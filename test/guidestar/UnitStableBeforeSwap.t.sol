@@ -160,15 +160,6 @@ contract UnitStableBeforeSwapTest is Test {
         assertEq(fee, 90 + 114);
     }
 
-    function testAfterAddLiquidityShouldRevertIfMsgSenderIsNotPoolManager() public {
-        ModifyLiquidityParams memory mlParams;
-        BalanceDelta bd;
-
-        vm.expectRevert(GatewayHook.NotPoolManager.selector);
-        vm.prank(address(123));
-        gatewayHook.afterAddLiquidity(address(this), guidestarKey, mlParams, bd, bd, abi.encode());
-    }
-
     function testBeforeInitializeShouldRevertIfPoolIsNotUsingDynamicFee() public {
         guidestarKey = PoolKey(
             Currency.wrap(address(token1)), Currency.wrap(address(token0)), uint24(0), TICK_SPACING, gatewayHook

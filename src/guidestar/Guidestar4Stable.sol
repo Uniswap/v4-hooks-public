@@ -57,6 +57,77 @@ contract Guidestar4Stable is BaseGuidestarHook {
         BaseGuidestarHook(_poolManager, _initialOwner, _gateway)
     {}
 
+    function initializePair(
+        PoolKey calldata poolKey,
+        uint160 sqrtPriceX96,
+        FeeData memory feeData_,
+        HookParams memory hookParams_
+    ) external onlyOwner returns (int24 tick) {
+        tick = poolManager.initialize(poolKey, sqrtPriceX96);
+        PoolStorage storage poolStorage_ = _getStorage(poolKey);
+        poolStorage_.feeData = feeData_;
+        poolStorage_.hookParams = hookParams_;
+    }
+
+    function feeData(PoolId poolId) external view returns (FeeData memory) {
+        return poolStorage[poolId].feeData;
+    }
+
+    function setFeeData(PoolKey calldata poolKey, FeeData memory feeData_) external onlyOwner {
+        poolStorage[poolKey.toId()].feeData = feeData_;
+    }
+
+    function hookParams(PoolId poolId) external view returns (HookParams memory) {
+        return poolStorage[poolId].hookParams;
+    }
+
+    function setHookParams(PoolKey calldata poolKey, HookParams memory hookParams_) external onlyOwner {
+        poolStorage[poolKey.toId()].hookParams = hookParams_;
+    }
+
+    function setReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice_) external onlyOwner {
+        PoolStorage storage poolStorage_ = _getStorage(poolKey);
+        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
+        poolStorage_.hookParams.referenceSqrtPrice = referenceSqrtPrice_;
+        poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
+        poolStorage_.feeData.blockNumber = block.number;
+    }
+
+    function setOptimalFeeSpread(PoolKey calldata poolKey, uint24 optimalFeeSpread_) external onlyOwner {
+        PoolStorage storage poolStorage_ = _getStorage(poolKey);
+        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
+        poolStorage_.hookParams.optimalFeeSpread = optimalFeeSpread_;
+        poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
+        poolStorage_.feeData.blockNumber = block.number;
+    }
+
+    function beforeInitialize(address, PoolKey calldata poolKey, uint160) external view onlyByGateway returns (bytes4) {
+        if (!LPFeeLibrary.isDynamicFee(poolKey.fee)) {
+            revert MustUseDynamicFee();
+        }
+        return Guidestar4Stable.beforeInitialize.selector;
+    }
+
+    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        external
+        view
+        onlyByGateway
+        returns (bytes4)
+    {
+        return Guidestar4Stable.beforeAddLiquidity.selector;
+    }
+
+    function afterRemoveLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata
+    ) external virtual onlyByGateway returns (bytes4, BalanceDelta) {
+        return (Guidestar4Stable.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
+    }
+
     function beforeSwap(address, PoolKey calldata poolKey, SwapParams calldata params, bytes calldata)
         external
         onlyByGateway
@@ -71,7 +142,7 @@ contract Guidestar4Stable is BaseGuidestarHook {
                 revert PoolNotRecognizedByHook();
             }
 
-            uint160 sqrtAmmPrice = uint160(getSqrtPriceX96(poolId));
+            uint160 sqrtAmmPrice = uint160(_getSqrtPriceX96(poolId));
             uint160 referenceSqrtPrice_ = uint160(poolStorage_.hookParams.referenceSqrtPrice);
 
             bool userSellsZeroForOne = params.zeroForOne;
@@ -163,98 +234,18 @@ contract Guidestar4Stable is BaseGuidestarHook {
         }
     }
 
-    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external
-        view
-        onlyByGateway
-        returns (bytes4)
-    {
-        return Guidestar4Stable.beforeAddLiquidity.selector;
-    }
-
-    // function afterAddLiquidity(
-    //     address,
-    //     PoolKey calldata,
-    //     IPoolManager.ModifyLiquidityParams calldata,
-    //     BalanceDelta,
-    //     BalanceDelta,
-    //     bytes calldata
-    // )
-    //     external
-    //     onlyByGateway
-    //     returns (bytes4, BalanceDelta)
-    // {
-    //     return (Guidestar4Stable.afterAddLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
-    // }
-
-    function afterRemoveLiquidity(
-        address,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
-        BalanceDelta,
-        BalanceDelta,
-        bytes calldata
-    ) external virtual onlyByGateway returns (bytes4, BalanceDelta) {
-        return (Guidestar4Stable.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
-    }
-
-    function initializePair(
-        PoolKey calldata poolKey,
-        uint160 sqrtPriceX96,
-        FeeData memory feeData_,
-        HookParams memory hookParams_
-    ) external onlyOwner returns (int24 tick) {
-        tick = poolManager.initialize(poolKey, sqrtPriceX96);
-        PoolStorage storage poolStorage_ = getStorage(poolKey);
-        poolStorage_.feeData = feeData_;
-        poolStorage_.hookParams = hookParams_;
-    }
-
-    function beforeInitialize(address, PoolKey calldata poolKey, uint160) external view onlyByGateway returns (bytes4) {
-        if (!LPFeeLibrary.isDynamicFee(poolKey.fee)) {
-            revert MustUseDynamicFee();
-        }
-        return Guidestar4Stable.beforeInitialize.selector;
-    }
-
-    function getStorage(PoolKey calldata poolKey) internal view returns (PoolStorage storage) {
+    /// @dev Internal function to get the pool storage
+    /// @param poolKey The pool key
+    /// @return The pool storage
+    function _getStorage(PoolKey calldata poolKey) internal view returns (PoolStorage storage) {
         return poolStorage[poolKey.toId()];
     }
 
-    function getSqrtPriceX96(PoolId poolId) internal view returns (uint256) {
+    /// @dev Internal function to get the sqrt price X96
+    /// @param poolId The pool ID
+    /// @return The sqrt price X96
+    function _getSqrtPriceX96(PoolId poolId) internal view returns (uint256) {
         (uint160 price,,,) = StateLibrary.getSlot0(poolManager, poolId);
         return price;
-    }
-
-    function feeData(PoolId poolId) external view returns (FeeData memory) {
-        return poolStorage[poolId].feeData;
-    }
-
-    function setFeeData(PoolKey calldata poolKey, FeeData memory feeData_) external onlyOwner {
-        poolStorage[poolKey.toId()].feeData = feeData_;
-    }
-
-    function hookParams(PoolId poolId) external view returns (HookParams memory) {
-        return poolStorage[poolId].hookParams;
-    }
-
-    function setHookParams(PoolKey calldata poolKey, HookParams memory hookParams_) external onlyOwner {
-        poolStorage[poolKey.toId()].hookParams = hookParams_;
-    }
-
-    function setReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice_) external onlyOwner {
-        PoolStorage storage poolStorage_ = getStorage(poolKey);
-        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
-        poolStorage_.hookParams.referenceSqrtPrice = referenceSqrtPrice_;
-        poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
-        poolStorage_.feeData.blockNumber = block.number;
-    }
-
-    function setOptimalFeeSpread(PoolKey calldata poolKey, uint24 optimalFeeSpread_) external onlyOwner {
-        PoolStorage storage poolStorage_ = getStorage(poolKey);
-        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
-        poolStorage_.hookParams.optimalFeeSpread = optimalFeeSpread_;
-        poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
-        poolStorage_.feeData.blockNumber = block.number;
     }
 }

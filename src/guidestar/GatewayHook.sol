@@ -16,95 +16,31 @@ import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {BaseHook} from "../base/BaseHook.sol";
 
 /**
  * @title GatewayHook hook for Uniswap v4, unichain version (guidestar.fi)
  * @author Guidestar Team
  */
-contract GatewayHook is Ownable, IHooks {
+contract GatewayHook is Ownable, BaseHook {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
 
     // /// @notice PoolKey.fee must be set to DYNAMIC_FEE_FLAG
     error MustUseDynamicFee();
-    error NotPoolManager();
-    error HookNotImplemented();
-
-    constructor(IPoolManager _poolManager, address _initialOwner) {
-        _initializeOwner(_initialOwner);
-        poolManager = _poolManager;
-    }
 
     IHooks public implementation;
-    IPoolManager public immutable poolManager;
 
-    modifier onlyByPoolManager() {
-        if (msg.sender != address(poolManager)) {
-            revert NotPoolManager();
-        }
-        _;
+    constructor(IPoolManager _poolManager, address _initialOwner) BaseHook(_poolManager) {
+        _initializeOwner(_initialOwner);
     }
 
-    /// @inheritdoc IHooks
-    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
-        external
-        virtual
-        onlyByPoolManager
-        returns (bytes4, BeforeSwapDelta, uint24)
-    {
-        return implementation.beforeSwap(sender, key, params, hookData);
+    function setImplementation(IHooks _newImplementation) external onlyOwner {
+        implementation = _newImplementation;
     }
 
-    /// @inheritdoc IHooks
-    function beforeAddLiquidity(
-        address sender,
-        PoolKey calldata poolKey,
-        ModifyLiquidityParams calldata params,
-        bytes calldata hookData
-    ) external virtual onlyByPoolManager returns (bytes4) {
-        return implementation.beforeAddLiquidity(sender, poolKey, params, hookData);
-    }
-
-    // currently we don`t take the permisition
-    /// @inheritdoc IHooks
-    function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external
-        virtual
-        onlyByPoolManager
-        returns (bytes4)
-    {
-        // uint256 priorityFee = tx.gasprice - block.basefee;
-
-        // if (priorityFee == 0) {
-        //     return IHooks.beforeRemoveLiquidity.selector;
-        // }
-
-        // return implementation.beforeRemoveLiquidity(sender, poolKey, params, hookData);
-        revert HookNotImplemented();
-    }
-
-    /// @inheritdoc IHooks
-    function afterRemoveLiquidity(
-        address sender,
-        PoolKey calldata poolKey,
-        ModifyLiquidityParams calldata params,
-        BalanceDelta delta,
-        BalanceDelta,
-        bytes calldata hookData
-    ) external virtual onlyByPoolManager returns (bytes4, BalanceDelta) {
-        uint256 priorityFee = tx.gasprice - block.basefee;
-
-        if (priorityFee == 0) {
-            return (IHooks.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
-        }
-
-        return
-            implementation.afterRemoveLiquidity(
-                sender, poolKey, params, delta, BalanceDeltaLibrary.ZERO_DELTA, hookData
-            );
-    }
-
-    function getHookPermissions() public pure virtual returns (Hooks.Permissions memory) {
+    /// @inheritdoc BaseHook
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
             afterInitialize: false,
@@ -123,11 +59,10 @@ contract GatewayHook is Ownable, IHooks {
         });
     }
 
-    /// @inheritdoc IHooks
-    function beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtAmmPrice)
-        external
-        virtual
-        onlyByPoolManager
+    /// @inheritdoc BaseHook
+    function _beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtAmmPrice)
+        internal
+        override
         returns (bytes4)
     {
         if (!LPFeeLibrary.isDynamicFee(key.fee)) {
@@ -137,50 +72,43 @@ contract GatewayHook is Ownable, IHooks {
         return implementation.beforeInitialize(sender, key, sqrtAmmPrice);
     }
 
-    function setImplementation(IHooks _newImplementation) external onlyOwner {
-        implementation = _newImplementation;
+    /// @inheritdoc BaseHook
+    function _beforeAddLiquidity(
+        address sender,
+        PoolKey calldata poolKey,
+        ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) internal override returns (bytes4) {
+        return implementation.beforeAddLiquidity(sender, poolKey, params, hookData);
     }
 
-    function afterAddLiquidity(
-        address,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
+    /// @inheritdoc BaseHook
+    function _afterRemoveLiquidity(
+        address sender,
+        PoolKey calldata poolKey,
+        ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
         BalanceDelta,
-        BalanceDelta,
-        bytes calldata
-    ) external virtual onlyByPoolManager returns (bytes4, BalanceDelta) {
-        revert HookNotImplemented();
+        bytes calldata hookData
+    ) internal override returns (bytes4, BalanceDelta) {
+        uint256 priorityFee = tx.gasprice - block.basefee;
+
+        if (priorityFee == 0) {
+            return (IHooks.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
+        }
+
+        return
+            implementation.afterRemoveLiquidity(
+                sender, poolKey, params, delta, BalanceDeltaLibrary.ZERO_DELTA, hookData
+            );
     }
 
-    /// @inheritdoc IHooks
-    function afterInitialize(address, PoolKey calldata, uint160, int24) external virtual returns (bytes4) {
-        revert HookNotImplemented();
-    }
-
-    /// @inheritdoc IHooks
-    function afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
-        external
-        virtual
-        returns (bytes4, int128)
+    /// @inheritdoc BaseHook
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
     {
-        revert HookNotImplemented();
-    }
-
-    /// @inheritdoc IHooks
-    function beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
-        revert HookNotImplemented();
-    }
-
-    /// @inheritdoc IHooks
-    function afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
-        revert HookNotImplemented();
+        return implementation.beforeSwap(sender, key, params, hookData);
     }
 }
