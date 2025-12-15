@@ -46,12 +46,7 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     /// @inheritdoc IHooks
-    function beforeSwap(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    )
+    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         external
         virtual
         onlyByPoolManager
@@ -66,23 +61,13 @@ contract GatewayHook is Ownable, IHooks {
         PoolKey calldata poolKey,
         ModifyLiquidityParams calldata params,
         bytes calldata hookData
-    )
-        external
-        virtual
-        onlyByPoolManager
-        returns (bytes4)
-    {
+    ) external virtual onlyByPoolManager returns (bytes4) {
         return implementation.beforeAddLiquidity(sender, poolKey, params, hookData);
     }
 
     // currently we don`t take the permisition
     /// @inheritdoc IHooks
-    function beforeRemoveLiquidity(
-        address sender,
-        PoolKey calldata poolKey,
-        ModifyLiquidityParams calldata params,
-        bytes calldata hookData
-    )
+    function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         external
         virtual
         onlyByPoolManager
@@ -106,21 +91,17 @@ contract GatewayHook is Ownable, IHooks {
         BalanceDelta delta,
         BalanceDelta,
         bytes calldata hookData
-    )
-        external
-        virtual
-        onlyByPoolManager
-        returns (bytes4, BalanceDelta)
-    {
+    ) external virtual onlyByPoolManager returns (bytes4, BalanceDelta) {
         uint256 priorityFee = tx.gasprice - block.basefee;
 
         if (priorityFee == 0) {
             return (IHooks.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
         }
 
-        return implementation.afterRemoveLiquidity(
-            sender, poolKey, params, delta, BalanceDeltaLibrary.ZERO_DELTA, hookData
-        );
+        return
+            implementation.afterRemoveLiquidity(
+                sender, poolKey, params, delta, BalanceDeltaLibrary.ZERO_DELTA, hookData
+            );
     }
 
     function getHookPermissions() public pure virtual returns (Hooks.Permissions memory) {
@@ -143,11 +124,7 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     /// @inheritdoc IHooks
-    function beforeInitialize(
-        address sender,
-        PoolKey calldata key,
-        uint160 sqrtAmmPrice
-    )
+    function beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtAmmPrice)
         external
         virtual
         onlyByPoolManager
@@ -165,18 +142,13 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     function afterAddLiquidity(
-        address sender,
-        PoolKey calldata poolKey,
-        ModifyLiquidityParams calldata params,
-        BalanceDelta delta,
-        BalanceDelta delta2,
-        bytes calldata hookData
-    )
-        external
-        virtual
-        onlyByPoolManager
-        returns (bytes4, BalanceDelta)
-    {
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata
+    ) external virtual onlyByPoolManager returns (bytes4, BalanceDelta) {
         revert HookNotImplemented();
     }
 
@@ -186,13 +158,7 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     /// @inheritdoc IHooks
-    function afterSwap(
-        address,
-        PoolKey calldata,
-        SwapParams calldata,
-        BalanceDelta,
-        bytes calldata
-    )
+    function afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
         external
         virtual
         returns (bytes4, int128)
@@ -201,13 +167,7 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     /// @inheritdoc IHooks
-    function beforeDonate(
-        address,
-        PoolKey calldata,
-        uint256,
-        uint256,
-        bytes calldata
-    )
+    function beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
         external
         virtual
         returns (bytes4)
@@ -216,13 +176,7 @@ contract GatewayHook is Ownable, IHooks {
     }
 
     /// @inheritdoc IHooks
-    function afterDonate(
-        address,
-        PoolKey calldata,
-        uint256,
-        uint256,
-        bytes calldata
-    )
+    function afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
         external
         virtual
         returns (bytes4)

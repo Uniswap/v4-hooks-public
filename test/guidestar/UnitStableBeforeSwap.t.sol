@@ -62,9 +62,7 @@ contract UnitStableBeforeSwapTest is Test {
             flags: 1, // бит 0 = stable
             previousFee: 1e12 + 1, // INVALID_FEE
             previousSqrtAmmPrice: sqrtAmmPrice,
-            blockNumber: block.number,
-            timeStep: 1 days, // 86400
-            rate: 7 // 0.7 bps
+            blockNumber: block.number
         });
 
         Guidestar4Stable.HookParams memory hookParams = Guidestar4Stable.HookParams({
@@ -72,26 +70,21 @@ contract UnitStableBeforeSwapTest is Test {
             k: 16_609_443, // k = 99% в Q0.24
             logK: 9140,
             optimalFeeSpread: 90, // 0.9 bps
-            referenceSqrtPrice: uint160(2 ** 96), // sqrt(1) = 1 << 96
-            blockTime: 12 * 32, // 12s / блок * 32 = 384
-            previousTimestamp: block.timestamp
+            referenceSqrtPrice: uint160(2 ** 96) // sqrt(1) = 1 << 96
         });
 
         implHook.setFeeData(guidestarKey, feeData);
         implHook.setHookParams(guidestarKey, hookParams);
     }
 
-    function callBeforeSwap(
-        bool zeroForOne,
-        int256 amountSpecified,
-        uint160 sqrtPriceLimitX96
-    )
+    function callBeforeSwap(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
         internal
         returns (uint24)
     {
         Guidestar4Stable.HookParams memory hookParams = implHook.hookParams(guidestarKey.toId());
-        SwapParams memory swapParams =
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96});
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
+        });
         (bytes4 selector, BeforeSwapDelta delta, uint24 fee) =
             gatewayHook.beforeSwap(address(this), guidestarKey, swapParams, Constants.ZERO_BYTES);
         Guidestar4Stable.HookParams memory afterHookParams = implHook.hookParams(guidestarKey.toId());
@@ -101,8 +94,6 @@ contract UnitStableBeforeSwapTest is Test {
         assertEq(hookParams.logK, afterHookParams.logK);
         assertEq(hookParams.optimalFeeSpread, afterHookParams.optimalFeeSpread);
         assertEq(hookParams.referenceSqrtPrice, afterHookParams.referenceSqrtPrice);
-        assertEq(hookParams.blockTime, afterHookParams.blockTime);
-        assertEq(hookParams.previousTimestamp, afterHookParams.previousTimestamp);
 
         assertEq(selector, IHooks.beforeSwap.selector);
         assertEq(BeforeSwapDelta.unwrap(delta), BeforeSwapDelta.unwrap(BeforeSwapDeltaLibrary.ZERO_DELTA));
@@ -169,32 +160,6 @@ contract UnitStableBeforeSwapTest is Test {
         assertEq(fee, 90 + 114);
     }
 
-    function testRevertTooMuchNegativeRateAccumulated() public {
-        Guidestar4Stable.FeeData memory feeData = implHook.feeData(guidestarKey.toId());
-
-        feeData.flags = feeData.flags | 2;
-
-        Guidestar4Stable.FeeData memory feeData_ =
-            toFeeData(feeData.flags, feeData.previousFee, feeData.previousSqrtAmmPrice, feeData.blockNumber, -128, 1200);
-
-        implHook.setFeeData(guidestarKey, feeData_);
-
-        uint256 passed = 100;
-        vm.warp(block.timestamp + passed * 24 * 60 * 60);
-        vm.roll(block.number + 1000);
-
-        gatewayHook.beforeSwap(
-            address(this),
-            guidestarKey,
-            SwapParams(false, 50_000 * 1e18, Constants.SQRT_RATIO_1_1),
-            Constants.ZERO_BYTES
-        );
-
-        Guidestar4Stable.HookParams memory hookParams = implHook.hookParams(guidestarKey.toId());
-
-        assertEq(2 ** 32, hookParams.referenceSqrtPrice);
-    }
-
     function testAfterAddLiquidityShouldRevertIfMsgSenderIsNotPoolManager() public {
         ModifyLiquidityParams memory mlParams;
         BalanceDelta bd;
@@ -217,22 +182,14 @@ contract UnitStableBeforeSwapTest is Test {
         uint256 flagsX4,
         uint256 previousFeeX40,
         uint256 previousSqrtAmmPriceX160,
-        uint256 blockNumberX32,
-        int256 rateX9,
-        uint256 timeStepSecs
-    )
-        public
-        pure
-        returns (Guidestar4Stable.FeeData memory)
-    {
+        uint256 blockNumberX32
+    ) public pure returns (Guidestar4Stable.FeeData memory) {
         unchecked {
             return Guidestar4Stable.FeeData({
                 flags: flagsX4 & (2 ** 4 - 1),
                 previousFee: previousFeeX40 & (2 ** 40 - 1),
                 previousSqrtAmmPrice: uint160(previousSqrtAmmPriceX160 & (2 ** 160 - 1)),
-                blockNumber: blockNumberX32 & (2 ** 32 - 1),
-                timeStep: (timeStepSecs / (20 * 60)) & (2 ** 10 - 1),
-                rate: rateX9
+                blockNumber: blockNumberX32 & (2 ** 32 - 1)
             });
         }
     }

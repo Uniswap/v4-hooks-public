@@ -18,6 +18,8 @@ import {BaseGuidestarHook} from "./BaseGuidestarHook.sol";
 import {GuidestarLibrary} from "./libraries/GuidestarLibrary.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
+/// @title Guidestar4Stable
+/// @notice A hook for stable pairs that allows for dynamic fees
 contract Guidestar4Stable is BaseGuidestarHook {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
@@ -28,15 +30,12 @@ contract Guidestar4Stable is BaseGuidestarHook {
     uint256 internal constant ONE = 1e12;
     uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
     uint256 internal constant TO_UNISWAP_FEE = ONE / 1e6;
-    int256 internal constant MINIMUM_SQRT_PRICE = 2 ** 32;
 
     struct FeeData {
-        uint256 flags; // bit0 = 1 => stable, bit1 => auto-update
+        uint256 flags; // bit0 = 1 => stable
         uint256 previousFee;
         uint160 previousSqrtAmmPrice;
         uint256 blockNumber;
-        uint256 timeStep;
-        int256 rate;
     }
 
     struct HookParams {
@@ -45,8 +44,6 @@ contract Guidestar4Stable is BaseGuidestarHook {
         uint256 logK;
         uint256 optimalFeeSpread;
         uint160 referenceSqrtPrice;
-        uint256 blockTime;
-        uint256 previousTimestamp;
     }
 
     struct PoolStorage {
@@ -56,20 +53,11 @@ contract Guidestar4Stable is BaseGuidestarHook {
 
     mapping(PoolId => PoolStorage) private poolStorage;
 
-    constructor(
-        IPoolManager _poolManager,
-        address _initialOwner,
-        address _gateway
-    )
+    constructor(IPoolManager _poolManager, address _initialOwner, address _gateway)
         BaseGuidestarHook(_poolManager, _initialOwner, _gateway)
     {}
 
-    function beforeSwap(
-        address,
-        PoolKey calldata poolKey,
-        SwapParams calldata params,
-        bytes calldata
-    )
+    function beforeSwap(address, PoolKey calldata poolKey, SwapParams calldata params, bytes calldata)
         external
         onlyByGateway
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -85,30 +73,6 @@ contract Guidestar4Stable is BaseGuidestarHook {
 
             uint160 sqrtAmmPrice = uint160(getSqrtPriceX96(poolId));
             uint160 referenceSqrtPrice_ = uint160(poolStorage_.hookParams.referenceSqrtPrice);
-
-            if ((feeData_.flags & 2) == 2) {
-                uint256 prevTimestamp = poolStorage_.hookParams.previousTimestamp;
-                uint256 timeStep = feeData_.timeStep;
-                uint256 passed = (block.timestamp - prevTimestamp) / timeStep;
-
-                if (passed > 0) {
-                    prevTimestamp += passed * timeStep;
-
-                    int256 factor = (2 ** 80 * 100_000 + int256(passed) * feeData_.rate * 2 ** 80 / 2);
-                    int256 newRP = factor * int256(uint256(referenceSqrtPrice_)) / 2 ** 80 / 100_000;
-                    if (newRP < MINIMUM_SQRT_PRICE) {
-                        newRP = MINIMUM_SQRT_PRICE;
-                    }
-
-                    referenceSqrtPrice_ = uint160(uint256(newRP));
-                    poolStorage_.hookParams.referenceSqrtPrice = referenceSqrtPrice_;
-                    poolStorage_.hookParams.previousTimestamp = prevTimestamp;
-
-                    feeData_.previousFee = UNDEFINED_FLEXIBLE_FEE;
-                    feeData_.blockNumber =
-                        block.number - (block.timestamp - prevTimestamp) * 32 / poolStorage_.hookParams.blockTime;
-                }
-            }
 
             bool userSellsZeroForOne = params.zeroForOne;
             bool ammPriceToTheLeft = (sqrtAmmPrice < referenceSqrtPrice_);
@@ -170,13 +134,11 @@ contract Guidestar4Stable is BaseGuidestarHook {
                         uint256 blocksPassed = block.number - feeData_.blockNumber;
                         uint256 factorX24 = blocksPassed <= 4
                             ? GuidestarLibrary.fastPow(poolStorageCopy.hookParams.k, blocksPassed)
-                            : (
-                                uint256(
-                                    FixedPointMathLib.expWad(
-                                        -int256(((poolStorageCopy.hookParams.logK) << 40) * blocksPassed)
-                                    )
-                                ) << 24
-                            ) / 1e18;
+                            : (uint256(
+                                            FixedPointMathLib.expWad(
+                                                -int256(((poolStorageCopy.hookParams.logK) << 40) * blocksPassed)
+                                            )
+                                        ) << 24) / 1e18;
                         flexibleFee = targetFee + ((factorX24 * (previousFee - targetFee)) >> 24);
                     }
 
@@ -201,13 +163,9 @@ contract Guidestar4Stable is BaseGuidestarHook {
         }
     }
 
-    function beforeAddLiquidity(
-        address,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
-        bytes calldata
-    )
+    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         external
+        view
         onlyByGateway
         returns (bytes4)
     {
@@ -230,18 +188,13 @@ contract Guidestar4Stable is BaseGuidestarHook {
     // }
 
     function afterRemoveLiquidity(
-        address sender,
-        PoolKey calldata poolKey,
-        ModifyLiquidityParams calldata params,
-        BalanceDelta delta,
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
         BalanceDelta,
-        bytes calldata hookData
-    )
-        external
-        virtual
-        onlyByGateway
-        returns (bytes4, BalanceDelta)
-    {
+        BalanceDelta,
+        bytes calldata
+    ) external virtual onlyByGateway returns (bytes4, BalanceDelta) {
         return (Guidestar4Stable.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
     }
 
@@ -250,18 +203,14 @@ contract Guidestar4Stable is BaseGuidestarHook {
         uint160 sqrtPriceX96,
         FeeData memory feeData_,
         HookParams memory hookParams_
-    )
-        external
-        onlyOwner
-        returns (int24 tick)
-    {
+    ) external onlyOwner returns (int24 tick) {
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         PoolStorage storage poolStorage_ = getStorage(poolKey);
         poolStorage_.feeData = feeData_;
         poolStorage_.hookParams = hookParams_;
     }
 
-    function beforeInitialize(address, PoolKey calldata poolKey, uint160) external onlyByGateway returns (bytes4) {
+    function beforeInitialize(address, PoolKey calldata poolKey, uint160) external view onlyByGateway returns (bytes4) {
         if (!LPFeeLibrary.isDynamicFee(poolKey.fee)) {
             revert MustUseDynamicFee();
         }

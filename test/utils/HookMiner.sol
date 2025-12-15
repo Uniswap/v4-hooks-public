@@ -20,12 +20,7 @@ library HookMiner {
     /// `abi.encode(address(manager))`
     /// @return hookAddress salt and corresponding address that was found. The salt can be used in `new Hook{salt:
     /// salt}(<constructor arguments>)`
-    function find(
-        address deployer,
-        uint160 flags,
-        bytes memory creationCode,
-        bytes memory constructorArgs
-    )
+    function find(address deployer, uint160 flags, bytes memory creationCode, bytes memory constructorArgs)
         internal
         view
         returns (address, bytes32)
@@ -51,11 +46,7 @@ library HookMiner {
     /// Proxy)
     /// @param salt The salt used to deploy the hook
     /// @param keccakOfCreationCodeWithArgs The creation code of a hook contract
-    function computeAddress(
-        address deployer,
-        uint256 salt,
-        bytes32 keccakOfCreationCodeWithArgs
-    )
+    function computeAddress(address deployer, uint256 salt, bytes32 keccakOfCreationCodeWithArgs)
         internal
         pure
         returns (address hookAddress)
