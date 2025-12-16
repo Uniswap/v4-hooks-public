@@ -57,6 +57,12 @@ contract Guidestar4Stable is BaseGuidestarHook {
         BaseGuidestarHook(_poolManager, _initialOwner, _gateway)
     {}
 
+    /// @notice Initializes a v4 pool and sets its fee data and hook params
+    /// @param poolKey the poolKey of the pool to initialize
+    /// @param sqrtPriceX96 the initial price of the pool to be set
+    /// @param feeData_ the fee data for the poolKey
+    /// @param hookParams_ the hook params for the poolKey
+    /// @return tick the tick of the new initialized pool
     function initializePair(
         PoolKey calldata poolKey,
         uint160 sqrtPriceX96,
@@ -108,26 +114,6 @@ contract Guidestar4Stable is BaseGuidestarHook {
         return Guidestar4Stable.beforeInitialize.selector;
     }
 
-    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external
-        view
-        onlyByGateway
-        returns (bytes4)
-    {
-        return Guidestar4Stable.beforeAddLiquidity.selector;
-    }
-
-    function afterRemoveLiquidity(
-        address,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
-        BalanceDelta,
-        BalanceDelta,
-        bytes calldata
-    ) external virtual onlyByGateway returns (bytes4, BalanceDelta) {
-        return (Guidestar4Stable.afterRemoveLiquidity.selector, BalanceDeltaLibrary.ZERO_DELTA);
-    }
-
     function beforeSwap(address, PoolKey calldata poolKey, SwapParams calldata params, bytes calldata)
         external
         onlyByGateway
@@ -142,19 +128,23 @@ contract Guidestar4Stable is BaseGuidestarHook {
                 revert PoolNotRecognizedByHook();
             }
 
+            // Get the current sqrt price of the pool
             uint160 sqrtAmmPrice = uint160(_getSqrtPriceX96(poolId));
+            // Get the reference sqrt price of the pool
             uint160 referenceSqrtPrice_ = uint160(poolStorage_.hookParams.referenceSqrtPrice);
 
+            // Whether the user is selling zero for one or not
             bool userSellsZeroForOne = params.zeroForOne;
+            // Whether the AMM price is less than the ideal reference sqrt price or not
             bool ammPriceToTheLeft = (sqrtAmmPrice < referenceSqrtPrice_);
 
             int256 closeFee;
-            uint256 farFee;
-            bool insideOptimalSpread;
-            uint256 insideOptimalSpreadFee;
+            uint256 farFee; // fee when its outside the optimal spread
+            bool insideOptimalSpread; // true if price is within optimal spread
+            uint256 insideOptimalSpreadFee; // fee when its within the optimal spread
 
             {
-                uint256 optimalFeeSpread_ = poolStorage_.hookParams.optimalFeeSpread;
+                uint256 optimalFeeSpread_ = poolStorage_.hookParams.optimalFeeSpread; // grab optimal fee spread
                 uint256 ratio = ammPriceToTheLeft
                     ? (uint256(sqrtAmmPrice) * 2 ** 48) / referenceSqrtPrice_
                     : (uint256(referenceSqrtPrice_) * 2 ** 48) / sqrtAmmPrice;
@@ -175,10 +165,12 @@ contract Guidestar4Stable is BaseGuidestarHook {
             uint256 totalStableFee;
             {
                 uint256 flexibleFee;
+                // if price is within optimal spread, set fee to insideOptimalSpreadFee
                 if (insideOptimalSpread) {
                     totalStableFee = insideOptimalSpreadFee;
                     flexibleFee = UNDEFINED_FLEXIBLE_FEE;
                 } else {
+                    // if price is outside optimal spread, calculate the flexible fee
                     uint256 previousSqrtAmmPrice = feeData_.previousSqrtAmmPrice;
                     uint256 previousFee = feeData_.previousFee;
 
@@ -221,9 +213,10 @@ contract Guidestar4Stable is BaseGuidestarHook {
                 feeData_.blockNumber = block.number;
             }
 
-            totalStableFee /= TO_UNISWAP_FEE;
+            totalStableFee /= TO_UNISWAP_FEE; // divide by TO_UNISWAP_FEE to get fee in pips (1e12 -> 1e6)
             if (totalStableFee > 990_000) {
-                totalStableFee = 990_000;
+                // this caps the fee to 99%
+                totalStableFee = 990_000; // set fee to 990_000 if it is greater than 990_000
             }
 
             return (

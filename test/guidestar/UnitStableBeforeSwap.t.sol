@@ -32,10 +32,7 @@ contract UnitStableBeforeSwapTest is Test {
     Guidestar4Stable implHook;
 
     PoolKey guidestarKey;
-    uint160 constant FLAGS = uint160(
-        Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
-            | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA_FLAG
-    );
+    uint160 constant FLAGS = uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG);
     TestERC20 token0;
     TestERC20 token1;
     int24 constant TICK_SPACING = 60;
