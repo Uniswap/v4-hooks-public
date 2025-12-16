@@ -25,24 +25,28 @@ contract Guidestar4Stable is BaseGuidestarHook {
     using PoolIdLibrary for PoolKey;
 
     error MustUseDynamicFee();
-    error PoolNotRecognizedByHook();
 
-    uint256 internal constant ONE = 1e12;
-    uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
-    uint256 internal constant TO_UNISWAP_FEE = ONE / 1e6;
+    /// @notice The maximum fee is 99%
+    uint256 public constant MAX_FEE = 990_000;
+    /// @notice Used for sqrt price ratio calculations
+    uint256 internal constant Q48 = 2 ** 48;
+    uint256 internal constant Q96 = 2 ** 96;
+    uint256 internal constant FEE_PRECISION = 1e12;
+    /// @notice Denominator in pips used for fee calculations
+    uint256 internal constant FEE_DENOMINATOR = 1e6;
+    uint256 internal constant UNDEFINED_FLEXIBLE_FEE = FEE_PRECISION + 1;
+    uint256 internal constant TO_UNISWAP_FEE = FEE_PRECISION / 1e6;
 
     struct FeeData {
-        uint256 flags; // bit0 = 1 => stable
         uint256 previousFee;
         uint160 previousSqrtAmmPrice;
         uint256 blockNumber;
     }
 
     struct HookParams {
-        uint256 flags; // bit0=1 => stable
         uint256 k;
         uint256 logK;
-        uint256 optimalFeeSpread;
+        uint256 optimalFeeSpread; // optimal fee spread in pips (1e6 = 100%)
         uint160 referenceSqrtPrice;
     }
 
@@ -75,38 +79,58 @@ contract Guidestar4Stable is BaseGuidestarHook {
         poolStorage_.hookParams = hookParams_;
     }
 
+    /// @notice Gets the fee data for a given pool
+    /// @param poolId The pool ID
+    /// @return The fee data for the pool
     function feeData(PoolId poolId) external view returns (FeeData memory) {
         return poolStorage[poolId].feeData;
     }
 
+    /// @notice Sets the fee data for a given pool
+    /// @param poolKey The pool key
+    /// @param feeData_ The fee data for the pool
     function setFeeData(PoolKey calldata poolKey, FeeData memory feeData_) external onlyOwner {
         poolStorage[poolKey.toId()].feeData = feeData_;
     }
 
+    /// @notice Gets the hook params for a given pool
+    /// @param poolId The pool ID
+    /// @return The hook params for the pool
     function hookParams(PoolId poolId) external view returns (HookParams memory) {
         return poolStorage[poolId].hookParams;
     }
 
+    /// @notice Sets the hook params for a given pool
+    /// @param poolKey The pool key
+    /// @param hookParams_ The hook params for the pool
     function setHookParams(PoolKey calldata poolKey, HookParams memory hookParams_) external onlyOwner {
         poolStorage[poolKey.toId()].hookParams = hookParams_;
     }
 
+    /// @notice Sets the reference sqrt price for a given pool
+    /// @param poolKey The pool key
+    /// @param referenceSqrtPrice_ The reference sqrt price for the pool
     function setReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice_) external onlyOwner {
         PoolStorage storage poolStorage_ = _getStorage(poolKey);
-        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
         poolStorage_.hookParams.referenceSqrtPrice = referenceSqrtPrice_;
         poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
         poolStorage_.feeData.blockNumber = block.number;
     }
 
+    /// @notice Sets the optimal fee spread for a given pool
+    /// @param poolKey The pool key
+    /// @param optimalFeeSpread_ The optimal fee spread for the pool in pips
     function setOptimalFeeSpread(PoolKey calldata poolKey, uint24 optimalFeeSpread_) external onlyOwner {
         PoolStorage storage poolStorage_ = _getStorage(poolKey);
-        require((poolStorage_.hookParams.flags & 1) == 1 && (poolStorage_.feeData.flags & 1) == 1, "Not a stable pair");
         poolStorage_.hookParams.optimalFeeSpread = optimalFeeSpread_;
         poolStorage_.feeData.previousFee = UNDEFINED_FLEXIBLE_FEE;
         poolStorage_.feeData.blockNumber = block.number;
     }
 
+    /// @notice Before initialize hook
+    /// @dev Checks that the pool is using a dynamic fee
+    /// @param poolKey The pool key
+    /// @return The selector for the before initialize hook
     function beforeInitialize(address, PoolKey calldata poolKey, uint160) external view onlyByGateway returns (bytes4) {
         if (!LPFeeLibrary.isDynamicFee(poolKey.fee)) {
             revert MustUseDynamicFee();
@@ -114,6 +138,13 @@ contract Guidestar4Stable is BaseGuidestarHook {
         return Guidestar4Stable.beforeInitialize.selector;
     }
 
+    /// @notice Before swap hook
+    /// @dev Calculates the fee for the swap
+    /// @param poolKey The pool key
+    /// @param params The swap parameters
+    /// @return The selector for the before swap hook
+    /// @return The delta for the swap (always 0)
+    /// @return The fee for the swap
     function beforeSwap(address, PoolKey calldata poolKey, SwapParams calldata params, bytes calldata)
         external
         onlyByGateway
@@ -123,10 +154,6 @@ contract Guidestar4Stable is BaseGuidestarHook {
         PoolStorage storage poolStorage_ = poolStorage[poolId];
         unchecked {
             FeeData storage feeData_ = poolStorage_.feeData;
-
-            if (feeData_.flags == 0) {
-                revert PoolNotRecognizedByHook();
-            }
 
             // Get the current sqrt price of the pool
             uint160 sqrtAmmPrice = uint160(_getSqrtPriceX96(poolId));
@@ -145,20 +172,26 @@ contract Guidestar4Stable is BaseGuidestarHook {
 
             {
                 uint256 optimalFeeSpread_ = poolStorage_.hookParams.optimalFeeSpread; // grab optimal fee spread
+                // multiply by 2 ** 48 to maintain 48 bits of precision
                 uint256 ratio = ammPriceToTheLeft
-                    ? (uint256(sqrtAmmPrice) * 2 ** 48) / referenceSqrtPrice_
-                    : (uint256(referenceSqrtPrice_) * 2 ** 48) / sqrtAmmPrice;
+                    ? (uint256(sqrtAmmPrice) * Q48) / referenceSqrtPrice_
+                    : (uint256(referenceSqrtPrice_) * Q48) / sqrtAmmPrice;
+                // square the sqrt ratio of 48 bits to get actual price ratio in 96 bits
                 ratio = ratio * ratio;
 
-                closeFee = int256(ONE) - int256((ONE * ratio * 1_000_000) / (1_000_000 - optimalFeeSpread_) / 2 ** 96);
+                closeFee = int256(FEE_PRECISION)
+                    - int256((FEE_PRECISION * ratio * FEE_DENOMINATOR) / (FEE_DENOMINATOR - optimalFeeSpread_) / Q96);
                 insideOptimalSpread = (closeFee <= 0);
 
                 if (insideOptimalSpread) {
                     insideOptimalSpreadFee = ammPriceToTheLeft == userSellsZeroForOne
-                        ? ONE - (ONE * (1_000_000 - optimalFeeSpread_) * 2 ** 96) / ratio / 1_000_000
-                        : ONE - (ONE * (1_000_000 - optimalFeeSpread_) * ratio) / 2 ** 96 / 1_000_000;
+                        ? FEE_PRECISION - (FEE_PRECISION * (FEE_DENOMINATOR - optimalFeeSpread_) * Q96) / ratio
+                            / FEE_DENOMINATOR
+                        : FEE_PRECISION - (FEE_PRECISION * (FEE_DENOMINATOR - optimalFeeSpread_) * ratio) / Q96
+                            / FEE_DENOMINATOR;
                 } else {
-                    farFee = ONE - (ONE * (1_000_000 - optimalFeeSpread_) * ratio) / 2 ** 96 / 1_000_000;
+                    farFee = FEE_PRECISION - (FEE_PRECISION * (FEE_DENOMINATOR - optimalFeeSpread_) * ratio) / Q96
+                        / FEE_DENOMINATOR;
                 }
             }
 
@@ -181,10 +214,10 @@ contract Guidestar4Stable is BaseGuidestarHook {
                         previousFee = farFee;
                     } else if (ammPriceToTheLeft == (sqrtAmmPrice < previousSqrtAmmPrice)) {
                         uint256 ratio = ammPriceToTheLeft
-                            ? (uint256(sqrtAmmPrice) * 2 ** 48) / previousSqrtAmmPrice
-                            : (previousSqrtAmmPrice * 2 ** 48) / sqrtAmmPrice;
+                            ? (uint256(sqrtAmmPrice) * Q48) / previousSqrtAmmPrice
+                            : (previousSqrtAmmPrice * Q48) / sqrtAmmPrice;
                         ratio = ratio * ratio;
-                        previousFee = ONE - (ratio * (ONE - previousFee)) / 2 ** 96;
+                        previousFee = FEE_PRECISION - (ratio * (FEE_PRECISION - previousFee)) / Q96;
                     } else if (previousFee > farFee) {
                         previousFee = farFee;
                     }
@@ -214,9 +247,9 @@ contract Guidestar4Stable is BaseGuidestarHook {
             }
 
             totalStableFee /= TO_UNISWAP_FEE; // divide by TO_UNISWAP_FEE to get fee in pips (1e12 -> 1e6)
-            if (totalStableFee > 990_000) {
+            if (totalStableFee > MAX_FEE) {
                 // this caps the fee to 99%
-                totalStableFee = 990_000; // set fee to 990_000 if it is greater than 990_000
+                totalStableFee = MAX_FEE; // set fee to 990_000 if it is greater than 990_000
             }
 
             return (

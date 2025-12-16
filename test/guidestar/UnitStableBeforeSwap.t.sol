@@ -56,14 +56,12 @@ contract UnitStableBeforeSwapTest is Test {
         );
 
         Guidestar4Stable.FeeData memory feeData = Guidestar4Stable.FeeData({
-            flags: 1, // бит 0 = stable
             previousFee: 1e12 + 1, // INVALID_FEE
             previousSqrtAmmPrice: sqrtAmmPrice,
             blockNumber: block.number
         });
 
         Guidestar4Stable.HookParams memory hookParams = Guidestar4Stable.HookParams({
-            flags: 1,
             k: 16_609_443, // k = 99% в Q0.24
             logK: 9140,
             optimalFeeSpread: 90, // 0.9 bps
@@ -86,7 +84,6 @@ contract UnitStableBeforeSwapTest is Test {
             gatewayHook.beforeSwap(address(this), guidestarKey, swapParams, Constants.ZERO_BYTES);
         Guidestar4Stable.HookParams memory afterHookParams = implHook.hookParams(guidestarKey.toId());
 
-        assertEq(hookParams.flags, afterHookParams.flags);
         assertEq(hookParams.k, afterHookParams.k);
         assertEq(hookParams.logK, afterHookParams.logK);
         assertEq(hookParams.optimalFeeSpread, afterHookParams.optimalFeeSpread);
@@ -164,21 +161,5 @@ contract UnitStableBeforeSwapTest is Test {
         vm.expectRevert(Guidestar4Stable.MustUseDynamicFee.selector);
         vm.prank(address(gatewayHook));
         implHook.beforeInitialize(address(this), guidestarKey, 0);
-    }
-
-    function toFeeData(
-        uint256 flagsX4,
-        uint256 previousFeeX40,
-        uint256 previousSqrtAmmPriceX160,
-        uint256 blockNumberX32
-    ) public pure returns (Guidestar4Stable.FeeData memory) {
-        unchecked {
-            return Guidestar4Stable.FeeData({
-                flags: flagsX4 & (2 ** 4 - 1),
-                previousFee: previousFeeX40 & (2 ** 40 - 1),
-                previousSqrtAmmPrice: uint160(previousSqrtAmmPriceX160 & (2 ** 160 - 1)),
-                blockNumber: blockNumberX32 & (2 ** 32 - 1)
-            });
-        }
     }
 }
