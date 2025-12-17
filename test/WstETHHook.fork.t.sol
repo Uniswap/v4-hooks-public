@@ -18,7 +18,7 @@ import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {BaseTokenWrapperHook} from "../src/base/BaseTokenWrapperHook.sol";
 import {WstETHHook} from "../src/WstETHHook.sol";
 import {WstETHRoutingHook} from "../src/WstETHRoutingHook.sol";
-import {IWstETH} from "../src/interfaces/IWStETH.sol";
+import {IWstETH} from "../src/interfaces/IWstETH.sol";
 import {TestRouter} from "./shared/TestRouter.sol";
 import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
 import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";

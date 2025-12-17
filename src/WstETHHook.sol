@@ -6,7 +6,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BaseTokenWrapperHook} from "./base/BaseTokenWrapperHook.sol";
-import {IWstETH, IStETH} from "./interfaces/IWStETH.sol";
+import {IWstETH, IStETH} from "./interfaces/IWstETH.sol";
 import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 
 /// @title Wrapped Staked ETH (wstETH) Hook
