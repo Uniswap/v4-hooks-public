@@ -16,7 +16,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 import {BaseTokenWrapperHook} from "../src/base/BaseTokenWrapperHook.sol";
 import {WstETHHook} from "../src/WstETHHook.sol";
-import {IWstETH} from "../src/interfaces/IWStETH.sol";
+import {IWstETH} from "../src/interfaces/IWstETH.sol";
 import {MockWstETH} from "./mocks/MockWstETH.sol";
 import {TestRouter} from "./shared/TestRouter.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
