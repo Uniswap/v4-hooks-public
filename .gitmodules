@@ -11,3 +11,9 @@
 	path = lib/v4-periphery
 	url = https://github.com/Uniswap/v4-periphery
 
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
+[submodule "lib/v4-core"]
+	path = lib/v4-core
+	url = https://github.com/Uniswap/v4-core
