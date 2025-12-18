@@ -2,6 +2,7 @@
 
 # Contents
 - [base](/src/base)
+- [guidestar](/src/guidestar)
 - [interfaces](/src/interfaces)
 - [utils](/src/utils)
 - [WETHHook](WETHHook.sol/contract.WETHHook.md)

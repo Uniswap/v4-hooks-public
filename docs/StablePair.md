@@ -25,9 +25,9 @@ The selling fee is initially set so that the selling price is equal to $optimalS
 Over time this fee will decline according to the following process.
 
 - First, we calculate $targetSellPrice$ as
-$$targetPrice = optimalSpreadSell + (ammPrice - optimalBuy)/2.$$
+  $$targetPrice = optimalSpreadSell + (ammPrice - optimalBuy)/2.$$
 - The selling fee reduces over time so that the selling price increases towards target price:
-$$sellPrice = targetPrice - k^{blocksPassed} \cdot (targetPrice - previousPrice)$$
+  $$sellPrice = targetPrice - k^{blocksPassed} \cdot (targetPrice - previousPrice)$$
 
 where $blocksPassed$ is the number of blocks passed since the last transaction,
 $previousPrice$ is the previous selling price at the time of the last swap,
