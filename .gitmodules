@@ -7,3 +7,13 @@
 [submodule "lib/briefcase"]
 	path = lib/briefcase
 	url = https://github.com/Uniswap/briefcase
+[submodule "lib/v4-periphery"]
+	path = lib/v4-periphery
+	url = https://github.com/Uniswap/v4-periphery
+
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
+[submodule "lib/v4-core"]
+	path = lib/v4-core
+	url = https://github.com/Uniswap/v4-core
