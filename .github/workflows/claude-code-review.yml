@@ -46,5 +46,4 @@ jobs:
       pr_number: ${{ github.event.pull_request.number }}
       base_ref: ${{ github.base_ref }}
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }} # Optional: for thread resolution
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
