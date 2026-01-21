@@ -1,38 +1,50 @@
-name: "[claude] Claude Code Review"
-
-concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, labeled, unlabeled]
+    types: [opened, synchronize, ready_for_review]
+
+  # Comment trigger: Add "@request-claude-review" to any PR comment to force a fresh review
+  issue_comment:
+    types: [created]
+
+  pull_request_review_comment:
+    types: [created]
+
+  # Manual trigger for forcing a new review without code changes
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
+      force_review:
+        description: "Force a full review even if code hasn't changed"
+        required: false
+        type: boolean
+        default: true
+
+# Ensure only one review runs at a time per PR
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
-  claude-review-auto:
+  claude-review:
+    # Skip merge queue PRs, draft PRs (unless authored by claude[bot]), and release promotion PRs
     if: |
-      github.event_name == 'pull_request' &&
-      github.event.action != 'review_requested' &&
       !contains(github.head_ref, 'gh-readonly-queue/') &&
-      !startsWith(github.head_ref, 'release/') &&
+      !startsWith(github.head_ref, 'release/next-to-main-') &&
       (
         github.event.pull_request.draft == false ||
-        github.event.action == 'ready_for_review'
+        github.event.action == 'ready_for_review' ||
+        github.event.pull_request.user.login == 'claude[bot]'
       )
 
-    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@d1c6dec19c7eef99bbcc8d3a1a4009f3d3c2732d
+    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number }}
       base_ref: ${{ github.base_ref }}
-      force_review: false
-      toolkit_ref: d1c6dec19c7eef99bbcc8d3a1a4009f3d3c2732d
-      custom_prompt_path: ".claude/prompts/claude-pr-review.md"
-
-      model: "claude-opus-4-5"
-
-      # Standard timeout for most PRs
-      timeout_minutes: 20
-
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }} # Optional: for thread resolution
