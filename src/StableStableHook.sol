@@ -55,7 +55,7 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
         _validateDecayFactor(feeConfiguration.decayFactor);
-        _validateOptimalFeeSpread(feeConfiguration.optimalFeeSpread);
+        _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
         _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPrice);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         feeConfig[poolKey.toId()] = feeConfiguration;
@@ -72,10 +72,10 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
 
     /// @inheritdoc IStableStableHook
     /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external onlyFeeController {
-        _validateOptimalFeeSpread(optimalFeeSpread);
-        feeConfig[poolKey.toId()].optimalFeeSpread = optimalFeeSpread;
-        emit OptimalFeeSpreadUpdated(poolKey, optimalFeeSpread);
+    function updateOptimalFeeRate(PoolKey calldata poolKey, uint256 optimalFeeRate) external onlyFeeController {
+        _validateOptimalFeeRate(optimalFeeRate);
+        feeConfig[poolKey.toId()].optimalFeeRate = optimalFeeRate;
+        emit OptimalFeeRateUpdated(poolKey, optimalFeeRate);
     }
 
     /// @inheritdoc IStableStableHook
@@ -131,7 +131,7 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
         // TODO: set bounds on decay factor
     }
 
-    function _validateOptimalFeeSpread(uint256 _optimalFeeSpread) internal pure {
+    function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure {
         // TODO: set bounds on optimal fee spread
     }
 

@@ -23,7 +23,7 @@ contract StableStableHookTest is Test, Deployers {
 
     event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
     event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
-    event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+    event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
     event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
 
     StableStableHook public hook;
@@ -37,7 +37,7 @@ contract StableStableHookTest is Test, Deployers {
 
     FeeConfig public feeConfig = FeeConfig({
         decayFactor: DECAY_FACTOR,
-        optimalFeeSpread: OPTIMAL_FEE_SPREAD, // 0.9 bps
+        optimalFeeRate: OPTIMAL_FEE_SPREAD, // 0.9 bps
         referenceSqrtPrice: REFERENCE_SQRT_PRICE
     });
 
@@ -141,9 +141,9 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(slot0SqrtPriceX96, TickMath.MIN_SQRT_PRICE);
         assertEq(slot0ProtocolFee, 0);
         assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(TickMath.MIN_SQRT_PRICE));
-        (uint256 decayFactor, uint256 optimalFeeSpread, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
+        (uint256 decayFactor, uint256 optimalFeeRate, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(decayFactor, DECAY_FACTOR);
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD);
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD);
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE);
         (uint24 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
             hook.historicalFeeData(testPoolKey.toId());
@@ -167,19 +167,19 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(decayFactor, DECAY_FACTOR - 1);
     }
 
-    function test_updateOptimalFeeSpread_revertsWithNotFeeController() public {
+    function test_updateOptimalFeeRate_revertsWithNotFeeController() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IStableStableHook.NotFeeController.selector, address(this)));
-        hook.updateOptimalFeeSpread(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        hook.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
     }
 
-    function test_updateOptimalFeeSpread_succeeds() public {
+    function test_updateOptimalFeeRate_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit OptimalFeeSpreadUpdated(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        emit OptimalFeeRateUpdated(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
         vm.prank(poolFeeController);
-        hook.updateOptimalFeeSpread(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
-        (, uint256 optimalFeeSpread,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD - 1);
+        hook.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        (, uint256 optimalFeeRate,) = hook.feeConfig(testPoolKey.toId());
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
     }
 
     function test_updateReferenceSqrtPrice_revertsWithNotFeeController() public {
@@ -209,15 +209,15 @@ contract StableStableHookTest is Test, Deployers {
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
 
-        (uint256 decayFactor, uint256 optimalFeeSpread, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
+        (uint256 decayFactor, uint256 optimalFeeRate, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(decayFactor, DECAY_FACTOR);
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD);
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD);
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE);
 
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeWithSelector(IStableStableHook.updateDecayFactor.selector, testPoolKey, DECAY_FACTOR - 1);
         calls[1] = abi.encodeWithSelector(
-            IStableStableHook.updateOptimalFeeSpread.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
+            IStableStableHook.updateOptimalFeeRate.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
         );
         calls[2] = abi.encodeWithSelector(
             IStableStableHook.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE - 1
@@ -231,8 +231,8 @@ contract StableStableHookTest is Test, Deployers {
         // check that the fee configuration is not updated
         (decayFactor,,) = hook.feeConfig(testPoolKey.toId());
         assertEq(decayFactor, DECAY_FACTOR);
-        (, optimalFeeSpread,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD);
+        (, optimalFeeRate,) = hook.feeConfig(testPoolKey.toId());
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD);
         (,, referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE);
     }
@@ -241,15 +241,15 @@ contract StableStableHookTest is Test, Deployers {
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
 
-        (uint256 decayFactor, uint256 optimalFeeSpread, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
+        (uint256 decayFactor, uint256 optimalFeeRate, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(decayFactor, DECAY_FACTOR);
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD);
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD);
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE);
 
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeWithSelector(IStableStableHook.updateDecayFactor.selector, testPoolKey, DECAY_FACTOR - 1);
         calls[1] = abi.encodeWithSelector(
-            IStableStableHook.updateOptimalFeeSpread.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
+            IStableStableHook.updateOptimalFeeRate.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
         );
         calls[2] = abi.encodeWithSelector(
             IStableStableHook.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE - 1
@@ -261,8 +261,8 @@ contract StableStableHookTest is Test, Deployers {
 
         (decayFactor,,) = hook.feeConfig(testPoolKey.toId());
         assertEq(decayFactor, DECAY_FACTOR - 1);
-        (, optimalFeeSpread,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD - 1);
+        (, optimalFeeRate,) = hook.feeConfig(testPoolKey.toId());
+        assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
         (,, referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE - 1);
     }

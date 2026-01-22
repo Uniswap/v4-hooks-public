@@ -25,8 +25,8 @@ interface IStableStableHook {
     /// @notice Error thrown when decay factor is invalid
     error InvalidDecayFactor(uint256 decayFactor);
 
-    /// @notice Error thrown when optimal fee spread is too high
-    error OptimalFeeSpreadTooHigh(uint256 optimalFeeSpread);
+    /// @notice Error thrown when optimal fee rate is too high
+    error OptimalFeeRateTooHigh(uint256 optimalFeeRate);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
@@ -43,10 +43,10 @@ interface IStableStableHook {
     /// @param decayFactor The new decay factor
     event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
 
-    /// @notice Event emitted when the optimal fee spread is updated
+    /// @notice Event emitted when the optimal fee rate is updated
     /// @param poolKey The PoolKey of the pool
-    /// @param optimalFeeSpread The new optimal fee spread
-    event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+    /// @param optimalFeeRate The new optimal fee rate
+    event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
 
     /// @notice Event emitted when the reference sqrt price is updated
     /// @param poolKey The PoolKey of the pool
@@ -72,9 +72,9 @@ interface IStableStableHook {
     function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external;
 
     /// @notice Update the optimal fee spread for a pool
-    /// @param poolKey The PoolKey of the pool to update the optimal fee spread for
-    /// @param optimalFeeSpread The new optimal fee spread
-    function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external;
+    /// @param poolKey The PoolKey of the pool to update the optimal fee rate for
+    /// @param optimalFeeRate The new optimal fee rate
+    function updateOptimalFeeRate(PoolKey calldata poolKey, uint256 optimalFeeRate) external;
 
     /// @notice Update the reference sqrt price for a pool
     /// @param poolKey The PoolKey of the pool to update the reference sqrt price for

@@ -4,6 +4,6 @@ pragma solidity ^0.8.0;
 /// @notice The fee configuration for each pool
 struct FeeConfig {
     uint256 decayFactor;
-    uint256 optimalFeeSpread;
+    uint256 optimalFeeRate;
     uint160 referenceSqrtPrice;
 }

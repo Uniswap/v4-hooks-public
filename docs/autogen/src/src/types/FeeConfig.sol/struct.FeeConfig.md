@@ -1,5 +1,5 @@
 # FeeConfig
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/types/FeeConfig.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/3992a271872241370b4273b1db0b1e8f9e70d9df/src/types/FeeConfig.sol)
 
 The fee configuration for each pool
 
@@ -7,7 +7,7 @@ The fee configuration for each pool
 ```solidity
 struct FeeConfig {
 uint256 decayFactor;
-uint256 optimalFeeSpread;
+uint256 optimalFeeRate;
 uint160 referenceSqrtPrice;
 }
 ```

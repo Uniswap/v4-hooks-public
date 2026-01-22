@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/3992a271872241370b4273b1db0b1e8f9e70d9df/src/StableStableHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -103,7 +103,7 @@ function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) extern
 |`decayFactor`|`uint256`|The new decay factor|
 
 
-### updateOptimalFeeSpread
+### updateOptimalFeeRate
 
 Update the optimal fee spread for a pool
 
@@ -111,14 +111,14 @@ Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
-function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external onlyFeeController;
+function updateOptimalFeeRate(PoolKey calldata poolKey, uint256 optimalFeeRate) external onlyFeeController;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee spread for|
-|`optimalFeeSpread`|`uint256`|The new optimal fee spread|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee rate for|
+|`optimalFeeRate`|`uint256`|The new optimal fee rate|
 
 
 ### updateReferenceSqrtPrice
@@ -196,11 +196,11 @@ function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calld
 function _validateDecayFactor(uint256 _decayFactor) internal pure;
 ```
 
-### _validateOptimalFeeSpread
+### _validateOptimalFeeRate
 
 
 ```solidity
-function _validateOptimalFeeSpread(uint256 _optimalFeeSpread) internal pure;
+function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
 ```
 
 ### _validateReferenceSqrtPrice

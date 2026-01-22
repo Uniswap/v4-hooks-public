@@ -1,5 +1,5 @@
 # IStableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/interfaces/IStableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/3992a271872241370b4273b1db0b1e8f9e70d9df/src/interfaces/IStableStableHook.sol)
 
 Interface for the StableStableHook
 
@@ -46,20 +46,20 @@ function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) extern
 |`decayFactor`|`uint256`|The new decay factor|
 
 
-### updateOptimalFeeSpread
+### updateOptimalFeeRate
 
 Update the optimal fee spread for a pool
 
 
 ```solidity
-function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external;
+function updateOptimalFeeRate(PoolKey calldata poolKey, uint256 optimalFeeRate) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee spread for|
-|`optimalFeeSpread`|`uint256`|The new optimal fee spread|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee rate for|
+|`optimalFeeRate`|`uint256`|The new optimal fee rate|
 
 
 ### updateReferenceSqrtPrice
@@ -125,12 +125,12 @@ event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
 |`decayFactor`|`uint256`|The new decay factor|
 
-### OptimalFeeSpreadUpdated
-Event emitted when the optimal fee spread is updated
+### OptimalFeeRateUpdated
+Event emitted when the optimal fee rate is updated
 
 
 ```solidity
-event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
 ```
 
 **Parameters**
@@ -138,7 +138,7 @@ event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread)
 |Name|Type|Description|
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
-|`optimalFeeSpread`|`uint256`|The new optimal fee spread|
+|`optimalFeeRate`|`uint256`|The new optimal fee rate|
 
 ### ReferenceSqrtPriceUpdated
 Event emitted when the reference sqrt price is updated
@@ -234,12 +234,12 @@ Error thrown when decay factor is invalid
 error InvalidDecayFactor(uint256 decayFactor);
 ```
 
-### OptimalFeeSpreadTooHigh
-Error thrown when optimal fee spread is too high
+### OptimalFeeRateTooHigh
+Error thrown when optimal fee rate is too high
 
 
 ```solidity
-error OptimalFeeSpreadTooHigh(uint256 optimalFeeSpread);
+error OptimalFeeRateTooHigh(uint256 optimalFeeRate);
 ```
 
 ### InvalidReferenceSqrtPrice
