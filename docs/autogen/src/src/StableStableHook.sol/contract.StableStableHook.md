@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/619dbe3ff1bd956d7247f5309c0553a3680ffe0a/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ef9808384cab8e369c1005cc3519542d59621d1c/src/StableStableHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)
@@ -39,7 +39,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 
 ```solidity
-function _beforeInitialize(address, PoolKey calldata poolKey, uint160) internal pure override returns (bytes4);
+function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4);
 ```
 
 ### _beforeSwap
@@ -51,14 +51,5 @@ function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calld
     pure
     override
     returns (bytes4, BeforeSwapDelta, uint24);
-```
-
-## Errors
-### MustUseDynamicFee
-Error thrown when the pool trying to be initialized is not using a dynamic fee
-
-
-```solidity
-error MustUseDynamicFee();
 ```
 

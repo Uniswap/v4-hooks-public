@@ -15,9 +15,6 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 contract StableStableHook is BaseHook {
     using LPFeeLibrary for uint24;
 
-    /// @notice Error thrown when the pool trying to be initialized is not using a dynamic fee
-    error MustUseDynamicFee();
-
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
     /// @inheritdoc BaseHook
@@ -41,10 +38,7 @@ contract StableStableHook is BaseHook {
     }
 
     /// @inheritdoc BaseHook
-    function _beforeInitialize(address, PoolKey calldata poolKey, uint160) internal pure override returns (bytes4) {
-        if (!poolKey.fee.isDynamicFee()) {
-            revert MustUseDynamicFee();
-        }
+    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         return IHooks.beforeInitialize.selector;
     }
 
