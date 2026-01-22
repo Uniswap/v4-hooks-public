@@ -7,6 +7,8 @@ import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract StableStableHookTest is Test, Deployers {
+    address owner = makeAddr("owner");
+
     StableStableHook stableStableHook = StableStableHook(
         address(
             uint160(
@@ -18,7 +20,7 @@ contract StableStableHookTest is Test, Deployers {
 
     function setUp() public {
         deployFreshManagerAndRouters();
-        StableStableHook impl = new StableStableHook(manager);
+        StableStableHook impl = new StableStableHook(manager, owner);
         vm.etch(address(stableStableHook), address(impl).code);
     }
 }

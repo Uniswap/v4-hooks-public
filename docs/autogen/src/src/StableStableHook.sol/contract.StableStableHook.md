@@ -1,8 +1,8 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/619dbe3ff1bd956d7247f5309c0553a3680ffe0a/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ef9808384cab8e369c1005cc3519542d59621d1c/src/StableStableHook.sol)
 
 **Inherits:**
-[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)
+[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
 
 **Title:**
 StableStableHook
@@ -15,8 +15,34 @@ Dynamic fee hook for stable/stable pools
 
 
 ```solidity
-constructor(IPoolManager _manager) BaseHook(_manager);
+constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner);
 ```
+
+### initializePool
+
+Initialize a Uniswap v4 pool
+
+
+```solidity
+function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, uint24 fee)
+    external
+    onlyOwner
+    returns (int24 tick);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to initialize|
+|`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
+|`fee`|`uint24`|The LP fee of the pool|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`tick`|`int24`|The current tick of the pool|
+
 
 ### getHookPermissions
 
@@ -39,7 +65,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 
 ```solidity
-function _beforeInitialize(address, PoolKey calldata poolKey, uint160) internal pure override returns (bytes4);
+function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4);
 ```
 
 ### _beforeSwap
@@ -59,6 +85,27 @@ Error thrown when the pool trying to be initialized is not using a dynamic fee
 
 
 ```solidity
-error MustUseDynamicFee();
+error MustUseDynamicFee(uint24 fee);
 ```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`fee`|`uint24`|The fee that was used to try to initialize the pool|
+
+### InvalidInitializer
+Error thrown when the caller of `initializePool` is not address(this)
+
+
+```solidity
+error InvalidInitializer(address caller, address expected);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`caller`|`address`|The invalid address attempting to initialize the pool|
+|`expected`|`address`|address(this)|
 
