@@ -1,47 +1,88 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.26;
 
+import {IStableStableHook, FeeConfig, HistoricalData} from "./interfaces/IStableStableHook.sol";
 import {BaseHook} from "./base/BaseHook.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
-contract StableStableHook is BaseHook, Ownable {
+contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
     using LPFeeLibrary for uint24;
 
-    /// @notice Error thrown when the pool trying to be initialized is not using a dynamic fee
-    /// @param lpFee The LP fee that was used to try to initialize the pool
-    error MustUseDynamicFee(uint24 lpFee);
+    /// @notice The fee configuration for each pool
+    mapping(PoolId => FeeConfig) public feeConfig;
+    /// @notice The historical data for each pool
+    mapping(PoolId => HistoricalData) public historicalData;
 
-    /// @notice Error thrown when the hook address is not address(this)
-    /// @param hookAddress The invalid hook address
-    error InvalidHookAddress(address hookAddress);
+    /// @notice The address of the fee controller
+    /// @dev The fee controller is the address that can update the fee configuration for a pool
+    address public immutable feeController;
 
-    /// @notice Error thrown when the caller of `initializePool` is not address(this)
-    /// @param caller The invalid address attempting to initialize the pool
-    error InvalidInitializer(address caller);
+    constructor(IPoolManager _manager, address _owner, address _feeController) BaseHook(_manager) Ownable(_owner) {
+        feeController = _feeController;
+    }
 
-    constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner) {}
+    /// @notice Modifier to only allow calls from the fee controller
+    /// @dev This modifier is used to prevent unauthorized updates to the fee configuration per pool
+    modifier onlyFeeController() {
+        if (msg.sender != feeController) revert NotFeeController(msg.sender);
+        _;
+    }
 
-    /// @notice Initialize a Uniswap v4 pool
-    /// @param poolKey The PoolKey of the pool to initialize
-    /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
-    /// @return tick The current tick of the pool
-    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick) {
+    /// @inheritdoc IStableStableHook
+    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfiguration)
+        external
+        onlyOwner
+        returns (int24 tick)
+    {
         if (!poolKey.fee.isDynamicFee()) {
             revert MustUseDynamicFee(poolKey.fee);
         }
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
+        _validateDecayFactor(feeConfiguration.decayFactor);
+        _validateOptimalFeeSpread(feeConfiguration.optimalFeeSpread);
+        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPrice);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
+        feeConfig[poolKey.toId()] = feeConfiguration;
+    }
+
+    /// @inheritdoc IStableStableHook
+    /// @dev Should be called in a multicall with clearHistoricalData()
+    function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyFeeController {
+        _validateDecayFactor(decayFactor);
+        feeConfig[poolKey.toId()].decayFactor = decayFactor;
+    }
+
+    /// @inheritdoc IStableStableHook
+    /// @dev Should be called in a multicall with clearHistoricalData()
+    function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external onlyFeeController {
+        _validateOptimalFeeSpread(optimalFeeSpread);
+        feeConfig[poolKey.toId()].optimalFeeSpread = optimalFeeSpread;
+    }
+
+    /// @inheritdoc IStableStableHook
+    /// @dev Should be called in a multicall with clearHistoricalData()
+    function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external onlyFeeController {
+        _validateReferenceSqrtPrice(referenceSqrtPrice);
+        feeConfig[poolKey.toId()].referenceSqrtPrice = referenceSqrtPrice;
+    }
+
+    /// @inheritdoc IStableStableHook
+    function clearHistoricalData(PoolKey calldata poolKey) external onlyFeeController {
+        delete historicalData[poolKey.toId()];
     }
 
     /// @inheritdoc BaseHook
@@ -77,5 +118,18 @@ contract StableStableHook is BaseHook, Ownable {
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+    }
+
+    function _validateDecayFactor(uint256 _decayFactor) internal pure {
+        // TODO: set bounds on decay factor
+    }
+
+    function _validateOptimalFeeSpread(uint256 _optimalFeeSpread) internal pure {
+        // TODO: set bounds on optimal fee spread
+    }
+
+    function _validateReferenceSqrtPrice(uint160 _referenceSqrtPrice) internal pure {
+        // TODO: set bounds on reference sqrt price
+        // should they be close to stable price?
     }
 }

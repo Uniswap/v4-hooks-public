@@ -1,8 +1,8 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/faae6bc83a1d5c7c0278e78d82941054e5cbd26f/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/924626d0c8f933c1c38d53555d77ded7e76f8009/src/StableStableHook.sol)
 
 **Inherits:**
-[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
+[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
 
 **Title:**
 StableStableHook
@@ -10,12 +10,53 @@ StableStableHook
 Dynamic fee hook for stable/stable pools
 
 
+## State Variables
+### feeConfig
+The fee configuration for each pool
+
+
+```solidity
+mapping(PoolId => FeeConfig) public feeConfig
+```
+
+
+### historicalData
+The historical data for each pool
+
+
+```solidity
+mapping(PoolId => HistoricalData) public historicalData
+```
+
+
+### feeController
+The address of the fee controller
+
+The fee controller is the address that can update the fee configuration for a pool
+
+
+```solidity
+address public immutable feeController
+```
+
+
 ## Functions
 ### constructor
 
 
 ```solidity
-constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner);
+constructor(IPoolManager _manager, address _owner, address _feeController) BaseHook(_manager) Ownable(_owner);
+```
+
+### onlyFeeController
+
+Modifier to only allow calls from the fee controller
+
+This modifier is used to prevent unauthorized updates to the fee configuration per pool
+
+
+```solidity
+modifier onlyFeeController() ;
 ```
 
 ### initializePool
@@ -24,7 +65,10 @@ Initialize a Uniswap v4 pool
 
 
 ```solidity
-function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick);
+function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfiguration)
+    external
+    onlyOwner
+    returns (int24 tick);
 ```
 **Parameters**
 
@@ -32,12 +76,82 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to initialize|
 |`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
+|`feeConfiguration`|`FeeConfig`||
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`tick`|`int24`|The current tick of the pool|
+
+
+### updateDecayFactor
+
+Update the decay factor for a pool
+
+Should be called in a multicall with clearHistoricalData()
+
+
+```solidity
+function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyFeeController;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to update the decay factor for|
+|`decayFactor`|`uint256`|The new decay factor|
+
+
+### updateOptimalFeeSpread
+
+Update the optimal fee spread for a pool
+
+Should be called in a multicall with clearHistoricalData()
+
+
+```solidity
+function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external onlyFeeController;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee spread for|
+|`optimalFeeSpread`|`uint256`|The new optimal fee spread|
+
+
+### updateReferenceSqrtPrice
+
+Update the reference sqrt price for a pool
+
+Should be called in a multicall with clearHistoricalData()
+
+
+```solidity
+function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external onlyFeeController;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to update the reference sqrt price for|
+|`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
+
+
+### clearHistoricalData
+
+Clear the historical data for a pool
+
+
+```solidity
+function clearHistoricalData(PoolKey calldata poolKey) external onlyFeeController;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to clear the historical data for|
 
 
 ### getHookPermissions
@@ -75,46 +189,24 @@ function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calld
     returns (bytes4, BeforeSwapDelta, uint24);
 ```
 
-## Errors
-### MustUseDynamicFee
-Error thrown when the pool trying to be initialized is not using a dynamic fee
+### _validateDecayFactor
 
 
 ```solidity
-error MustUseDynamicFee(uint24 lpFee);
+function _validateDecayFactor(uint256 _decayFactor) internal pure;
 ```
 
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`lpFee`|`uint24`|The LP fee that was used to try to initialize the pool|
-
-### InvalidHookAddress
-Error thrown when the hook address is not address(this)
+### _validateOptimalFeeSpread
 
 
 ```solidity
-error InvalidHookAddress(address hookAddress);
+function _validateOptimalFeeSpread(uint256 _optimalFeeSpread) internal pure;
 ```
 
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`hookAddress`|`address`|The invalid hook address|
-
-### InvalidInitializer
-Error thrown when the caller of `initializePool` is not address(this)
+### _validateReferenceSqrtPrice
 
 
 ```solidity
-error InvalidInitializer(address caller);
+function _validateReferenceSqrtPrice(uint160 _referenceSqrtPrice) internal pure;
 ```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`caller`|`address`|The invalid address attempting to initialize the pool|
 
