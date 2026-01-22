@@ -37,12 +37,10 @@ contract StableStableHook is BaseHook {
         });
     }
 
-    /// @inheritdoc BaseHook
     function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         return IHooks.beforeInitialize.selector;
     }
 
-    /// @inheritdoc BaseHook
     function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
         internal
         pure

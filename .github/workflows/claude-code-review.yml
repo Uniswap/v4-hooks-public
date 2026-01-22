@@ -1,0 +1,49 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+  # Comment trigger: Add "@request-claude-review" to any PR comment to force a fresh review
+  issue_comment:
+    types: [created]
+
+  pull_request_review_comment:
+    types: [created]
+
+  # Manual trigger for forcing a new review without code changes
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
+      force_review:
+        description: "Force a full review even if code hasn't changed"
+        required: false
+        type: boolean
+        default: true
+
+# Ensure only one review runs at a time per PR
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude-review:
+    # Skip merge queue PRs, draft PRs (unless authored by claude[bot]), and release promotion PRs
+    if: |
+      !contains(github.head_ref, 'gh-readonly-queue/') &&
+      !startsWith(github.head_ref, 'release/next-to-main-') &&
+      (
+        github.event.pull_request.draft == false ||
+        github.event.action == 'ready_for_review' ||
+        github.event.pull_request.user.login == 'claude[bot]'
+      )
+
+    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      base_ref: ${{ github.base_ref }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
