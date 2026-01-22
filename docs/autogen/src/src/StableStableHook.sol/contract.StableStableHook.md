@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/00b4a9284d98f4fa6a7f5ae7ea60f3ee50fd746d/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/faae6bc83a1d5c7c0278e78d82941054e5cbd26f/src/StableStableHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
@@ -95,22 +95,21 @@ Error thrown when the hook address is not address(this)
 
 
 ```solidity
-error InvalidHookAddress(address invalid, address expected);
+error InvalidHookAddress(address hookAddress);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`invalid`|`address`|The invalid hook address|
-|`expected`|`address`|address(this)|
+|`hookAddress`|`address`|The invalid hook address|
 
 ### InvalidInitializer
 Error thrown when the caller of `initializePool` is not address(this)
 
 
 ```solidity
-error InvalidInitializer(address caller, address expected);
+error InvalidInitializer(address caller);
 ```
 
 **Parameters**
@@ -118,5 +117,4 @@ error InvalidInitializer(address caller, address expected);
 |Name|Type|Description|
 |----|----|-----------|
 |`caller`|`address`|The invalid address attempting to initialize the pool|
-|`expected`|`address`|address(this)|
 

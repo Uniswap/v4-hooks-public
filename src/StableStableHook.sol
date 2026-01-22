@@ -21,14 +21,12 @@ contract StableStableHook is BaseHook, Ownable {
     error MustUseDynamicFee(uint24 lpFee);
 
     /// @notice Error thrown when the hook address is not address(this)
-    /// @param invalid The invalid hook address
-    /// @param expected address(this)
-    error InvalidHookAddress(address invalid, address expected);
+    /// @param hookAddress The invalid hook address
+    error InvalidHookAddress(address hookAddress);
 
     /// @notice Error thrown when the caller of `initializePool` is not address(this)
     /// @param caller The invalid address attempting to initialize the pool
-    /// @param expected address(this)
-    error InvalidInitializer(address caller, address expected);
+    error InvalidInitializer(address caller);
 
     constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner) {}
 
@@ -41,7 +39,7 @@ contract StableStableHook is BaseHook, Ownable {
             revert MustUseDynamicFee(poolKey.fee);
         }
         if (poolKey.hooks != IHooks(address(this))) {
-            revert InvalidHookAddress(address(poolKey.hooks), address(this));
+            revert InvalidHookAddress(address(poolKey.hooks));
         }
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
     }
@@ -66,16 +64,12 @@ contract StableStableHook is BaseHook, Ownable {
         });
     }
 
-    /// @inheritdoc BaseHook
     function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4) {
-        // This check is only hit when another address tries to initialize the pool, since hooks cannot call themselves.
-        // Therefore this will always revert, ensuring only this contract can initialize pools
-        if (sender != address(this)) revert InvalidInitializer(sender, address(this));
-
-        return IHooks.beforeInitialize.selector;
+        // Since hooks cannot call themselves, this function is only called when another address tries to initialize a pool with this contract as the hook
+        // Therefore this function always reverts to ensure only this contract can initialize new pools
+        revert InvalidInitializer(sender);
     }
 
-    /// @inheritdoc BaseHook
     function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
         internal
         pure

@@ -78,7 +78,7 @@ contract StableStableHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(hook), // target
                 IHooks.beforeInitialize.selector, // selector
-                abi.encodeWithSelector(StableStableHook.InvalidInitializer.selector, address(this), address(hook)), // reason
+                abi.encodeWithSelector(StableStableHook.InvalidInitializer.selector, address(this)), // reason
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector) // details
             )
         );
@@ -96,7 +96,7 @@ contract StableStableHookTest is Test, Deployers {
             hooks: IHooks(address(0)) // invalid hook address
         });
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(StableStableHook.InvalidHookAddress.selector, address(0), address(hook)));
+        vm.expectRevert(abi.encodeWithSelector(StableStableHook.InvalidHookAddress.selector, address(0)));
         hook.initializePool(poolKey, TickMath.MIN_SQRT_PRICE);
     }
 
