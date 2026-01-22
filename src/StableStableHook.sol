@@ -17,8 +17,14 @@ contract StableStableHook is BaseHook, Ownable {
     using LPFeeLibrary for uint24;
 
     /// @notice Error thrown when the pool trying to be initialized is not using a dynamic fee
-    /// @param fee The fee that was used to try to initialize the pool
-    error MustUseDynamicFee(uint24 fee);
+    /// @param lpFee The LP fee that was used to try to initialize the pool
+    error MustUseDynamicFee(uint24 lpFee);
+
+    /// @notice Error thrown when the hook address is not address(this)
+    /// @param invalid The invalid hook address
+    /// @param expected address(this)
+    error InvalidHookAddress(address invalid, address expected);
+
     /// @notice Error thrown when the caller of `initializePool` is not address(this)
     /// @param caller The invalid address attempting to initialize the pool
     /// @param expected address(this)
@@ -29,15 +35,13 @@ contract StableStableHook is BaseHook, Ownable {
     /// @notice Initialize a Uniswap v4 pool
     /// @param poolKey The PoolKey of the pool to initialize
     /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
-    /// @param fee The LP fee of the pool
     /// @return tick The current tick of the pool
-    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, uint24 fee)
-        external
-        onlyOwner
-        returns (int24 tick)
-    {
-        if (!fee.isDynamicFee()) {
-            revert MustUseDynamicFee(fee);
+    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick) {
+        if (!poolKey.fee.isDynamicFee()) {
+            revert MustUseDynamicFee(poolKey.fee);
+        }
+        if (poolKey.hooks != IHooks(address(this))) {
+            revert InvalidHookAddress(address(poolKey.hooks), address(this));
         }
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
     }

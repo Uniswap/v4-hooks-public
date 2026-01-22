@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/ef9808384cab8e369c1005cc3519542d59621d1c/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00b4a9284d98f4fa6a7f5ae7ea60f3ee50fd746d/src/StableStableHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
@@ -24,10 +24,7 @@ Initialize a Uniswap v4 pool
 
 
 ```solidity
-function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, uint24 fee)
-    external
-    onlyOwner
-    returns (int24 tick);
+function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick);
 ```
 **Parameters**
 
@@ -35,7 +32,6 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, uint24 f
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to initialize|
 |`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
-|`fee`|`uint24`|The LP fee of the pool|
 
 **Returns**
 
@@ -85,14 +81,29 @@ Error thrown when the pool trying to be initialized is not using a dynamic fee
 
 
 ```solidity
-error MustUseDynamicFee(uint24 fee);
+error MustUseDynamicFee(uint24 lpFee);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`fee`|`uint24`|The fee that was used to try to initialize the pool|
+|`lpFee`|`uint24`|The LP fee that was used to try to initialize the pool|
+
+### InvalidHookAddress
+Error thrown when the hook address is not address(this)
+
+
+```solidity
+error InvalidHookAddress(address invalid, address expected);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`invalid`|`address`|The invalid hook address|
+|`expected`|`address`|address(this)|
 
 ### InvalidInitializer
 Error thrown when the caller of `initializePool` is not address(this)
