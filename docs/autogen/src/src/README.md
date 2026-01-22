@@ -3,6 +3,7 @@
 # Contents
 - [base](/src/base)
 - [interfaces](/src/interfaces)
+- [types](/src/types)
 - [utils](/src/utils)
 - [StableStableHook](StableStableHook.sol/contract.StableStableHook.md)
 - [WETHHook](WETHHook.sol/contract.WETHHook.md)

@@ -14,10 +14,17 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IStableStableHook, FeeConfig, HistoricalData} from "../src/interfaces/IStableStableHook.sol";
+import {IStableStableHook} from "../src/interfaces/IStableStableHook.sol";
+import {FeeConfig} from "../src/types/FeeConfig.sol";
+import {HistoricalFeeData} from "../src/types/HistoricalFeeData.sol";
 
 contract StableStableHookTest is Test, Deployers {
     using StateLibrary for IPoolManager;
+
+    event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
+    event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
+    event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+    event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
 
     StableStableHook public hook;
 
@@ -125,6 +132,8 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_initializePool_succeeds() public {
+        vm.expectEmit(true, false, false, true);
+        emit PoolInitialized(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
 
@@ -137,7 +146,7 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(optimalFeeSpread, OPTIMAL_FEE_SPREAD);
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE);
         (uint24 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
-            hook.historicalData(testPoolKey.toId());
+            hook.historicalFeeData(testPoolKey.toId());
         assertEq(previousFee, 0);
         assertEq(previousSqrtAmmPrice, 0);
         assertEq(blockNumber, 0);
@@ -150,6 +159,8 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_updateDecayFactor_succeeds() public {
+        vm.expectEmit(true, false, false, true);
+        emit DecayFactorUpdated(testPoolKey, DECAY_FACTOR - 1);
         vm.prank(poolFeeController);
         hook.updateDecayFactor(testPoolKey, DECAY_FACTOR - 1);
         (uint256 decayFactor,,) = hook.feeConfig(testPoolKey.toId());
@@ -163,6 +174,8 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_updateOptimalFeeSpread_succeeds() public {
+        vm.expectEmit(true, false, false, true);
+        emit OptimalFeeSpreadUpdated(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
         vm.prank(poolFeeController);
         hook.updateOptimalFeeSpread(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
         (, uint256 optimalFeeSpread,) = hook.feeConfig(testPoolKey.toId());
@@ -176,19 +189,21 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_updateReferenceSqrtPrice_succeeds() public {
+        vm.expectEmit(true, false, false, true);
+        emit ReferenceSqrtPriceUpdated(testPoolKey, REFERENCE_SQRT_PRICE - 1);
         vm.prank(poolFeeController);
         hook.updateReferenceSqrtPrice(testPoolKey, REFERENCE_SQRT_PRICE - 1);
         (,, uint160 referenceSqrtPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPrice, REFERENCE_SQRT_PRICE - 1);
     }
 
-    function test_clearHistoricalData_revertsWithNotFeeController() public {
+    function test_clearHistoricalFeeData_revertsWithNotFeeController() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IStableStableHook.NotFeeController.selector, address(this)));
-        hook.clearHistoricalData(testPoolKey);
+        hook.clearHistoricalFeeData(testPoolKey);
     }
 
-    // TODO: add test later assuring clearHistoricalData works as expected
+    // TODO: add test later assuring clearHistoricalFeeData works as expected
 
     function test_multicall_revertsWithNotFeeController() public {
         vm.prank(owner);
@@ -207,7 +222,7 @@ contract StableStableHookTest is Test, Deployers {
         calls[2] = abi.encodeWithSelector(
             IStableStableHook.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE - 1
         );
-        calls[3] = abi.encodeWithSelector(IStableStableHook.clearHistoricalData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IStableStableHook.clearHistoricalFeeData.selector, testPoolKey);
 
         vm.prank(address(this)); // not the fee controller
         vm.expectRevert(abi.encodeWithSelector(IStableStableHook.NotFeeController.selector, address(this)));
@@ -239,7 +254,7 @@ contract StableStableHookTest is Test, Deployers {
         calls[2] = abi.encodeWithSelector(
             IStableStableHook.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE - 1
         );
-        calls[3] = abi.encodeWithSelector(IStableStableHook.clearHistoricalData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IStableStableHook.clearHistoricalFeeData.selector, testPoolKey);
 
         vm.prank(poolFeeController);
         hook.multicall(calls);

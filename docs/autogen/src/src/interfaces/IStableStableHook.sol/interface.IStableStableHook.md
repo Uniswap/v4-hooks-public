@@ -1,5 +1,5 @@
 # IStableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/924626d0c8f933c1c38d53555d77ded7e76f8009/src/interfaces/IStableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/interfaces/IStableStableHook.sol)
 
 Interface for the StableStableHook
 
@@ -78,13 +78,13 @@ function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqr
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 
-### clearHistoricalData
+### clearHistoricalFeeData
 
 Clear the historical data for a pool
 
 
 ```solidity
-function clearHistoricalData(PoolKey calldata poolKey) external;
+function clearHistoricalFeeData(PoolKey calldata poolKey) external;
 ```
 **Parameters**
 
@@ -92,6 +92,82 @@ function clearHistoricalData(PoolKey calldata poolKey) external;
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to clear the historical data for|
 
+
+## Events
+### PoolInitialized
+Event emitted when a pool is initialized
+
+
+```solidity
+event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
+|`feeConfig`|`FeeConfig`|The fee configuration for the pool|
+
+### DecayFactorUpdated
+Event emitted when the decay factor is updated
+
+
+```solidity
+event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`decayFactor`|`uint256`|The new decay factor|
+
+### OptimalFeeSpreadUpdated
+Event emitted when the optimal fee spread is updated
+
+
+```solidity
+event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`optimalFeeSpread`|`uint256`|The new optimal fee spread|
+
+### ReferenceSqrtPriceUpdated
+Event emitted when the reference sqrt price is updated
+
+
+```solidity
+event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
+
+### HistoricalFeeDataCleared
+Event emitted when the historical fee data is cleared
+
+
+```solidity
+event HistoricalFeeDataCleared(PoolKey indexed poolKey);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
 
 ## Errors
 ### MustUseDynamicFee

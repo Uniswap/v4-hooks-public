@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/924626d0c8f933c1c38d53555d77ded7e76f8009/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/StableStableHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -20,12 +20,12 @@ mapping(PoolId => FeeConfig) public feeConfig
 ```
 
 
-### historicalData
+### historicalFeeData
 The historical data for each pool
 
 
 ```solidity
-mapping(PoolId => HistoricalData) public historicalData
+mapping(PoolId => HistoricalFeeData) public historicalFeeData
 ```
 
 
@@ -89,7 +89,7 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfi
 
 Update the decay factor for a pool
 
-Should be called in a multicall with clearHistoricalData()
+Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
@@ -107,7 +107,7 @@ function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) extern
 
 Update the optimal fee spread for a pool
 
-Should be called in a multicall with clearHistoricalData()
+Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
@@ -125,7 +125,7 @@ function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpre
 
 Update the reference sqrt price for a pool
 
-Should be called in a multicall with clearHistoricalData()
+Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
@@ -139,13 +139,13 @@ function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqr
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 
-### clearHistoricalData
+### clearHistoricalFeeData
 
 Clear the historical data for a pool
 
 
 ```solidity
-function clearHistoricalData(PoolKey calldata poolKey) external onlyFeeController;
+function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyFeeController;
 ```
 **Parameters**
 

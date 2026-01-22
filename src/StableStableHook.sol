@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.26;
 
-import {IStableStableHook, FeeConfig, HistoricalData} from "./interfaces/IStableStableHook.sol";
+import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {BaseHook} from "./base/BaseHook.sol";
+import {FeeConfig} from "./types/FeeConfig.sol";
+import {HistoricalFeeData} from "./types/HistoricalFeeData.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -23,7 +25,7 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
     /// @notice The fee configuration for each pool
     mapping(PoolId => FeeConfig) public feeConfig;
     /// @notice The historical data for each pool
-    mapping(PoolId => HistoricalData) public historicalData;
+    mapping(PoolId => HistoricalFeeData) public historicalFeeData;
 
     /// @notice The address of the fee controller
     /// @dev The fee controller is the address that can update the fee configuration for a pool
@@ -57,32 +59,37 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
         _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPrice);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         feeConfig[poolKey.toId()] = feeConfiguration;
+        emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
     }
 
     /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalData()
+    /// @dev Should be called in a multicall with clearHistoricalFeeData()
     function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyFeeController {
         _validateDecayFactor(decayFactor);
         feeConfig[poolKey.toId()].decayFactor = decayFactor;
+        emit DecayFactorUpdated(poolKey, decayFactor);
     }
 
     /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalData()
+    /// @dev Should be called in a multicall with clearHistoricalFeeData()
     function updateOptimalFeeSpread(PoolKey calldata poolKey, uint256 optimalFeeSpread) external onlyFeeController {
         _validateOptimalFeeSpread(optimalFeeSpread);
         feeConfig[poolKey.toId()].optimalFeeSpread = optimalFeeSpread;
+        emit OptimalFeeSpreadUpdated(poolKey, optimalFeeSpread);
     }
 
     /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalData()
+    /// @dev Should be called in a multicall with clearHistoricalFeeData()
     function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external onlyFeeController {
         _validateReferenceSqrtPrice(referenceSqrtPrice);
         feeConfig[poolKey.toId()].referenceSqrtPrice = referenceSqrtPrice;
+        emit ReferenceSqrtPriceUpdated(poolKey, referenceSqrtPrice);
     }
 
     /// @inheritdoc IStableStableHook
-    function clearHistoricalData(PoolKey calldata poolKey) external onlyFeeController {
-        delete historicalData[poolKey.toId()];
+    function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyFeeController {
+        delete historicalFeeData[poolKey.toId()];
+        emit HistoricalFeeDataCleared(poolKey);
     }
 
     /// @inheritdoc BaseHook

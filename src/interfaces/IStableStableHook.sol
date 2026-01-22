@@ -2,20 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-
-/// @notice The fee configuration for each pool
-struct FeeConfig {
-    uint256 decayFactor;
-    uint256 optimalFeeSpread;
-    uint160 referenceSqrtPrice;
-}
-
-/// @notice The historical data for each pool
-struct HistoricalData {
-    uint24 previousFee;
-    uint160 previousSqrtAmmPrice;
-    uint256 blockNumber;
-}
+import {FeeConfig} from "../types/FeeConfig.sol";
 
 /// @notice Interface for the StableStableHook
 interface IStableStableHook {
@@ -45,6 +32,31 @@ interface IStableStableHook {
     /// @param invalidSqrtPrice The invalid reference sqrt price
     error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
 
+    /// @notice Event emitted when a pool is initialized
+    /// @param poolKey The PoolKey of the pool
+    /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
+    /// @param feeConfig The fee configuration for the pool
+    event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
+
+    /// @notice Event emitted when the decay factor is updated
+    /// @param poolKey The PoolKey of the pool
+    /// @param decayFactor The new decay factor
+    event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
+
+    /// @notice Event emitted when the optimal fee spread is updated
+    /// @param poolKey The PoolKey of the pool
+    /// @param optimalFeeSpread The new optimal fee spread
+    event OptimalFeeSpreadUpdated(PoolKey indexed poolKey, uint256 optimalFeeSpread);
+
+    /// @notice Event emitted when the reference sqrt price is updated
+    /// @param poolKey The PoolKey of the pool
+    /// @param referenceSqrtPrice The new reference sqrt price
+    event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
+
+    /// @notice Event emitted when the historical fee data is cleared
+    /// @param poolKey The PoolKey of the pool
+    event HistoricalFeeDataCleared(PoolKey indexed poolKey);
+
     /// @notice Initialize a Uniswap v4 pool
     /// @param poolKey The PoolKey of the pool to initialize
     /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
@@ -71,5 +83,5 @@ interface IStableStableHook {
 
     /// @notice Clear the historical data for a pool
     /// @param poolKey The PoolKey of the pool to clear the historical data for
-    function clearHistoricalData(PoolKey calldata poolKey) external;
+    function clearHistoricalFeeData(PoolKey calldata poolKey) external;
 }
