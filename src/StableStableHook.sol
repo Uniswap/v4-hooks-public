@@ -2,6 +2,8 @@
 pragma solidity 0.8.26;
 
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
+import {FeeController} from "./FeeController.sol";
+import {FeeConfiguration} from "./FeeConfiguration.sol";
 import {BaseHook} from "./base/BaseHook.sol";
 import {FeeConfig} from "./types/FeeConfig.sol";
 import {HistoricalFeeData} from "./types/HistoricalFeeData.sol";
@@ -19,28 +21,14 @@ import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
-contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
+contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, IStableStableHook {
     using LPFeeLibrary for uint24;
 
-    /// @notice The fee configuration for each pool
-    mapping(PoolId => FeeConfig) public feeConfig;
-    /// @notice The historical data for each pool
-    mapping(PoolId => HistoricalFeeData) public historicalFeeData;
-
-    /// @notice The address of the fee controller
-    /// @dev The fee controller is the address that can update the fee configuration for a pool
-    address public immutable feeController;
-
-    constructor(IPoolManager _manager, address _owner, address _feeController) BaseHook(_manager) Ownable(_owner) {
-        feeController = _feeController;
-    }
-
-    /// @notice Modifier to only allow calls from the fee controller
-    /// @dev This modifier is used to prevent unauthorized updates to the fee configuration per pool
-    modifier onlyFeeController() {
-        if (msg.sender != feeController) revert NotFeeController(msg.sender);
-        _;
-    }
+    constructor(IPoolManager _manager, address _owner, address _feeController)
+        FeeConfiguration(_feeController)
+        Ownable(_owner)
+        BaseHook(_manager)
+    {}
 
     /// @inheritdoc IStableStableHook
     function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfiguration)
@@ -56,40 +44,10 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
         }
         _validateDecayFactor(feeConfiguration.decayFactor);
         _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
-        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPrice);
+        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
-    }
-
-    /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyFeeController {
-        _validateDecayFactor(decayFactor);
-        feeConfig[poolKey.toId()].decayFactor = decayFactor;
-        emit DecayFactorUpdated(poolKey, decayFactor);
-    }
-
-    /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateOptimalFeeRate(PoolKey calldata poolKey, uint256 optimalFeeRate) external onlyFeeController {
-        _validateOptimalFeeRate(optimalFeeRate);
-        feeConfig[poolKey.toId()].optimalFeeRate = optimalFeeRate;
-        emit OptimalFeeRateUpdated(poolKey, optimalFeeRate);
-    }
-
-    /// @inheritdoc IStableStableHook
-    /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external onlyFeeController {
-        _validateReferenceSqrtPrice(referenceSqrtPrice);
-        feeConfig[poolKey.toId()].referenceSqrtPrice = referenceSqrtPrice;
-        emit ReferenceSqrtPriceUpdated(poolKey, referenceSqrtPrice);
-    }
-
-    /// @inheritdoc IStableStableHook
-    function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyFeeController {
-        delete historicalFeeData[poolKey.toId()];
-        emit HistoricalFeeDataCleared(poolKey);
     }
 
     /// @inheritdoc BaseHook
@@ -127,16 +85,16 @@ contract StableStableHook is BaseHook, Ownable, Multicall, IStableStableHook {
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
-    function _validateDecayFactor(uint256 _decayFactor) internal pure {
-        // TODO: set bounds on decay factor
+    function _getFeeConfig(PoolKey calldata poolKey) internal view override returns (FeeConfig storage) {
+        return feeConfig[poolKey.toId()];
     }
 
-    function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure {
-        // TODO: set bounds on optimal fee spread
-    }
-
-    function _validateReferenceSqrtPrice(uint160 _referenceSqrtPrice) internal pure {
-        // TODO: set bounds on reference sqrt price
-        // should they be close to stable price?
+    function _getHistoricalFeeData(PoolKey calldata poolKey)
+        internal
+        view
+        override
+        returns (HistoricalFeeData storage)
+    {
+        return historicalFeeData[poolKey.toId()];
     }
 }

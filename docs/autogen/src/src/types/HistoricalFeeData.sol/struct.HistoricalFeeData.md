@@ -1,5 +1,5 @@
 # HistoricalFeeData
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/42f0f4c9ee15cb6b951d3e798fb2c00c2fd84420/src/types/HistoricalFeeData.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/cc39bad2f9286aefd0824c4bc93d241fe8657275/src/types/HistoricalFeeData.sol)
 
 The historical fee data for each pool
 
@@ -7,7 +7,7 @@ The historical fee data for each pool
 ```solidity
 struct HistoricalFeeData {
 uint24 previousFee;
-uint160 previousSqrtAmmPrice;
+uint160 previousSqrtAmmPriceX96;
 uint256 blockNumber;
 }
 ```
