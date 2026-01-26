@@ -3,7 +3,6 @@ pragma solidity 0.8.26;
 
 import {IFeeConfiguration, FeeConfig, HistoricalFeeData} from "../interfaces/IFeeConfiguration.sol";
 import {ConfigManager} from "./ConfigManager.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @title FeeConfiguration
@@ -21,36 +20,33 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
 
     /// @inheritdoc IFeeConfiguration
     /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external onlyConfigManager {
+    function updateDecayFactor(PoolId poolId, uint256 k, uint256 logK) external onlyConfigManager {
         _validateDecayFactor(k, logK);
-        feeConfig[poolKey.toId()].k = k;
-        feeConfig[poolKey.toId()].logK = logK;
-        emit DecayFactorUpdated(poolKey, k, logK);
+        feeConfig[poolId].k = k;
+        feeConfig[poolId].logK = logK;
+        emit DecayFactorUpdated(poolId, k, logK);
     }
 
     /// @inheritdoc IFeeConfiguration
-    /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) external onlyConfigManager {
+    /// @dev Should be called in a multicall with resetHistoricalFeeData()
+    function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external onlyConfigManager {
         _validateOptimalFeeRate(optimalFeeRate);
-        feeConfig[poolKey.toId()].optimalFeeRate = optimalFeeRate;
-        emit OptimalFeeRateUpdated(poolKey, optimalFeeRate);
+        feeConfig[poolId].optimalFeeRate = optimalFeeRate;
+        emit OptimalFeeRateUpdated(poolId, optimalFeeRate);
     }
 
     /// @inheritdoc IFeeConfiguration
-    /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPriceX96)
-        external
-        onlyConfigManager
-    {
+    /// @dev Should be called in a multicall with resetHistoricalFeeData()
+    function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager {
         _validateReferenceSqrtPrice(referenceSqrtPriceX96);
-        feeConfig[poolKey.toId()].referenceSqrtPriceX96 = referenceSqrtPriceX96;
-        emit ReferenceSqrtPriceUpdated(poolKey, referenceSqrtPriceX96);
+        feeConfig[poolId].referenceSqrtPriceX96 = referenceSqrtPriceX96;
+        emit ReferenceSqrtPriceUpdated(poolId, referenceSqrtPriceX96);
     }
 
     /// @inheritdoc IFeeConfiguration
-    function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager {
-        _resetHistoricalFeeData(poolKey.toId());
-        emit HistoricalFeeDataReset(poolKey);
+    function resetHistoricalFeeData(PoolId poolId) external onlyConfigManager {
+        _resetHistoricalFeeData(poolId);
+        emit HistoricalFeeDataReset(poolId);
     }
 
     /// @notice Internal helper to initialize fee configuration and historical data

@@ -6,6 +6,7 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -19,9 +20,9 @@ contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
 
-    event DecayFactorUpdated(PoolKey indexed poolKey, uint256 k, uint256 logK);
-    event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
-    event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPriceX96);
+    event DecayFactorUpdated(PoolId indexed poolId, uint256 k, uint256 logK);
+    event OptimalFeeRateUpdated(PoolId indexed poolId, uint256 optimalFeeRate);
+    event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
 
     uint24 public constant OPTIMAL_FEE_SPREAD = 90; // 0.9 bps
     uint160 public constant REFERENCE_SQRT_PRICE_X96 = TickMath.MIN_SQRT_PRICE;
@@ -48,53 +49,71 @@ contract FeeConfigurationImplementationTest is Test {
     function test_updateDecayFactor_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.updateDecayFactor(testPoolKey, K - 1, LOG_K - 1);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey.toId(), K - 1, LOG_K - 1);
     }
 
     function test_updateDecayFactor_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit DecayFactorUpdated(testPoolKey, K - 1, LOG_K - 1);
+        emit DecayFactorUpdated(testPoolKey.toId(), K - 1, LOG_K - 1);
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateDecayFactor(testPoolKey, K - 1, LOG_K - 1);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey.toId(), K - 1, LOG_K - 1);
         (uint256 k, uint256 logK,,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(k, K - 1);
         assertEq(logK, LOG_K - 1);
     }
 
+    function test_updateDecayFactor_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey.toId(), K - 1, LOG_K - 1);
+        vm.snapshotGasLastCall("updateDecayFactor");
+    }
+
     function test_updateOptimalFeeRate_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
     }
 
     function test_updateOptimalFeeRate_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit OptimalFeeRateUpdated(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        emit OptimalFeeRateUpdated(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
+        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
         (,, uint256 optimalFeeRate,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
+    }
+
+    function test_updateOptimalFeeRate_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
+        vm.snapshotGasLastCall("updateOptimalFeeRate");
     }
 
     function test_updateReferenceSqrtPrice_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
+        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
     function test_updateReferenceSqrtPrice_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit ReferenceSqrtPriceUpdated(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
+        emit ReferenceSqrtPriceUpdated(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
+        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         (,,, uint160 referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
+    }
+
+    function test_updateReferenceSqrtPrice_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        vm.snapshotGasLastCall("updateReferenceSqrtPrice");
     }
 
     function test_resetHistoricalFeeData_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.resetHistoricalFeeData(testPoolKey);
+        feeConfigurationImplementation.resetHistoricalFeeData(testPoolKey.toId());
     }
 
     // TODO: add test later assuring resetHistoricalFeeData works as expected

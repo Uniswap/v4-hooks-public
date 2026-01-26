@@ -28,4 +28,10 @@ contract ConfigManagerTest is Test {
         configManagerImplementation.setConfigManager(address(1));
         assertEq(configManagerImplementation.configManager(), address(1));
     }
+
+    function test_setConfigManager_gas() public {
+        vm.prank(poolConfigManager);
+        configManagerImplementation.setConfigManager(address(1));
+        vm.snapshotGasLastCall("setConfigManager");
+    }
 }

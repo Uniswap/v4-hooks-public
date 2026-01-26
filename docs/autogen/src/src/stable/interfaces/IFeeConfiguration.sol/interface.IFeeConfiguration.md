@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/56d233d0b250177bdf941e4e02adb122dab011ae/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/342b588592cdc4a4eb78e436a73ad75a4c051796/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -11,13 +11,13 @@ Update the decay factor for a pool
 
 
 ```solidity
-function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external;
+function updateDecayFactor(PoolId poolId, uint256 k, uint256 logK) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the decay factor for|
+|`poolId`|`PoolId`|The ID of the pool to update the decay factor for|
 |`k`|`uint256`|The new k|
 |`logK`|`uint256`|The new logK|
 
@@ -28,13 +28,13 @@ Update the optimal fee spread for a pool
 
 
 ```solidity
-function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) external;
+function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee rate for|
+|`poolId`|`PoolId`|The ID of the pool to update the optimal fee rate for|
 |`optimalFeeRate`|`uint24`|The new optimal fee rate|
 
 
@@ -44,14 +44,14 @@ Update the reference sqrt price for a pool
 
 
 ```solidity
-function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external;
+function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the reference sqrt price for|
-|`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
+|`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
+|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
 
 
 ### resetHistoricalFeeData
@@ -60,13 +60,13 @@ Reset the historical data for a pool
 
 
 ```solidity
-function resetHistoricalFeeData(PoolKey calldata poolKey) external;
+function resetHistoricalFeeData(PoolId poolId) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
+|`poolId`|`PoolId`|The ID of the pool to reset the historical data for|
 
 
 ## Events
@@ -75,14 +75,14 @@ Event emitted when the decay factor is updated
 
 
 ```solidity
-event DecayFactorUpdated(PoolKey indexed poolKey, uint256 k, uint256 logK);
+event DecayFactorUpdated(PoolId indexed poolId, uint256 k, uint256 logK);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`poolId`|`PoolId`|The ID of the pool|
 |`k`|`uint256`|The new k|
 |`logK`|`uint256`|The new logK|
 
@@ -91,14 +91,14 @@ Event emitted when the optimal fee rate is updated
 
 
 ```solidity
-event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
+event OptimalFeeRateUpdated(PoolId indexed poolId, uint256 optimalFeeRate);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`poolId`|`PoolId`|The ID of the pool|
 |`optimalFeeRate`|`uint256`|The new optimal fee rate|
 
 ### ReferenceSqrtPriceUpdated
@@ -106,14 +106,14 @@ Event emitted when the reference sqrt price is updated
 
 
 ```solidity
-event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
+event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPrice);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`poolId`|`PoolId`|The ID of the pool|
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 ### HistoricalFeeDataReset
@@ -121,14 +121,14 @@ Event emitted when the historical fee data is reset
 
 
 ```solidity
-event HistoricalFeeDataReset(PoolKey indexed poolKey);
+event HistoricalFeeDataReset(PoolId indexed poolId);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`poolId`|`PoolId`|The ID of the pool|
 
 ## Errors
 ### InvalidDecayFactor

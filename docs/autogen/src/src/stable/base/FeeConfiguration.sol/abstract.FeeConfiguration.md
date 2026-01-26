@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/56d233d0b250177bdf941e4e02adb122dab011ae/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/342b588592cdc4a4eb78e436a73ad75a4c051796/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [ConfigManager](/src/stable/base/ConfigManager.sol/abstract.ConfigManager.md), [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -59,13 +59,13 @@ Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
-function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external onlyConfigManager;
+function updateDecayFactor(PoolId poolId, uint256 k, uint256 logK) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the decay factor for|
+|`poolId`|`PoolId`|The ID of the pool to update the decay factor for|
 |`k`|`uint256`|The new k|
 |`logK`|`uint256`|The new logK|
 
@@ -74,17 +74,17 @@ function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) ex
 
 Update the optimal fee spread for a pool
 
-Should be called in a multicall with clearHistoricalFeeData()
+Should be called in a multicall with resetHistoricalFeeData()
 
 
 ```solidity
-function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) external onlyConfigManager;
+function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the optimal fee rate for|
+|`poolId`|`PoolId`|The ID of the pool to update the optimal fee rate for|
 |`optimalFeeRate`|`uint24`|The new optimal fee rate|
 
 
@@ -92,20 +92,18 @@ function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) e
 
 Update the reference sqrt price for a pool
 
-Should be called in a multicall with clearHistoricalFeeData()
+Should be called in a multicall with resetHistoricalFeeData()
 
 
 ```solidity
-function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPriceX96)
-    external
-    onlyConfigManager;
+function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to update the reference sqrt price for|
-|`referenceSqrtPriceX96`|`uint160`||
+|`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
+|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
 
 
 ### resetHistoricalFeeData
@@ -114,13 +112,13 @@ Reset the historical data for a pool
 
 
 ```solidity
-function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager;
+function resetHistoricalFeeData(PoolId poolId) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
+|`poolId`|`PoolId`|The ID of the pool to reset the historical data for|
 
 
 ### _validateFeeConfig
