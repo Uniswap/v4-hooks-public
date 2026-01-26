@@ -104,11 +104,36 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                     ? (uint256(sqrtAmmPriceX96) * 2 ** 48) / referenceSqrtPriceX96
                     : (uint256(referenceSqrtPriceX96) * 2 ** 48) / sqrtAmmPriceX96;
                 ratio = ratio * ratio;
+                /*
+                if ammPriceToTheLeft then (as if userSellsZeroForOne = false, 'buy' deal increases prices)
+                      ratio = ammPrice/RP <= 1
+                ammPrice / (1 - closeFee) = (1 - optimalFeeSpread) * RP    (lowerBound price)
+                closeFee = 1 - ammPrice/RP / (1 - optimalFeeSpread) = 1 - ratio / (1 - optimalFeeSpread)
+
+                ammPrice / (1 - farFee) = RP / (1 - optimalFeeSpread)      (upperBound price)
+                farFee = 1 - ammPrice/RP * (1 - optimalFeeSpread) = 1 - (1 - optimalFeeSpread) * ratio
+                if !ammPriceToTheLeft then (as if userSellsZeroForOne = true, 'sell' deal decreases prices)
+                      ratio = RP / ammPrice <= 1
+                ammPrice * (1 - closeFee) = RP / (1 - optimalFeeSpread)    (upperBound price)
+                ammPrice * (1 - farFee) = (1 - optimalFeeSpread) * RP      (lowerBound price)
+                      ... still same formulas w.r.t. ratio:
+                      closeFee = 1 - ratio / (1 - optimalFeeSpread)
+                      farFee = 1 - (1 - optimalFeeSpread) * ratio
+                */
 
                 closeFee = int256(ONE) - int256((ONE * ratio * 1_000_000) / (1_000_000 - optimalFeeRate) / 2 ** 96);
                 insideOptimalSpread = (closeFee <= 0);
 
                 if (insideOptimalSpread) {
+                    /*
+                        if userSellsZeroForOne => sellPrice = (1 - optimalFeeSpread) * RP
+                        ammPrice * (1 - fee) = (1 - optimalFeeSpread) * RP
+                        fee = 1 - (1 - optimalFeeSpread) * RP / ammPrice
+
+                        if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFeeSpread)
+                        ammPrice / (1 - fee) = RP / (1 - optimalFeeSpread)
+                        fee = 1 - (1 - optimalFeeSpread) * ammPrice / RP
+                    */
                     insideOptimalSpreadFee = ammPriceToTheLeft == userSellsZeroForOne
                         ? ONE - (ONE * (1_000_000 - optimalFeeRate) * 2 ** 96) / ratio / 1_000_000
                         : ONE - (ONE * (1_000_000 - optimalFeeRate) * ratio) / 2 ** 96 / 1_000_000;
@@ -124,28 +149,42 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                     totalStableFee = insideOptimalSpreadFee;
                     flexibleFee = UNDEFINED_FLEXIBLE_FEE;
                 } else {
+                    // Outside the optimal spread, from this point on 0 < closeFee < farFee, both fees are
+                    // less than ONE, recalculate flexibleFee first
                     uint256 previousSqrtAmmPriceX96 = historicalFeeData_.previousSqrtAmmPriceX96;
                     uint256 previousFee = historicalFeeData_.previousFee;
-
+                    // adjust previousFee if needed
                     if (
                         previousFee == UNDEFINED_FLEXIBLE_FEE
                             || (ammPriceToTheLeft != (previousSqrtAmmPriceX96 < referenceSqrtPriceX96))
                     ) {
+                        // The AMM price has just left the optimal spread or it has jumped over it.
+                        // Use the far border of the optimal spread as previousFee.
                         previousFee = farFee;
                     } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
+                        // Adjust previousFee according to the price change (so that it would be w.r.t. sqrtAmmPrice,
+                        // not w.r.t. previousSqrtAmmPrice).
+                        // we want to use previous flexible fee *including* its price impact,
+                        // so we do not need to adjust previousFee if the previous swap was at flexible fee
+                        // AMM price moved further from the RP hence previous swap was at zero fee (AMM side)
                         uint256 ratio = ammPriceToTheLeft
                             ? (uint256(sqrtAmmPriceX96) * 2 ** 48) / previousSqrtAmmPriceX96
                             : (previousSqrtAmmPriceX96 * 2 ** 48) / sqrtAmmPriceX96;
                         ratio = ratio * ratio;
                         previousFee = ONE - (ratio * (ONE - previousFee)) / 2 ** 96;
                     } else if (previousFee > farFee) {
+                        // The AMM price has just left the optimal spread or it has jumped over it.
+                        // Use the far border of the optimal spread as previousFee.
                         previousFee = farFee;
                     }
 
+                    // always > 0 since farFee > closeFee
                     uint256 targetFee = farFee - uint256(closeFee) / 2;
                     if (previousFee <= targetFee) {
+                        // This case is impossible to reach via just swaps due to price impact recalculation above.
                         flexibleFee = targetFee;
                     } else {
+                        // This case is possible to reach via just swaps.
                         uint256 blocksPassed = block.number - historicalFeeData_.blockNumber;
                         uint256 factorX24 = blocksPassed <= 4
                             ? StableLibrary.fastPow(feeConfig_.k, blocksPassed)
@@ -153,7 +192,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                                         << 24) / 1e18;
                         flexibleFee = targetFee + ((factorX24 * (previousFee - targetFee)) >> 24);
                     }
-
+                    // Return the fee but in any event not greater than 99%
                     totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFee;
                 }
 
