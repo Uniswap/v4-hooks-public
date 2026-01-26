@@ -59,6 +59,12 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(decayFactor, DECAY_FACTOR - 1);
     }
 
+    function test_updateDecayFactor_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey.toId(), DECAY_FACTOR - 1);
+        vm.snapshotGasLastCall("updateDecayFactor");
+    }
+
     function test_updateOptimalFeeRate_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
@@ -74,6 +80,12 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
     }
 
+    function test_updateOptimalFeeRate_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
+        vm.snapshotGasLastCall("updateOptimalFeeRate");
+    }
+
     function test_updateReferenceSqrtPrice_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
@@ -87,6 +99,12 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         (,, uint160 referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
+    }
+
+    function test_updateReferenceSqrtPrice_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        vm.snapshotGasLastCall("updateReferenceSqrtPrice");
     }
 
     function test_resetHistoricalFeeData_revertsWithNotConfigManager() public {

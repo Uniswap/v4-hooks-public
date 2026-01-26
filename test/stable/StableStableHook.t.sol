@@ -150,6 +150,12 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(blockNumber, block.number);
     }
 
+    function test_initializePool_gas() public {
+        vm.prank(owner);
+        hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
+        vm.snapshotGasLastCall("initializePool");
+    }
+
     function test_multicall_revertsWithNotFeeController() public {
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
@@ -214,5 +220,24 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
         (,, referenceSqrtPriceX96) = hook.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
+    }
+
+    function test_multicall_gas() public {
+        vm.prank(owner);
+        hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
+
+        bytes[] memory calls = new bytes[](4);
+        calls[0] = abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey, DECAY_FACTOR - 1);
+        calls[1] = abi.encodeWithSelector(
+            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
+        );
+        calls[2] = abi.encodeWithSelector(
+            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1
+        );
+        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey);
+
+        vm.prank(configManager);
+        hook.multicall(calls);
+        vm.snapshotGasLastCall("multicall");
     }
 }
