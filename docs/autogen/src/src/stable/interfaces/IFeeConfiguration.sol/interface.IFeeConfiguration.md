@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -53,19 +53,19 @@ function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqr
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 
-### clearHistoricalFeeData
+### resetHistoricalFeeData
 
-Clear the historical data for a pool
+Reset the historical data for a pool
 
 
 ```solidity
-function clearHistoricalFeeData(PoolKey calldata poolKey) external;
+function resetHistoricalFeeData(PoolKey calldata poolKey) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to clear the historical data for|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
 
 
 ## Events
@@ -114,12 +114,12 @@ event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPr
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
-### HistoricalFeeDataCleared
-Event emitted when the historical fee data is cleared
+### HistoricalFeeDataReset
+Event emitted when the historical fee data is reset
 
 
 ```solidity
-event HistoricalFeeDataCleared(PoolKey indexed poolKey);
+event HistoricalFeeDataReset(PoolKey indexed poolKey);
 ```
 
 **Parameters**

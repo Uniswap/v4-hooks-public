@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -80,23 +80,5 @@ function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calld
     pure
     override
     returns (bytes4, BeforeSwapDelta, uint24);
-```
-
-### _getFeeConfig
-
-
-```solidity
-function _getFeeConfig(PoolKey calldata poolKey) internal view override returns (FeeConfig storage);
-```
-
-### _getHistoricalFeeData
-
-
-```solidity
-function _getHistoricalFeeData(PoolKey calldata poolKey)
-    internal
-    view
-    override
-    returns (HistoricalFeeData storage);
 ```
 

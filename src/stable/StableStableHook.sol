@@ -39,9 +39,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
-        _validateDecayFactor(feeConfiguration.decayFactor);
-        _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
-        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
+        _validateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
@@ -80,18 +78,5 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
-    }
-
-    function _getFeeConfig(PoolKey calldata poolKey) internal view override returns (FeeConfig storage) {
-        return feeConfig[poolKey.toId()];
-    }
-
-    function _getHistoricalFeeData(PoolKey calldata poolKey)
-        internal
-        view
-        override
-        returns (HistoricalFeeData storage)
-    {
-        return historicalFeeData[poolKey.toId()];
     }
 }

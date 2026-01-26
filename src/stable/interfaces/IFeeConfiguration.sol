@@ -42,9 +42,9 @@ interface IFeeConfiguration {
     /// @param referenceSqrtPrice The new reference sqrt price
     event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
 
-    /// @notice Event emitted when the historical fee data is cleared
+    /// @notice Event emitted when the historical fee data is reset
     /// @param poolKey The PoolKey of the pool
-    event HistoricalFeeDataCleared(PoolKey indexed poolKey);
+    event HistoricalFeeDataReset(PoolKey indexed poolKey);
 
     /// @notice Update the decay factor for a pool
     /// @param poolKey The PoolKey of the pool to update the decay factor for
@@ -61,7 +61,7 @@ interface IFeeConfiguration {
     /// @param referenceSqrtPrice The new reference sqrt price
     function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPrice) external;
 
-    /// @notice Clear the historical data for a pool
-    /// @param poolKey The PoolKey of the pool to clear the historical data for
-    function clearHistoricalFeeData(PoolKey calldata poolKey) external;
+    /// @notice Reset the historical data for a pool
+    /// @param poolKey The PoolKey of the pool to reset the historical data for
+    function resetHistoricalFeeData(PoolKey calldata poolKey) external;
 }

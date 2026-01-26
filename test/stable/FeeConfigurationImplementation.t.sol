@@ -87,11 +87,11 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
-    function test_clearHistoricalFeeData_revertsWithNotConfigManager() public {
+    function test_resetHistoricalFeeData_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.clearHistoricalFeeData(testPoolKey);
+        feeConfigurationImplementation.resetHistoricalFeeData(testPoolKey);
     }
 
-    // TODO: add test later assuring clearHistoricalFeeData works as expected
+    // TODO: add test later assuring resetHistoricalFeeData works as expected
 }

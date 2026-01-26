@@ -44,10 +44,19 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     }
 
     /// @inheritdoc IFeeConfiguration
-    function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager {
-        historicalFeeData[poolKey.toId()].previousFee = 1e12 + 1; // TODO: make constant
-        historicalFeeData[poolKey.toId()].blockNumber = block.number;
-        emit HistoricalFeeDataCleared(poolKey);
+    function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager {
+        _resetHistoricalFeeData(poolKey.toId());
+        emit HistoricalFeeDataReset(poolKey);
+    }
+
+    /// @notice Internal helper to initialize fee configuration and historical data
+    /// @param poolId The pool ID to initialize
+    /// @param feeConfiguration The fee configuration to set
+    function _validateFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal {
+        _validateDecayFactor(feeConfiguration.decayFactor);
+        _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
+        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
+        _resetHistoricalFeeData(poolId);
     }
 
     /// @notice Validate the decay factor
@@ -69,13 +78,10 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
         // should they be close to stable price?
     }
 
-    /// @notice Get the fee configuration for a pool
-    /// @param poolKey The PoolKey of the pool
-    /// @return The fee configuration for the pool
-    function _getFeeConfig(PoolKey calldata poolKey) internal virtual returns (FeeConfig storage);
-
-    /// @notice Get the historical fee data for a pool
-    /// @param poolKey The PoolKey of the pool
-    /// @return The historical fee data for the pool
-    function _getHistoricalFeeData(PoolKey calldata poolKey) internal virtual returns (HistoricalFeeData storage);
+    /// @notice Internal helper to reset historical fee data
+    /// @param poolId The pool ID to reset historical data for
+    function _resetHistoricalFeeData(PoolId poolId) internal {
+        historicalFeeData[poolId].previousFee = 1e12 + 1; // TODO: make constant
+        historicalFeeData[poolId].blockNumber = block.number;
+    }
 }

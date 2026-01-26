@@ -145,9 +145,9 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
         (uint40 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
             hook.historicalFeeData(testPoolKey.toId());
-        assertEq(previousFee, 0);
+        assertEq(previousFee, 1e12 + 1); // UNDEFINED_FLEXIBLE_FEE
         assertEq(previousSqrtAmmPrice, 0);
-        assertEq(blockNumber, 0);
+        assertEq(blockNumber, block.number);
     }
 
     function test_multicall_revertsWithNotFeeController() public {
@@ -168,7 +168,7 @@ contract StableStableHookTest is Test, Deployers {
         calls[2] = abi.encodeWithSelector(
             IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1
         );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.clearHistoricalFeeData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey);
 
         vm.prank(address(this)); // not the fee controller
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
@@ -201,7 +201,7 @@ contract StableStableHookTest is Test, Deployers {
         calls[2] = abi.encodeWithSelector(
             IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1
         );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.clearHistoricalFeeData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey);
 
         vm.prank(configManager);
         hook.multicall(calls);
