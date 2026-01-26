@@ -1,5 +1,5 @@
 
 
 # Contents
+- [ConfigManagerImplementation](ConfigManagerImplementation.sol/contract.ConfigManagerImplementation.md)
 - [FeeConfigurationImplementation](FeeConfigurationImplementation.sol/contract.FeeConfigurationImplementation.md)
-- [FeeControllerImplementation](FeeControllerImplementation.sol/contract.FeeControllerImplementation.md)

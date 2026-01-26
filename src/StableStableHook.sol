@@ -2,17 +2,14 @@
 pragma solidity 0.8.26;
 
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
-import {FeeController} from "./FeeController.sol";
 import {FeeConfiguration} from "./FeeConfiguration.sol";
 import {BaseHook} from "./base/BaseHook.sol";
-import {FeeConfig} from "./types/FeeConfig.sol";
-import {HistoricalFeeData} from "./types/HistoricalFeeData.sol";
+import {FeeConfig, HistoricalFeeData} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -24,8 +21,8 @@ import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, IStableStableHook {
     using LPFeeLibrary for uint24;
 
-    constructor(IPoolManager _manager, address _owner, address _feeController)
-        FeeConfiguration(_feeController)
+    constructor(IPoolManager _manager, address _owner, address _configManager)
+        FeeConfiguration(_configManager)
         Ownable(_owner)
         BaseHook(_manager)
     {}
@@ -70,7 +67,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         });
     }
 
-    function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4) {
+    function _beforeInitialize(address sender, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         // Since hooks cannot call themselves, this function is only called when another address tries to initialize a pool with this contract as the hook
         // Therefore this function always reverts to ensure only this contract can initialize new pools
         revert InvalidInitializer(sender);

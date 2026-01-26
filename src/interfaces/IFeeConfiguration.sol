@@ -3,6 +3,18 @@ pragma solidity ^0.8.0;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
+struct FeeConfig {
+    uint256 decayFactor;
+    uint24 optimalFeeRate;
+    uint160 referenceSqrtPriceX96;
+}
+
+struct HistoricalFeeData {
+    uint40 previousFee;
+    uint160 previousSqrtAmmPriceX96;
+    uint256 blockNumber;
+}
+
 /// @notice Interface for the FeeConfiguration
 interface IFeeConfiguration {
     /// @notice Error thrown when decay factor is invalid

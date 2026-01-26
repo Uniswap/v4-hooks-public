@@ -10,8 +10,9 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IFeeController} from "../src/interfaces/IFeeController.sol";
+import {IConfigManager} from "../src/interfaces/IConfigManager.sol";
 import {FeeConfigurationImplementation} from "../src/test/FeeConfigurationImplementation.sol";
+import {FeeConfig, HistoricalFeeData} from "../src/interfaces/IFeeConfiguration.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
@@ -41,9 +42,9 @@ contract FeeConfigurationImplementationTest is Test {
         });
     }
 
-    function test_updateDecayFactor_revertsWithNotFeeController() public {
+    function test_updateDecayFactor_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IFeeController.NotFeeController.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.updateDecayFactor(testPoolKey, DECAY_FACTOR - 1);
     }
 
@@ -56,9 +57,9 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(decayFactor, DECAY_FACTOR - 1);
     }
 
-    function test_updateOptimalFeeRate_revertsWithNotFeeController() public {
+    function test_updateOptimalFeeRate_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IFeeController.NotFeeController.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
     }
 
@@ -71,9 +72,9 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
     }
 
-    function test_updateReferenceSqrtPrice_revertsWithNotFeeController() public {
+    function test_updateReferenceSqrtPrice_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IFeeController.NotFeeController.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
@@ -86,9 +87,9 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
-    function test_clearHistoricalFeeData_revertsWithNotFeeController() public {
+    function test_clearHistoricalFeeData_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IFeeController.NotFeeController.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.clearHistoricalFeeData(testPoolKey);
     }
 

@@ -1,5 +1,5 @@
 # FeeConfigurationImplementation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/cc39bad2f9286aefd0824c4bc93d241fe8657275/src/test/FeeConfigurationImplementation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ec3cfb721a3661c7406618f534d9ae8887a128c1/src/test/FeeConfigurationImplementation.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/FeeConfiguration.sol/abstract.FeeConfiguration.md)
@@ -15,7 +15,7 @@ Implementation of the FeeConfiguration contract
 
 
 ```solidity
-constructor(address _feeController) FeeConfiguration(_feeController);
+constructor(address _configManager) FeeConfiguration(_configManager);
 ```
 
 ### _getFeeConfig

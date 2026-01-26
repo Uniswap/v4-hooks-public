@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {FeeConfig} from "../types/FeeConfig.sol";
+import {FeeConfig} from "../interfaces/IFeeConfiguration.sol";
 
 /// @notice Interface for the StableStableHook
 interface IStableStableHook {

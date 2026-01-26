@@ -1,8 +1,8 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/cc39bad2f9286aefd0824c4bc93d241fe8657275/src/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ec3cfb721a3661c7406618f534d9ae8887a128c1/src/FeeConfiguration.sol)
 
 **Inherits:**
-[FeeController](/src/FeeController.sol/abstract.FeeController.md), [IFeeConfiguration](/src/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
+[ConfigManager](/src/ConfigManager.sol/abstract.ConfigManager.md), [IFeeConfiguration](/src/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
 
 **Title:**
 FeeConfiguration
@@ -34,7 +34,7 @@ mapping(PoolId => HistoricalFeeData) public historicalFeeData
 
 
 ```solidity
-constructor(address _feeController) FeeController(_feeController);
+constructor(address _configManager) ConfigManager(_configManager);
 ```
 
 ### updateDecayFactor
@@ -45,7 +45,7 @@ Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
-function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyFeeController;
+function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyConfigManager;
 ```
 **Parameters**
 
@@ -63,7 +63,7 @@ Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
-function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) external onlyFeeController;
+function updateOptimalFeeRate(PoolKey calldata poolKey, uint24 optimalFeeRate) external onlyConfigManager;
 ```
 **Parameters**
 
@@ -83,7 +83,7 @@ Should be called in a multicall with clearHistoricalFeeData()
 ```solidity
 function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqrtPriceX96)
     external
-    onlyFeeController;
+    onlyConfigManager;
 ```
 **Parameters**
 
@@ -99,7 +99,7 @@ Clear the historical data for a pool
 
 
 ```solidity
-function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyFeeController;
+function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager;
 ```
 **Parameters**
 
@@ -110,36 +110,88 @@ function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyFeeContro
 
 ### _validateDecayFactor
 
+Validate the decay factor
+
 
 ```solidity
 function _validateDecayFactor(uint256 _decayFactor) internal pure;
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_decayFactor`|`uint256`|The decay factor to validate|
+
 
 ### _validateOptimalFeeRate
+
+Validate the optimal fee rate
 
 
 ```solidity
 function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_optimalFeeRate`|`uint256`|The optimal fee rate to validate|
+
 
 ### _validateReferenceSqrtPrice
+
+Validate the reference sqrt price
 
 
 ```solidity
 function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pure;
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
+
 
 ### _getFeeConfig
+
+Get the fee configuration for a pool
 
 
 ```solidity
 function _getFeeConfig(PoolKey calldata poolKey) internal virtual returns (FeeConfig storage);
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`FeeConfig`|The fee configuration for the pool|
+
 
 ### _getHistoricalFeeData
+
+Get the historical fee data for a pool
 
 
 ```solidity
 function _getHistoricalFeeData(PoolKey calldata poolKey) internal virtual returns (HistoricalFeeData storage);
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`HistoricalFeeData`|The historical fee data for the pool|
+
 

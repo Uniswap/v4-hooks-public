@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/cc39bad2f9286aefd0824c4bc93d241fe8657275/src/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ec3cfb721a3661c7406618f534d9ae8887a128c1/src/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -15,8 +15,8 @@ Dynamic fee hook for stable/stable pools
 
 
 ```solidity
-constructor(IPoolManager _manager, address _owner, address _feeController)
-    FeeConfiguration(_feeController)
+constructor(IPoolManager _manager, address _owner, address _configManager)
+    FeeConfiguration(_configManager)
     Ownable(_owner)
     BaseHook(_manager);
 ```
@@ -68,7 +68,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 
 ```solidity
-function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4);
+function _beforeInitialize(address sender, PoolKey calldata, uint160) internal pure override returns (bytes4);
 ```
 
 ### _beforeSwap

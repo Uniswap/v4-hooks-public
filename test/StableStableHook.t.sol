@@ -15,9 +15,8 @@ import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IStableStableHook} from "../src/interfaces/IStableStableHook.sol";
-import {FeeConfig} from "../src/types/FeeConfig.sol";
-import {IFeeController} from "../src/interfaces/IFeeController.sol";
-import {IFeeConfiguration} from "../src/interfaces/IFeeConfiguration.sol";
+import {FeeConfig, IFeeConfiguration} from "../src/interfaces/IFeeConfiguration.sol";
+import {IConfigManager} from "../src/interfaces/IConfigManager.sol";
 
 contract StableStableHookTest is Test, Deployers {
     using StateLibrary for IPoolManager;
@@ -31,7 +30,7 @@ contract StableStableHookTest is Test, Deployers {
     StableStableHook public hook;
 
     address owner = makeAddr("owner");
-    address poolFeeController = makeAddr("poolFeeController");
+    address configManager = makeAddr("configManager");
 
     FeeConfig public feeConfig = FeeConfig({
         decayFactor: DECAY_FACTOR,
@@ -52,7 +51,7 @@ contract StableStableHookTest is Test, Deployers {
             )
         );
 
-        deployCodeTo("StableStableHook", abi.encode(manager, owner, poolFeeController), address(hook));
+        deployCodeTo("StableStableHook", abi.encode(manager, owner, configManager), address(hook));
 
         testPoolKey = PoolKey({
             currency0: Currency.wrap(address(0)),
@@ -144,7 +143,7 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(decayFactor, DECAY_FACTOR);
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-        (uint24 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
+        (uint40 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
             hook.historicalFeeData(testPoolKey.toId());
         assertEq(previousFee, 0);
         assertEq(previousSqrtAmmPrice, 0);
@@ -172,7 +171,7 @@ contract StableStableHookTest is Test, Deployers {
         calls[3] = abi.encodeWithSelector(IFeeConfiguration.clearHistoricalFeeData.selector, testPoolKey);
 
         vm.prank(address(this)); // not the fee controller
-        vm.expectRevert(abi.encodeWithSelector(IFeeController.NotFeeController.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
         hook.multicall(calls);
 
         // check that the fee configuration is not updated
@@ -204,7 +203,7 @@ contract StableStableHookTest is Test, Deployers {
         );
         calls[3] = abi.encodeWithSelector(IFeeConfiguration.clearHistoricalFeeData.selector, testPoolKey);
 
-        vm.prank(poolFeeController);
+        vm.prank(configManager);
         hook.multicall(calls);
 
         (decayFactor,,) = hook.feeConfig(testPoolKey.toId());
