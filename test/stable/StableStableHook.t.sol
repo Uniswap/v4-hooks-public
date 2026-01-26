@@ -161,14 +161,15 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
 
         bytes[] memory calls = new bytes[](4);
-        calls[0] = abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey, DECAY_FACTOR - 1);
+        calls[0] =
+            abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey.toId(), DECAY_FACTOR - 1);
         calls[1] = abi.encodeWithSelector(
-            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
+            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1
         );
         calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1
+            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
         );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
 
         vm.prank(address(this)); // not the fee controller
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
@@ -194,14 +195,15 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
 
         bytes[] memory calls = new bytes[](4);
-        calls[0] = abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey, DECAY_FACTOR - 1);
+        calls[0] =
+            abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey.toId(), DECAY_FACTOR - 1);
         calls[1] = abi.encodeWithSelector(
-            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey, OPTIMAL_FEE_SPREAD - 1
+            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1
         );
         calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1
+            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
         );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey);
+        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
 
         vm.prank(configManager);
         hook.multicall(calls);
