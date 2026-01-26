@@ -44,7 +44,7 @@ interface IFeeConfiguration {
     /// @param referenceSqrtPrice The new reference sqrt price
     event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPrice);
 
-    /// @notice Event emitted when the historical fee data is cleared
+    /// @notice Event emitted when the historical fee data is reset
     /// @param poolKey The PoolKey of the pool
     event HistoricalFeeDataReset(PoolKey indexed poolKey);
 

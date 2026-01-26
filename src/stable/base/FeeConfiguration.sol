@@ -56,20 +56,11 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     /// @notice Internal helper to initialize fee configuration and historical data
     /// @param poolId The pool ID to initialize
     /// @param feeConfiguration The fee configuration to set
-    function _initializeFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal {
+    function _validateFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal {
         _validateDecayFactor(feeConfiguration.k, feeConfiguration.logK);
         _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
         _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
-
-        feeConfig[poolId] = feeConfiguration;
         _resetHistoricalFeeData(poolId);
-    }
-
-    /// @notice Internal helper to reset historical fee data to default state
-    /// @param poolId The pool ID to reset historical data for
-    function _resetHistoricalFeeData(PoolId poolId) internal {
-        historicalFeeData[poolId].previousFee = UNDEFINED_FLEXIBLE_FEE;
-        historicalFeeData[poolId].blockNumber = block.number;
     }
 
     /// @notice Validate the decay factor
@@ -90,5 +81,12 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pure {
         // TODO: set bounds on reference sqrt price
         // should they be close to stable price?
+    }
+
+    /// @notice Internal helper to reset historical fee data
+    /// @param poolId The pool ID to reset historical data for
+    function _resetHistoricalFeeData(PoolId poolId) internal {
+        historicalFeeData[poolId].previousFee = UNDEFINED_FLEXIBLE_FEE;
+        historicalFeeData[poolId].blockNumber = block.number;
     }
 }

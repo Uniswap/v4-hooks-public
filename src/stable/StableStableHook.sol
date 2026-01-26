@@ -45,10 +45,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
-
+        _validateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
-        _initializeFeeConfig(poolKey.toId(), feeConfiguration);
-
+        feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
     }
 

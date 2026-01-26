@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/56d233d0b250177bdf941e4e02adb122dab011ae/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -117,7 +117,7 @@ event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPr
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 ### HistoricalFeeDataReset
-Event emitted when the historical fee data is cleared
+Event emitted when the historical fee data is reset
 
 
 ```solidity

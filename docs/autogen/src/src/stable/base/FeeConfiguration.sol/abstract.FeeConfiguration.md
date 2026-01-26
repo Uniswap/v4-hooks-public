@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/56d233d0b250177bdf941e4e02adb122dab011ae/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [ConfigManager](/src/stable/base/ConfigManager.sol/abstract.ConfigManager.md), [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -123,13 +123,13 @@ function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigMan
 |`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
 
 
-### _initializeFeeConfig
+### _validateFeeConfig
 
 Internal helper to initialize fee configuration and historical data
 
 
 ```solidity
-function _initializeFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal;
+function _validateFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal;
 ```
 **Parameters**
 
@@ -137,21 +137,6 @@ function _initializeFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration
 |----|----|-----------|
 |`poolId`|`PoolId`|The pool ID to initialize|
 |`feeConfiguration`|`FeeConfig`|The fee configuration to set|
-
-
-### _resetHistoricalFeeData
-
-Internal helper to reset historical fee data to default state
-
-
-```solidity
-function _resetHistoricalFeeData(PoolId poolId) internal;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The pool ID to reset historical data for|
 
 
 ### _validateDecayFactor
@@ -198,5 +183,20 @@ function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pu
 |Name|Type|Description|
 |----|----|-----------|
 |`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
+
+
+### _resetHistoricalFeeData
+
+Internal helper to reset historical fee data
+
+
+```solidity
+function _resetHistoricalFeeData(PoolId poolId) internal;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolId`|`PoolId`|The pool ID to reset historical data for|
 
 
