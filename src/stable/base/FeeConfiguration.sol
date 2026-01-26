@@ -9,6 +9,9 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
 abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
+    uint256 internal constant ONE = 1e12;
+    uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
+
     /// @notice The fee configuration for each pool
     mapping(PoolId => FeeConfig) public feeConfig;
     /// @notice The historical data for each pool
@@ -18,10 +21,11 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
 
     /// @inheritdoc IFeeConfiguration
     /// @dev Should be called in a multicall with clearHistoricalFeeData()
-    function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyConfigManager {
-        _validateDecayFactor(decayFactor);
-        feeConfig[poolKey.toId()].decayFactor = decayFactor;
-        emit DecayFactorUpdated(poolKey, decayFactor);
+    function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external onlyConfigManager {
+        _validateDecayFactor(k, logK);
+        feeConfig[poolKey.toId()].k = k;
+        feeConfig[poolKey.toId()].logK = logK;
+        emit DecayFactorUpdated(poolKey, k, logK);
     }
 
     /// @inheritdoc IFeeConfiguration
@@ -44,15 +48,34 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     }
 
     /// @inheritdoc IFeeConfiguration
-    function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager {
-        historicalFeeData[poolKey.toId()].previousFee = 1e12 + 1; // TODO: make constant
-        historicalFeeData[poolKey.toId()].blockNumber = block.number;
-        emit HistoricalFeeDataCleared(poolKey);
+    function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager {
+        _resetHistoricalFeeData(poolKey.toId());
+        emit HistoricalFeeDataReset(poolKey);
+    }
+
+    /// @notice Internal helper to initialize fee configuration and historical data
+    /// @param poolId The pool ID to initialize
+    /// @param feeConfiguration The fee configuration to set
+    function _initializeFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal {
+        _validateDecayFactor(feeConfiguration.k, feeConfiguration.logK);
+        _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
+        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
+
+        feeConfig[poolId] = feeConfiguration;
+        _resetHistoricalFeeData(poolId);
+    }
+
+    /// @notice Internal helper to reset historical fee data to default state
+    /// @param poolId The pool ID to reset historical data for
+    function _resetHistoricalFeeData(PoolId poolId) internal {
+        historicalFeeData[poolId].previousFee = UNDEFINED_FLEXIBLE_FEE;
+        historicalFeeData[poolId].blockNumber = block.number;
     }
 
     /// @notice Validate the decay factor
-    /// @param _decayFactor The decay factor to validate
-    function _validateDecayFactor(uint256 _decayFactor) internal pure {
+    /// @param _k The k to validate
+    /// @param _logK The logK to validate
+    function _validateDecayFactor(uint256 _k, uint256 _logK) internal pure {
         // TODO: set bounds on decay factor
     }
 
@@ -68,14 +91,4 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
         // TODO: set bounds on reference sqrt price
         // should they be close to stable price?
     }
-
-    /// @notice Get the fee configuration for a pool
-    /// @param poolKey The PoolKey of the pool
-    /// @return The fee configuration for the pool
-    function _getFeeConfig(PoolKey calldata poolKey) internal virtual returns (FeeConfig storage);
-
-    /// @notice Get the historical fee data for a pool
-    /// @param poolKey The PoolKey of the pool
-    /// @return The historical fee data for the pool
-    function _getHistoricalFeeData(PoolKey calldata poolKey) internal virtual returns (HistoricalFeeData storage);
 }

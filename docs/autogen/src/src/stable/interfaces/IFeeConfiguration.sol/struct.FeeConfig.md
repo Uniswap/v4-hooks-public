@@ -1,10 +1,11 @@
 # FeeConfig
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/interfaces/IFeeConfiguration.sol)
 
 
 ```solidity
 struct FeeConfig {
-uint256 decayFactor;
+uint256 k;
+uint256 logK;
 uint24 optimalFeeRate;
 uint160 referenceSqrtPriceX96;
 }

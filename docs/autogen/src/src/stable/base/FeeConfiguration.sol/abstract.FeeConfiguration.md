@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [ConfigManager](/src/stable/base/ConfigManager.sol/abstract.ConfigManager.md), [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -11,6 +11,20 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### ONE
+
+```solidity
+uint256 internal constant ONE = 1e12
+```
+
+
+### UNDEFINED_FLEXIBLE_FEE
+
+```solidity
+uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
+```
+
+
 ### feeConfig
 The fee configuration for each pool
 
@@ -45,14 +59,15 @@ Should be called in a multicall with clearHistoricalFeeData()
 
 
 ```solidity
-function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external onlyConfigManager;
+function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to update the decay factor for|
-|`decayFactor`|`uint256`|The new decay factor|
+|`k`|`uint256`|The new k|
+|`logK`|`uint256`|The new logK|
 
 
 ### updateOptimalFeeRate
@@ -93,19 +108,50 @@ function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqr
 |`referenceSqrtPriceX96`|`uint160`||
 
 
-### clearHistoricalFeeData
+### resetHistoricalFeeData
 
-Clear the historical data for a pool
+Reset the historical data for a pool
 
 
 ```solidity
-function clearHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager;
+function resetHistoricalFeeData(PoolKey calldata poolKey) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to clear the historical data for|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
+
+
+### _initializeFeeConfig
+
+Internal helper to initialize fee configuration and historical data
+
+
+```solidity
+function _initializeFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolId`|`PoolId`|The pool ID to initialize|
+|`feeConfiguration`|`FeeConfig`|The fee configuration to set|
+
+
+### _resetHistoricalFeeData
+
+Internal helper to reset historical fee data to default state
+
+
+```solidity
+function _resetHistoricalFeeData(PoolId poolId) internal;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolId`|`PoolId`|The pool ID to reset historical data for|
 
 
 ### _validateDecayFactor
@@ -114,13 +160,14 @@ Validate the decay factor
 
 
 ```solidity
-function _validateDecayFactor(uint256 _decayFactor) internal pure;
+function _validateDecayFactor(uint256 _k, uint256 _logK) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_decayFactor`|`uint256`|The decay factor to validate|
+|`_k`|`uint256`|The k to validate|
+|`_logK`|`uint256`|The logK to validate|
 
 
 ### _validateOptimalFeeRate
@@ -151,47 +198,5 @@ function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pu
 |Name|Type|Description|
 |----|----|-----------|
 |`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
-
-
-### _getFeeConfig
-
-Get the fee configuration for a pool
-
-
-```solidity
-function _getFeeConfig(PoolKey calldata poolKey) internal virtual returns (FeeConfig storage);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`FeeConfig`|The fee configuration for the pool|
-
-
-### _getHistoricalFeeData
-
-Get the historical fee data for a pool
-
-
-```solidity
-function _getHistoricalFeeData(PoolKey calldata poolKey) internal virtual returns (HistoricalFeeData storage);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`HistoricalFeeData`|The historical fee data for the pool|
 
 

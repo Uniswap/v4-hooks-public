@@ -13,17 +13,20 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IConfigManager} from "../../src/stable/interfaces/IConfigManager.sol";
 import {FeeConfigurationImplementation} from "../../src/stable/test/FeeConfigurationImplementation.sol";
 import {FeeConfig, HistoricalFeeData} from "../../src/stable/interfaces/IFeeConfiguration.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
 
-    event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
+    event DecayFactorUpdated(PoolKey indexed poolKey, uint256 k, uint256 logK);
     event OptimalFeeRateUpdated(PoolKey indexed poolKey, uint256 optimalFeeRate);
     event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPriceX96);
 
-    uint256 public constant DECAY_FACTOR = 9140;
     uint24 public constant OPTIMAL_FEE_SPREAD = 90; // 0.9 bps
     uint160 public constant REFERENCE_SQRT_PRICE_X96 = TickMath.MIN_SQRT_PRICE;
+    uint256 public constant LOG_K = 9140;
+    uint256 public constant K = 16_609_443;
 
     FeeConfigurationImplementation public feeConfigurationImplementation;
     PoolKey public testPoolKey;
@@ -45,16 +48,17 @@ contract FeeConfigurationImplementationTest is Test {
     function test_updateDecayFactor_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.updateDecayFactor(testPoolKey, DECAY_FACTOR - 1);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey, K - 1, LOG_K - 1);
     }
 
     function test_updateDecayFactor_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit DecayFactorUpdated(testPoolKey, DECAY_FACTOR - 1);
+        emit DecayFactorUpdated(testPoolKey, K - 1, LOG_K - 1);
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateDecayFactor(testPoolKey, DECAY_FACTOR - 1);
-        (uint256 decayFactor,,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
-        assertEq(decayFactor, DECAY_FACTOR - 1);
+        feeConfigurationImplementation.updateDecayFactor(testPoolKey, K - 1, LOG_K - 1);
+        (uint256 k, uint256 logK,,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        assertEq(k, K - 1);
+        assertEq(logK, LOG_K - 1);
     }
 
     function test_updateOptimalFeeRate_revertsWithNotConfigManager() public {
@@ -68,7 +72,7 @@ contract FeeConfigurationImplementationTest is Test {
         emit OptimalFeeRateUpdated(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey, OPTIMAL_FEE_SPREAD - 1);
-        (, uint256 optimalFeeRate,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        (,, uint256 optimalFeeRate,) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(optimalFeeRate, OPTIMAL_FEE_SPREAD - 1);
     }
 
@@ -83,15 +87,15 @@ contract FeeConfigurationImplementationTest is Test {
         emit ReferenceSqrtPriceUpdated(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey, REFERENCE_SQRT_PRICE_X96 - 1);
-        (,, uint160 referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        (,,, uint160 referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
-    function test_clearHistoricalFeeData_revertsWithNotConfigManager() public {
+    function test_resetHistoricalFeeData_revertsWithNotConfigManager() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.clearHistoricalFeeData(testPoolKey);
+        feeConfigurationImplementation.resetHistoricalFeeData(testPoolKey);
     }
 
-    // TODO: add test later assuring clearHistoricalFeeData works as expected
+    // TODO: add test later assuring resetHistoricalFeeData works as expected
 }

@@ -17,6 +17,8 @@
       - [HistoricalFeeData](src/stable/interfaces/IFeeConfiguration.sol/struct.HistoricalFeeData.md)
       - [IFeeConfiguration](src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
       - [IStableStableHook](src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
+    - [❱ libraries](src/stable/libraries/README.md)
+      - [StableLibrary](src/stable/libraries/StableLibrary.sol/library.StableLibrary.md)
     - [❱ test](src/stable/test/README.md)
       - [ConfigManagerImplementation](src/stable/test/ConfigManagerImplementation.sol/contract.ConfigManagerImplementation.md)
       - [FeeConfigurationImplementation](src/stable/test/FeeConfigurationImplementation.sol/contract.FeeConfigurationImplementation.md)

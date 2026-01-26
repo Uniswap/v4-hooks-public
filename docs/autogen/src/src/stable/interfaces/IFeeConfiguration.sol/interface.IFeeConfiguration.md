@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/00674b730d2e683e2e0113e347bb7dc3b38fc03b/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -11,14 +11,15 @@ Update the decay factor for a pool
 
 
 ```solidity
-function updateDecayFactor(PoolKey calldata poolKey, uint256 decayFactor) external;
+function updateDecayFactor(PoolKey calldata poolKey, uint256 k, uint256 logK) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to update the decay factor for|
-|`decayFactor`|`uint256`|The new decay factor|
+|`k`|`uint256`|The new k|
+|`logK`|`uint256`|The new logK|
 
 
 ### updateOptimalFeeRate
@@ -53,19 +54,19 @@ function updateReferenceSqrtPrice(PoolKey calldata poolKey, uint160 referenceSqr
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
 
-### clearHistoricalFeeData
+### resetHistoricalFeeData
 
-Clear the historical data for a pool
+Reset the historical data for a pool
 
 
 ```solidity
-function clearHistoricalFeeData(PoolKey calldata poolKey) external;
+function resetHistoricalFeeData(PoolKey calldata poolKey) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolKey`|`PoolKey`|The PoolKey of the pool to clear the historical data for|
+|`poolKey`|`PoolKey`|The PoolKey of the pool to reset the historical data for|
 
 
 ## Events
@@ -74,7 +75,7 @@ Event emitted when the decay factor is updated
 
 
 ```solidity
-event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
+event DecayFactorUpdated(PoolKey indexed poolKey, uint256 k, uint256 logK);
 ```
 
 **Parameters**
@@ -82,7 +83,8 @@ event DecayFactorUpdated(PoolKey indexed poolKey, uint256 decayFactor);
 |Name|Type|Description|
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
-|`decayFactor`|`uint256`|The new decay factor|
+|`k`|`uint256`|The new k|
+|`logK`|`uint256`|The new logK|
 
 ### OptimalFeeRateUpdated
 Event emitted when the optimal fee rate is updated
@@ -114,12 +116,12 @@ event ReferenceSqrtPriceUpdated(PoolKey indexed poolKey, uint160 referenceSqrtPr
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
 |`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
 
-### HistoricalFeeDataCleared
+### HistoricalFeeDataReset
 Event emitted when the historical fee data is cleared
 
 
 ```solidity
-event HistoricalFeeDataCleared(PoolKey indexed poolKey);
+event HistoricalFeeDataReset(PoolKey indexed poolKey);
 ```
 
 **Parameters**
