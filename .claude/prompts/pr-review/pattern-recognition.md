@@ -6,7 +6,7 @@
 
 ```ts
 async function handleUserAction(userId, action) {
-  if (!userId) throw new Error('Invalid user');
+  if (!userId) throw new Error("Invalid user");
   const user = await db.getUser(userId);
   const result = processAction(user, action);
   await db.save(result);
@@ -21,7 +21,7 @@ async function handleUserAction(userId, action) {
 **Hardcoded dependencies:**
 
 ```javascript
-import { stripeClient } from './stripe';
+import { stripeClient } from "./stripe";
 async function chargeCard(amount) {
   return stripeClient.charge(amount);
 }
@@ -31,7 +31,7 @@ async function chargeCard(amount) {
 
 "Accepting the payment client as a parameter makes this testable and swappable:
 
-```javascript
+````javascript
 async function chargeCard(amount, paymentClient) {
   return paymentClient.charge(amount);
 }
@@ -45,3 +45,4 @@ When you see good code, acknowledge it briefly:
 - Pure functions that are easy to test
 - Appropriate error handling
 - Clear naming that documents intent
+````
