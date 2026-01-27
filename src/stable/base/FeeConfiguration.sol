@@ -11,7 +11,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
 
-    /// @notice The fee configuration for each pool
+    /// @notice The fee config for each pool
     mapping(PoolId => FeeConfig) public feeConfig;
     /// @notice The fee state for each pool
     mapping(PoolId => FeeState) public feeState;
@@ -40,9 +40,9 @@ abstract contract FeeConfiguration is IFeeConfiguration {
         emit FeeConfigUpdated(poolId_, feeConfig_);
     }
 
-    /// @notice Internal helper to initialize fee configuration and fee state
+    /// @notice Internal helper to initialize fee config and fee state
     /// @param _poolId The pool ID to initialize
-    /// @param _feeConfig The fee configuration to set
+    /// @param _feeConfig The fee config to set
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
         _validateOptimalFeeRate(_feeConfig.optimalFeeRate);

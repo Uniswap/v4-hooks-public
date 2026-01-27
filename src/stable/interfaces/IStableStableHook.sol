@@ -21,13 +21,13 @@ interface IStableStableHook {
     /// @notice Event emitted when a pool is initialized
     /// @param poolKey The PoolKey of the pool
     /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
-    /// @param feeConfig The fee configuration for the pool
+    /// @param feeConfig The fee config for the pool
     event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
 
     /// @notice Initialize a Uniswap v4 pool
     /// @param poolKey The PoolKey of the pool to initialize
     /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
-    /// @param feeConfig The fee configuration for the pool
+    /// @param feeConfig The fee config for the pool
     /// @return tick The current tick of the pool
     function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfig)
         external

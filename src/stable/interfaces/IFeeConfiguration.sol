@@ -41,17 +41,17 @@ interface IFeeConfiguration {
     /// @param configManager The new config manager
     event ConfigManagerUpdated(address indexed configManager);
 
-    /// @notice Event emitted when the fee configuration is updated
+    /// @notice Event emitted when the fee config is updated
     /// @param poolId The ID of the pool
-    /// @param feeConfig The new fee configuration
+    /// @param feeConfig The new fee config
     event FeeConfigUpdated(PoolId indexed poolId, FeeConfig feeConfig);
 
     /// @notice Set the config manager
     /// @param configManager The address of the new config manager
     function setConfigManager(address configManager) external;
 
-    /// @notice Update the fee configuration for a pool
+    /// @notice Update the fee config for a pool
     /// @param poolId The ID of the pool
-    /// @param feeConfig The new fee configuration
+    /// @param feeConfig The new fee config
     function updateFeeConfig(PoolId poolId, FeeConfig calldata feeConfig) external;
 }

@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/13bbbb712d89d818d2905b1663e6d1141d8c4f20/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/fd6c246f56c71ed20e67ce06ce552b22eb9e0620/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -22,7 +22,7 @@ function setConfigManager(address configManager) external;
 
 ### updateFeeConfig
 
-Update the fee configuration for a pool
+Update the fee config for a pool
 
 
 ```solidity
@@ -33,7 +33,7 @@ function updateFeeConfig(PoolId poolId, FeeConfig calldata feeConfig) external;
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool|
-|`feeConfig`|`FeeConfig`|The new fee configuration|
+|`feeConfig`|`FeeConfig`|The new fee config|
 
 
 ## Events
@@ -52,7 +52,7 @@ event ConfigManagerUpdated(address indexed configManager);
 |`configManager`|`address`|The new config manager|
 
 ### FeeConfigUpdated
-Event emitted when the fee configuration is updated
+Event emitted when the fee config is updated
 
 
 ```solidity
@@ -64,7 +64,7 @@ event FeeConfigUpdated(PoolId indexed poolId, FeeConfig feeConfig);
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool|
-|`feeConfig`|`FeeConfig`|The new fee configuration|
+|`feeConfig`|`FeeConfig`|The new fee config|
 
 ## Errors
 ### NotConfigManager

@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/13bbbb712d89d818d2905b1663e6d1141d8c4f20/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/fd6c246f56c71ed20e67ce06ce552b22eb9e0620/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -23,7 +23,7 @@ address public configManager
 
 
 ### feeConfig
-The fee configuration for each pool
+The fee config for each pool
 
 
 ```solidity
@@ -76,7 +76,7 @@ function setConfigManager(address configManager_) external onlyConfigManager;
 
 ### updateFeeConfig
 
-Update the fee configuration for a pool
+Update the fee config for a pool
 
 
 ```solidity
@@ -92,7 +92,7 @@ function updateFeeConfig(PoolId poolId_, FeeConfig calldata feeConfig_) external
 
 ### _updateFeeConfig
 
-Internal helper to initialize fee configuration and fee state
+Internal helper to initialize fee config and fee state
 
 
 ```solidity
@@ -103,7 +103,7 @@ function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) interna
 |Name|Type|Description|
 |----|----|-----------|
 |`_poolId`|`PoolId`|The pool ID to initialize|
-|`_feeConfig`|`FeeConfig`|The fee configuration to set|
+|`_feeConfig`|`FeeConfig`|The fee config to set|
 
 
 ### _validateKAndLogK
