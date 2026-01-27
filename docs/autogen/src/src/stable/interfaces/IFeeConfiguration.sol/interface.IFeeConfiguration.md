@@ -1,10 +1,25 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/1b35eeec00849d703d317ca530bc80431c6bf9c0/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/c30efe567d08994ae07b3496ff1329cfd23f4065/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
 
 ## Functions
+### setConfigManager
+
+Set the config manager
+
+
+```solidity
+function setConfigManager(address configManager) external;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`configManager`|`address`|The address of the new config manager|
+
+
 ### updateDecayFactor
 
 Update the decay factor for a pool
@@ -37,20 +52,20 @@ function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external;
 |`optimalFeeRate`|`uint24`|The new optimal fee rate|
 
 
-### updateReferenceSqrtPrice
+### updateReferenceSqrtPriceX96
 
 Update the reference sqrt price for a pool
 
 
 ```solidity
-function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPrice) external;
+function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
-|`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
+|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
 
 
 ### resetHistoricalFeeData
@@ -69,6 +84,20 @@ function resetHistoricalFeeData(PoolId poolId) external;
 
 
 ## Events
+### ConfigManagerUpdated
+Event emitted when the config manager is updated
+
+
+```solidity
+event ConfigManagerUpdated(address indexed configManager);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`configManager`|`address`|The new config manager|
+
 ### DecayFactorUpdated
 Event emitted when the decay factor is updated
 
@@ -99,12 +128,12 @@ event OptimalFeeRateUpdated(PoolId indexed poolId, uint256 optimalFeeRate);
 |`poolId`|`PoolId`|The ID of the pool|
 |`optimalFeeRate`|`uint256`|The new optimal fee rate|
 
-### ReferenceSqrtPriceUpdated
+### ReferenceSqrtPriceX96Updated
 Event emitted when the reference sqrt price is updated
 
 
 ```solidity
-event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPrice);
+event ReferenceSqrtPriceX96Updated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
 ```
 
 **Parameters**
@@ -112,7 +141,7 @@ event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPric
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool|
-|`referenceSqrtPrice`|`uint160`|The new reference sqrt price|
+|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
 
 ### HistoricalFeeDataReset
 Event emitted when the historical fee data is reset
@@ -129,6 +158,20 @@ event HistoricalFeeDataReset(PoolId indexed poolId);
 |`poolId`|`PoolId`|The ID of the pool|
 
 ## Errors
+### NotConfigManager
+Error thrown when the caller is not the config manager
+
+
+```solidity
+error NotConfigManager(address caller);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`caller`|`address`|The invalid address attempting to update the pool fee data|
+
 ### InvalidDecayFactor
 Error thrown when decay factor is invalid
 

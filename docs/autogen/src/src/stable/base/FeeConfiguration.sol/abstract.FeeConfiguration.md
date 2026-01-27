@@ -1,8 +1,8 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/1b35eeec00849d703d317ca530bc80431c6bf9c0/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/c30efe567d08994ae07b3496ff1329cfd23f4065/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
-[ConfigManager](/src/stable/base/ConfigManager.sol/abstract.ConfigManager.md), [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
+[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
 
 **Title:**
 FeeConfiguration
@@ -11,6 +11,17 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### configManager
+The address of the config manager
+
+The config manager is the address that can update the fee configuration for a pool
+
+
+```solidity
+address public configManager
+```
+
+
 ### feeConfig
 The fee configuration for each pool
 
@@ -34,8 +45,34 @@ mapping(PoolId => HistoricalFeeData) public historicalFeeData
 
 
 ```solidity
-constructor(address _configManager) ConfigManager(_configManager);
+constructor(address _configManager) ;
 ```
+
+### onlyConfigManager
+
+Modifier to only allow calls from the config manager
+
+This modifier is used to prevent unauthorized updates to the fee configuration per pool
+
+
+```solidity
+modifier onlyConfigManager() ;
+```
+
+### setConfigManager
+
+Set the config manager
+
+
+```solidity
+function setConfigManager(address configManager_) external onlyConfigManager;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`configManager_`|`address`||
+
 
 ### updateDecayFactor
 
@@ -73,7 +110,7 @@ function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external onl
 |`optimalFeeRate`|`uint24`|The new optimal fee rate|
 
 
-### updateReferenceSqrtPrice
+### updateReferenceSqrtPriceX96
 
 Update the reference sqrt price for a pool
 
@@ -81,14 +118,14 @@ Should be called in a multicall with resetHistoricalFeeData()
 
 
 ```solidity
-function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager;
+function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
-|`referenceSqrtPriceX96`|`uint160`||
+|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
 
 
 ### resetHistoricalFeeData
@@ -112,14 +149,14 @@ Internal helper to initialize fee configuration and historical data
 
 
 ```solidity
-function _validateFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal;
+function _validateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfiguration) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolId`|`PoolId`|The pool ID to initialize|
-|`feeConfiguration`|`FeeConfig`|The fee configuration to set|
+|`_poolId`|`PoolId`|The pool ID to initialize|
+|`_feeConfiguration`|`FeeConfig`|The fee configuration to set|
 
 
 ### _validateDecayFactor
@@ -173,12 +210,12 @@ Internal helper to reset historical fee data
 
 
 ```solidity
-function _resetHistoricalFeeData(PoolId poolId) internal;
+function _resetHistoricalFeeData(PoolId _poolId) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolId`|`PoolId`|The pool ID to reset historical data for|
+|`_poolId`|`PoolId`|The pool ID to reset historical data for|
 
 

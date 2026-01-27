@@ -2,18 +2,37 @@
 pragma solidity 0.8.26;
 
 import {IFeeConfiguration, FeeConfig, HistoricalFeeData} from "../interfaces/IFeeConfiguration.sol";
-import {ConfigManager} from "./ConfigManager.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
-abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
+abstract contract FeeConfiguration is IFeeConfiguration {
+    /// @notice The address of the config manager
+    /// @dev The config manager is the address that can update the fee configuration for a pool
+    address public configManager;
+
     /// @notice The fee configuration for each pool
     mapping(PoolId => FeeConfig) public feeConfig;
     /// @notice The historical data for each pool
     mapping(PoolId => HistoricalFeeData) public historicalFeeData;
 
-    constructor(address _configManager) ConfigManager(_configManager) {}
+    constructor(address _configManager) {
+        configManager = _configManager;
+    }
+
+    /// @notice Modifier to only allow calls from the config manager
+    /// @dev This modifier is used to prevent unauthorized updates to the fee configuration per pool
+    modifier onlyConfigManager() {
+        if (msg.sender != configManager) revert NotConfigManager(msg.sender);
+        _;
+    }
+
+    /// @inheritdoc IFeeConfiguration
+    function setConfigManager(address configManager_) external onlyConfigManager {
+        // Setting the config manager to address(0) disables further updates to the fee configuration
+        configManager = configManager_;
+        emit ConfigManagerUpdated(configManager_);
+    }
 
     /// @inheritdoc IFeeConfiguration
     /// @dev Should be called in a multicall with resetHistoricalFeeData()
@@ -33,10 +52,10 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
 
     /// @inheritdoc IFeeConfiguration
     /// @dev Should be called in a multicall with resetHistoricalFeeData()
-    function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager {
+    function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager {
         _validateReferenceSqrtPrice(referenceSqrtPriceX96);
         feeConfig[poolId].referenceSqrtPriceX96 = referenceSqrtPriceX96;
-        emit ReferenceSqrtPriceUpdated(poolId, referenceSqrtPriceX96);
+        emit ReferenceSqrtPriceX96Updated(poolId, referenceSqrtPriceX96);
     }
 
     /// @inheritdoc IFeeConfiguration
@@ -46,13 +65,13 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     }
 
     /// @notice Internal helper to initialize fee configuration and historical data
-    /// @param poolId The pool ID to initialize
-    /// @param feeConfiguration The fee configuration to set
-    function _validateFeeConfig(PoolId poolId, FeeConfig calldata feeConfiguration) internal {
-        _validateDecayFactor(feeConfiguration.decayFactor);
-        _validateOptimalFeeRate(feeConfiguration.optimalFeeRate);
-        _validateReferenceSqrtPrice(feeConfiguration.referenceSqrtPriceX96);
-        _resetHistoricalFeeData(poolId);
+    /// @param _poolId The pool ID to initialize
+    /// @param _feeConfiguration The fee configuration to set
+    function _validateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfiguration) internal {
+        _validateDecayFactor(_feeConfiguration.decayFactor);
+        _validateOptimalFeeRate(_feeConfiguration.optimalFeeRate);
+        _validateReferenceSqrtPrice(_feeConfiguration.referenceSqrtPriceX96);
+        _resetHistoricalFeeData(_poolId);
     }
 
     /// @notice Validate the decay factor
@@ -75,9 +94,9 @@ abstract contract FeeConfiguration is ConfigManager, IFeeConfiguration {
     }
 
     /// @notice Internal helper to reset historical fee data
-    /// @param poolId The pool ID to reset historical data for
-    function _resetHistoricalFeeData(PoolId poolId) internal {
-        historicalFeeData[poolId].previousFee = 1e12 + 1; // TODO: make constant
-        historicalFeeData[poolId].blockNumber = block.number;
+    /// @param _poolId The pool ID to reset historical data for
+    function _resetHistoricalFeeData(PoolId _poolId) internal {
+        historicalFeeData[_poolId].previousFee = 1e12 + 1; // TODO: make constant
+        historicalFeeData[_poolId].blockNumber = block.number;
     }
 }

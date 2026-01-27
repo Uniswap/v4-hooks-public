@@ -1,7 +1,6 @@
 
 
 # Contents
-- [IConfigManager](IConfigManager.sol/interface.IConfigManager.md)
 - [FeeConfig](IFeeConfiguration.sol/struct.FeeConfig.md)
 - [HistoricalFeeData](IFeeConfiguration.sol/struct.HistoricalFeeData.md)
 - [IFeeConfiguration](IFeeConfiguration.sol/interface.IFeeConfiguration.md)
