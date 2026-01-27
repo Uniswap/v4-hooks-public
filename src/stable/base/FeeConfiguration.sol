@@ -37,7 +37,6 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @inheritdoc IFeeConfiguration
     function updateFeeConfig(PoolId poolId_, FeeConfig calldata feeConfig_) external onlyConfigManager {
         _updateFeeConfig(poolId_, feeConfig_);
-        feeConfig[poolId_] = feeConfig_;
         emit FeeConfigUpdated(poolId_, feeConfig_);
     }
 
@@ -49,6 +48,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
         _validateOptimalFeeRate(_feeConfig.optimalFeeRate);
         _validateReferenceSqrtPrice(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
+        feeConfig[_poolId] = _feeConfig;
     }
 
     /// @notice Validate the decay factor

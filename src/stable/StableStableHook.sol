@@ -40,7 +40,6 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
         _updateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
-        feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
     }
 
