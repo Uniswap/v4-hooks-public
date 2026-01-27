@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 struct FeeConfig {
+    // TODO: natspec
     uint256 k;
     uint256 logK;
     uint24 optimalFeeRate;
@@ -11,6 +12,7 @@ struct FeeConfig {
 }
 
 struct HistoricalFeeData {
+    // TODO: natspec
     uint256 previousFee;
     uint160 previousSqrtAmmPriceX96;
     uint256 blockNumber;
