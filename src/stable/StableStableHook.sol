@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {FeeConfiguration} from "./base/FeeConfiguration.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {FeeConfig, HistoricalFeeData} from "./interfaces/IFeeConfiguration.sol";
+import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -14,11 +14,10 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
-contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, IStableStableHook {
+contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
 
     constructor(IPoolManager _manager, address _owner, address _configManager)
@@ -39,7 +38,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
-        _validateFeeConfig(poolKey.toId(), feeConfiguration);
+        _updateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
         feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);

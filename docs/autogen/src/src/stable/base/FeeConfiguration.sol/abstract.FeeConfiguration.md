@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/c30efe567d08994ae07b3496ff1329cfd23f4065/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/13bbbb712d89d818d2905b1663e6d1141d8c4f20/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -31,12 +31,12 @@ mapping(PoolId => FeeConfig) public feeConfig
 ```
 
 
-### historicalFeeData
-The historical data for each pool
+### feeState
+The fee state for each pool
 
 
 ```solidity
-mapping(PoolId => HistoricalFeeData) public historicalFeeData
+mapping(PoolId => FeeState) public feeState
 ```
 
 
@@ -74,104 +74,52 @@ function setConfigManager(address configManager_) external onlyConfigManager;
 |`configManager_`|`address`||
 
 
-### updateDecayFactor
+### updateFeeConfig
 
-Update the decay factor for a pool
-
-Should be called in a multicall with resetHistoricalFeeData()
+Update the fee configuration for a pool
 
 
 ```solidity
-function updateDecayFactor(PoolId poolId, uint256 decayFactor) external onlyConfigManager;
+function updateFeeConfig(PoolId poolId_, FeeConfig calldata feeConfig_) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the decay factor for|
-|`decayFactor`|`uint256`|The new decay factor|
+|`poolId_`|`PoolId`||
+|`feeConfig_`|`FeeConfig`||
 
 
-### updateOptimalFeeRate
+### _updateFeeConfig
 
-Update the optimal fee spread for a pool
-
-Should be called in a multicall with resetHistoricalFeeData()
-
-
-```solidity
-function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the optimal fee rate for|
-|`optimalFeeRate`|`uint24`|The new optimal fee rate|
-
-
-### updateReferenceSqrtPriceX96
-
-Update the reference sqrt price for a pool
-
-Should be called in a multicall with resetHistoricalFeeData()
+Internal helper to initialize fee configuration and fee state
 
 
 ```solidity
-function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
-|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
-
-
-### resetHistoricalFeeData
-
-Reset the historical data for a pool
-
-
-```solidity
-function resetHistoricalFeeData(PoolId poolId) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to reset the historical data for|
-
-
-### _validateFeeConfig
-
-Internal helper to initialize fee configuration and historical data
-
-
-```solidity
-function _validateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfiguration) internal;
+function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`_poolId`|`PoolId`|The pool ID to initialize|
-|`_feeConfiguration`|`FeeConfig`|The fee configuration to set|
+|`_feeConfig`|`FeeConfig`|The fee configuration to set|
 
 
-### _validateDecayFactor
+### _validateKAndLogK
 
 Validate the decay factor
 
 
 ```solidity
-function _validateDecayFactor(uint256 _decayFactor) internal pure;
+function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_decayFactor`|`uint256`|The decay factor to validate|
+|`_k`|`uint256`|The k value to validate|
+|`_logK`|`uint256`|The logK value to validate|
 
 
 ### _validateOptimalFeeRate
@@ -204,18 +152,18 @@ function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pu
 |`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
 
 
-### _resetHistoricalFeeData
+### _resetFeeState
 
-Internal helper to reset historical fee data
+Internal helper to reset fee state
 
 
 ```solidity
-function _resetHistoricalFeeData(PoolId _poolId) internal;
+function _resetFeeState(PoolId _poolId) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_poolId`|`PoolId`|The pool ID to reset historical data for|
+|`_poolId`|`PoolId`|The pool ID to reset fee state for|
 
 
