@@ -18,6 +18,10 @@ struct HistoricalFeeData {
 
 /// @notice Interface for the FeeConfiguration
 interface IFeeConfiguration {
+    /// @notice Error thrown when the caller is not the config manager
+    /// @param caller The invalid address attempting to update the pool fee data
+    error NotConfigManager(address caller);
+
     /// @notice Error thrown when decay factor is invalid
     error InvalidDecayFactor(uint256 decayFactor);
 
@@ -27,6 +31,10 @@ interface IFeeConfiguration {
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
     error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
+
+    /// @notice Event emitted when the config manager is updated
+    /// @param configManager The new config manager
+    event ConfigManagerUpdated(address indexed configManager);
 
     /// @notice Event emitted when the decay factor is updated
     /// @param poolId The ID of the pool
@@ -41,12 +49,16 @@ interface IFeeConfiguration {
 
     /// @notice Event emitted when the reference sqrt price is updated
     /// @param poolId The ID of the pool
-    /// @param referenceSqrtPrice The new reference sqrt price
-    event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPrice);
+    /// @param referenceSqrtPriceX96 The new reference sqrt price
+    event ReferenceSqrtPriceX96Updated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
 
     /// @notice Event emitted when the historical fee data is reset
     /// @param poolId The ID of the pool
     event HistoricalFeeDataReset(PoolId indexed poolId);
+
+    /// @notice Set the config manager
+    /// @param configManager The address of the new config manager
+    function setConfigManager(address configManager) external;
 
     /// @notice Update the decay factor for a pool
     /// @param poolId The ID of the pool to update the decay factor for
@@ -62,7 +74,7 @@ interface IFeeConfiguration {
     /// @notice Update the reference sqrt price for a pool
     /// @param poolId The ID of the pool to update the reference sqrt price for
     /// @param referenceSqrtPriceX96 The new reference sqrt price
-    function updateReferenceSqrtPrice(PoolId poolId, uint160 referenceSqrtPriceX96) external;
+    function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external;
 
     /// @notice Reset the historical data for a pool
     /// @param poolId The ID of the pool to reset the historical data for

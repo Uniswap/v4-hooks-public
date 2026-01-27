@@ -1,49 +1,49 @@
-name: Claude Code Review
+name: "[claude] Claude Code Review"
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
-
-  # Comment trigger: Add "@request-claude-review" to any PR comment to force a fresh review
-  issue_comment:
-    types: [created]
-
-  pull_request_review_comment:
-    types: [created]
-
-  # Manual trigger for forcing a new review without code changes
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: "Pull request number to review"
-        required: true
-        type: string
-      force_review:
-        description: "Force a full review even if code hasn't changed"
-        required: false
-        type: boolean
-        default: true
-
-# Ensure only one review runs at a time per PR
-concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+    types: [opened, synchronize, ready_for_review, labeled, unlabeled]
 
 jobs:
-  claude-review:
-    # Skip merge queue PRs, draft PRs (unless authored by claude[bot]), and release promotion PRs
+  claude-review-auto:
     if: |
+      github.event_name == 'pull_request' &&
+      github.event.action != 'review_requested' &&
       !contains(github.head_ref, 'gh-readonly-queue/') &&
-      !startsWith(github.head_ref, 'release/next-to-main-') &&
+      !startsWith(github.head_ref, 'release/') &&
       (
         github.event.pull_request.draft == false ||
-        github.event.action == 'ready_for_review' ||
-        github.event.pull_request.user.login == 'claude[bot]'
+        github.event.action == 'ready_for_review'
       )
 
-    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@main
+    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@01e6451c223af33f574ca6fcfae2ae3bc9137a63
     with:
       pr_number: ${{ github.event.pull_request.number }}
       base_ref: ${{ github.base_ref }}
+      force_review: false
+      toolkit_ref: 01e6451c223af33f574ca6fcfae2ae3bc9137a63
+
+      model: "claude-opus-4-5"
+
+      # Standard timeout for most PRs
+      timeout_minutes: 20
+
+      # Custom prompt overrides
+      prompt_override_review_priorities: ".claude/prompts/pr-review/review-priorities.md"
+      prompt_override_files_to_skip: ".claude/prompts/pr-review/files-to-skip.md"
+      prompt_override_communication_style: ".claude/prompts/pr-review/communication-style.md"
+      prompt_override_pattern_recognition: ".claude/prompts/pr-review/pattern-recognition.md"
+      prompt_override_initial_review_process: ".claude/prompts/pr-review/initial-review-process.md"
+      prompt_override_avoid_patterns: ".claude/prompts/pr-review/avoid-patterns.md"
+      prompt_override_verdict_approve: ".claude/prompts/pr-review/verdict-approve.md"
+      prompt_override_verdict_request_changes: ".claude/prompts/pr-review/verdict-request-changes.md"
+      prompt_override_verdict_comment: ".claude/prompts/pr-review/verdict-comment.md"
+      prompt_override_re_review_process: ".claude/prompts/pr-review/re-review-process.md"
+
     secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -35,7 +35,7 @@ jobs:
       !contains(github.head_ref, 'release/') &&
       !startsWith(github.event.pull_request.title, 'chore(release):')
 
-    uses: Uniswap/ai-toolkit/.github/workflows/_generate-pr-metadata.yml@d1c6dec19c7eef99bbcc8d3a1a4009f3d3c2732d
+    uses: Uniswap/ai-toolkit/.github/workflows/_generate-pr-metadata.yml@01e6451c223af33f574ca6fcfae2ae3bc9137a63
     with:
       generation_mode: "description,deferred-title"
       pr_number: ${{ github.event.pull_request.number }}
@@ -43,4 +43,5 @@ jobs:
       commit_history_count: 30
       pr_history_count: 10
     secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

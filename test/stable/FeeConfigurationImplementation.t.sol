@@ -11,18 +11,18 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IConfigManager} from "../../src/stable/interfaces/IConfigManager.sol";
 import {FeeConfigurationImplementation} from "../../src/stable/test/FeeConfigurationImplementation.sol";
-import {FeeConfig, HistoricalFeeData} from "../../src/stable/interfaces/IFeeConfiguration.sol";
+import {FeeConfig, HistoricalFeeData, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
 
+    event ConfigManagerUpdated(address indexed configManager);
     event DecayFactorUpdated(PoolId indexed poolId, uint256 k, uint256 logK);
     event OptimalFeeRateUpdated(PoolId indexed poolId, uint256 optimalFeeRate);
-    event ReferenceSqrtPriceUpdated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
+    event ReferenceSqrtPriceX96Updated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
 
     uint24 public constant OPTIMAL_FEE_SPREAD = 90; // 0.9 bps
     uint160 public constant REFERENCE_SQRT_PRICE_X96 = TickMath.MIN_SQRT_PRICE;
@@ -48,7 +48,7 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateDecayFactor_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.updateDecayFactor(testPoolKey.toId(), K - 1, LOG_K - 1);
     }
 
@@ -70,7 +70,7 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateOptimalFeeRate_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.updateOptimalFeeRate(testPoolKey.toId(), OPTIMAL_FEE_SPREAD - 1);
     }
 
@@ -91,30 +91,49 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateReferenceSqrtPrice_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
-        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
+        feeConfigurationImplementation.updateReferenceSqrtPriceX96(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
     function test_updateReferenceSqrtPrice_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit ReferenceSqrtPriceUpdated(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        emit ReferenceSqrtPriceX96Updated(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        feeConfigurationImplementation.updateReferenceSqrtPriceX96(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         (,,, uint160 referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
     }
 
     function test_updateReferenceSqrtPrice_gas() public {
         vm.prank(poolFeeController);
-        feeConfigurationImplementation.updateReferenceSqrtPrice(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
+        feeConfigurationImplementation.updateReferenceSqrtPriceX96(testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1);
         vm.snapshotGasLastCall("updateReferenceSqrtPrice");
     }
 
     function test_resetHistoricalFeeData_revertsWithNotConfigManager() public {
         vm.prank(address(this));
-        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
         feeConfigurationImplementation.resetHistoricalFeeData(testPoolKey.toId());
     }
 
-    // TODO: add test later assuring resetHistoricalFeeData works as expected
+    function test_setConfigManager_revertsWithNotConfigManager() public {
+        vm.prank(address(this));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
+        feeConfigurationImplementation.setConfigManager(address(1));
+    }
+
+    function test_setConfigManager_succeeds() public {
+        assertEq(feeConfigurationImplementation.configManager(), poolFeeController);
+        vm.expectEmit(true, false, false, true);
+        emit ConfigManagerUpdated(address(1));
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.setConfigManager(address(1));
+        assertEq(feeConfigurationImplementation.configManager(), address(1));
+    }
+
+    function test_setConfigManager_gas() public {
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.setConfigManager(address(1));
+        vm.snapshotGasLastCall("setConfigManager");
+    }
 }

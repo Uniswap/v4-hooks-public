@@ -16,7 +16,6 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IStableStableHook} from "../../src/stable/interfaces/IStableStableHook.sol";
 import {FeeConfig, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
-import {IConfigManager} from "../../src/stable/interfaces/IConfigManager.sol";
 import {Constants} from "../../test/utils/Constants.sol";
 
 contract StableStableHookTest is Test, Deployers {
@@ -179,12 +178,12 @@ contract StableStableHookTest is Test, Deployers {
             IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
         );
         calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
+            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
         );
         calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
 
         vm.prank(address(this)); // not the fee controller
-        vm.expectRevert(abi.encodeWithSelector(IConfigManager.NotConfigManager.selector, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
         hook.multicall(calls);
 
         // check that the fee configuration is not updated
@@ -215,7 +214,7 @@ contract StableStableHookTest is Test, Deployers {
             IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
         );
         calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
+            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
         );
         calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
 
@@ -242,7 +241,7 @@ contract StableStableHookTest is Test, Deployers {
             IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
         );
         calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPrice.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
+            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
         );
         calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
 
