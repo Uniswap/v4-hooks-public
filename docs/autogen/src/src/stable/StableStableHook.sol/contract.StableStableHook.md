@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/13bbbb712d89d818d2905b1663e6d1141d8c4f20/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -8,6 +8,16 @@
 StableStableHook
 
 Dynamic fee hook for stable/stable pools
+
+
+## State Variables
+### TO_UNISWAP_FEE
+Divide by this to convert fees from the internal 1e12 precision format to the Uniswap 1e6 precision format
+
+
+```solidity
+uint256 private constant TO_UNISWAP_FEE = 1e6
+```
 
 
 ## Functions
@@ -75,10 +85,16 @@ function _beforeInitialize(address sender, PoolKey calldata, uint160) internal p
 
 
 ```solidity
-function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
     internal
-    pure
     override
     returns (bytes4, BeforeSwapDelta, uint24);
+```
+
+### _getSqrtPriceX96
+
+
+```solidity
+function _getSqrtPriceX96(PoolId _poolId) internal view returns (uint256);
 ```
 

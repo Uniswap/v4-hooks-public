@@ -12,6 +12,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {FeeConfigurationImplementation} from "../../src/stable/test/FeeConfigurationImplementation.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FeeConfig, FeeState, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
 
 contract FeeConfigurationImplementationTest is Test {
@@ -54,6 +55,13 @@ contract FeeConfigurationImplementationTest is Test {
     }
 
     function test_updateFeeConfig_succeeds() public {
+        (uint256 k, uint256 logK, uint24 optimalFeeRate, uint160 referenceSqrtPriceX96) =
+            feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        assertEq(k, 0);
+        assertEq(logK, 0);
+        assertEq(optimalFeeRate, 0);
+        assertEq(referenceSqrtPriceX96, 0);
+
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeRate: OPTIMAL_FEE_RATE, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
@@ -64,15 +72,14 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
 
         // Verify FeeConfig was updated
-        (uint256 k, uint256 logK, uint24 optimalFeeRate, uint160 referenceSqrtPriceX96) =
-            feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        (k, logK, optimalFeeRate, referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
 
         // Verify FeeState was reset
-        (uint40 previousFee, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
+        (uint256 previousFee, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             feeConfigurationImplementation.feeState(testPoolKey.toId());
         assertEq(previousFee, 1e12 + 1);
         assertEq(previousSqrtAmmPriceX96, 0);

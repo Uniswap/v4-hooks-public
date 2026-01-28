@@ -13,7 +13,7 @@ struct FeeConfig {
 
 struct FeeState {
     // TODO: natspec
-    uint40 previousFee;
+    uint256 previousFee;
     uint160 previousSqrtAmmPriceX96;
     uint256 blockNumber;
 }
@@ -35,7 +35,7 @@ interface IFeeConfiguration {
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
-    error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
+    error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
 
     /// @notice Event emitted when the config manager is updated
     /// @param configManager The new config manager

@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fd6c246f56c71ed20e67ce06ce552b22eb9e0620/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -11,6 +11,24 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### ONE
+Fixed point constant: 1e12 represents 100%
+
+
+```solidity
+uint256 internal constant ONE = 1e12
+```
+
+
+### UNDEFINED_FLEXIBLE_FEE
+Sentinel value indicating no flexible fee (inside optimal rate)
+
+
+```solidity
+uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
+```
+
+
 ### configManager
 The address of the config manager
 
@@ -137,13 +155,13 @@ function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
 |`_optimalFeeRate`|`uint256`|The optimal fee rate to validate|
 
 
-### _validateReferenceSqrtPrice
+### _validateReferenceSqrtPriceX96
 
 Validate the reference sqrt price
 
 
 ```solidity
-function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pure;
+function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure;
 ```
 **Parameters**
 

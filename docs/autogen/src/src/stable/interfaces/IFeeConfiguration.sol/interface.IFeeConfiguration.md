@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fd6c246f56c71ed20e67ce06ce552b22eb9e0620/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -110,12 +110,12 @@ error InvalidOptimalFeeRate(uint256 optimalFeeRate);
 |----|----|-----------|
 |`optimalFeeRate`|`uint256`|The invalid optimal fee rate|
 
-### InvalidReferenceSqrtPrice
+### InvalidReferenceSqrtPriceX96
 Error thrown when reference sqrt price is invalid
 
 
 ```solidity
-error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
+error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
 ```
 
 **Parameters**

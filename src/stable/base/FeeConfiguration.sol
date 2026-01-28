@@ -7,6 +7,11 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
 abstract contract FeeConfiguration is IFeeConfiguration {
+    /// @notice Fixed point constant: 1e12 represents 100%
+    uint256 internal constant ONE = 1e12;
+    /// @notice Sentinel value indicating no flexible fee (inside optimal rate)
+    uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
+
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
@@ -46,7 +51,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
         _validateOptimalFeeRate(_feeConfig.optimalFeeRate);
-        _validateReferenceSqrtPrice(_feeConfig.referenceSqrtPriceX96);
+        _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
     }
@@ -68,16 +73,16 @@ abstract contract FeeConfiguration is IFeeConfiguration {
 
     /// @notice Validate the reference sqrt price
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
-    function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pure {
+    function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure {
         // TODO: set bounds on reference sqrt price
         // should they be close to stable price?
-        // revert InvalidReferenceSqrtPrice(_referenceSqrtPriceX96);
+        // revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
     }
 
     /// @notice Internal helper to reset fee state
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
-        feeState[_poolId].previousFee = 1e12 + 1; // TODO: make constant
+        feeState[_poolId].previousFee = UNDEFINED_FLEXIBLE_FEE;
         feeState[_poolId].blockNumber = block.number;
     }
 }
