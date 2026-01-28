@@ -55,6 +55,13 @@ contract FeeConfigurationImplementationTest is Test {
     }
 
     function test_updateFeeConfig_succeeds() public {
+        (uint256 k, uint256 logK, uint24 optimalFeeRate, uint160 referenceSqrtPriceX96) =
+            feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        assertEq(k, 0);
+        assertEq(logK, 0);
+        assertEq(optimalFeeRate, 0);
+        assertEq(referenceSqrtPriceX96, 0);
+
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeRate: OPTIMAL_FEE_RATE, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
@@ -65,8 +72,7 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
 
         // Verify FeeConfig was updated
-        (uint256 k, uint256 logK, uint24 optimalFeeRate, uint160 referenceSqrtPriceX96) =
-            feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        (k, logK, optimalFeeRate, referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
