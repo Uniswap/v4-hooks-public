@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5a5140e23118bda6025018601125d65f89f7fc4e/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -37,7 +37,7 @@ address public configManager
 
 
 ### feeConfig
-The fee configuration for each pool
+The fee config for each pool
 
 
 ```solidity
@@ -45,12 +45,12 @@ mapping(PoolId => FeeConfig) public feeConfig
 ```
 
 
-### historicalFeeData
-The historical data for each pool
+### feeState
+The fee state for each pool
 
 
 ```solidity
-mapping(PoolId => HistoricalFeeData) public historicalFeeData
+mapping(PoolId => FeeState) public feeState
 ```
 
 
@@ -88,106 +88,52 @@ function setConfigManager(address configManager_) external onlyConfigManager;
 |`configManager_`|`address`||
 
 
-### updateDecayFactor
+### updateFeeConfig
 
-Update the decay factor for a pool
-
-Should be called in a multicall with clearHistoricalFeeData()
+Update the fee config for a pool
 
 
 ```solidity
-function updateDecayFactor(PoolId poolId, uint256 k, uint256 logK) external onlyConfigManager;
+function updateFeeConfig(PoolId poolId_, FeeConfig calldata feeConfig_) external onlyConfigManager;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the decay factor for|
-|`k`|`uint256`|The new k|
-|`logK`|`uint256`|The new logK|
+|`poolId_`|`PoolId`||
+|`feeConfig_`|`FeeConfig`||
 
 
-### updateOptimalFeeRate
+### _updateFeeConfig
 
-Update the optimal fee spread for a pool
-
-Should be called in a multicall with resetHistoricalFeeData()
+Internal helper to initialize fee config and fee state
 
 
 ```solidity
-function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the optimal fee rate for|
-|`optimalFeeRate`|`uint24`|The new optimal fee rate|
-
-
-### updateReferenceSqrtPriceX96
-
-Update the reference sqrt price for a pool
-
-Should be called in a multicall with resetHistoricalFeeData()
-
-
-```solidity
-function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
-|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
-
-
-### resetHistoricalFeeData
-
-Reset the historical data for a pool
-
-
-```solidity
-function resetHistoricalFeeData(PoolId poolId) external onlyConfigManager;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to reset the historical data for|
-
-
-### _validateFeeConfig
-
-Internal helper to initialize fee configuration and historical data
-
-
-```solidity
-function _validateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal;
+function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`_poolId`|`PoolId`|The pool ID to initialize|
-|`_feeConfig`|`FeeConfig`|The fee configuration to set|
+|`_feeConfig`|`FeeConfig`|The fee config to set|
 
 
-### _validateDecayFactor
+### _validateKAndLogK
 
 Validate the decay factor
 
 
 ```solidity
-function _validateDecayFactor(uint256 _k, uint256 _logK) internal pure;
+function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_k`|`uint256`|The k to validate|
-|`_logK`|`uint256`|The logK to validate|
+|`_k`|`uint256`|The k value to validate|
+|`_logK`|`uint256`|The logK value to validate|
 
 
 ### _validateOptimalFeeRate
@@ -205,13 +151,13 @@ function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
 |`_optimalFeeRate`|`uint256`|The optimal fee rate to validate|
 
 
-### _validateReferenceSqrtPrice
+### _validateReferenceSqrtPriceX96
 
 Validate the reference sqrt price
 
 
 ```solidity
-function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pure;
+function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure;
 ```
 **Parameters**
 
@@ -220,18 +166,18 @@ function _validateReferenceSqrtPrice(uint160 _referenceSqrtPriceX96) internal pu
 |`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
 
 
-### _resetHistoricalFeeData
+### _resetFeeState
 
-Internal helper to reset historical fee data
+Internal helper to reset fee state
 
 
 ```solidity
-function _resetHistoricalFeeData(PoolId _poolId) internal;
+function _resetFeeState(PoolId _poolId) internal;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_poolId`|`PoolId`|The pool ID to reset historical data for|
+|`_poolId`|`PoolId`|The pool ID to reset fee state for|
 
 

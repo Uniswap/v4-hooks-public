@@ -1,8 +1,8 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/56d233d0b250177bdf941e4e02adb122dab011ae/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/StableStableHook.sol)
 
 **Inherits:**
-[FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, Multicall, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
+[FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
 
 **Title:**
 StableStableHook

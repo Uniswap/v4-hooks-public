@@ -4,8 +4,8 @@ pragma solidity 0.8.26;
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {FeeConfiguration} from "./base/FeeConfiguration.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {FeeConfig, HistoricalFeeData} from "./interfaces/IFeeConfiguration.sol";
 import {StableLibrary} from "./libraries/StableLibrary.sol";
+import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -16,12 +16,11 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
-contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, IStableStableHook {
+contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
 
@@ -45,9 +44,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
-        _validateFeeConfig(poolKey.toId(), feeConfiguration);
+        _updateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
-        feeConfig[poolKey.toId()] = feeConfiguration;
         emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
     }
 
@@ -84,7 +82,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
     {
         PoolId poolId = key.toId();
         FeeConfig storage feeConfig_ = feeConfig[poolId];
-        HistoricalFeeData storage historicalFeeData_ = historicalFeeData[poolId];
+        FeeState storage feeState_ = feeState[poolId];
         unchecked {
 
             uint160 sqrtAmmPriceX96 = uint160(_getSqrtPriceX96(poolId));
@@ -151,8 +149,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                 } else {
                     // Outside the optimal spread, from this point on 0 < closeFee < farFee, both fees are
                     // less than ONE, recalculate flexibleFee first
-                    uint256 previousSqrtAmmPriceX96 = historicalFeeData_.previousSqrtAmmPriceX96;
-                    uint256 previousFee = historicalFeeData_.previousFee;
+                    uint256 previousSqrtAmmPriceX96 = feeState_.previousSqrtAmmPriceX96;
+                    uint256 previousFee = feeState_.previousFee;
                     // adjust previousFee if needed
                     if (
                         previousFee == UNDEFINED_FLEXIBLE_FEE
@@ -185,7 +183,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                         flexibleFee = targetFee;
                     } else {
                         // This case is possible to reach via just swaps.
-                        uint256 blocksPassed = block.number - historicalFeeData_.blockNumber;
+                        uint256 blocksPassed = block.number - feeState_.blockNumber;
                         uint256 factorX24 = blocksPassed <= 4
                             ? StableLibrary.fastPow(feeConfig_.k, blocksPassed)
                             : (uint256(FixedPointMathLib.expWad(-int256(((feeConfig_.logK) << 40) * blocksPassed)))
@@ -196,9 +194,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, Multicall, ISt
                     totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFee;
                 }
 
-                historicalFeeData_.previousFee = flexibleFee;
-                historicalFeeData_.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
-                historicalFeeData_.blockNumber = block.number;
+                feeState_.previousFee = flexibleFee;
+                feeState_.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
+                feeState_.blockNumber = block.number;
             }
 
             totalStableFee /= TO_UNISWAP_FEE;

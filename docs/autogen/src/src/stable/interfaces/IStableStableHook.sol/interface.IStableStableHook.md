@@ -1,5 +1,5 @@
 # IStableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/52da5b5343d128438b4f25057129e9ba4367d580/src/stable/interfaces/IStableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/interfaces/IStableStableHook.sol)
 
 Interface for the StableStableHook
 
@@ -21,7 +21,7 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfi
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to initialize|
 |`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
-|`feeConfig`|`FeeConfig`|The fee configuration for the pool|
+|`feeConfig`|`FeeConfig`|The fee config for the pool|
 
 **Returns**
 
@@ -45,7 +45,7 @@ event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig f
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool|
 |`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
-|`feeConfig`|`FeeConfig`|The fee configuration for the pool|
+|`feeConfig`|`FeeConfig`|The fee config for the pool|
 
 ## Errors
 ### MustUseDynamicFee

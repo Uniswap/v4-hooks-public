@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5a5140e23118bda6025018601125d65f89f7fc4e/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -20,68 +20,20 @@ function setConfigManager(address configManager) external;
 |`configManager`|`address`|The address of the new config manager|
 
 
-### updateDecayFactor
+### updateFeeConfig
 
-Update the decay factor for a pool
+Update the fee config for a pool
 
 
 ```solidity
-function updateDecayFactor(PoolId poolId, uint256 k, uint256 logK) external;
+function updateFeeConfig(PoolId poolId, FeeConfig calldata feeConfig) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the decay factor for|
-|`k`|`uint256`|The new k|
-|`logK`|`uint256`|The new logK|
-
-
-### updateOptimalFeeRate
-
-Update the optimal fee spread for a pool
-
-
-```solidity
-function updateOptimalFeeRate(PoolId poolId, uint24 optimalFeeRate) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the optimal fee rate for|
-|`optimalFeeRate`|`uint24`|The new optimal fee rate|
-
-
-### updateReferenceSqrtPriceX96
-
-Update the reference sqrt price for a pool
-
-
-```solidity
-function updateReferenceSqrtPriceX96(PoolId poolId, uint160 referenceSqrtPriceX96) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to update the reference sqrt price for|
-|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
-
-
-### resetHistoricalFeeData
-
-Reset the historical data for a pool
-
-
-```solidity
-function resetHistoricalFeeData(PoolId poolId) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool to reset the historical data for|
+|`poolId`|`PoolId`|The ID of the pool|
+|`feeConfig`|`FeeConfig`|The new fee config|
 
 
 ## Events
@@ -99,12 +51,12 @@ event ConfigManagerUpdated(address indexed configManager);
 |----|----|-----------|
 |`configManager`|`address`|The new config manager|
 
-### DecayFactorUpdated
-Event emitted when the decay factor is updated
+### FeeConfigUpdated
+Event emitted when the fee config is updated
 
 
 ```solidity
-event DecayFactorUpdated(PoolId indexed poolId, uint256 k, uint256 logK);
+event FeeConfigUpdated(PoolId indexed poolId, FeeConfig feeConfig);
 ```
 
 **Parameters**
@@ -112,52 +64,7 @@ event DecayFactorUpdated(PoolId indexed poolId, uint256 k, uint256 logK);
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The ID of the pool|
-|`k`|`uint256`|The new k|
-|`logK`|`uint256`|The new logK|
-
-### OptimalFeeRateUpdated
-Event emitted when the optimal fee rate is updated
-
-
-```solidity
-event OptimalFeeRateUpdated(PoolId indexed poolId, uint256 optimalFeeRate);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool|
-|`optimalFeeRate`|`uint256`|The new optimal fee rate|
-
-### ReferenceSqrtPriceX96Updated
-Event emitted when the reference sqrt price is updated
-
-
-```solidity
-event ReferenceSqrtPriceX96Updated(PoolId indexed poolId, uint160 referenceSqrtPriceX96);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool|
-|`referenceSqrtPriceX96`|`uint160`|The new reference sqrt price|
-
-### HistoricalFeeDataReset
-Event emitted when the historical fee data is reset
-
-
-```solidity
-event HistoricalFeeDataReset(PoolId indexed poolId);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The ID of the pool|
+|`feeConfig`|`FeeConfig`|The new fee config|
 
 ## Errors
 ### NotConfigManager
@@ -174,28 +81,41 @@ error NotConfigManager(address caller);
 |----|----|-----------|
 |`caller`|`address`|The invalid address attempting to update the pool fee data|
 
-### InvalidDecayFactor
-Error thrown when decay factor is invalid
+### InvalidKAndLogK
+Error thrown when k and logK are invalid
 
 
 ```solidity
-error InvalidDecayFactor(uint256 decayFactor);
+error InvalidKAndLogK(uint256 k, uint256 logK);
 ```
 
-### OptimalFeeRateTooHigh
-Error thrown when optimal fee rate is too high
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`k`|`uint256`|The invalid k value|
+|`logK`|`uint256`|The invalid logK value|
+
+### InvalidOptimalFeeRate
+Error thrown when optimal fee rate is invalid
 
 
 ```solidity
-error OptimalFeeRateTooHigh(uint256 optimalFeeRate);
+error InvalidOptimalFeeRate(uint256 optimalFeeRate);
 ```
 
-### InvalidReferenceSqrtPrice
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`optimalFeeRate`|`uint256`|The invalid optimal fee rate|
+
+### InvalidReferenceSqrtPriceX96
 Error thrown when reference sqrt price is invalid
 
 
 ```solidity
-error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
+error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
 ```
 
 **Parameters**

@@ -141,16 +141,15 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(slot0SqrtPriceX96, Constants.SQRT_RATIO_1_1);
         assertEq(slot0ProtocolFee, 0);
         assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_RATIO_1_1));
-        (uint256 k, uint256 logK, uint256 optimalFeeRate, uint160 referenceSqrtPriceX96) =
+        (uint256 k, uint256 logK, uint24 optimalFeeRate, uint160 referenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-        (uint256 previousFee, uint160 previousSqrtAmmPrice, uint256 blockNumber) =
-            hook.historicalFeeData(testPoolKey.toId());
+        (uint256 previousFee, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) = hook.feeState(testPoolKey.toId());
         assertEq(previousFee, 1e12 + 1); // UNDEFINED_FLEXIBLE_FEE
-        assertEq(previousSqrtAmmPrice, 0);
+        assertEq(previousSqrtAmmPriceX96, 0);
         assertEq(blockNumber, block.number);
     }
 
@@ -158,95 +157,5 @@ contract StableStableHookTest is Test, Deployers {
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
         vm.snapshotGasLastCall("initializePool");
-    }
-
-    function test_multicall_revertsWithNotFeeController() public {
-        vm.prank(owner);
-        hook.initializePool(testPoolKey, Constants.SQRT_RATIO_1_1, feeConfig);
-
-        (uint256 k, uint256 logK, uint256 optimalFeeRate, uint160 referenceSqrtPriceX96) =
-            hook.feeConfig(testPoolKey.toId());
-        assertEq(k, K);
-        assertEq(logK, LOG_K);
-        assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
-        assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-
-        bytes[] memory calls = new bytes[](4);
-        calls[0] =
-            abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey.toId(), K - 1, LOG_K - 1);
-        calls[1] = abi.encodeWithSelector(
-            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
-        );
-        calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
-        );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
-
-        vm.prank(address(this)); // not the fee controller
-        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
-        hook.multicall(calls);
-
-        // check that the fee configuration is not updated
-        (k, logK,,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(k, K);
-        assertEq(logK, LOG_K);
-        (,, optimalFeeRate,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
-        (,,, referenceSqrtPriceX96) = hook.feeConfig(testPoolKey.toId());
-        assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-    }
-
-    function test_multicall_succeeds() public {
-        vm.prank(owner);
-        hook.initializePool(testPoolKey, Constants.SQRT_RATIO_1_1, feeConfig);
-
-        (uint256 k, uint256 logK, uint256 optimalFeeRate, uint160 referenceSqrtPriceX96) =
-            hook.feeConfig(testPoolKey.toId());
-        assertEq(k, K);
-        assertEq(logK, LOG_K);
-        assertEq(optimalFeeRate, OPTIMAL_FEE_RATE);
-        assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-
-        bytes[] memory calls = new bytes[](4);
-        calls[0] =
-            abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey.toId(), K - 1, LOG_K - 1);
-        calls[1] = abi.encodeWithSelector(
-            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
-        );
-        calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
-        );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
-
-        vm.prank(configManager);
-        hook.multicall(calls);
-
-        (k, logK,,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(k, K - 1);
-        assertEq(logK, LOG_K - 1);
-        (,, optimalFeeRate,) = hook.feeConfig(testPoolKey.toId());
-        assertEq(optimalFeeRate, OPTIMAL_FEE_RATE - 1);
-        (,,, referenceSqrtPriceX96) = hook.feeConfig(testPoolKey.toId());
-        assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96 - 1);
-    }
-
-    function test_multicall_gas() public {
-        vm.prank(owner);
-        hook.initializePool(testPoolKey, TickMath.MIN_SQRT_PRICE, feeConfig);
-
-        bytes[] memory calls = new bytes[](4);
-        calls[0] =
-            abi.encodeWithSelector(IFeeConfiguration.updateDecayFactor.selector, testPoolKey.toId(), K - 1, LOG_K - 1);
-        calls[1] = abi.encodeWithSelector(
-            IFeeConfiguration.updateOptimalFeeRate.selector, testPoolKey.toId(), OPTIMAL_FEE_RATE - 1
-        );
-        calls[2] = abi.encodeWithSelector(
-            IFeeConfiguration.updateReferenceSqrtPriceX96.selector, testPoolKey.toId(), REFERENCE_SQRT_PRICE_X96 - 1
-        );
-        calls[3] = abi.encodeWithSelector(IFeeConfiguration.resetHistoricalFeeData.selector, testPoolKey.toId());
-
-        vm.prank(configManager);
-        hook.multicall(calls);
-        vm.snapshotGasLastCall("multicall");
     }
 }

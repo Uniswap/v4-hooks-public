@@ -12,7 +12,7 @@
       - [FeeConfiguration](src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md)
     - [❱ interfaces](src/stable/interfaces/README.md)
       - [FeeConfig](src/stable/interfaces/IFeeConfiguration.sol/struct.FeeConfig.md)
-      - [HistoricalFeeData](src/stable/interfaces/IFeeConfiguration.sol/struct.HistoricalFeeData.md)
+      - [FeeState](src/stable/interfaces/IFeeConfiguration.sol/struct.FeeState.md)
       - [IFeeConfiguration](src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
       - [IStableStableHook](src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
     - [❱ libraries](src/stable/libraries/README.md)

@@ -1,6 +1,4 @@
 {
-  "setConfigManager": "27613",
-  "updateDecayFactor": "70300",
-  "updateOptimalFeeRate": "47633",
-  "updateReferenceSqrtPrice": "47663"
+  "setConfigManager": "27591",
+  "updateFeeConfig": "137800"
 }
