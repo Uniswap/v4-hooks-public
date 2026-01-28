@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.26;
 
-import {BaseHook} from "./base/BaseHook.sol";
+import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
+import {FeeConfiguration} from "./base/FeeConfiguration.sol";
+import {BaseHook} from "../base/BaseHook.sol";
+import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -9,39 +12,35 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
-contract StableStableHook is BaseHook, Ownable {
+contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
 
-    /// @notice Error thrown when the pool trying to be initialized is not using a dynamic fee
-    /// @param lpFee The LP fee that was used to try to initialize the pool
-    error MustUseDynamicFee(uint24 lpFee);
+    constructor(IPoolManager _manager, address _owner, address _configManager)
+        FeeConfiguration(_configManager)
+        Ownable(_owner)
+        BaseHook(_manager)
+    {}
 
-    /// @notice Error thrown when the hook address is not address(this)
-    /// @param hookAddress The invalid hook address
-    error InvalidHookAddress(address hookAddress);
-
-    /// @notice Error thrown when the caller of `initializePool` is not address(this)
-    /// @param caller The invalid address attempting to initialize the pool
-    error InvalidInitializer(address caller);
-
-    constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner) {}
-
-    /// @notice Initialize a Uniswap v4 pool
-    /// @param poolKey The PoolKey of the pool to initialize
-    /// @param sqrtPriceX96 The initial starting price of the pool, expressed as a sqrtPriceX96
-    /// @return tick The current tick of the pool
-    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick) {
+    /// @inheritdoc IStableStableHook
+    function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfiguration)
+        external
+        onlyOwner
+        returns (int24 tick)
+    {
         if (!poolKey.fee.isDynamicFee()) {
             revert MustUseDynamicFee(poolKey.fee);
         }
         if (poolKey.hooks != IHooks(address(this))) {
             revert InvalidHookAddress(address(poolKey.hooks));
         }
+        _updateFeeConfig(poolKey.toId(), feeConfiguration);
         tick = poolManager.initialize(poolKey, sqrtPriceX96);
+        emit PoolInitialized(poolKey, sqrtPriceX96, feeConfiguration);
     }
 
     /// @inheritdoc BaseHook
@@ -64,7 +63,7 @@ contract StableStableHook is BaseHook, Ownable {
         });
     }
 
-    function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4) {
+    function _beforeInitialize(address sender, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         // Since hooks cannot call themselves, this function is only called when another address tries to initialize a pool with this contract as the hook
         // Therefore this function always reverts to ensure only this contract can initialize new pools
         revert InvalidInitializer(sender);

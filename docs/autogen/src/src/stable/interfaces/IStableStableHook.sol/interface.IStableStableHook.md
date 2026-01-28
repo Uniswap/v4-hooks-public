@@ -1,30 +1,19 @@
-# StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/faae6bc83a1d5c7c0278e78d82941054e5cbd26f/src/StableStableHook.sol)
+# IStableStableHook
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/fd6c246f56c71ed20e67ce06ce552b22eb9e0620/src/stable/interfaces/IStableStableHook.sol)
 
-**Inherits:**
-[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
-
-**Title:**
-StableStableHook
-
-Dynamic fee hook for stable/stable pools
+Interface for the StableStableHook
 
 
 ## Functions
-### constructor
-
-
-```solidity
-constructor(IPoolManager _manager, address _owner) BaseHook(_manager) Ownable(_owner);
-```
-
 ### initializePool
 
 Initialize a Uniswap v4 pool
 
 
 ```solidity
-function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick);
+function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, FeeConfig calldata feeConfig)
+    external
+    returns (int24 tick);
 ```
 **Parameters**
 
@@ -32,6 +21,7 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external
 |----|----|-----------|
 |`poolKey`|`PoolKey`|The PoolKey of the pool to initialize|
 |`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
+|`feeConfig`|`FeeConfig`|The fee config for the pool|
 
 **Returns**
 
@@ -40,40 +30,22 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96) external
 |`tick`|`int24`|The current tick of the pool|
 
 
-### getHookPermissions
-
-Returns a struct of permissions to signal which hook functions are to be implemented
-
-Used at deployment to validate the address correctly represents the expected permissions
+## Events
+### PoolInitialized
+Event emitted when a pool is initialized
 
 
 ```solidity
-function getHookPermissions() public pure override returns (Hooks.Permissions memory);
+event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
 ```
-**Returns**
+
+**Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`<none>`|`Hooks.Permissions`|Permissions struct|
-
-
-### _beforeInitialize
-
-
-```solidity
-function _beforeInitialize(address sender, PoolKey calldata, uint160) internal view override returns (bytes4);
-```
-
-### _beforeSwap
-
-
-```solidity
-function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
-    internal
-    pure
-    override
-    returns (bytes4, BeforeSwapDelta, uint24);
-```
+|`poolKey`|`PoolKey`|The PoolKey of the pool|
+|`sqrtPriceX96`|`uint160`|The initial starting price of the pool, expressed as a sqrtPriceX96|
+|`feeConfig`|`FeeConfig`|The fee config for the pool|
 
 ## Errors
 ### MustUseDynamicFee

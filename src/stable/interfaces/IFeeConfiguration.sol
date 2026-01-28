@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.0;
+
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+
+struct FeeConfig {
+    // TODO: natspec
+    uint256 k;
+    uint256 logK;
+    uint24 optimalFeeRate;
+    uint160 referenceSqrtPriceX96;
+}
+
+struct FeeState {
+    // TODO: natspec
+    uint40 previousFee;
+    uint160 previousSqrtAmmPriceX96;
+    uint256 blockNumber;
+}
+
+/// @notice Interface for the FeeConfiguration
+interface IFeeConfiguration {
+    /// @notice Error thrown when the caller is not the config manager
+    /// @param caller The invalid address attempting to update the pool fee data
+    error NotConfigManager(address caller);
+
+    /// @notice Error thrown when k and logK are invalid
+    /// @param k The invalid k value
+    /// @param logK The invalid logK value
+    error InvalidKAndLogK(uint256 k, uint256 logK);
+
+    /// @notice Error thrown when optimal fee rate is invalid
+    /// @param optimalFeeRate The invalid optimal fee rate
+    error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+
+    /// @notice Error thrown when reference sqrt price is invalid
+    /// @param invalidSqrtPrice The invalid reference sqrt price
+    error InvalidReferenceSqrtPrice(uint160 invalidSqrtPrice);
+
+    /// @notice Event emitted when the config manager is updated
+    /// @param configManager The new config manager
+    event ConfigManagerUpdated(address indexed configManager);
+
+    /// @notice Event emitted when the fee config is updated
+    /// @param poolId The ID of the pool
+    /// @param feeConfig The new fee config
+    event FeeConfigUpdated(PoolId indexed poolId, FeeConfig feeConfig);
+
+    /// @notice Set the config manager
+    /// @param configManager The address of the new config manager
+    function setConfigManager(address configManager) external;
+
+    /// @notice Update the fee config for a pool
+    /// @param poolId The ID of the pool
+    /// @param feeConfig The new fee config
+    function updateFeeConfig(PoolId poolId, FeeConfig calldata feeConfig) external;
+}

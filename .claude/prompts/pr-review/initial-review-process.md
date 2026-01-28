@@ -5,6 +5,7 @@
 2. **Scan the diff** - Get an overview of what changed before diving deep
 
 3. **Review in priority order:**
+
    - Phase 1: Critical issues (bugs, security, performance, data risks)
    - Phase 2: Patterns & principles (maintainability concerns)
    - Phase 3: Polish (naming, coverage, docs - only if win is obvious)
