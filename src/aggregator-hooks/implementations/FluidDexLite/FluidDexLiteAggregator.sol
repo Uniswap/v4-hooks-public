@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IFluidDexLite} from "./interfaces/IFluidDexLite.sol";
+import {IFluidDexLiteCallback} from "./interfaces/IFluidDexLiteCallback.sol";
+import {IFluidDexLiteResolver} from "./interfaces/IFluidDexLiteResolver.sol";
+
+/// @title FluidDexLiteAggregator
+/// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX Lite pools
+/// @dev Implements the IFluidDexLiteCallback interface for swap callbacks
+contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback {
+    using StateLibrary for IPoolManager;
+    using SafeERC20 for IERC20;
+
+    /// @notice The Fluid DEX Lite contract
+    IFluidDexLite public immutable FLUID_DEX_LITE;
+    /// @notice The Fluid DEX Lite resolver for pool state queries
+    IFluidDexLiteResolver public immutable FLUID_DEX_LITE_RESOLVER;
+    /// @notice The key identifying the Fluid DEX Lite pool
+    IFluidDexLite.DexKey public dexKey;
+    /// @notice The Uniswap V4 pool ID associated with this aggregator
+    PoolId public localPoolId;
+
+    bytes32 private immutable salt;
+    address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    error UnauthorizedCaller();
+    error NativeCurrencyExactOut();
+
+    struct FluidDexLiteSwapParams {
+        IFluidDexLite.DexKey dexKey;
+        bool swap0To1;
+        int256 amountSpecified;
+        uint256 amountLimit;
+        address payer;
+        address recipient;
+        bytes extraData;
+    }
+
+    constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver _dexLiteResolver, bytes32 _salt)
+        ExternalLiqSourceHook(_manager)
+    {
+        FLUID_DEX_LITE = _dexLite;
+        FLUID_DEX_LITE_RESOLVER = _dexLiteResolver;
+        salt = _salt;
+    }
+
+    /// @inheritdoc IFluidDexLiteCallback
+    function dexCallback(address token, uint256 amount, bytes calldata) external override {
+        if (msg.sender != address(FLUID_DEX_LITE)) revert UnauthorizedCaller();
+        if (token == FLUID_NATIVE_CURRENCY) {
+            token = address(0);
+        }
+        poolManager.take(Currency.wrap(token), address(FLUID_DEX_LITE), amount);
+    }
+
+    /// @inheritdoc ExternalLiqSourceHook
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable override returns (uint256) {
+        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        // Negate amountSpecified to match what _conductSwap does
+        return FLUID_DEX_LITE_RESOLVER.estimateSwapSingle(dexKey, zeroToOne, -amountSpecified);
+    }
+
+    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        // Convert address(0) (Uniswap v4 native currency) to Fluid's native currency representation
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        if (token0 == address(0)) {
+            token0 = FLUID_NATIVE_CURRENCY;
+        }
+        if (token1 == address(0)) {
+            token1 = FLUID_NATIVE_CURRENCY;
+        }
+
+        dexKey = IFluidDexLite.DexKey({token0: token0, token1: token1, salt: salt});
+
+        IFluidDexLite.DexState memory dexState = FLUID_DEX_LITE_RESOLVER.getDexState(dexKey);
+
+        if (isEmpty(dexState)) revert PoolDoesNotExist();
+
+        localPoolId = key.toId();
+
+        emit AggregatorPoolRegistered(key.toId());
+        return IHooks.beforeInitialize.selector;
+    }
+
+    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId)
+        internal
+        override
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
+    {
+        bool isExactIn = params.amountSpecified < 0;
+
+        if (!settleCurrency.isAddressZero()) {
+            poolManager.sync(settleCurrency);
+        }
+
+        uint256 value;
+        if (takeCurrency.isAddressZero()) {
+            if (isExactIn) {
+                value = uint256(-params.amountSpecified);
+            } else {
+                revert NativeCurrencyExactOut();
+            }
+        }
+
+        uint256 amountUnspecified = _swap(
+            FluidDexLiteSwapParams({
+                dexKey: dexKey,
+                swap0To1: params.zeroForOne,
+                amountSpecified: -params.amountSpecified,
+                amountLimit: isExactIn ? 0 : type(uint256).max,
+                payer: address(this),
+                recipient: settleCurrency.isAddressZero() ? address(this) : address(poolManager),
+                extraData: bytes("")
+            }),
+            value
+        );
+
+        if (!settleCurrency.isAddressZero()) {
+            hasSettled = true;
+            poolManager.settle();
+        }
+
+        if (isExactIn) {
+            amountTake = uint256(-params.amountSpecified);
+            amountSettle = amountUnspecified;
+        } else {
+            amountSettle = uint256(params.amountSpecified);
+            amountTake = amountUnspecified;
+        }
+
+        return (amountSettle, amountTake, hasSettled);
+    }
+
+    function _swap(FluidDexLiteSwapParams memory p, uint256 value) internal returns (uint256 amountUnspecified) {
+        amountUnspecified = FLUID_DEX_LITE.swapSingle{value: value}(
+            p.dexKey,
+            p.swap0To1,
+            p.amountSpecified,
+            p.amountLimit,
+            p.recipient,
+            true, // callback enabled
+            bytes(""),
+            p.extraData
+        );
+    }
+
+    function isEmpty(IFluidDexLite.DexState memory dexState) private pure returns (bool) {
+        return dexState.dexVariables.token0Decimals == 0 && dexState.dexVariables.token1Decimals == 0
+            && dexState.dexVariables.fee == 0;
+    }
+}
