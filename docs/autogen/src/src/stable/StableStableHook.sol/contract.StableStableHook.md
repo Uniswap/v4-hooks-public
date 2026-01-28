@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -12,9 +12,11 @@ Dynamic fee hook for stable/stable pools
 
 ## State Variables
 ### TO_UNISWAP_FEE
+Divide by this to convert fees from the internal 1e12 precision format to the Uniswap 1e6 precision format
+
 
 ```solidity
-uint256 private constant TO_UNISWAP_FEE = ONE / 1e6
+uint256 private constant TO_UNISWAP_FEE = 1e6
 ```
 
 

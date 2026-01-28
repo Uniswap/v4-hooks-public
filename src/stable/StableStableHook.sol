@@ -24,7 +24,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
 
-    uint256 private constant TO_UNISWAP_FEE = ONE / 1e6;
+    /// @notice Divide by this to convert fees from the internal 1e12 precision format to the Uniswap 1e6 precision format
+    uint256 private constant TO_UNISWAP_FEE = 1e6;
 
     constructor(IPoolManager _manager, address _owner, address _configManager)
         FeeConfiguration(_configManager)
