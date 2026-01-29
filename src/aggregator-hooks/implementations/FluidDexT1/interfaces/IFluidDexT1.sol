@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice Fluid DEX v1 pool interface (FluidDexT1)
+/// @title IFluidDexT1
+/// @notice Interface for the Fluid DEX T1 pool (colloquially Fluid DEX v1)
 interface IFluidDexT1 {
     struct CollateralReserves {
         uint256 token0RealReserves;

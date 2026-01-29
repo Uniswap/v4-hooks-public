@@ -10,15 +10,15 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IFluidDexT1} from "./interfaces/IFluidDexT1.sol";
-import {IFluidDexCallback} from "./interfaces/IFluidDexT1Callback.sol";
-import {IFluidDexReservesResolver} from "./interfaces/IFluidDexT1Resolver.sol";
+import {IDexCallback} from "./interfaces/IDexCallback.sol";
+import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title FluidDexT1Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
-/// @dev Implements the IFluidDexCallback interface for swap callbacks
-contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
+/// @dev Implements Fluid's IDexCallback interface for swap callbacks
+contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
@@ -54,7 +54,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
         FLUID_DEX_RESERVES_RESOLVER = _fluidDexReservesResolver;
     }
 
-    /// @inheritdoc IFluidDexCallback
+    /// @inheritdoc IDexCallback
     /// @dev Called by the v1 pool during swap*WithCallback().
     /// Per Fluid docs, tokens should be transferred to the Liquidity Layer.
     function dexCallback(address token, uint256 amount) external override {

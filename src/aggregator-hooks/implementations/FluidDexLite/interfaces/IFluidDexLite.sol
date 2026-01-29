@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/// @title IFluidDexLite
+/// @notice Interface for the Fluid DEX Lite pool
 interface IFluidDexLite {
     struct DexKey {
         address token0; // Lexicographically smaller token

@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {IFluidDexT1} from "./IFluidDexT1.sol";
 
+/// @title IFluidDexReservesResolver
+/// @notice Interface for the Fluid DEX T1 reserves resolver
 interface IFluidDexReservesResolver {
     struct DexLimits {
         TokenLimit withdrawableToken0;

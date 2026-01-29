@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {IFluidDexLite} from "./IFluidDexLite.sol";
 
+/// @title IFluidDexLiteResolver
+/// @notice Interface for the Fluid DEX Lite resolver
 interface IFluidDexLiteResolver {
     /// @notice Returns all registered DEX pools
     /// @return An array of DexKey structs identifying each pool

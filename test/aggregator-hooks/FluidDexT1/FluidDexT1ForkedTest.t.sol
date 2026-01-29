@@ -22,7 +22,7 @@ import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementation
 import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
 import {
     IFluidDexReservesResolver
-} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1Resolver.sol";
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title FluidDexT1ERCForkedTest

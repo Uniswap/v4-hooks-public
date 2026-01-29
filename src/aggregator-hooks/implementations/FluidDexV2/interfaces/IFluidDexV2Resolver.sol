@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {IFluidDexV2} from "./IFluidDexV2.sol";
 
+/// @title IFluidDexV2Resolver
+/// @notice Interface for the Fluid DEX V2 resolver
 interface IFluidDexV2Resolver {
     // Pool configuration with metadata
     struct DexConfig {

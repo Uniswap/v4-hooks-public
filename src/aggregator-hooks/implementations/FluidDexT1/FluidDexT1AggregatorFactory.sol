@@ -7,7 +7,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {FluidDexT1Aggregator} from "./FluidDexT1Aggregator.sol";
 import {IFluidDexT1} from "./interfaces/IFluidDexT1.sol";
-import {IFluidDexReservesResolver} from "./interfaces/IFluidDexT1Resolver.sol";
+import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
 
 /// @title FluidDexT1AggregatorFactory
 /// @notice Factory for creating FluidDexT1Aggregator hooks via CREATE2 and initializing Uniswap V4 pools
