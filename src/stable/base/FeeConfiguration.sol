@@ -64,7 +64,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @notice Validate the optimal fee rate
     /// @param _optimalFeeRate The optimal fee rate to validate
     function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure {
-        if (_optimalFeeRate >= FeeCalculation.PPM) revert InvalidOptimalFeeRate(_optimalFeeRate);
+        if (_optimalFeeRate > FeeCalculation.MAX_OPTIMAL_FEE_RATE) revert InvalidOptimalFeeRate(_optimalFeeRate);
     }
 
     /// @notice Validate the reference sqrt price

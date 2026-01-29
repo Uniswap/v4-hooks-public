@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/1d9a035e8253d1e4e235f3fda8628172692236a6/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/2f5fbd074d45e06945adf690c6462ffb68bfc1f0/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -17,8 +17,19 @@ uint24 public constant MAX_FEE = 990_000
 ```
 
 
+### MAX_OPTIMAL_FEE_RATE
+Maximum allowed optimal fee rate
+
+Optimal fee rate must be strictly less than PPM (100%).
+
+
+```solidity
+uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1
+```
+
+
 ### ONE
-Fixed-point scalar where 1e12 == 100%.
+Fixed-point scalar used for precisionwhere 1e12 == 100%.
 
 
 ```solidity
@@ -36,7 +47,7 @@ uint40 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
 
 
 ### PPM
-Parts-per-million scalar (1e6).
+Parts-per-million scalar (1e6 = 100%).
 
 
 ```solidity
@@ -50,15 +61,6 @@ Scale used to preserve precision in sqrt ratio math.
 
 ```solidity
 uint64 internal constant Q48 = 2 ** 48
-```
-
-
-### Q96
-Fixed-point scalar used for price ratios (Q96).
-
-
-```solidity
-uint128 internal constant Q96 = 2 ** 96
 ```
 
 

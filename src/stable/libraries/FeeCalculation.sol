@@ -1,26 +1,29 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.26;
 
+import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
+
 /// @title FeeCalculation
 /// @notice Library providing core mathematical functions for calculating dynamic swap fees
 library FeeCalculation {
     /// @notice Maximum supported fee in Uniswap format (990_000 = 99%)
     uint24 public constant MAX_FEE = 990_000;
 
-    /// @notice Fixed-point scalar where 1e12 == 100%.
+    /// @notice Maximum allowed optimal fee rate
+    /// @dev Optimal fee rate must be strictly less than PPM (100%).
+    uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1;
+
+    /// @notice Fixed-point scalar used for precisionwhere 1e12 == 100%.
     uint40 internal constant ONE = 1e12;
 
     /// @notice Sentinel: no flexible fee (inside optimal spread).
     uint40 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
 
-    /// @notice Parts-per-million scalar (1e6).
+    /// @notice Parts-per-million scalar (1e6 = 100%).
     uint24 internal constant PPM = 1e6;
 
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint64 internal constant Q48 = 2 ** 48;
-
-    /// @notice Fixed-point scalar used for price ratios (Q96).
-    uint128 internal constant Q96 = 2 ** 96;
 
     /// @notice Calculate the price ratio between AMM price and reference price in Q96 format
     /// @param sqrtAmmPriceX96 Current AMM sqrt price in Q96 format
@@ -62,7 +65,7 @@ library FeeCalculation {
         //   closeFee = 1 - priceRatio / (1 - optimalFeeRate)
         closeFee = int40(
             int256(uint256(ONE)) - (int256(uint256(ONE)) * int256(uint256(priceRatioX96)) * int256(uint256(PPM)))
-                / int256(uint256(PPM - optimalFeeRate)) / int256(uint256(Q96))
+                / int256(uint256(PPM - optimalFeeRate)) / int256(uint256(FixedPoint96.Q96))
         );
     }
 
@@ -90,9 +93,9 @@ library FeeCalculation {
         // fee = 1 - (1 - optimalFeeRate) * ammPrice / RP
 
         if (ammPriceToTheLeft == userSellsZeroForOne) {
-            fee = uint40(ONE - (uint256(ONE) * (PPM - optimalFeeRate) * Q96) / priceRatioX96 / PPM);
+            fee = uint40(ONE - (uint256(ONE) * (PPM - optimalFeeRate) * FixedPoint96.Q96) / priceRatioX96 / PPM);
         } else {
-            fee = uint40(ONE - (uint256(ONE) * (PPM - optimalFeeRate) * priceRatioX96) / Q96 / PPM);
+            fee = uint40(ONE - (uint256(ONE) * (PPM - optimalFeeRate) * priceRatioX96) / FixedPoint96.Q96 / PPM);
         }
     }
 

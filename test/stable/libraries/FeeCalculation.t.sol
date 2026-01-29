@@ -5,11 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {FeeCalculation} from "../../../src/stable/libraries/FeeCalculation.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 
 contract FeeCalculationTest is Test {
     uint40 constant ONE = 1e12;
     uint24 constant OPTIMAL_FEE_RATE = 90; // 0.009%
-    uint160 constant REFERENCE_SQRT_PRICE_X96 = 2 ** 96; // 1:1 price
+    uint160 constant REFERENCE_SQRT_PRICE_X96 = uint160(FixedPoint96.Q96); // 1:1 price
     uint256 constant Q48 = 2 ** 48;
 
     function test_calculatePriceRatioX96_left_succeeds() public pure {
@@ -21,7 +22,7 @@ contract FeeCalculationTest is Test {
         assertEq(priceRatioX96, expected);
 
         // Ratio should be less than or equal to 2^96 (1)
-        assertTrue(priceRatioX96 <= 2 ** 96);
+        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
     }
 
     function test_calculatePriceRatioX96_right_succeeds() public pure {
@@ -33,7 +34,7 @@ contract FeeCalculationTest is Test {
         assertEq(priceRatioX96, expected);
 
         // Ratio should be less than or equal to 2^96 (1)
-        assertTrue(priceRatioX96 <= 2 ** 96);
+        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
     }
 
     function test_fuzz_calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePriceX96) public pure {
@@ -42,12 +43,12 @@ contract FeeCalculationTest is Test {
 
         uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        assertTrue(priceRatioX96 <= 2 ** 96);
+        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
     }
 
     function test_calculateCloseFee_succeeds_inside_optimal_spread() public pure {
         // Price very close to reference (should be inside optimal spread)
-        uint160 priceRatioX96 = 2 ** 96; // Exactly at reference
+        uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
         int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_RATE);
         assertTrue(closeFee < 0);
     }
@@ -111,7 +112,7 @@ contract FeeCalculationTest is Test {
         optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6));
 
         // Calculate the minimum priceRatioX96 that's inside the optimal spread
-        uint256 minPriceRatio = (uint256(2 ** 96) * (1e6 - optimalFeeRate)) / 1e6;
+        uint256 minPriceRatio = (uint256(FixedPoint96.Q96) * (1e6 - optimalFeeRate)) / 1e6;
 
         // Bound priceRatioX96 to be inside the optimal spread
         priceRatioX96 = uint160(bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96));
