@@ -31,12 +31,14 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
-    bool private _inflight;
     bool private _isReversed;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
+    bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
 
     error UnauthorizedCaller();
     error Reentrancy();
+    error ProhibitedEntry();
     error NativeCurrencyExactOut();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
@@ -56,7 +58,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
     /// @dev Called by the v1 pool during swap*WithCallback().
     /// Per Fluid docs, tokens should be transferred to the Liquidity Layer.
     function dexCallback(address token, uint256 amount) external override {
-        if (!_inflight) revert Reentrancy();
+        if (!_getTransientInflight()) revert ProhibitedEntry();
         if (msg.sender != address(FLUID_POOL)) revert UnauthorizedCaller();
         if (token == FLUID_NATIVE_CURRENCY) {
             token = address(0);
@@ -117,7 +119,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
-        if (_inflight) revert Reentrancy();
+        if (_getTransientInflight()) revert Reentrancy();
 
         // Pre-compute values to avoid stack depth issues
         bool inputIsNative = takeCurrency.isAddressZero();
@@ -129,7 +131,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
             poolManager.sync(settleCurrency);
         }
 
-        _inflight = true;
+        _setTransientInflight(true);
 
         if (params.amountSpecified < 0) {
             amountTake = uint256(-params.amountSpecified);
@@ -139,11 +141,11 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
             amountTake = _swapExactOut(inputIsNative, fluidSwap0to1, amountSettle, recipient, takeCurrency);
         }
 
-        _inflight = false;
+        _setTransientInflight(false);
 
         if (!outputIsNative) {
             hasSettled = true;
-            // Fluid's exactOut can sometimes be off by 1 so we use the actual settled amount
+            // Fluid's exactOut can sometimes be off by 1-2 so we use the actual settled amount
             amountSettle = poolManager.settle();
         }
 
@@ -174,5 +176,21 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IFluidDexCallback {
         } else {
             amountIn = FLUID_POOL.swapOutWithCallback(fluidSwap0to1, amountOut, type(uint256).max, recipient);
         }
+    }
+
+    function _setTransientInflight(bool value) private {
+        uint256 _value = value ? 1 : 0;
+        assembly {
+            tstore(INFLIGHT_SLOT, _value)
+        }
+    }
+
+    function _getTransientInflight() private view returns (bool value) {
+        uint256 _value;
+        assembly {
+            _value := tload(INFLIGHT_SLOT)
+        }
+        // Results to true if the slot is not empty
+        value = _value > 0;
     }
 }

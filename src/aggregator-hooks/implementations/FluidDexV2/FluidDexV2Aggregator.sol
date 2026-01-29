@@ -50,8 +50,9 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
-    bool private _inflight;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
+    bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
 
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
@@ -83,10 +84,10 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     /// @return The result bytes from the swap operation
     function startOperationCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(FLUID_DEX_V2)) revert UnauthorizedCaller();
-        if (_inflight) revert Reentrancy();
+        if (_getTransientInflight()) revert Reentrancy();
 
         FluidDexV2SwapParams memory fluidParams = abi.decode(data, (FluidDexV2SwapParams));
-        _inflight = true;
+        _setTransientInflight(true);
 
         bytes memory swapResult;
         uint256 amountIn;
@@ -126,7 +127,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
             _settleSwap(fluidParams, amountIn, fluidParams.amount);
         }
 
-        _inflight = false;
+        _setTransientInflight(false);
         if (fluidParams.isQuote) {
             revert QuoteResult(amountIn, amountOut);
         }
@@ -150,7 +151,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         // startOperation should "fail" because callback reverts with QuoteResult error
         if (ok) revert UnexpectedSuccess();
 
-        // If it reverted with our custom error, decode it.
+        // If it reverted with QuoteResult error, decode it.
         // Custom error encoding: selector (4 bytes) + abi-encoded args
         if (ret.length >= 4 && bytes4(ret) == QuoteResult.selector) {
             // Strip selector
@@ -195,7 +196,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         return IHooks.beforeInitialize.selector;
     }
 
-    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId)
+    function _conductSwap(Currency, Currency, SwapParams calldata params, PoolId)
         internal
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
@@ -213,11 +214,11 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         (uint256 resultAmount,,) = abi.decode(res, (uint256, uint256, uint256));
 
         if (params.amountSpecified < 0) {
-            // Exact-In: resultAmount is amountOut
+            // Exact-In: resultAmount is amount Out
             amountTake = uint256(-params.amountSpecified);
             amountSettle = resultAmount;
         } else {
-            // Exact-Out: resultAmount is amountIn
+            // Exact-Out: resultAmount is amount In
             amountSettle = uint256(params.amountSpecified);
             amountTake = resultAmount;
         }
@@ -230,7 +231,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         address inToken = fluidParams.swap0To1 ? fluidParams.key.token0 : fluidParams.key.token1;
         address outToken = fluidParams.swap0To1 ? fluidParams.key.token1 : fluidParams.key.token0;
 
-        // Check if tokens are native currency (Fluid uses 0xEeee... for native)
+        // Check if tokens are native currency
         bool inTokenIsNative = inToken == FLUID_NATIVE_CURRENCY;
         bool outTokenIsNative = outToken == FLUID_NATIVE_CURRENCY;
         uint256 msgValue = inTokenIsNative ? amountIn : 0;
@@ -253,10 +254,27 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     /// @inheritdoc IFluidDexV2Callback
     function dexCallback(address token, address to, uint256 amount) external {
         if (msg.sender != address(FLUID_DEX_V2)) revert UnauthorizedCaller();
+        if (!_getTransientInflight()) revert Reentrancy();
         // Convert Fluid's native currency representation to address(0) for Uniswap v4
         if (token == FLUID_NATIVE_CURRENCY) {
             token = address(0);
         }
         poolManager.take(Currency.wrap(token), to, amount);
+    }
+
+    function _setTransientInflight(bool value) private {
+        uint256 _value = value ? 1 : 0;
+        assembly {
+            tstore(INFLIGHT_SLOT, _value)
+        }
+    }
+
+    function _getTransientInflight() private view returns (bool value) {
+        uint256 _value;
+        assembly {
+            _value := tload(INFLIGHT_SLOT)
+        }
+        // Results to true if the slot is not empty
+        value = _value > 0;
     }
 }

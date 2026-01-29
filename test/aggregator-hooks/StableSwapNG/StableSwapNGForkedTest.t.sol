@@ -127,10 +127,6 @@ contract StableSwapNGForkedTest is Test {
 
     function _deployHook() internal {
         // Hook flags required by ExternalLiqSourceHook:
-        // - beforeSwap
-        // - beforeSwapReturnDelta
-        // - beforeInitialize
-        // - beforeAddLiquidity
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
