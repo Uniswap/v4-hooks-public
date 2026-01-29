@@ -18,13 +18,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
-import {FluidDexLiteAggregator} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
+import {
+    FluidDexLiteAggregator
+} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
 import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
-import {IFluidDexLiteResolver} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
-
-interface IERC20Metadata {
-    function decimals() external view returns (uint8);
-}
+import {
+    IFluidDexLiteResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title FluidDexLiteERCForkedTest
 /// @notice Tests for Fluid DEX Lite with ERC20 token pairs (no native ETH)
@@ -108,8 +109,9 @@ contract FluidDexLiteERCForkedTest is Test {
         initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
         initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
 
-        // Use mainnet PoolManager
-        manager = PoolManager(address(0x000000000004444c5dc75cB358380D2e3dE08A90));
+        // Use deployed PoolManager
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);

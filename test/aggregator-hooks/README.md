@@ -10,7 +10,9 @@ For tests that fork mainnet, you need an .env file containing pool info for each
 Example:
 
 ```
-MAINNET_RPC_URL=<RPC_URL_HERE>
+MAINNET_RPC_URL=<RPC_URL>
+# UniswapV4 Pool Manager (required for all tests)
+POOL_MANAGER=0x000000000004444c5dc75cB358380D2e3dE08A90
 # StableSwap
 STABLE_SWAP_POOL=0xf2DCf6336D8250754B4527f57b275b19c8D5CF88
 # StableSwap-NG

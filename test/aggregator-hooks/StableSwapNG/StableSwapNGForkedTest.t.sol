@@ -16,13 +16,13 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-
-import {StableSwapNGAggregator} from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
-import {ICurveStableSwapNG} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
-
-interface IERC20Metadata {
-    function decimals() external view returns (uint8);
-}
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {
+    StableSwapNGAggregator
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
+import {
+    ICurveStableSwapNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
 
 contract StableSwapNGForkedTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -93,8 +93,9 @@ contract StableSwapNGForkedTest is Test {
         swapAmount = 1000 * (10 ** tokenDecimals);
         initialBalance = 1_000_000 * (10 ** tokenDecimals);
 
-        // Use mainnet PoolManager
-        manager = PoolManager(address(0x000000000004444c5dc75cB358380D2e3dE08A90));
+        // Use deployed PoolManager
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);

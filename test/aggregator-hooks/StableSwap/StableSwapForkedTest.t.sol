@@ -16,7 +16,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
 
@@ -89,8 +89,9 @@ contract StableSwapForkedTest is Test {
         swapAmount = 1 * (10 ** tokenDecimals);
         initialBalance = 1000 * (10 ** tokenDecimals);
 
-        // Use mainnet PoolManager
-        manager = PoolManager(address(0x000000000004444c5dc75cB358380D2e3dE08A90));
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        // Use deployedPoolManager
+        manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
@@ -323,8 +324,4 @@ contract StableSwapForkedTest is Test {
     }
 
     receive() external payable {}
-}
-
-interface IERC20Metadata {
-    function decimals() external view returns (uint8);
 }
