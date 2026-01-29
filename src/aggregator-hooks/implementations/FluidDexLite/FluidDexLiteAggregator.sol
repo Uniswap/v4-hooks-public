@@ -31,6 +31,7 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
+    bool private _isReversed;
     bytes32 private immutable salt;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
@@ -65,21 +66,35 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
     }
 
     /// @inheritdoc ExternalLiqSourceHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable override returns (uint256) {
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        external
+        payable
+        override
+        returns (uint256 amountUnspecified)
+    {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
-        // Negate amountSpecified to match what _conductSwap does
-        return FLUID_DEX_LITE_RESOLVER.estimateSwapSingle(dexKey, zeroToOne, -amountSpecified);
+        bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
+        amountUnspecified = FLUID_DEX_LITE_RESOLVER.estimateSwapSingle(dexKey, fluidSwap0to1, -amountSpecified);
+    }
+
+    /// @inheritdoc ExternalLiqSourceHook
+    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        (, IFluidDexLite.Reserves memory reserves) = FLUID_DEX_LITE_RESOLVER.getPricesAndReserves(dexKey);
+        if (_isReversed) {
+            return (reserves.token1RealReserves, reserves.token0RealReserves);
+        }
+        return (reserves.token0RealReserves, reserves.token1RealReserves);
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         // Convert address(0) (Uniswap v4 native currency) to Fluid's native currency representation
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
+
         if (token0 == address(0)) {
             token0 = FLUID_NATIVE_CURRENCY;
-        }
-        if (token1 == address(0)) {
-            token1 = FLUID_NATIVE_CURRENCY;
+            _isReversed = true;
         }
 
         dexKey = IFluidDexLite.DexKey({token0: token0, token1: token1, salt: salt});
@@ -114,10 +129,11 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
             }
         }
 
+        bool fluidSwap0to1 = _isReversed ? !params.zeroForOne : params.zeroForOne;
         uint256 amountUnspecified = _swap(
             FluidDexLiteSwapParams({
                 dexKey: dexKey,
-                swap0To1: params.zeroForOne,
+                swap0To1: fluidSwap0to1,
                 amountSpecified: -params.amountSpecified,
                 amountLimit: isExactIn ? 0 : type(uint256).max,
                 payer: address(this),

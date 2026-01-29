@@ -43,22 +43,29 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
         external
         payable
         override
-        returns (uint256 unspecifiedAmount)
+        returns (uint256 amountUnspecified)
     {
         PoolInfo storage poolInfo = poolIdToTokenInfo[poolId];
         if (amountSpecified < 0) {
             if (zeroToOne) {
-                return pool.get_dy(poolInfo.token0Index, poolInfo.token1Index, uint256(-amountSpecified));
+                amountUnspecified = pool.get_dy(poolInfo.token0Index, poolInfo.token1Index, uint256(-amountSpecified));
             } else {
-                return pool.get_dy(poolInfo.token1Index, poolInfo.token0Index, uint256(-amountSpecified));
+                amountUnspecified = pool.get_dy(poolInfo.token1Index, poolInfo.token0Index, uint256(-amountSpecified));
             }
         } else {
             if (zeroToOne) {
-                return pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, uint256(amountSpecified));
             } else {
-                return pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, uint256(amountSpecified));
             }
         }
+    }
+
+    /// @inheritdoc ExternalLiqSourceHook
+    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+        PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
+        amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
+        amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {

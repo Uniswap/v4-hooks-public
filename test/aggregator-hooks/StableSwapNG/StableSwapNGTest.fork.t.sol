@@ -372,5 +372,19 @@ contract StableSwapNGForkedTest is Test {
         assertGt(expectedOut, amountIn * 99 / 100, "Quote should be close to 1:1 for stableswap");
     }
 
+    /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances
+    function test_pseudoTotalValueLocked() public {
+        (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
+
+        (int128 token0Index, int128 token1Index) = hook.poolIdToTokenInfo(poolId);
+        uint256 expectedBalance0 = curvePool.balances(uint256(uint128(token0Index)));
+        uint256 expectedBalance1 = curvePool.balances(uint256(uint128(token1Index)));
+
+        assertEq(amount0, expectedBalance0, "amount0 should match Curve pool balance");
+        assertEq(amount1, expectedBalance1, "amount1 should match Curve pool balance");
+        assertGt(amount0, 0, "amount0 should be non-zero");
+        assertGt(amount1, 0, "amount1 should be non-zero");
+    }
+
     receive() external payable {}
 }

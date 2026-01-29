@@ -37,4 +37,9 @@ interface ICurveStableSwapNG {
     /// @param i Index of the token in the pool
     /// @return The token address at that index
     function coins(uint256 i) external view returns (address);
+
+    /// @notice Returns the balance of a token at a given index
+    /// @param i Index of the token in the pool
+    /// @return The balance of the token at that index
+    function balances(uint256 i) external view returns (uint256);
 }

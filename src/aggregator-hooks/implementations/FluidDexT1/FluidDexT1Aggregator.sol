@@ -67,17 +67,40 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     }
 
     /// @inheritdoc ExternalLiqSourceHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable override returns (uint256) {
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        external
+        payable
+        override
+        returns (uint256 amountUnspecified)
+    {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
         if (amountSpecified < 0) {
-            return FLUID_DEX_RESERVES_RESOLVER.estimateSwapIn(
+            amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapIn(
                 address(FLUID_POOL), fluidSwap0to1, uint256(-amountSpecified), 0
             );
         } else {
-            return FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
+            amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
                 address(FLUID_POOL), fluidSwap0to1, uint256(amountSpecified), type(uint256).max
             );
+        }
+    }
+
+    /// @inheritdoc ExternalLiqSourceHook
+    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        (bool success, bytes memory data) = address(FLUID_DEX_RESERVES_RESOLVER)
+            .staticcall(
+                abi.encodeWithSelector(IFluidDexReservesResolver.getPoolWithReserves.selector, address(FLUID_POOL))
+            );
+        if (success && data.length > 0) {
+            IFluidDexReservesResolver.PoolWithReserves memory poolData =
+                abi.decode(data, (IFluidDexReservesResolver.PoolWithReserves));
+            uint256 token0Reserves =
+                poolData.collateralReserves.token0RealReserves + poolData.debtReserves.token0RealReserves;
+            uint256 token1Reserves =
+                poolData.collateralReserves.token1RealReserves + poolData.debtReserves.token1RealReserves;
+            return _isReversed ? (token1Reserves, token0Reserves) : (token0Reserves, token1Reserves);
         }
     }
 

@@ -12,6 +12,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IFluidDexV2} from "./interfaces/IFluidDexV2.sol";
 import {IFluidDexV2Callback} from "./interfaces/IFluidDexV2Callback.sol";
 import {IFluidDexV2Resolver} from "./interfaces/IFluidDexV2Resolver.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title FluidDexV2Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX V2 pools
@@ -50,6 +51,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
+    bool private _isReversed;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
     bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
@@ -137,10 +139,11 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     /// @inheritdoc ExternalLiqSourceHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable override returns (uint256) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
         FluidDexV2SwapParams memory fluidParams = FluidDexV2SwapParams({
             kind: amountSpecified < 0 ? SwapKind.ExactIn : SwapKind.ExactOut,
             key: dexKey,
-            swap0To1: zeroToOne,
+            swap0To1: fluidSwap0to1,
             amount: amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified),
             controllerData: "",
             isQuote: false
@@ -168,15 +171,34 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         revert UnexpectedError();
     }
 
+    /// @inheritdoc ExternalLiqSourceHook
+    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        address token0 = dexKey.token0 == FLUID_NATIVE_CURRENCY ? address(0) : dexKey.token0;
+        address token1 = dexKey.token1 == FLUID_NATIVE_CURRENCY ? address(0) : dexKey.token1;
+        uint256 balance0;
+        uint256 balance1;
+        if (token0 == address(0)) {
+            balance0 = address(FLUID_DEX_V2).balance;
+        } else {
+            balance0 = IERC20(token0).balanceOf(address(FLUID_DEX_V2));
+        }
+        if (token1 == address(0)) {
+            balance1 = address(FLUID_DEX_V2).balance;
+        } else {
+            balance1 = IERC20(token1).balanceOf(address(FLUID_DEX_V2));
+        }
+        return _isReversed ? (balance1, balance0) : (balance0, balance1);
+    }
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         // Convert address(0) (Uniswap v4 native currency) to Fluid's native currency representation
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
         if (token0 == address(0)) {
             token0 = FLUID_NATIVE_CURRENCY;
-        }
-        if (token1 == address(0)) {
-            token1 = FLUID_NATIVE_CURRENCY;
+            _isReversed = true;
+            (token0, token1) = (token1, token0);
         }
 
         dexKey = IFluidDexV2.DexKey({
@@ -201,10 +223,11 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
+        bool fluidSwap0to1 = _isReversed ? !params.zeroForOne : params.zeroForOne;
         FluidDexV2SwapParams memory fluidParams = FluidDexV2SwapParams({
             kind: params.amountSpecified < 0 ? SwapKind.ExactIn : SwapKind.ExactOut,
             key: dexKey,
-            swap0To1: params.zeroForOne,
+            swap0To1: fluidSwap0to1,
             amount: params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified),
             controllerData: "",
             isQuote: false

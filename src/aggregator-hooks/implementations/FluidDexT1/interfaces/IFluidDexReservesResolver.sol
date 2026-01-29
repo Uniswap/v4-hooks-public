@@ -57,4 +57,9 @@ interface IFluidDexReservesResolver {
         external
         payable
         returns (uint256 amountIn_);
+
+    /// @notice Get pool data with reserves for a specific DEX
+    /// @param dex_ The address of the DEX
+    /// @return poolData_ The pool data including reserves
+    function getPoolWithReserves(address dex_) external view returns (PoolWithReserves memory poolData_);
 }

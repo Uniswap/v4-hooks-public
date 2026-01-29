@@ -321,6 +321,18 @@ contract FluidDexT1ERCForkedTest is Test {
         assertGt(expectedOut, 0, "Quote should return non-zero");
     }
 
+    /// @notice Test pseudoTotalValueLocked doesn't revert and returns values
+    function test_pseudoTotalValueLocked() public view {
+        (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
+
+        if (amount0 == 0 && amount1 == 0) {
+            return;
+        }
+
+        assertGt(amount0, 0, "amount0 should be non-zero");
+        assertGt(amount1, 0, "amount1 should be non-zero");
+    }
+
     receive() external payable {}
 }
 
@@ -604,6 +616,18 @@ contract FluidDexT1NativeForkedTest is Test {
 
         assertGt(expectedOut, 0, "Quote should return non-zero");
         assertGt(expectedOut, uint256(amountIn) * 70 / 100, "Quote should be within reasonable range");
+    }
+
+    /// @notice Test pseudoTotalValueLocked doesn't revert and returns values for native pool
+    function test_pseudoTotalValueLocked() public view {
+        (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
+
+        if (amount0 == 0 && amount1 == 0) {
+            return;
+        }
+
+        assertGt(amount0, 0, "amount0 should be non-zero");
+        assertGt(amount1, 0, "amount1 should be non-zero");
     }
 
     receive() external payable {}

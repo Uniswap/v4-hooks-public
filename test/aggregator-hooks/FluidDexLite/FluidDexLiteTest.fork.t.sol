@@ -316,6 +316,14 @@ contract FluidDexLiteERCForkedTest is Test {
         assertGt(expectedOut, 0, "Quote should return non-zero");
     }
 
+    /// @notice Test pseudoTotalValueLocked returns non-zero values
+    function test_pseudoTotalValueLocked() public {
+        (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
+
+        assertGt(amount0, 0, "amount0 should be non-zero");
+        assertGt(amount1, 0, "amount1 should be non-zero");
+    }
+
     receive() external payable {}
 }
 
