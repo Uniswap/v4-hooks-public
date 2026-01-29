@@ -82,6 +82,7 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
             // NOTE: it is up to the router to handle this
             specified = -int128(uint128(amountOut));
         }
+        
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }
 

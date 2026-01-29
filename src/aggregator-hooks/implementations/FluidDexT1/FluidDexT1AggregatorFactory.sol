@@ -69,13 +69,13 @@ contract FluidDexT1AggregatorFactory {
     /// @param salt The CREATE2 salt
     /// @param fluidPool The Fluid DEX T1 pool
     /// @return The predicted hook address
-    function computeAddress(bytes32 salt, IFluidDexT1 fluidPool) external view returns (address) {
+    function computeAddress(bytes32 salt, IFluidDexT1 fluidPool) external view returns (address computedAddress) {
         bytes32 bytecodeHash = keccak256(
             abi.encodePacked(
                 type(FluidDexT1Aggregator).creationCode,
                 abi.encode(POOL_MANAGER, fluidPool, FLUID_DEX_RESERVES_RESOLVER, FLUID_LIQUIDITY)
             )
         );
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
+        computedAddress = address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
     }
 }

@@ -62,12 +62,13 @@ contract StableSwapNGForkedTest is Test {
     address public alice = makeAddr("alice");
 
     function setUp() public {
-        // Fork mainnet - requires MAINNET_RPC_URL env var
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
+        
         vm.createSelectFork(rpcUrl);
 
         // Load pool address from .env
-        curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
         curvePool = ICurveStableSwapNG(curvePoolAddress);
 
         // Dynamically fetch tokens from the pool
@@ -94,7 +95,6 @@ contract StableSwapNGForkedTest is Test {
         initialBalance = 1_000_000 * (10 ** tokenDecimals);
 
         // Use deployed PoolManager
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
         manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router

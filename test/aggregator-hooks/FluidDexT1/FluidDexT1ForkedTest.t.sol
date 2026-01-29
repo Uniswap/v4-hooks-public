@@ -74,15 +74,15 @@ contract FluidDexT1ERCForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        // Fork mainnet - requires MAINNET_RPC_URL env var
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
+        fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_ERC");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+
         vm.createSelectFork(rpcUrl);
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_erc_v1"))));
 
-        // Load ERC pool address from .env
-        fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_ERC");
         fluidPool = IFluidDexT1(fluidPoolAddress);
         fluidResolver = IFluidDexReservesResolver(FLUID_DEX_RESERVES_RESOLVER);
 
@@ -111,8 +111,6 @@ contract FluidDexT1ERCForkedTest is Test {
         initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
         initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
 
-        // Use deployed PoolManager
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
         manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
