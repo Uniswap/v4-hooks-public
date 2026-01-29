@@ -17,10 +17,14 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
-import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
+import {
+    StableSwapNGAggregator
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
+import {
+    ICurveStableSwapNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
 
-contract StableSwapForkedTest is Test {
+contract StableSwapNGForkedTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -46,8 +50,8 @@ contract StableSwapForkedTest is Test {
 
     IPoolManager public manager;
     SafePoolSwapTest public swapRouter;
-    StableSwapAggregator public hook;
-    ICurveStableSwap public curvePool;
+    StableSwapNGAggregator public hook;
+    ICurveStableSwapNG public curvePool;
 
     PoolKey public poolKey;
     PoolId public poolId;
@@ -60,11 +64,12 @@ contract StableSwapForkedTest is Test {
     function setUp() public {
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
-        curvePoolAddress = vm.envAddress("STABLE_SWAP_POOL");
-        
+        curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
+
         vm.createSelectFork(rpcUrl);
 
-        curvePool = ICurveStableSwap(curvePoolAddress);
+        // Load pool address from .env
+        curvePool = ICurveStableSwapNG(curvePoolAddress);
 
         // Dynamically fetch tokens from the pool
         address coinA = curvePool.coins(0);
@@ -86,10 +91,10 @@ contract StableSwapForkedTest is Test {
         tokenDecimals = IERC20Metadata(token0Address).decimals();
 
         // Set test amounts based on decimals
-        swapAmount = 1 * (10 ** tokenDecimals);
-        initialBalance = 1000 * (10 ** tokenDecimals);
+        swapAmount = 1000 * (10 ** tokenDecimals);
+        initialBalance = 1_000_000 * (10 ** tokenDecimals);
 
-        // Use deployedPoolManager
+        // Use deployed PoolManager
         manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
@@ -110,9 +115,6 @@ contract StableSwapForkedTest is Test {
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        // Mint tokens to PoolManager (since these might not have existing balance)
-        _mintToPoolManager();
-
         // Deal tokens to alice for testing
         _dealTokens(alice, initialBalance, initialBalance);
 
@@ -124,25 +126,18 @@ contract StableSwapForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by ExternalLiqSourceHook
+        // Hook flags required by ExternalLiqSourceHook:
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         // Mine salt for hook address
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address hookAddress, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
+            HookMiner.find(address(this), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 
         // Deploy hook
-        hook = new StableSwapAggregator{salt: salt}(manager, curvePool);
+        hook = new StableSwapNGAggregator{salt: salt}(manager, curvePool);
         require(address(hook) == hookAddress, "Hook address mismatch");
-    }
-
-    function _mintToPoolManager() internal {
-        // Mint tokens to PoolManager so it has liquidity for swaps
-        uint256 poolManagerBalance = 10_000 * (10 ** tokenDecimals);
-        deal(token0Address, address(manager), poolManagerBalance);
-        deal(token1Address, address(manager), poolManagerBalance);
     }
 
     function _dealTokens(address to, uint256 amount0, uint256 amount1) internal {
@@ -168,8 +163,8 @@ contract StableSwapForkedTest is Test {
 
     /// @notice Test exact input swap: Token0 -> Token1 (zero to one)
     function test_swapExactInput_ZeroForOne() public {
+        // Dynamically determine safe amount based on PoolManager balance
         uint256 amountIn = _getSafeAmountZeroForOne(swapAmount);
-        require(amountIn > 0, "No balance for swap");
 
         // Get quote before swap
         uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
@@ -181,7 +176,11 @@ contract StableSwapForkedTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -int256(amountIn), // negative for exact input
+                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -189,16 +188,17 @@ contract StableSwapForkedTest is Test {
         uint256 token0After = IERC20(token0Address).balanceOf(alice);
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
+        // Verify Token0 decreased
         assertEq(token0Before - token0After, amountIn, "Token0 should decrease by exact input amount");
 
-        uint256 received = token1After - token1Before;
-        assertEq(received, expectedOut, "Received amount should match quote");
+        // Verify Token1 increased and matches quote
+        uint256 token1Received = token1After - token1Before;
+        assertEq(token1Received, expectedOut, "Received amount should match quote");
     }
 
     /// @notice Test exact input swap: Token1 -> Token0 (one to zero)
     function test_swapExactInput_OneForZero() public {
-        uint256 amountIn = _getSafeAmountOneForZero(swapAmount);
-        require(amountIn > 0, "No balance for swap");
+        uint256 amountIn = swapAmount;
 
         // Get quote before swap
         uint256 expectedOut = hook.quote(false, -int256(amountIn), poolId);
@@ -210,7 +210,11 @@ contract StableSwapForkedTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: false,
+                amountSpecified: -int256(amountIn), // negative for exact input
+                sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -218,48 +222,92 @@ contract StableSwapForkedTest is Test {
         uint256 token0After = IERC20(token0Address).balanceOf(alice);
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
+        // Verify Token1 decreased
         assertEq(token1Before - token1After, amountIn, "Token1 should decrease by exact input amount");
 
-        uint256 received = token0After - token0Before;
-        assertEq(received, expectedOut, "Received amount should match quote");
+        // Verify Token0 increased and matches quote
+        uint256 token0Received = token0After - token0Before;
+        assertEq(token0Received, expectedOut, "Received amount should match quote");
     }
 
-    /// @notice Test that exact output swap reverts (StableSwap pools don't support get_dx)
-    function test_swapExactOutput_ZeroForOne_Reverts() public {
-        uint256 amountOut = swapAmount;
+    /// @notice Test exact output swap: Token0 -> Token1 (zero to one)
+    function test_swapExactOutput_ZeroForOne() public {
+        // Dynamically determine safe amount based on PoolManager balance
+        uint256 amountOut = _getSafeAmountZeroForOne(swapAmount);
+
+        // Get quote for expected input amount
+        uint256 expectedIn = hook.quote(true, int256(amountOut), poolId);
+        assertGt(expectedIn, 0, "Quote should return non-zero");
+
+        uint256 token0Before = IERC20(token0Address).balanceOf(alice);
+        uint256 token1Before = IERC20(token1Address).balanceOf(alice);
 
         vm.prank(alice);
-        vm.expectRevert(); // Should revert with ExactOutputNotSupported
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: int256(amountOut), // positive for exact output
+                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
+
+        uint256 token0After = IERC20(token0Address).balanceOf(alice);
+        uint256 token1After = IERC20(token1Address).balanceOf(alice);
+
+        // Verify Token1 increased by the exact output amount (Curve pools may have 1-2 wei rounding)
+        assertApproxEqAbs(token1After - token1Before, amountOut, 2, "Token1 should increase by ~exact output amount");
+
+        // Verify Token0 spent matches quote
+        uint256 token0Spent = token0Before - token0After;
+        assertEq(token0Spent, expectedIn, "Token0 spent should match quote");
     }
 
-    /// @notice Test that exact output swap reverts (StableSwap pools don't support get_dx)
-    function test_swapExactOutput_OneForZero_Reverts() public {
+    /// @notice Test exact output swap: Token1 -> Token0 (one to zero)
+    function test_swapExactOutput_OneForZero() public {
         uint256 amountOut = swapAmount;
 
+        // Get quote for expected input amount
+        uint256 expectedIn = hook.quote(false, int256(amountOut), poolId);
+        assertGt(expectedIn, 0, "Quote should return non-zero");
+
+        uint256 token0Before = IERC20(token0Address).balanceOf(alice);
+        uint256 token1Before = IERC20(token1Address).balanceOf(alice);
+
         vm.prank(alice);
-        vm.expectRevert(); // Should revert with ExactOutputNotSupported
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: false,
+                amountSpecified: int256(amountOut), // positive for exact output
+                sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
+
+        uint256 token0After = IERC20(token0Address).balanceOf(alice);
+        uint256 token1After = IERC20(token1Address).balanceOf(alice);
+
+        // Verify Token0 increased by the exact output amount (Curve pools may have 1-2 wei rounding)
+        assertApproxEqAbs(token0After - token0Before, amountOut, 2, "Token0 should increase by ~exact output amount");
+
+        // Verify Token1 spent matches quote
+        uint256 token1Spent = token1Before - token1After;
+        assertEq(token1Spent, expectedIn, "Token1 spent should match quote");
     }
 
     // ========== ADDITIONAL TESTS ==========
 
     /// @notice Test that multiple swaps work correctly
     function test_multipleSwaps() public {
+        // Use dynamic amount based on PoolManager balance (for zeroForOne swaps)
         uint256 amount = _getSafeAmountZeroForOne(100 * (10 ** tokenDecimals));
-        require(amount > 0, "No balance for swap");
+        require(amount > 0, "PoolManager has no Token0 balance for this test");
 
-        // First swap: Token0 -> Token1 (exact input)
+        // First swap: Token0 -> Token1
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
@@ -268,7 +316,7 @@ contract StableSwapForkedTest is Test {
             ""
         );
 
-        // Second swap: Token1 -> Token0 (exact input)
+        // Second swap: Token1 -> Token0
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
@@ -277,13 +325,12 @@ contract StableSwapForkedTest is Test {
             ""
         );
 
-        // Third swap: Another exact input swap (Note: StableSwap pools don't have get_dx, so exact output not
-        // supported)
+        // Third swap: exact output (use smaller amount to ensure PoolManager has enough after previous swaps)
         uint256 smallAmount = amount / 2;
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(smallAmount), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({zeroForOne: true, amountSpecified: int256(smallAmount), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -291,9 +338,10 @@ contract StableSwapForkedTest is Test {
 
     /// @notice Test swap with larger amount
     function test_swapLargeAmount() public {
-        uint256 desiredAmount = 1000 * (10 ** tokenDecimals);
+        // Dynamically determine safe amount - use oneForZero since PoolManager typically has more Token1
+        uint256 desiredAmount = 100_000 * (10 ** tokenDecimals);
         uint256 largeAmount = _getSafeAmountOneForZero(desiredAmount);
-        require(largeAmount > 0, "No balance for swap");
+        require(largeAmount > 0, "PoolManager has no Token1 balance for this test");
 
         _dealTokens(alice, largeAmount, largeAmount);
 
@@ -307,15 +355,17 @@ contract StableSwapForkedTest is Test {
             ""
         );
 
-        uint256 received = IERC20(token0Address).balanceOf(alice) - token0Before;
-        // Note: Some stableswap pools have non-1:1 exchange rates, so we just check we received something
-        assertGt(received, 0, "Should receive some tokens for large swap");
+        uint256 token0Received = IERC20(token0Address).balanceOf(alice) - token0Before;
+
+        // Larger amounts may have more slippage on Curve
+        assertGt(token0Received, largeAmount * 95 / 100, "Should receive at least 95% for large swap");
     }
 
     /// @notice Verify quote function returns reasonable values
     function test_quote() public {
         uint256 amountIn = swapAmount;
 
+        // Quote for exact input (negative amountSpecified)
         uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
 
         assertGt(expectedOut, 0, "Quote should return non-zero");

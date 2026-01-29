@@ -64,10 +64,16 @@ contract StableSwapNGAggregatorFactory {
     /// @notice Computes the CREATE2 address for a hook without deploying
     /// @param salt The CREATE2 salt
     /// @param curvePool The Curve StableSwap NG pool
-    /// @return The predicted hook address
-    function computeAddress(bytes32 salt, ICurveStableSwapNG curvePool) external view returns (address) {
-        bytes32 bytecodeHash =
-            keccak256(abi.encodePacked(type(StableSwapNGAggregator).creationCode, abi.encode(POOL_MANAGER, curvePool)));
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
+    /// @return computedAddress The predicted hook address
+    function computeAddress(bytes32 salt, ICurveStableSwapNG curvePool)
+        external
+        view
+        returns (address computedAddress)
+    {
+        bytes32 bytecodeHash = keccak256(
+            abi.encodePacked(type(StableSwapNGAggregator).creationCode, abi.encode(POOL_MANAGER, curvePool))
+        );
+        computedAddress =
+            address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
     }
 }

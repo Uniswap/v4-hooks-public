@@ -353,7 +353,7 @@ contract FluidDexT1NativeForkedTest is Test {
     address ercTokenAddress; // The ERC20 token in the pair (not native)
 
     // Test amounts (in 18 decimals)
-    uint256 constant SWAP_AMOUNT = 1 ether;
+    int256 constant SWAP_AMOUNT = 1 ether;
     uint256 constant INITIAL_BALANCE = 100 ether;
 
     IPoolManager public manager;
@@ -448,19 +448,19 @@ contract FluidDexT1NativeForkedTest is Test {
 
     /// @notice Test exact input swap: Native ETH in -> ERC20 out (zeroForOne)
     function test_nativeIn_exactIn() public {
-        uint256 amountIn = SWAP_AMOUNT;
+        int256 amountIn = SWAP_AMOUNT;
 
         // Get quote before swap
-        uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
+        uint256 expectedOut = hook.quote(true, -(amountIn), poolId);
         assertGt(expectedOut, 0, "Quote should return non-zero");
 
         uint256 ethBefore = alice.balance;
         uint256 ercBefore = IERC20(ercTokenAddress).balanceOf(alice);
 
         vm.prank(alice);
-        swapRouter.swap{value: amountIn}(
+        swapRouter.swap{value: uint256(amountIn)}(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({zeroForOne: true, amountSpecified: -(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -470,7 +470,7 @@ contract FluidDexT1NativeForkedTest is Test {
 
         // ETH should decrease by approximately the input amount (small variance allowed for native handling)
         uint256 ethSpent = ethBefore - ethAfter;
-        assertApproxEqRel(ethSpent, amountIn, 0.001e18, "ETH spent should be close to input amount");
+        assertApproxEqRel(ethSpent, uint256(amountIn), 0.001e18, "ETH spent should be close to input amount");
 
         // Should receive ERC20 tokens matching quote (allow 0.1% variance)
         uint256 ercReceived = ercAfter - ercBefore;
@@ -479,10 +479,10 @@ contract FluidDexT1NativeForkedTest is Test {
 
     /// @notice Test exact input swap: ERC20 in -> Native ETH out (oneForZero)
     function test_nativeOut_exactIn() public {
-        uint256 amountIn = SWAP_AMOUNT;
+        int256 amountIn = SWAP_AMOUNT;
 
         // Get quote before swap
-        uint256 expectedOut = hook.quote(false, -int256(amountIn), poolId);
+        uint256 expectedOut = hook.quote(false, -(amountIn), poolId);
         assertGt(expectedOut, 0, "Quote should return non-zero");
 
         uint256 ethBefore = alice.balance;
@@ -491,7 +491,7 @@ contract FluidDexT1NativeForkedTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({zeroForOne: false, amountSpecified: -(amountIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -500,7 +500,7 @@ contract FluidDexT1NativeForkedTest is Test {
         uint256 ercAfter = IERC20(ercTokenAddress).balanceOf(alice);
 
         // ERC20 should decrease by exact input amount
-        assertEq(ercBefore - ercAfter, amountIn, "ERC20 should decrease by exact input amount");
+        assertEq(ercBefore - ercAfter, uint256(amountIn), "ERC20 should decrease by exact input amount");
 
         // Should receive ETH close to quote (allow 0.1% variance for state changes between quote and swap)
         uint256 ethReceived = ethAfter - ethBefore;
@@ -510,7 +510,7 @@ contract FluidDexT1NativeForkedTest is Test {
     /// @notice Test exact output swap: Native ETH in -> ERC20 out (zeroForOne) - SHOULD REVERT
     /// @dev Native currency exact output is not supported because we can't know how much ETH to send upfront
     function test_nativeIn_exactOut_reverts() public {
-        uint256 amountOut = SWAP_AMOUNT;
+        int256 amountOut = SWAP_AMOUNT;
 
         vm.prank(alice);
         vm.expectRevert(
@@ -522,9 +522,9 @@ contract FluidDexT1NativeForkedTest is Test {
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
-        swapRouter.swap{value: amountOut * 2}( // Send extra ETH that would be refunded
+        swapRouter.swap{value: uint256(amountOut) * 2}( // Send extra ETH that would be refunded
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({zeroForOne: true, amountSpecified: (amountOut), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -532,10 +532,10 @@ contract FluidDexT1NativeForkedTest is Test {
 
     /// @notice Test exact output swap: ERC20 in -> Native ETH out (oneForZero)
     function test_nativeOut_exactOut() public {
-        uint256 amountOut = SWAP_AMOUNT;
+        int256 amountOut = SWAP_AMOUNT;
 
         // Get quote for expected input amount
-        uint256 expectedIn = hook.quote(false, int256(amountOut), poolId);
+        uint256 expectedIn = hook.quote(false, (amountOut), poolId);
 
         uint256 ethBefore = alice.balance;
         uint256 ercBefore = IERC20(ercTokenAddress).balanceOf(alice);
@@ -543,7 +543,7 @@ contract FluidDexT1NativeForkedTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({zeroForOne: false, amountSpecified: (amountOut), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -553,7 +553,7 @@ contract FluidDexT1NativeForkedTest is Test {
 
         // ETH should increase by approximately the output amount (allow 0.1% variance)
         uint256 ethReceived = ethAfter - ethBefore;
-        assertApproxEqRel(ethReceived, amountOut, 0.001e18, "ETH received should be close to output amount");
+        assertApproxEqRel(ethReceived, uint256(amountOut), 0.001e18, "ETH received should be close to output amount");
 
         // ERC20 should decrease
         uint256 ercSpent = ercBefore - ercAfter;
@@ -598,12 +598,12 @@ contract FluidDexT1NativeForkedTest is Test {
 
     /// @notice Verify quote function returns reasonable values for native pool
     function test_quote() public {
-        uint256 amountIn = SWAP_AMOUNT;
+        int256 amountIn = SWAP_AMOUNT;
 
-        uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
+        uint256 expectedOut = hook.quote(true, -(amountIn), poolId);
 
         assertGt(expectedOut, 0, "Quote should return non-zero");
-        assertGt(expectedOut, amountIn * 70 / 100, "Quote should be within reasonable range");
+        assertGt(expectedOut, uint256(amountIn) * 70 / 100, "Quote should be within reasonable range");
     }
 
     receive() external payable {}

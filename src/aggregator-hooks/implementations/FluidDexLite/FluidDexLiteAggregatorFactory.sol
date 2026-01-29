@@ -62,14 +62,15 @@ contract FluidDexLiteAggregatorFactory {
     /// @notice Computes the CREATE2 address for a hook without deploying
     /// @param salt The CREATE2 salt
     /// @param dexSalt The salt for the Fluid DEX Lite pool's DexKey
-    /// @return The predicted hook address
-    function computeAddress(bytes32 salt, bytes32 dexSalt) external view returns (address) {
+    /// @return computedAddress The predicted hook address
+    function computeAddress(bytes32 salt, bytes32 dexSalt) external view returns (address computedAddress) {
         bytes32 bytecodeHash = keccak256(
             abi.encodePacked(
                 type(FluidDexLiteAggregator).creationCode,
                 abi.encode(POOL_MANAGER, FLUID_DEX_LITE, FLUID_DEX_LITE_RESOLVER, dexSalt)
             )
         );
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
+        computedAddress =
+            address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
     }
 }
