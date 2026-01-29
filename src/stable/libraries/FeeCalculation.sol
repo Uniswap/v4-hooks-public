@@ -14,7 +14,7 @@ library FeeCalculation {
     uint40 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
 
     /// @notice Parts-per-million scalar (1e6).
-    uint40 internal constant PPM = 1e6;
+    uint24 internal constant PPM = 1e6;
 
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint64 internal constant Q48 = 2 ** 48;
@@ -33,6 +33,7 @@ library FeeCalculation {
     {
         // If AMM price < reference: sqrtPriceRatioX96 = (ammPrice/refPrice)
         // If AMM price >= reference: sqrtPriceRatioX96 = (refPrice/ammPrice)
+        /// Multiply by Q48 to preserve precision
         uint160 sqrtPriceRatioX96 = sqrtAmmPriceX96 < sqrtReferencePriceX96
             ? uint160(uint256(sqrtAmmPriceX96) * Q48 / sqrtReferencePriceX96)
             : uint160(uint256(sqrtReferencePriceX96) * Q48 / sqrtAmmPriceX96);
@@ -41,23 +42,23 @@ library FeeCalculation {
         priceRatioX96 = sqrtPriceRatioX96 * sqrtPriceRatioX96;
     }
 
-    /// @notice Calculate close fee
+    /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
+    ///         The close boundary is whichever edge of the optimal spread is nearest to the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96
-    /// @param optimalFeeRate Optimal fee rate in parts per million (e.g., 90 = 0.009%)
-    /// @return closeFee Fee at the close boundary (negative if inside optimal range)
+    /// @param optimalFeeRate Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
+    /// @return closeFee Fee at the "close" boundary. If <= 0, price is inside optimal spread. If > 0, price is outside.
     function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (int40 closeFee) {
-        // We derive closeFee such that after applying fees, the effective price equals
-        // the boundary price defined by optimalFeeRate.
+        // Case 1: ammPrice < RP (price to the left)
+        //   - priceRatio = ammPrice / RP ≤ 1
+        //   - Close boundary = RP * (1 - optimalFeeRate) [lower bound]
+        //   - Target equation: ammPrice / (1 - closeFee) = RP * (1 - optimalFeeRate)
 
-        // Case 1: ammPriceToTheLeft (user buys token0, pushing price UP toward reference)
-        //   - priceRatio = ammPrice / referencePrice ≤ 1
-        //   - Target: ammPrice / (1 - closeFee) = referencePrice * (1 - optimalFeeRate)
+        // Case 2: ammPrice > RP (price to the right)
+        //   - priceRatio = RP / ammPrice ≤ 1
+        //   - Close boundary = RP / (1 - optimalFeeRate) [upper bound]
+        //   - Target equation: ammPrice * (1 - closeFee) = RP / (1 - optimalFeeRate)
 
-        // Case 2: !ammPriceToTheLeft (user sells token0, pushing price DOWN toward reference)
-        //   - priceRatio = referencePrice / ammPrice ≤ 1
-        //   - Target: ammPrice * (1 - closeFee) = referencePrice / (1 - optimalFeeRate)
-
-        // Both cases simplify to the same formula:
+        // Both cases use the same formula:
         //   closeFee = 1 - priceRatio / (1 - optimalFeeRate)
         closeFee = int40(
             int256(uint256(ONE)) - (int256(uint256(ONE)) * int256(uint256(priceRatioX96)) * int256(uint256(PPM)))
@@ -77,16 +78,16 @@ library FeeCalculation {
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) internal pure returns (uint40 fee) {
-        // Note: This calculation assumes the price is inside the optimal spread.
-        // (i.e., priceRatioX96 >= Q96 * (PPM - optimalFeeRate) / PPM, or closeFee <= 0)
+        // Note: This calculation assumes the price is inside the optimal rate.
+        // (i.e., priceRatioX96 >= Q96 * (PPM - optimalFeeRate) / PPM
 
-        // if userSellsZeroForOne => sellPrice = (1 - optimalFeeSpread) * RP
-        // ammPrice * (1 - fee) = (1 - optimalFeeSpread) * RP
-        // fee = 1 - (1 - optimalFeeSpread) * RP / ammPrice
+        // if userSellsZeroForOne => sellPrice = (1 - optimalFeeRate) * RP [lower bound]
+        // ammPrice * (1 - fee) = (1 - optimalFeeRate) * RP
+        // fee = 1 - (1 - optimalFeeRate) * RP / ammPrice
 
-        // if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFeeSpread)
-        // ammPrice / (1 - fee) = RP / (1 - optimalFeeSpread)
-        // fee = 1 - (1 - optimalFeeSpread) * ammPrice / RP
+        // if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFeeRate) [upper bound]
+        // ammPrice / (1 - fee) = RP / (1 - optimalFeeRate)
+        // fee = 1 - (1 - optimalFeeRate) * ammPrice / RP
 
         if (ammPriceToTheLeft == userSellsZeroForOne) {
             fee = uint40(ONE - (uint256(ONE) * (PPM - optimalFeeRate) * Q96) / priceRatioX96 / PPM);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 import {StableStableHook} from "../../src/stable/StableStableHook.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -128,15 +129,106 @@ contract StableStableHookTest is Test, Deployers {
         vm.store(address(hook), bytes32(uint256(baseSlot) + 1), bytes32(uint256(previousSqrtAmmPriceX96)));
     }
 
-    function testStableBeforeSwapSecondInFirstBlock() public {
-        sqrtAmmPriceX96 = sqrtAmmPriceX96 * 1;
+    function test_beforeSwap_insideOptimalRange_exactReferencePrice() public {
+        // Set AMM price exactly at reference price
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
         uint24 fee;
 
+        // Sell token0 at reference price - should charge optimal fee
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertEq(fee, 90);
+        assertEq(fee, OPTIMAL_FEE_RATE);
 
+        // Buy token0 at reference price - should charge optimal fee
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertEq(fee, 90);
+        assertEq(fee, OPTIMAL_FEE_RATE);
+    }
+
+    function test_beforeSwap_insideOptimalRange_lowerBoundary() public {
+        // Lower boundary = RP * (1 - optimalFeeRate) = RP * 0.999910
+        // Compute boundary in price-space (Q192), then convert back to sqrtPriceX96 (Q96) via sqrt.
+        uint256 ammPriceX192 =
+            (uint256(REFERENCE_SQRT_PRICE_X96)
+                    * uint256(REFERENCE_SQRT_PRICE_X96)
+                    * (1_000_000 - (OPTIMAL_FEE_RATE - 1))) / 1_000_000; // slightly inside the lower boundary
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        // Sell token0 (pushing price down, away from boundary) - should have minimal fee
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        assertLt(sellFee, OPTIMAL_FEE_RATE);
+
+        // Buy token0 (pushing price up, toward reference) - should charge higher fee to reach buy price
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+        assertGt(buyFee, OPTIMAL_FEE_RATE);
+    }
+
+    function test_beforeSwap_insideOptimalRange_upperBoundary() public {
+        // Upper boundary = RP / (1 - optimalFeeRate) = RP / 0.999910 ≈ RP * 1.000090009
+        uint256 ammPriceX192 = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 1_000_090) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        // Buy token0 (pushing price up, away from boundary) - should have minimal fee
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+        assertLt(buyFee, OPTIMAL_FEE_RATE);
+
+        // Sell token0 (pushing price down, toward reference) - should charge higher fee to reach sell price
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        assertGt(sellFee, OPTIMAL_FEE_RATE);
+    }
+
+    function test_fuzz_beforeSwap_insideOptimalRange_leftOfReference(uint24 priceBps) public {
+        // Bound to inside optimal spread: 999.91% to 100% of reference price
+        priceBps = uint24(bound(priceBps, 999_911, 1_000_000));
+
+        // Calculate AMM price
+        uint256 ammPriceX192 = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * priceBps) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+
+        assertLe(sellFee, OPTIMAL_FEE_RATE);
+        assertGe(buyFee, OPTIMAL_FEE_RATE);
+    }
+
+    function test_fuzz_beforeSwap_insideOptimalRange_rightOfReference(uint24 priceBps) public {
+        // Bound to inside optimal spread: 100% to 100.009% of reference price
+        priceBps = uint24(bound(priceBps, 1_000_000, 1_000_090));
+
+        // Calculate AMM price
+        uint256 ammPriceX192 = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * priceBps) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+
+        assertLe(buyFee, OPTIMAL_FEE_RATE);
+        assertGe(sellFee, OPTIMAL_FEE_RATE);
+    }
+
+    function test_fuzz_beforeSwap_insideOptimalRange_consistentEffectivePrices(uint24 priceBps) public {
+        // Bound to inside optimal spread: 999.91% to 100.009% of reference price
+        priceBps = uint24(bound(priceBps, 999_911, 1_000_090));
+
+        // Calculate AMM price
+        uint256 ammPriceX192 = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * priceBps) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+
+        // Calculate effective prices after fees
+        // Sell: effectivePrice = ammPrice * (1 - fee)
+        // Buy: effectivePrice = ammPrice / (1 - fee)
+        uint256 effectiveSellPrice = (ammPriceX192 * (1_000_000 - sellFee)) / 1_000_000;
+        uint256 effectiveBuyPrice = (ammPriceX192 * 1_000_000) / (1_000_000 - buyFee);
+
+        // Target prices (from optimal spread boundaries)
+        uint256 targetSellPrice = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 999_910) / 1_000_000;
+        uint256 targetBuyPrice = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 1_000_090) / 1_000_000;
+
+        // Effective prices should be close to target prices within 0.0001% tolerance
+        assertApproxEqRel(effectiveSellPrice, targetSellPrice, 0.000001e18);
+        assertApproxEqRel(effectiveBuyPrice, targetBuyPrice, 0.000001e18);
     }
 
     // function testUnitSwapAmmPriceBiggerThanOptimalSpreadTargetMovedOpposite() public {

@@ -17,7 +17,6 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
@@ -99,6 +98,14 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
+        // closeFee is a threshold test to determine if we're inside or outside the optimal spread.
+        // The optimal spread has two boundaries around the reference price:
+        //   - Lower bound: RP * (1 - optimalFeeRate)
+        //   - Upper bound: RP / (1 - optimalFeeRate)
+        //
+        // closeFee represents the fee at whichever boundary is closest to the current AMM price.
+        //   - If closeFee <= 0: AMM price is inside the optimal spread (past the close boundary)
+        //   - If closeFee > 0: AMM price is outside the optimal spread (hasn't reached the close boundary)
         int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate);
 
         bool userSellsZeroForOne = params.zeroForOne;
@@ -106,14 +113,14 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint40 totalStableFee; // the fee to be charged to the swapper in 1e12 precision
         uint40 flexibleFee;
 
-        // If closeFee <= 0, we're inside the optimal spread
-        // If closeFee > 0, we're outside the optimal spread
         if (closeFee <= 0) {
-            // Calculate the fee needed to always buy at the same price and sell at the same price based on the optimal fee rate
+            // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
+            //   - All buys happen at the lower bound
+            //   - All sells happen at the upper bound
             totalStableFee = FeeCalculation.calculateInsideOptimalSpreadFee(
                 priceRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
             );
-            flexibleFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE; // No flexible fee inside optimal spread
+            flexibleFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE; // No flexible fee inside optimal fee rate
         }
         // else {
         //     // outside optimal spread

@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/2e697d19d9bd1bca99a9588352933864b9fd42b0/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/1d9a035e8253d1e4e235f3fda8628172692236a6/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -40,7 +40,7 @@ Parts-per-million scalar (1e6).
 
 
 ```solidity
-uint40 internal constant PPM = 1e6
+uint24 internal constant PPM = 1e6
 ```
 
 
@@ -90,7 +90,8 @@ function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePr
 
 ### calculateCloseFee
 
-Calculate close fee
+Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
+The close boundary is whichever edge of the optimal spread is nearest to the current AMM price.
 
 
 ```solidity
@@ -101,13 +102,13 @@ function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) interna
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96|
-|`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million (e.g., 90 = 0.009%)|
+|`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`closeFee`|`int40`|Fee at the close boundary (negative if inside optimal range)|
+|`closeFee`|`int40`|Fee at the "close" boundary. If <= 0, price is inside optimal spread. If > 0, price is outside.|
 
 
 ### calculateInsideOptimalSpreadFee

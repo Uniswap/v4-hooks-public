@@ -67,7 +67,7 @@ contract FeeCalculationTest is Test {
 
     function test_fuzz_calculateCloseFee_succeeds(uint160 priceRatioX96, uint24 optimalFeeRate) public pure {
         priceRatioX96 = uint160(bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96));
-        optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6));
+        optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6 - 1));
         FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate); // should not revert
     }
 

@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {IFeeConfiguration, FeeConfig, FeeState} from "../interfaces/IFeeConfiguration.sol";
 import {FeeCalculation} from "../libraries/FeeCalculation.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
@@ -63,16 +64,15 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @notice Validate the optimal fee rate
     /// @param _optimalFeeRate The optimal fee rate to validate
     function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure {
-        // TODO: set bounds on optimal fee spread
-        // revert InvalidOptimalFeeRate(_optimalFeeRate);
+        if (_optimalFeeRate >= FeeCalculation.PPM) revert InvalidOptimalFeeRate(_optimalFeeRate);
     }
 
     /// @notice Validate the reference sqrt price
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
     function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure {
-        // TODO: set bounds on reference sqrt price
-        // should they be close to stable price?
-        // revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
+        if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 > TickMath.MAX_SQRT_PRICE) {
+            revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
+        }
     }
 
     /// @notice Internal helper to reset fee state

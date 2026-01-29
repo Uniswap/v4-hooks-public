@@ -14,6 +14,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {FeeConfigurationImplementation} from "../../src/stable/test/FeeConfigurationImplementation.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FeeConfig, FeeState, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
+import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
@@ -25,7 +26,7 @@ contract FeeConfigurationImplementationTest is Test {
     uint256 public constant K = 16_609_443;
     uint256 public constant LOG_K = 9140;
     uint24 public constant OPTIMAL_FEE_RATE = 90; // 0.9 bps
-    uint160 public constant REFERENCE_SQRT_PRICE_X96 = TickMath.MIN_SQRT_PRICE;
+    uint160 public constant REFERENCE_SQRT_PRICE_X96 = Constants.SQRT_PRICE_1_1;
 
     FeeConfigurationImplementation public feeConfigurationImplementation;
     PoolKey public testPoolKey;
@@ -51,6 +52,27 @@ contract FeeConfigurationImplementationTest is Test {
 
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, address(this)));
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96() public {
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeRate: OPTIMAL_FEE_RATE, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE - 1
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(
+            abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, TickMath.MIN_SQRT_PRICE - 1)
+        );
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidOptimalFeeRate() public {
+        FeeConfig memory newConfig =
+            FeeConfig({k: K, logK: LOG_K, optimalFeeRate: 1e6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidOptimalFeeRate.selector, 1e6));
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
