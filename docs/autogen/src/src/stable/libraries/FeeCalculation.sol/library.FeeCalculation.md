@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/2f5fbd074d45e06945adf690c6462ffb68bfc1f0/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/f4d8d22c12001671a333524cf0b44fc3fb5e13d3/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -38,7 +38,7 @@ uint40 internal constant ONE = 1e12
 
 
 ### UNDEFINED_FLEXIBLE_FEE
-Sentinel: no flexible fee (inside optimal spread).
+Sentinel: no flexible fee (inside optimal rate).
 
 
 ```solidity
@@ -93,7 +93,7 @@ function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePr
 ### calculateCloseFee
 
 Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
-The close boundary is whichever edge of the optimal spread is nearest to the current AMM price.
+The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
 
 
 ```solidity
@@ -110,16 +110,16 @@ function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) interna
 
 |Name|Type|Description|
 |----|----|-----------|
-|`closeFee`|`int40`|Fee at the "close" boundary. If <= 0, price is inside optimal spread. If > 0, price is outside.|
+|`closeFee`|`int40`|Fee at the "close" boundary. If <= 0, price is inside optimal rate. If > 0, price is outside.|
 
 
-### calculateInsideOptimalSpreadFee
+### calculateInsideOptimalRateFee
 
-Calculate fee when price is inside optimal spread
+Calculate fee when price is inside optimal rate
 
 
 ```solidity
-function calculateInsideOptimalSpreadFee(
+function calculateInsideOptimalRateFee(
     uint160 priceRatioX96,
     uint24 optimalFeeRate,
     bool ammPriceToTheLeft,

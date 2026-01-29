@@ -16,7 +16,7 @@ library FeeCalculation {
     /// @notice Fixed-point scalar used for precisionwhere 1e12 == 100%.
     uint40 internal constant ONE = 1e12;
 
-    /// @notice Sentinel: no flexible fee (inside optimal spread).
+    /// @notice Sentinel: no flexible fee (inside optimal rate).
     uint40 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
 
     /// @notice Parts-per-million scalar (1e6 = 100%).
@@ -46,10 +46,10 @@ library FeeCalculation {
     }
 
     /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
-    ///         The close boundary is whichever edge of the optimal spread is nearest to the current AMM price.
+    ///         The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96
     /// @param optimalFeeRate Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
-    /// @return closeFee Fee at the "close" boundary. If <= 0, price is inside optimal spread. If > 0, price is outside.
+    /// @return closeFee Fee at the "close" boundary. If <= 0, price is inside optimal rate. If > 0, price is outside.
     function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (int40 closeFee) {
         // Case 1: ammPrice < RP (price to the left)
         //   - priceRatio = ammPrice / RP ≤ 1
@@ -69,13 +69,13 @@ library FeeCalculation {
         );
     }
 
-    /// @notice Calculate fee when price is inside optimal spread
+    /// @notice Calculate fee when price is inside optimal rate
     /// @param priceRatioX96 Price ratio in Q96 format
     /// @param optimalFeeRate Optimal fee rate in parts per million
     /// @param ammPriceToTheLeft True if AMM price < reference price
     /// @param userSellsZeroForOne True if user is selling token0 for token1
     /// @return fee Calculated fee in 1e12 precision
-    function calculateInsideOptimalSpreadFee(
+    function calculateInsideOptimalRateFee(
         uint160 priceRatioX96,
         uint24 optimalFeeRate,
         bool ammPriceToTheLeft,

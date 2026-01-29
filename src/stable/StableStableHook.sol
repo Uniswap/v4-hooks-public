@@ -98,14 +98,14 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // closeFee is a threshold test to determine if we're inside or outside the optimal spread.
-        // The optimal spread has two boundaries around the reference price:
+        // closeFee is a threshold test to determine if we're inside or outside the optimal rate.
+        // The optimal rate has two boundaries around the reference price:
         //   - Lower bound: RP * (1 - optimalFeeRate)
         //   - Upper bound: RP / (1 - optimalFeeRate)
         //
         // closeFee represents the fee at whichever boundary is closest to the current AMM price.
-        //   - If closeFee <= 0: AMM price is inside the optimal spread (past the close boundary)
-        //   - If closeFee > 0: AMM price is outside the optimal spread (hasn't reached the close boundary)
+        //   - If closeFee <= 0: AMM price is inside the optimal rate (past the close boundary)
+        //   - If closeFee > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
         int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate);
 
         bool userSellsZeroForOne = params.zeroForOne;
@@ -117,13 +117,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFee = FeeCalculation.calculateInsideOptimalSpreadFee(
+            totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
                 priceRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
             );
             flexibleFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE; // No flexible fee inside optimal fee rate
         }
         // else {
-        //     // outside optimal spread
+        //     // outside optimal rate
         //     // TODO
         // }
 

@@ -46,14 +46,14 @@ contract FeeCalculationTest is Test {
         assertTrue(priceRatioX96 <= FixedPoint96.Q96);
     }
 
-    function test_calculateCloseFee_succeeds_inside_optimal_spread() public pure {
-        // Price very close to reference (should be inside optimal spread)
+    function test_calculateCloseFee_succeeds_inside_optimal_rate() public pure {
+        // Price very close to reference (should be inside optimal rate)
         uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
         int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_RATE);
         assertTrue(closeFee < 0);
     }
 
-    function test_calculateCloseFee_succeeds_outside_optimal_spread() public pure {
+    function test_calculateCloseFee_succeeds_outside_optimal_rate() public pure {
         // at the boundary of the optimal range
         /// 1000000 - OPTIMAL_FEE_RATE = 999910
         uint160 priceRatioX96 = (uint160(REFERENCE_SQRT_PRICE_X96) * (1000000 - OPTIMAL_FEE_RATE)) / 1000000; // the lower boundary of the optimal range
@@ -103,21 +103,21 @@ contract FeeCalculationTest is Test {
         }
     }
 
-    function test_fuzz_calculateInsideOptimalSpreadFee_succeeds(
+    function test_fuzz_calculateInsideOptimalRateFee_succeeds(
         uint160 priceRatioX96,
         uint24 optimalFeeRate,
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) public pure {
-        optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6));
+        optimalFeeRate = uint24(bound(optimalFeeRate, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE));
 
-        // Calculate the minimum priceRatioX96 that's inside the optimal spread
-        uint256 minPriceRatio = (uint256(FixedPoint96.Q96) * (1e6 - optimalFeeRate)) / 1e6;
+        // Calculate the minimum priceRatioX96 that's inside the optimal rate
+        uint256 minPriceRatio = (uint256(FixedPoint96.Q96) * (FeeCalculation.PPM - optimalFeeRate)) / FeeCalculation.PPM;
 
-        // Bound priceRatioX96 to be inside the optimal spread
+        // Bound priceRatioX96 to be inside the optimal rate
         priceRatioX96 = uint160(bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96));
 
-        uint40 totalStableFee = FeeCalculation.calculateInsideOptimalSpreadFee(
+        uint40 totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
             priceRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
         ); // should not revert
 
