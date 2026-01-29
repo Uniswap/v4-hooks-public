@@ -13,7 +13,7 @@ library FeeCalculation {
     /// @dev Optimal fee rate must be strictly less than PPM (100%).
     uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1;
 
-    /// @notice Fixed-point scalar used for precisionwhere 1e12 == 100%.
+    /// @notice Fixed-point scalar used for precision where 1e12 == 100%.
     uint40 internal constant ONE = 1e12;
 
     /// @notice Sentinel: no flexible fee (inside optimal rate).
