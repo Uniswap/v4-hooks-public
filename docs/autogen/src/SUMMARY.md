@@ -16,6 +16,7 @@
       - [IFeeConfiguration](src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
       - [IStableStableHook](src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
     - [❱ libraries](src/stable/libraries/README.md)
+      - [FeeCalculation](src/stable/libraries/FeeCalculation.sol/library.FeeCalculation.md)
       - [StableLibrary](src/stable/libraries/StableLibrary.sol/library.StableLibrary.md)
     - [❱ test](src/stable/test/README.md)
       - [FeeConfigurationImplementation](src/stable/test/FeeConfigurationImplementation.sol/contract.FeeConfigurationImplementation.md)

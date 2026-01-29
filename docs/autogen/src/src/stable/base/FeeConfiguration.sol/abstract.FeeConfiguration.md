@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/2e697d19d9bd1bca99a9588352933864b9fd42b0/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -11,24 +11,6 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
-### ONE
-Fixed point constant: 1e12 represents 100%
-
-
-```solidity
-uint256 internal constant ONE = 1e12
-```
-
-
-### UNDEFINED_FLEXIBLE_FEE
-Sentinel value indicating no flexible fee (inside optimal rate)
-
-
-```solidity
-uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
-```
-
-
 ### configManager
 The address of the config manager
 

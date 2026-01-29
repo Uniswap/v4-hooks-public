@@ -2,16 +2,12 @@
 pragma solidity 0.8.26;
 
 import {IFeeConfiguration, FeeConfig, FeeState} from "../interfaces/IFeeConfiguration.sol";
+import {FeeCalculation} from "../libraries/FeeCalculation.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
 abstract contract FeeConfiguration is IFeeConfiguration {
-    /// @notice Fixed point constant: 1e12 represents 100%
-    uint256 internal constant ONE = 1e12;
-    /// @notice Sentinel value indicating no flexible fee (inside optimal rate)
-    uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1;
-
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
@@ -82,7 +78,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @notice Internal helper to reset fee state
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
-        feeState[_poolId].previousFee = UNDEFINED_FLEXIBLE_FEE;
+        feeState[_poolId].previousFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE;
         feeState[_poolId].blockNumber = block.number;
     }
 }
