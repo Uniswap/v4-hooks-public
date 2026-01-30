@@ -58,11 +58,8 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
 
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
-    error InvalidSwapKind();
     error UnauthorizedCaller();
     error Reentrancy();
-    error SlippageExceeded();
-    error AmountInMaxExceeded();
     error QuoteResult(uint256 amountIn, uint256 amountOut);
     error UnexpectedSuccess();
     error UnexpectedError();
