@@ -22,10 +22,7 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
-    /// @notice Number of pools registered with this hook
-    uint16 public registeredPoolCount;
-
-    /// @notice If true, skips settlement (used by composable deployer)
+    /// @notice If true, skips settlement (used by implementations on which settlement is part of the composed swap action)
     bool private skipSettle;
 
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
@@ -58,7 +55,7 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     /// @notice Quotes amount of unspecified side for a given amount of specified side
     /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
     /// @param amountSpecified The amount of tokens in or out (negative for exact-in, positive for exact-out)
-    /// @return amountUnspecified amount of unspecified side
+    /// @return amountUnspecified amount of unspecified side (always positive)
     /// @dev This function is meant to be called as a view function even though it is not one. This is because the swap
     /// might be simulated but not finalized
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)

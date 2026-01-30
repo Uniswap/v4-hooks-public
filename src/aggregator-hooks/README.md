@@ -2,11 +2,12 @@
 
 Uniswap V4 hooks that aggregate liquidity from external DEX protocols, enabling unified liquidity access through Uniswap V4's interface.
 
-## ID System:
+## ID System
 
 Aggregator Hook contract addresses should adhere to the following identification system:
- - The first character should be the same as first character of the protocol ("c" for Curve, "f", for Fluid, "b" for Balancer, etc)
- - The second character should be the contract type/version.
+
+- The first character should be the same as first character of the protocol ("c" for Curve, "f" for Fluid, "b" for Balancer, etc)
+- The second character should represent the contract type/version.
  This can be done with the modified HookMiner contract.
 
  First-byte ID table:
@@ -23,9 +24,9 @@ Aggregator Hook contract addresses should adhere to the following identification
 
 ### Curve Finance
 
-One hook is deployed per curve pool, despite one curve pool resulting in ((n * (n-1)) / 2) Uniswap V4 pools. This means that for a Curve pool with 8 tokens, all 28 UniswapV4 pools associated with that pool use the same hook. 
+One hook is deployed per curve pool, despite one curve pool resulting in ((n * (n-1)) / 2) Uniswap V4 pools. This means that for a Curve pool with 8 tokens, all 28 UniswapV4 pools associated with that pool use the same hook.
 
-This design allows routing to know when they are interacting with the same Curve pool by checking for duplicate hook addresses, which is important since swaps in one direction will effect all other directions including one of the touched tokens.
+This design allows routing to know when they are interacting with the same Curve pool by checking for duplicate hook addresses, which is important since swaps in one direction will affect all other directions including one of the touched tokens.
 
 | Pool Type | Implementation | Description |
 |-----------|----------------|-------------|
