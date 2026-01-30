@@ -2,6 +2,23 @@
 
 Uniswap V4 hooks that aggregate liquidity from external DEX protocols, enabling unified liquidity access through Uniswap V4's interface.
 
+## ID System:
+
+Aggregator Hook contract addresses should adhere to the following identification system:
+ - The first character should be the same as first character of the protocol ("c" for Curve, "f", for Fluid, "b" for Balancer, etc)
+ - The second character should be the contract type/version.
+ This can be done with the modified HookMiner contract.
+
+ First-byte ID table:
+
+| ID | Protocol/Pool Type |
+|----|-------------------|
+| C1 | StableSwap |
+| C2 | StableSwap-NG |
+| F1 | FluidDexT1 |
+| F2 | FluidDexV2 |
+| F3 | FluidDexLite |
+
 ## Supported Protocols
 
 ### Curve Finance
