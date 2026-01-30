@@ -103,7 +103,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         //   - Lower bound: RP * (1 - optimalFeeRate)
         //   - Upper bound: RP / (1 - optimalFeeRate)
         //
-        // closeFee represents the fee at whichever boundary is closest to the current AMM price.
+        // closeFee represents the fee to reach whichever boundary is closest to the current AMM price.
         //   - If closeFee <= 0: AMM price is inside the optimal rate (past the close boundary)
         //   - If closeFee > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
         int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate);

@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f4d8d22c12001671a333524cf0b44fc3fb5e13d3/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -29,7 +29,7 @@ uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1
 
 
 ### ONE
-Fixed-point scalar used for precisionwhere 1e12 == 100%.
+Fixed-point scalar used for precision where 1e12 == 100%.
 
 
 ```solidity
