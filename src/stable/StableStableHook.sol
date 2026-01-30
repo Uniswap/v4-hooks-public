@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {FeeConfiguration} from "./base/FeeConfiguration.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {StableLibrary} from "./libraries/StableLibrary.sol";
 import {FeeCalculation} from "./libraries/FeeCalculation.sol";
 import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
