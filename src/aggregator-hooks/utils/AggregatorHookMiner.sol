@@ -21,11 +21,13 @@ library HookMiner {
     /// @param creationCode The creation code of a hook contract. Example: `type(Counter).creationCode`
     /// @param constructorArgs The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`
     /// @return (hookAddress, salt) The hook deploys to `hookAddress` when using `salt` with the syntax: `new Hook{salt: salt}(<constructor arguments>)`
-    function find(address deployer, uint160 flags, uint8 firstByte, bytes memory creationCode, bytes memory constructorArgs)
-        internal
-        view
-        returns (address, bytes32)
-    {
+    function find(
+        address deployer,
+        uint160 flags,
+        uint8 firstByte,
+        bytes memory creationCode,
+        bytes memory constructorArgs
+    ) internal view returns (address, bytes32) {
         flags = flags & FLAG_MASK; // mask for only the bottom 14 bits
         // Shift first byte to the most significant byte position (bits 152-159)
         uint160 firstByteMask = uint160(0xFF) << 152; // 0xFF00000000000000000000000000000000000000
@@ -37,7 +39,10 @@ library HookMiner {
             hookAddress = computeAddress(deployer, salt, creationCodeWithArgs);
 
             // if the hook's bottom 14 bits match the desired flags, first byte matches the desired ID, AND the address does not have bytecode, we found a match
-            if (uint160(hookAddress) & FLAG_MASK == flags && (uint160(hookAddress) & firstByteMask) == desiredFirstByte && hookAddress.code.length == 0) {
+            if (
+                uint160(hookAddress) & FLAG_MASK == flags && (uint160(hookAddress) & firstByteMask) == desiredFirstByte
+                    && hookAddress.code.length == 0
+            ) {
                 return (hookAddress, bytes32(salt));
             }
         }
