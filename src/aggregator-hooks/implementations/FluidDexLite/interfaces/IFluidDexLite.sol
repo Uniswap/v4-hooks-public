@@ -5,9 +5,9 @@ pragma solidity ^0.8.24;
 /// @notice Interface for the Fluid DEX Lite pool
 interface IFluidDexLite {
     struct DexKey {
-        address token0; // Lexicographically smaller token
-        address token1; // Lexicographically larger token
-        bytes32 salt; // Pool salt
+        address token0;
+        address token1;
+        bytes32 salt;
     }
 
     struct DexState {
