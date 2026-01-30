@@ -22,9 +22,6 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
-    /// @notice If true, skips settlement (used by implementations on which settlement is part of the composed swap action)
-    bool private skipSettle;
-
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
@@ -118,9 +115,6 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
         internal
         returns (uint256 amountIn, uint256 amountOut)
     {
-        if (skipSettle) {
-            return (0, 0);
-        }
         Currency settleCurrency = params.zeroForOne ? key.currency1 : key.currency0;
         Currency takeCurrency = params.zeroForOne ? key.currency0 : key.currency1;
 
