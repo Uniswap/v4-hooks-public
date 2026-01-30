@@ -121,12 +121,17 @@ contract StableStableHookTest is Test, Deployers {
         // For a mapping, the slot is keccak256(abi.encode(key, slotNumber))
         bytes32 baseSlot = keccak256(abi.encode(PoolId.unwrap(poolId), uint256(2)));
 
-        // FeeState struct layout:
-        // slot 0: previousFee (uint256)
-        // slot 1: previousSqrtAmmPriceX96 (uint160) + padding
-        // slot 2: blockNumber (uint256)
+        // FeeState struct layout (packed into slots):
+        // slot 0: previousFee (uint40, 5 bytes) + previousSqrtAmmPriceX96 (uint160, 20 bytes) + padding (7 bytes)
+        // slot 1: blockNumber (uint256)
 
-        vm.store(address(hook), bytes32(uint256(baseSlot) + 1), bytes32(uint256(previousSqrtAmmPriceX96)));
+        // Read slot 0, update previousSqrtAmmPriceX96 (bytes 5-24), write back
+        bytes32 slot0 = vm.load(address(hook), baseSlot);
+        uint40 previousFee = uint40(uint256(slot0)); // Extract first 5 bytes
+
+        // Pack previousFee and previousSqrtAmmPriceX96 into slot 0
+        bytes32 newSlot0 = bytes32(uint256(previousFee) | (uint256(previousSqrtAmmPriceX96) << 40));
+        vm.store(address(hook), baseSlot, newSlot0);
     }
 
     function test_beforeSwap_insideOptimalRange_exactReferencePrice() public {
@@ -231,47 +236,47 @@ contract StableStableHookTest is Test, Deployers {
         assertApproxEqRel(effectiveBuyPrice, targetBuyPrice, 0.000001e18);
     }
 
-    // function testUnitSwapAmmPriceBiggerThanOptimalSpreadTargetMovedOpposite() public {
-    //     uint24 fee;
-    //     uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
-    //     sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+    function test_beforeSwap_unitSwapAmmPriceBiggerThanOptimalSpreadTargetMovedOpposite() public {
+        uint24 fee;
+        uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-    //     vm.roll(block.number + 750);
+        vm.roll(block.number + 750);
 
-    //     fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-    //     assertEq(fee, 0);
+        fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+        assertEq(fee, 0);
 
-    //     // Move price further right
-    //     ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
-    //     sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+        // Move price further right
+        ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-    //     // Update the historical fee data to simulate that the price has already moved to this level
-    //     // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
-    //     updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
+        // Update the historical fee data to simulate that the price has already moved to this level
+        // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
+        updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
 
-    //     fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-    //     assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
-    // }
+        fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+    }
 
-    // function testUnitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
-    //     uint24 fee;
-    //     uint160 ammPrice = uint160(999_870 * 2 ** 96) / 1_000_000;
-    //     sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+    function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
+        uint24 fee;
+        uint160 ammPrice = uint160(999_870 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-    //     vm.roll(block.number + 750);
+        vm.roll(block.number + 750);
 
-    //     fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-    //     assertEq(fee, 0);
+        fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        assertEq(fee, 0);
 
-    //     // Move price further left
-    //     ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
-    //     sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+        // Move price further left
+        ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-    //     // Update the historical fee data to simulate that the price has already moved to this level
-    //     // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
-    //     updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
+        // Update the historical fee data to simulate that the price has already moved to this level
+        // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
+        updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
 
-    //     fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-    //     assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
-    // }
+        fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+    }
 }

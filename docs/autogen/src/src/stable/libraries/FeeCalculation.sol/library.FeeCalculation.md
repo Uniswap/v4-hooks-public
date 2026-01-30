@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f4d8d22c12001671a333524cf0b44fc3fb5e13d3/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -29,7 +29,7 @@ uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1
 
 
 ### ONE
-Fixed-point scalar used for precisionwhere 1e12 == 100%.
+Fixed-point scalar used for precision where 1e12 == 100%.
 
 
 ```solidity
@@ -140,6 +140,116 @@ function calculateInsideOptimalRateFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`fee`|`uint40`|Calculated fee in 1e12 precision|
+
+
+### calculateFarFee
+
+Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
+The far boundary is whichever edge of the optimal rate is farthest from the current AMM price.
+
+
+```solidity
+function calculateFarFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (uint40 farFee);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96|
+|`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`farFee`|`uint40`|Fee to get to the "far" boundary|
+
+
+### adjustPreviousFeeForPriceMovement
+
+Adjust previous fee for price movement
+
+When price moves further from reference, adjust the previous fee to account for the movement
+
+
+```solidity
+function adjustPreviousFeeForPriceMovement(
+    uint40 previousFee,
+    uint160 sqrtAmmPriceX96,
+    uint160 previousSqrtAmmPriceX96,
+    bool ammPriceToTheLeft
+) internal pure returns (uint40 adjustedFee);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`previousFee`|`uint40`|Previous flexible fee|
+|`sqrtAmmPriceX96`|`uint160`|Current AMM sqrt price|
+|`previousSqrtAmmPriceX96`|`uint160`|Previous AMM sqrt price|
+|`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`adjustedFee`|`uint40`|Adjusted previous fee accounting for price movement|
+
+
+### calculateDecayFactor
+
+Calculate exponential decay factor for fee reduction over time
+
+Uses fast computation for small block counts, exponential for large
+
+
+```solidity
+function calculateDecayFactor(uint256 k, uint256 logK, uint256 blocksPassed)
+    internal
+    pure
+    returns (uint256 factorX24);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)|
+|`logK`|`uint256`|Natural log of k scaled appropriately|
+|`blocksPassed`|`uint256`|Number of blocks since last fee update|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`factorX24`|`uint256`|Decay factor in Q24 format (2^24 = no decay, 0 = full decay)|
+
+
+### calculateFlexibleFeeWithDecay
+
+Calculate flexible fee with exponential decay
+
+Fee decays from previous fee toward target fee over time
+
+
+```solidity
+function calculateFlexibleFeeWithDecay(uint40 targetFee, uint40 previousFee, uint256 factorX24)
+    internal
+    pure
+    returns (uint40 flexibleFee);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`targetFee`|`uint40`|Target fee to decay toward|
+|`previousFee`|`uint40`|Previous flexible fee|
+|`factorX24`|`uint256`|Decay factor in Q24 format from calculateDecayFactor|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`flexibleFee`|`uint40`|New flexible fee after decay|
 
 
 ### convertToUniswapFee

@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/2e697d19d9bd1bca99a9588352933864b9fd42b0/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -108,5 +108,40 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 |`<none>`|`bytes4`|selector The function selector for IHooks.beforeSwap|
 |`<none>`|`BeforeSwapDelta`|delta BeforeSwapDelta (always zero for this hook)|
 |`<none>`|`uint24`|lpFeeOverride The calculated dynamic fee with override flag|
+
+
+### _calculateFlexibleFee
+
+Calculate flexible fee when price is outside optimal rate
+
+
+```solidity
+function _calculateFlexibleFee(
+    FeeConfig storage config,
+    FeeState storage feeState,
+    uint160 sqrtAmmPriceX96,
+    uint160 sqrtReferencePriceX96,
+    int40 closeFee,
+    uint40 farFee,
+    bool ammPriceToTheLeft
+) private view returns (uint40 flexibleFee);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`config`|`FeeConfig`|The FeeConfig of the pool|
+|`feeState`|`FeeState`|The FeeState of the pool|
+|`sqrtAmmPriceX96`|`uint160`|The current AMM sqrt price|
+|`sqrtReferencePriceX96`|`uint160`|The reference sqrt price|
+|`closeFee`|`int40`|The fee to reach the close boundary|
+|`farFee`|`uint40`|The fee to reach the far boundary|
+|`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`flexibleFee`|`uint40`|The calculated flexible fee|
 
 
