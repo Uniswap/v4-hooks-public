@@ -9,7 +9,6 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -17,7 +16,6 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {
     FluidDexLiteAggregator
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
@@ -27,9 +25,9 @@ import {
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
-/// @title FluidDexLiteERCForkedTest
-/// @notice Tests for Fluid DEX Lite with ERC20 token pairs (no native ETH)
-contract FluidDexLiteERCForkedTest is Test {
+/// @title FluidDexLiteERC20ForkedTest
+/// @notice Tests for Fluid DEX Lite with ERC20 token pairs. Fluid Dex Lite currently has no Native currency pools
+contract FluidDexLiteERC20ForkedTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -326,9 +324,3 @@ contract FluidDexLiteERCForkedTest is Test {
 
     receive() external payable {}
 }
-
-contract FluidDexLiteNativeForkedTest is Test {
-    // NOTE: No native ETH pools are currently available on Fluid DEX Lite.
-    // TODO: Native tests can be added when a native pool is deployed.
-
-    }

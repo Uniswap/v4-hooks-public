@@ -3,9 +3,10 @@ pragma solidity ^0.8.21;
 
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
-/// @title HookMiner
-/// @notice a minimal library for mining hook addresses
-library HookMiner {
+/// @title AggregatorHookMiner
+/// @notice a minimal library for mining aggregator hook addresses
+/// @dev This library is a version of HookMiner that incorporates the aggregator hook identification system.
+library AggregatorHookMiner {
     // mask to slice out the bottom 14 bit of the address
     uint160 constant FLAG_MASK = Hooks.ALL_HOOK_MASK; // 0000 ... 0000 0011 1111 1111 1111
 
@@ -20,7 +21,8 @@ library HookMiner {
     /// @param firstByte The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, etc.)
     /// @param creationCode The creation code of a hook contract. Example: `type(Counter).creationCode`
     /// @param constructorArgs The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`
-    /// @return (hookAddress, salt) The hook deploys to `hookAddress` when using `salt` with the syntax: `new Hook{salt: salt}(<constructor arguments>)`
+    /// @return hookAddress The computed hook address
+    /// @return salt The salt that produces the hook address
     function find(
         address deployer,
         uint160 flags,
@@ -54,6 +56,7 @@ library HookMiner {
     /// In `forge script`, this should be `0x4e59b44847b379578588920cA78FbF26c0B4956C` (CREATE2 Deployer Proxy)
     /// @param salt The salt used to deploy the hook
     /// @param creationCodeWithArgs The creation code of a hook contract, with encoded constructor arguments appended. Example: `abi.encodePacked(type(Counter).creationCode, abi.encode(constructorArg1, constructorArg2))`
+    /// @return hookAddress The address of the hook
     function computeAddress(address deployer, uint256 salt, bytes memory creationCodeWithArgs)
         internal
         pure

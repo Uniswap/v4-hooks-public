@@ -34,8 +34,6 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         bool isQuote;
     }
 
-    uint256 constant SWAP_MODULE_ID = 1;
-
     /// @notice The Fluid DEX V2 contract
     IFluidDexV2 public immutable FLUID_DEX_V2;
     /// @notice The Fluid DEX V2 resolver for pool state queries
@@ -55,6 +53,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
     bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
+    uint256 private constant SWAP_MODULE_ID = 1;
 
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);

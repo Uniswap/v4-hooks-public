@@ -31,6 +31,7 @@ contract FluidDexV2AggregatorFactory {
     /// @notice Creates a new FluidDexV2Aggregator hook and initializes the pool
     /// @param salt The CREATE2 salt (pre-mined to produce valid hook address)
     /// @param controller The controller address for the Fluid DEX V2 pool
+    /// @param dexType The type of DEX (3 for D3, 4 for D4)
     /// @param currency0 The first currency of the pool (must be < currency1)
     /// @param currency1 The second currency of the pool
     /// @param fee The pool fee
