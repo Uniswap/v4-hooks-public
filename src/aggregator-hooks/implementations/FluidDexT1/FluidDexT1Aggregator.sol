@@ -154,7 +154,6 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         bool inputIsNative = takeCurrency.isAddressZero();
         bool outputIsNative = settleCurrency.isAddressZero();
         bool fluidSwap0to1 = _isReversed ? !params.zeroForOne : params.zeroForOne;
-        address recipient = outputIsNative ? address(this) : address(poolManager);
 
         if (!outputIsNative) {
             poolManager.sync(settleCurrency);
@@ -164,7 +163,13 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
 
         if (params.amountSpecified < 0) {
             amountTake = uint256(-params.amountSpecified);
-            amountSettle = _swapExactIn(inputIsNative, fluidSwap0to1, amountTake, recipient, takeCurrency);
+            amountSettle = _swapExactIn(
+                inputIsNative,
+                fluidSwap0to1,
+                amountTake,
+                outputIsNative ? address(this) : address(poolManager),
+                takeCurrency
+            );
         } else {
             amountSettle = uint256(params.amountSpecified);
             amountTake = _swapExactOut(

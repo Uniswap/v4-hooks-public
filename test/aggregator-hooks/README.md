@@ -1,9 +1,20 @@
 # aggregator-hooks
 
-## TODO
-- Fuzz Testing
+## Fuzz Testing (StableSwapNG)
 
-## Testing
+The StableSwapNG fuzz tests deploy Curve pools locally using precompiled bytecode.
+
+### Precompiled Bytecode
+
+The fuzz tests use precompiled bytecode stored in `test/aggregator-hooks/StableSwapNG/precompiled/`:
+
+- `StableSwapNGFactory.bin` - Factory contract (from `0x6A8cbed756804B16E05E741eDaBd5cB544AE21bf` on Mainnet Ethereum)
+- `StableSwapNGPool.bin` - Plain AMM pool implementation (from `0xDCc91f930b42619377C200BA05b7513f2958b202` on Mainnet Ethereum)
+- `StableSwapNGMath.bin` - Math library (from `0xc9CBC565A9F4120a2740ec6f64CC24AeB2bB3E5E` on Mainnet Ethereum)
+- `StableSwapNGViews.bin` - Views contract (from `0xFF53042865dF617de4bB871bD0988E7B93439cCF` on Mainnet Ethereum)
+
+
+## Testing (Fork Tests)
 
 For tests that fork mainnet, you need an .env file containing pool info for each pool you want to test with.
 

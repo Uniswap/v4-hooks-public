@@ -20,3 +20,6 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/stableswap-ng"]
+	path = lib/stableswap-ng
+	url = https://github.com/curvefi/stableswap-ng
