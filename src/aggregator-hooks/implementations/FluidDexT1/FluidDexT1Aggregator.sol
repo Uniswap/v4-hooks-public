@@ -36,6 +36,8 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
     bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
+    // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+    uint256 private constant INACCURACY_BUFFER = 20;
 
     error UnauthorizedCaller();
     error Reentrancy();
@@ -81,7 +83,11 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
             );
         } else {
             amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
-                address(FLUID_POOL), fluidSwap0to1, uint256(amountSpecified) + 20, type(uint256).max
+                // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+                address(FLUID_POOL),
+                fluidSwap0to1,
+                uint256(amountSpecified) + INACCURACY_BUFFER,
+                type(uint256).max
             );
         }
     }
@@ -161,8 +167,9 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
             amountSettle = _swapExactIn(inputIsNative, fluidSwap0to1, amountTake, recipient, takeCurrency);
         } else {
             amountSettle = uint256(params.amountSpecified);
-            amountTake =
-                _swapExactOut(inputIsNative, outputIsNative, fluidSwap0to1, amountSettle, recipient, settleCurrency);
+            amountTake = _swapExactOut(
+                inputIsNative, outputIsNative, fluidSwap0to1, amountSettle, address(this), settleCurrency
+            );
         }
 
         _setTransientInflight(false);
@@ -203,7 +210,10 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         if (inputIsNative) {
             revert NativeCurrencyExactOut();
         } else {
-            amountIn = FLUID_POOL.swapOutWithCallback(fluidSwap0to1, amountOut + 20, type(uint256).max, address(this));
+            // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+            amountIn = FLUID_POOL.swapOutWithCallback(
+                fluidSwap0to1, amountOut + INACCURACY_BUFFER, type(uint256).max, recipient
+            );
             if (!outputIsNative) {
                 settleCurrency.transfer(address(poolManager), amountOut);
             }
