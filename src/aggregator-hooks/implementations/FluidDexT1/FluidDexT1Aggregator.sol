@@ -14,6 +14,7 @@ import {IDexCallback} from "./interfaces/IDexCallback.sol";
 import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {console} from "forge-std/console.sol";
 
 /// @title FluidDexT1Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
@@ -55,8 +56,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     }
 
     /// @inheritdoc IDexCallback
-    /// @dev Called by the v1 pool during swap*WithCallback().
-    /// Per Fluid docs, tokens should be transferred to the Liquidity Layer.
+    /// @dev Per Fluid docs, tokens should be transferred to the Liquidity Layer.
     function dexCallback(address token, uint256 amount) external override {
         if (!_getTransientInflight()) revert ProhibitedEntry();
         if (msg.sender != address(FLUID_POOL)) revert UnauthorizedCaller();
@@ -81,7 +81,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
             );
         } else {
             amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
-                address(FLUID_POOL), fluidSwap0to1, uint256(amountSpecified), type(uint256).max
+                address(FLUID_POOL), fluidSwap0to1, uint256(amountSpecified) + 20, type(uint256).max
             );
         }
     }
@@ -161,15 +161,15 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
             amountSettle = _swapExactIn(inputIsNative, fluidSwap0to1, amountTake, recipient, takeCurrency);
         } else {
             amountSettle = uint256(params.amountSpecified);
-            amountTake = _swapExactOut(inputIsNative, fluidSwap0to1, amountSettle, recipient, takeCurrency);
+            amountTake =
+                _swapExactOut(inputIsNative, outputIsNative, fluidSwap0to1, amountSettle, recipient, settleCurrency);
         }
 
         _setTransientInflight(false);
 
         if (!outputIsNative) {
             hasSettled = true;
-            // Fluid's exactOut can sometimes be off by 1-2 so we use the actual settled amount
-            amountSettle = poolManager.settle();
+            poolManager.settle();
         }
 
         return (amountSettle, amountTake, hasSettled);
@@ -192,15 +192,21 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         }
     }
 
-    function _swapExactOut(bool inputIsNative, bool fluidSwap0to1, uint256 amountOut, address recipient, Currency)
-        internal
-        returns (uint256 amountIn)
-    {
+    function _swapExactOut(
+        bool inputIsNative,
+        bool outputIsNative,
+        bool fluidSwap0to1,
+        uint256 amountOut,
+        address recipient,
+        Currency settleCurrency
+    ) internal returns (uint256 amountIn) {
         if (inputIsNative) {
             revert NativeCurrencyExactOut();
         } else {
-            // Uses type(uint256).max for amountInMax to avoid slippage check because it is checked in the router
-            amountIn = FLUID_POOL.swapOutWithCallback(fluidSwap0to1, amountOut, type(uint256).max, recipient);
+            amountIn = FLUID_POOL.swapOutWithCallback(fluidSwap0to1, amountOut + 20, type(uint256).max, address(this));
+            if (!outputIsNative) {
+                settleCurrency.transfer(address(poolManager), amountOut);
+            }
         }
     }
 

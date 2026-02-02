@@ -82,7 +82,7 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
         int128 specified = int128(-params.amountSpecified); // cancel core
 
         if (params.amountSpecified > 0) {
-            // For exactOut, external liquidity sources can be off by a few wei.
+            // For exactOut, in cases the external liquidity amountOut is off.
             // NOTE: it is up to the router to handle this
             specified = -int128(uint128(amountOut));
         }
