@@ -181,7 +181,7 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_leftOfReference(uint24 priceBps) public {
-        // Bound to inside optimal spread: 999.91% to 100% of reference price
+        // Bound to inside optimal range: 999.91% to 100% of reference price
         priceBps = uint24(bound(priceBps, 999_911, 1_000_000));
 
         // Calculate AMM price
@@ -196,7 +196,7 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_rightOfReference(uint24 priceBps) public {
-        // Bound to inside optimal spread: 100% to 100.009% of reference price
+        // Bound to inside optimal range: 100% to 100.009% of reference price
         priceBps = uint24(bound(priceBps, 1_000_000, 1_000_090));
 
         // Calculate AMM price
@@ -211,7 +211,7 @@ contract StableStableHookTest is Test, Deployers {
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_consistentEffectivePrices(uint24 priceBps) public {
-        // Bound to inside optimal spread: 999.91% to 100.009% of reference price
+        // Bound to inside optimal range: 999.91% to 100.009% of reference price
         priceBps = uint24(bound(priceBps, 999_911, 1_000_090));
 
         // Calculate AMM price
@@ -227,7 +227,7 @@ contract StableStableHookTest is Test, Deployers {
         uint256 effectiveSellPrice = (ammPriceX192 * (1_000_000 - sellFee)) / 1_000_000;
         uint256 effectiveBuyPrice = (ammPriceX192 * 1_000_000) / (1_000_000 - buyFee);
 
-        // Target prices (from optimal spread boundaries)
+        // Target prices (from optimal range boundaries)
         uint256 targetSellPrice = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 999_910) / 1_000_000;
         uint256 targetBuyPrice = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 1_000_090) / 1_000_000;
 
@@ -255,7 +255,7 @@ contract StableStableHookTest is Test, Deployers {
         updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
 
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+        assertEq(fee, 204); // 90 (optimal) + 114 (calculated decaying fee)
     }
 
     function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
@@ -277,6 +277,6 @@ contract StableStableHookTest is Test, Deployers {
         updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
 
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+        assertEq(fee, 204); // 90 (optimal) + 114 (calculated decaying fee)
     }
 }

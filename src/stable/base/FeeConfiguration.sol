@@ -78,7 +78,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @notice Internal helper to reset fee state
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
-        feeState[_poolId].previousFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE;
+        feeState[_poolId].previousFee = FeeCalculation.UNDEFINED_DECAYING_FEE;
         feeState[_poolId].blockNumber = block.number;
     }
 }

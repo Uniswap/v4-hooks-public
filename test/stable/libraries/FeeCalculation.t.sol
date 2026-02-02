@@ -46,30 +46,35 @@ contract FeeCalculationTest is Test {
         assertTrue(priceRatioX96 <= FixedPoint96.Q96);
     }
 
-    function test_calculateCloseFee_succeeds_inside_optimal_rate() public pure {
-        // Price very close to reference (should be inside optimal rate)
+    function test_calculateDistanceFromOptimalRange_succeeds_inside_optimal_rate() public pure {
+        // Price very close to reference (should be inside optimal range)
         uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
-        int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_RATE);
-        assertTrue(closeFee < 0);
+        int40 distanceFromOptimalRange =
+            FeeCalculation.calculateDistanceFromOptimalRange(priceRatioX96, OPTIMAL_FEE_RATE);
+        assertTrue(distanceFromOptimalRange < 0);
     }
 
-    function test_calculateCloseFee_succeeds_outside_optimal_rate() public pure {
+    function test_calculateDistanceFromOptimalRange_succeeds_outside_optimal_rate() public pure {
         // at the boundary of the optimal range
         /// 1000000 - OPTIMAL_FEE_RATE = 999910
         uint160 priceRatioX96 = (uint160(REFERENCE_SQRT_PRICE_X96) * (1000000 - OPTIMAL_FEE_RATE)) / 1000000; // the lower boundary of the optimal range
-        int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_RATE);
-        assertTrue(closeFee > 0);
+        int40 distanceFromOptimalRange =
+            FeeCalculation.calculateDistanceFromOptimalRange(priceRatioX96, OPTIMAL_FEE_RATE);
+        assertTrue(distanceFromOptimalRange > 0);
 
         // just inside the boundary of the optimal range (89)
         priceRatioX96 = (uint160(REFERENCE_SQRT_PRICE_X96) * (1000000 - (OPTIMAL_FEE_RATE - 1))) / 1000000;
-        closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_RATE);
-        assertTrue(closeFee < 0);
+        distanceFromOptimalRange = FeeCalculation.calculateDistanceFromOptimalRange(priceRatioX96, OPTIMAL_FEE_RATE);
+        assertTrue(distanceFromOptimalRange < 0);
     }
 
-    function test_fuzz_calculateCloseFee_succeeds(uint160 priceRatioX96, uint24 optimalFeeRate) public pure {
+    function test_fuzz_calculateDistanceFromOptimalRange_succeeds(uint160 priceRatioX96, uint24 optimalFeeRate)
+        public
+        pure
+    {
         priceRatioX96 = uint160(bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96));
         optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6 - 1));
-        FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate); // should not revert
+        FeeCalculation.calculateDistanceFromOptimalRange(priceRatioX96, optimalFeeRate); // should not revert
     }
 
     function test_convertToUniswapFee_succeeds() public pure {
@@ -111,10 +116,10 @@ contract FeeCalculationTest is Test {
     ) public pure {
         optimalFeeRate = uint24(bound(optimalFeeRate, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE));
 
-        // Calculate the minimum priceRatioX96 that's inside the optimal rate
+        // Calculate the minimum priceRatioX96 that's inside the optimal range
         uint256 minPriceRatio = (uint256(FixedPoint96.Q96) * (FeeCalculation.PPM - optimalFeeRate)) / FeeCalculation.PPM;
 
-        // Bound priceRatioX96 to be inside the optimal rate
+        // Bound priceRatioX96 to be inside the optimal range
         priceRatioX96 = uint160(bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96));
 
         uint40 totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
