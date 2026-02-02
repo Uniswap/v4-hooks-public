@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -12,6 +12,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {ICurveStableSwapNG} from "./interfaces/IStableSwapNG.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "forge-std/Test.sol";
 
 /// @title StableSwapNGAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
@@ -23,6 +24,9 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
     /// @notice The Curve StableSwap NG pool
     ICurveStableSwapNG public pool;
 
+    uint256 internal constant INACCURACY_BUFFER = 20;
+    uint256 internal constant dBPS = 100_000;
+
     struct PoolInfo {
         int128 token0Index;
         int128 token1Index;
@@ -31,6 +35,7 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
     /// @notice Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
     mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 
+    error AmountOutExceeded();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
@@ -53,10 +58,14 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
                 amountUnspecified = pool.get_dy(poolInfo.token1Index, poolInfo.token0Index, uint256(-amountSpecified));
             }
         } else {
+            uint256 _amountSpecified = uint256(amountSpecified) + INACCURACY_BUFFER;
+            if (_amountSpecified < (uint256(amountSpecified) * (dBPS + 1)) / dBPS) {
+                _amountSpecified = (uint256(amountSpecified) * (dBPS + 1)) / dBPS;
+            }
             if (zeroToOne) {
-                amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, _amountSpecified);
             } else {
-                amountUnspecified = pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, _amountSpecified);
             }
         }
     }
@@ -98,8 +107,8 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 
-        IERC20(Currency.unwrap(key.currency0)).safeIncreaseAllowance(address(pool), type(uint256).max);
-        IERC20(Currency.unwrap(key.currency1)).safeIncreaseAllowance(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
         return IHooks.beforeInitialize.selector;
@@ -125,24 +134,40 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
             // Exact-In
             amountTake = uint256(-params.amountSpecified);
         } else {
+            uint256 amountSpecified = uint256(params.amountSpecified) + INACCURACY_BUFFER;
+            if (amountSpecified < (uint256(params.amountSpecified) * (dBPS + 1)) / dBPS) {
+                amountSpecified = (uint256(params.amountSpecified) * (dBPS + 1)) / dBPS;
+            }
             // Exact-Out: find out how much in
-            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, uint256(params.amountSpecified));
+            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, amountSpecified);
         }
 
         poolManager.take(takeCurrency, address(this), amountTake);
 
-        amountSettle = _handleSwap(amountTake, tokenInIndex, tokenOutIndex, settleCurrency);
+        amountSettle = _handleSwap(amountTake, tokenInIndex, tokenOutIndex, settleCurrency, params);
         hasSettled = true;
 
         return (amountSettle, amountTake, hasSettled);
     }
 
-    function _handleSwap(uint256 amountTake, int128 tokenInIndex, int128 tokenOutIndex, Currency settleCurrency)
-        internal
-        returns (uint256 amountOut)
-    {
+    function _handleSwap(
+        uint256 amountTake,
+        int128 tokenInIndex,
+        int128 tokenOutIndex,
+        Currency settleCurrency,
+        SwapParams calldata params
+    ) internal returns (uint256 amountOut) {
         poolManager.sync(settleCurrency);
-        amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
+        // Is exactOut has accuracy issues on Curve, so we do the gas inefficient way of transferring here first to ensure exact amount
+        if (params.amountSpecified > 0) {
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
+            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
+            amountOut = uint256(params.amountSpecified);
+            settleCurrency.transfer(address(poolManager), uint256(params.amountSpecified));
+        } else {
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
+            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
+        }
         poolManager.settle();
     }
 }

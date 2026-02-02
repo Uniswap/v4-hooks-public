@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.26;
 
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
@@ -21,6 +21,7 @@ library AggregatorHookMiner {
     /// @param firstByte The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, etc.)
     /// @param creationCode The creation code of a hook contract. Example: `type(Counter).creationCode`
     /// @param constructorArgs The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`
+    /// @param saltOffset The starting salt value for the search. Increment by MAX_LOOP for subsequent attempts.
     /// @return hookAddress The computed hook address
     /// @return salt The salt that produces the hook address
     function find(
@@ -28,7 +29,8 @@ library AggregatorHookMiner {
         uint160 flags,
         uint8 firstByte,
         bytes memory creationCode,
-        bytes memory constructorArgs
+        bytes memory constructorArgs,
+        uint256 saltOffset
     ) internal view returns (address, bytes32) {
         flags = flags & FLAG_MASK; // mask for only the bottom 14 bits
         // Shift first byte to the most significant byte position (bits 152-159)
@@ -37,7 +39,7 @@ library AggregatorHookMiner {
         bytes memory creationCodeWithArgs = abi.encodePacked(creationCode, constructorArgs);
 
         address hookAddress;
-        for (uint256 salt; salt < MAX_LOOP; salt++) {
+        for (uint256 salt = saltOffset; salt < saltOffset + MAX_LOOP; salt++) {
             hookAddress = computeAddress(deployer, salt, creationCodeWithArgs);
 
             // if the hook's bottom 14 bits match the desired flags, first byte matches the desired ID, AND the address does not have bytecode, we found a match

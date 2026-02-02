@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -94,15 +94,16 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
 
         if (fluidParams.kind == SwapKind.ExactIn) {
             amountIn = fluidParams.amount;
-            IFluidDexV2.SwapInParams memory p = IFluidDexV2.SwapInParams({
+            IFluidDexV2.SwapInParams memory params = IFluidDexV2.SwapInParams({
                 dexKey: fluidParams.key,
                 swap0To1: fluidParams.swap0To1,
                 amountIn: amountIn,
+                // Safe to disable slippage check since these are checked in the router
                 amountOutMin: 0,
                 controllerData: fluidParams.controllerData
             });
 
-            bytes memory callData = abi.encodeWithSelector(IFluidDexV2.swapIn.selector, p);
+            bytes memory callData = abi.encodeWithSelector(IFluidDexV2.swapIn.selector, params);
             swapResult = FLUID_DEX_V2.operate(dexType, SWAP_MODULE_ID, callData);
 
             (amountOut,,) = abi.decode(swapResult, (uint256, uint256, uint256));
@@ -110,15 +111,16 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
             _settleSwap(fluidParams, fluidParams.amount, amountOut);
         } else {
             amountOut = fluidParams.amount;
-            IFluidDexV2.SwapOutParams memory p = IFluidDexV2.SwapOutParams({
+            IFluidDexV2.SwapOutParams memory params = IFluidDexV2.SwapOutParams({
                 dexKey: fluidParams.key,
                 swap0To1: fluidParams.swap0To1,
                 amountOut: amountOut,
+                // Safe to disable slippage check since these are checked in the router
                 amountInMax: type(uint256).max,
                 controllerData: fluidParams.controllerData
             });
 
-            bytes memory callData = abi.encodeWithSelector(IFluidDexV2.swapOut.selector, p);
+            bytes memory callData = abi.encodeWithSelector(IFluidDexV2.swapOut.selector, params);
             swapResult = FLUID_DEX_V2.operate(dexType, SWAP_MODULE_ID, callData);
 
             (amountIn,,) = abi.decode(swapResult, (uint256, uint256, uint256));
@@ -143,7 +145,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
             swap0To1: fluidSwap0to1,
             amount: amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified),
             controllerData: "",
-            isQuote: false
+            isQuote: true
         });
         (bool ok, bytes memory ret) = address(FLUID_DEX_V2)
             .call(abi.encodeWithSelector(IFluidDexV2.startOperation.selector, abi.encode(fluidParams)));
@@ -207,7 +209,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         IFluidDexV2Resolver.DexPoolState memory dexPoolState = FLUID_DEX_V2_RESOLVER.getDexPoolState(dexType, dexKey);
 
         // As recommended by the docs: https://docs.fluid.instadapp.io/integrate/dex-v2-swaps.html
-        if (dexPoolState.dexPoolStateRaw.dexVariablesUnpacked.currentSqrtPriceX96 > 0) revert PoolDoesNotExist();
+        if (dexPoolState.dexPoolStateRaw.dexVariablesUnpacked.currentSqrtPriceX96 == 0) revert PoolDoesNotExist();
 
         localPoolId = key.toId();
 

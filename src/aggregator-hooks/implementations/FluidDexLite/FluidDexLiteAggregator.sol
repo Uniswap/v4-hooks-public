@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -135,6 +135,7 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
                 dexKey: dexKey,
                 swap0To1: fluidSwap0to1,
                 amountSpecified: -params.amountSpecified,
+                // Safe to disable slippage check since these are checked in the router
                 amountLimit: isExactIn ? 0 : type(uint256).max,
                 payer: address(this),
                 recipient: settleCurrency.isAddressZero() ? address(this) : address(poolManager),

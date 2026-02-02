@@ -4,6 +4,8 @@ Uniswap V4 hooks that aggregate liquidity from external DEX protocols, enabling 
 
 ## ID System
 
+The ID system is for convenience of routing programs to know which protocols the external liquidity source belongs to. This is useful for knowing when there is interaction with the same pool more than once in a route. Any random hook address does have a 1/256 chance of a false positive, so anyone relying on the ID system should be aware of that.
+
 Aggregator Hook contract addresses should adhere to the following identification system:
 
 - The first character should be the same as first character of the protocol ("c" for Curve, "f" for Fluid, "b" for Balancer, etc)

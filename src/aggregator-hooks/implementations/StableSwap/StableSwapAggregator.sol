@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -134,6 +134,7 @@ contract StableSwapAggregator is ExternalLiqSourceHook {
 
         poolManager.take(takeCurrency, address(this), amountTake);
 
+        // MinAmountOut is 0 to avoid slippage check because it is checked in the router
         amountSettle = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0);
 
         hasSettled = false;

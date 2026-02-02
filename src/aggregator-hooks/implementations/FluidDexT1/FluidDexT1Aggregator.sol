@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -184,8 +184,10 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     ) internal returns (uint256 amountOut) {
         if (inputIsNative) {
             poolManager.take(takeCurrency, address(this), amountIn);
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
             amountOut = FLUID_POOL.swapIn{value: amountIn}(fluidSwap0to1, amountIn, 0, recipient);
         } else {
+            // MinAmoountOut is 0 to avoid slippage check because it is checked in the router
             amountOut = FLUID_POOL.swapInWithCallback(fluidSwap0to1, amountIn, 0, recipient);
         }
     }
@@ -197,6 +199,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         if (inputIsNative) {
             revert NativeCurrencyExactOut();
         } else {
+            // Uses type(uint256).max for amountInMax to avoid slippage check because it is checked in the router
             amountIn = FLUID_POOL.swapOutWithCallback(fluidSwap0to1, amountOut, type(uint256).max, recipient);
         }
     }
