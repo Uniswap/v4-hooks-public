@@ -20,9 +20,6 @@
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
   },
-  "lib/stableswap-ng": {
-    "rev": "47bedcf737dd565f3fcc9c884054795d92502d9e"
-  },
   "lib/v4-core": {
     "rev": "d153b048868a60c2403a3ef5b2301bb247884d46"
   },
