@@ -1,4 +1,4 @@
 
 
 # Contents
-- [StableLibrary](StableLibrary.sol/library.StableLibrary.md)
+- [FeeCalculation](FeeCalculation.sol/library.FeeCalculation.md)

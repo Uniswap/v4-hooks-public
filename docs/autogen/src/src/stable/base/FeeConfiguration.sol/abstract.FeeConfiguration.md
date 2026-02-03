@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/bc61b69dbabe6bb31bf5ca2c5c42140a7cb4f0cc/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
@@ -11,24 +11,6 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
-### ONE
-Fixed point constant: 1e12 represents 100%
-
-
-```solidity
-uint256 internal constant ONE = 1e12
-```
-
-
-### UNDEFINED_FLEXIBLE_FEE
-Sentinel value indicating no flexible fee (inside optimal rate)
-
-
-```solidity
-uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
-```
-
-
 ### configManager
 The address of the config manager
 
@@ -140,19 +122,19 @@ function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 |`_logK`|`uint256`|The logK value to validate|
 
 
-### _validateOptimalFeeRate
+### _validateOptimalFeeRateE6
 
 Validate the optimal fee rate
 
 
 ```solidity
-function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
+function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_optimalFeeRate`|`uint256`|The optimal fee rate to validate|
+|`_optimalFeeRateE6`|`uint24`|The optimal fee rate to validate|
 
 
 ### _validateReferenceSqrtPriceX96

@@ -7,13 +7,13 @@ struct FeeConfig {
     // TODO: natspec
     uint256 k;
     uint256 logK;
-    uint24 optimalFeeRate;
+    uint24 optimalFeeRateE6;
     uint160 referenceSqrtPriceX96;
 }
 
 struct FeeState {
     // TODO: natspec
-    uint256 previousFee;
+    uint40 previousFeeE12;
     uint160 previousSqrtAmmPriceX96;
     uint256 blockNumber;
 }
@@ -30,8 +30,8 @@ interface IFeeConfiguration {
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
     /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeRate The invalid optimal fee rate
-    error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+    /// @param optimalFeeRateE6 The invalid optimal fee rate
+    error InvalidOptimalFeeRateE6(uint24 optimalFeeRateE6);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
