@@ -1,0 +1,539 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "forge-std/Test.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {ICurveFactory} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/ICurveFactory.sol";
+import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
+import {
+    StableSwapAggregatorFactory
+} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+/// @title StableSwapFuzz
+/// @notice Fuzz tests for StableSwap through Uniswap V4 hooks
+/// @dev Deploys Curve pools and V4 hooks locally for comprehensive testing
+contract StableSwapFuzz is Test {
+    using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
+
+    // V4 Pool configuration
+    uint24 constant POOL_FEE = 500; // 0.05%
+    int24 constant TICK_SPACING = 10;
+    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+
+    // Price limits for swaps
+    uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
+    uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
+
+    // Curve pool parameters
+    uint256 constant DEFAULT_A = 200;
+    uint256 constant DEFAULT_FEE = 4000000; // 0.04%
+    uint256 constant DEFAULT_ASSET_TYPE = 0; // USD
+
+    // Storage slots for Curve factory (Metapool Factory)
+    // The Metapool Factory uses Vyper storage layout
+    // admin is at slot 0, fee_receiver is at slot 1
+    uint256 constant SLOT_ADMIN = 0;
+    uint256 constant SLOT_FEE_RECEIVER = 1;
+
+    // Precompiled bytecode paths
+    string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/StableSwap/precompiled/StableSwapFactory.bin";
+    string constant POOL2_BYTECODE_PATH = "test/aggregator-hooks/StableSwap/precompiled/StableSwapPool2.bin";
+    string constant POOL3_BYTECODE_PATH = "test/aggregator-hooks/StableSwap/precompiled/StableSwapPool3.bin";
+    string constant POOL4_BYTECODE_PATH = "test/aggregator-hooks/StableSwap/precompiled/StableSwapPool4.bin";
+
+    // Contracts
+    IPoolManager public manager;
+    SafePoolSwapTest public swapRouter;
+    ICurveFactory public curveFactory;
+    StableSwapAggregatorFactory public hookFactory;
+
+    address public pool2Impl;
+    address public pool3Impl;
+    address public pool4Impl;
+    address public curveOwner;
+    address public curveFeeReceiver;
+
+    address public alice = makeAddr("alice");
+
+    function setUp() public {
+        curveOwner = makeAddr("curveOwner");
+        curveFeeReceiver = makeAddr("curveFeeReceiver");
+
+        // Deploy Uniswap V4 PoolManager
+        manager = new PoolManager(address(this));
+
+        // Deploy swap router
+        swapRouter = new SafePoolSwapTest(manager);
+
+        // Deploy hook factory
+        hookFactory = new StableSwapAggregatorFactory(manager);
+
+        // Deploy Curve factory from precompiled bytecode
+        curveFactory = ICurveFactory(_deployFromBytecode(FACTORY_BYTECODE_PATH));
+        pool2Impl = _deployFromBytecode(POOL2_BYTECODE_PATH);
+        pool3Impl = _deployFromBytecode(POOL3_BYTECODE_PATH);
+        pool4Impl = _deployFromBytecode(POOL4_BYTECODE_PATH);
+
+        // Initialize Curve factory storage - set admin and fee receiver
+        vm.store(address(curveFactory), bytes32(SLOT_ADMIN), bytes32(uint256(uint160(curveOwner))));
+        vm.store(address(curveFactory), bytes32(SLOT_FEE_RECEIVER), bytes32(uint256(uint160(curveFeeReceiver))));
+
+        // Set plain_implementations using the admin function
+        // The factory has set_plain_implementations(uint256 _n_coins, address[10] _implementations)
+        _setPlainImplementations();
+    }
+
+    /// @notice Set plain implementations using admin function
+    function _setPlainImplementations() internal {
+        // Build implementations arrays for each coin count
+        address[10] memory impls2;
+        impls2[0] = pool2Impl;
+
+        address[10] memory impls3;
+        impls3[0] = pool3Impl;
+
+        address[10] memory impls4;
+        impls4[0] = pool4Impl;
+
+        // Call as admin to set implementations
+        vm.startPrank(curveOwner);
+        (bool success2,) = address(curveFactory)
+            .call(abi.encodeWithSignature("set_plain_implementations(uint256,address[10])", 2, impls2));
+        require(success2, "Failed to set 2-coin impl");
+
+        (bool success3,) = address(curveFactory)
+            .call(abi.encodeWithSignature("set_plain_implementations(uint256,address[10])", 3, impls3));
+        require(success3, "Failed to set 3-coin impl");
+
+        (bool success4,) = address(curveFactory)
+            .call(abi.encodeWithSignature("set_plain_implementations(uint256,address[10])", 4, impls4));
+        require(success4, "Failed to set 4-coin impl");
+        vm.stopPrank();
+    }
+
+    /// @notice Deploy contract from hex bytecode file
+    function _deployFromBytecode(string memory path) internal returns (address deployed) {
+        bytes memory bytecode = vm.parseBytes(vm.readFile(path));
+        require(bytecode.length > 0, "Empty bytecode");
+        deployed = address(uint160(uint256(keccak256(abi.encodePacked(path, "v1")))));
+        vm.etch(deployed, bytecode);
+        require(deployed.code.length > 0, "Deployment failed");
+    }
+
+    /// @notice Deploy a Curve pool with two tokens and custom amplification
+    function _deployCurvePool(MockERC20 token0, MockERC20 token1, uint256 amplification)
+        internal
+        returns (address pool)
+    {
+        // Use address[4] with zeros for unused slots
+        address[4] memory coins = [address(token0), address(token1), address(0), address(0)];
+
+        pool =
+            curveFactory.deploy_plain_pool("Test Pool", "TP", coins, amplification, DEFAULT_FEE, DEFAULT_ASSET_TYPE, 0);
+    }
+
+    /// @notice Add liquidity to a Curve pool
+    function _addCurveLiquidity(address pool, MockERC20 token0, MockERC20 token1, uint256 amount0, uint256 amount1)
+        internal
+    {
+        token0.mint(address(this), amount0);
+        token1.mint(address(this), amount1);
+        token0.approve(pool, amount0);
+        token1.approve(pool, amount1);
+
+        // StableSwap uses fixed-size arrays: add_liquidity(uint256[2], uint256)
+        uint256[2] memory amounts = [amount0, amount1];
+        (bool success,) = pool.call(abi.encodeWithSignature("add_liquidity(uint256[2],uint256)", amounts, 0));
+        require(success, "Add liquidity failed");
+    }
+
+    /// @notice Deploy a Curve pool with N tokens and custom amplification
+    /// @dev Uses address[4] with zeros for unused slots (Curve factory requirement)
+    function _deployCurvePoolMulti(MockERC20[] memory tokens, uint256 amplification) internal returns (address pool) {
+        uint256 numTokens = tokens.length;
+        require(numTokens >= 2 && numTokens <= 4, "Unsupported number of tokens");
+
+        // Build address[4] array with zeros for unused slots
+        address[4] memory coins;
+        for (uint256 i = 0; i < numTokens; i++) {
+            coins[i] = address(tokens[i]);
+        }
+        // Remaining slots are already address(0) by default
+
+        pool = curveFactory.deploy_plain_pool(
+            "Test Multi Pool", "TMP", coins, amplification, DEFAULT_FEE, DEFAULT_ASSET_TYPE, 0
+        );
+    }
+
+    /// @notice Add liquidity to a Curve pool with N tokens
+    function _addCurveLiquidityMulti(address pool, MockERC20[] memory tokens, uint256[] memory amounts) internal {
+        require(tokens.length == amounts.length, "Array length mismatch");
+        uint256 numTokens = tokens.length;
+
+        for (uint256 i = 0; i < numTokens; i++) {
+            tokens[i].mint(address(this), amounts[i]);
+            tokens[i].approve(pool, amounts[i]);
+        }
+
+        // StableSwap uses fixed-size arrays: add_liquidity(uint256[N], uint256)
+        // Each coin count has a different function selector
+        bool success;
+        if (numTokens == 2) {
+            uint256[2] memory fixedAmounts = [amounts[0], amounts[1]];
+            (success,) = pool.call(abi.encodeWithSignature("add_liquidity(uint256[2],uint256)", fixedAmounts, 0));
+        } else if (numTokens == 3) {
+            uint256[3] memory fixedAmounts = [amounts[0], amounts[1], amounts[2]];
+            (success,) = pool.call(abi.encodeWithSignature("add_liquidity(uint256[3],uint256)", fixedAmounts, 0));
+        } else if (numTokens == 4) {
+            uint256[4] memory fixedAmounts = [amounts[0], amounts[1], amounts[2], amounts[3]];
+            (success,) = pool.call(abi.encodeWithSignature("add_liquidity(uint256[4],uint256)", fixedAmounts, 0));
+        } else {
+            revert("Unsupported number of tokens");
+        }
+        require(success, "Add liquidity failed");
+    }
+
+    /// @notice Create and sort N mock tokens by address
+    /// @dev Uses seed to create deterministic token addresses
+    function _createSortedTokens(uint256 seed, uint256 numTokens) internal returns (MockERC20[] memory tokens) {
+        tokens = new MockERC20[](numTokens);
+
+        // Create tokens with unique names
+        for (uint256 i = 0; i < numTokens; i++) {
+            // Use seed + index to get unique salt for each token
+            bytes32 tokenSalt = keccak256(abi.encode(seed, "token", i));
+            string memory name = string(abi.encodePacked("Token", vm.toString(i)));
+            string memory symbol = string(abi.encodePacked("TK", vm.toString(i)));
+            tokens[i] = new MockERC20{salt: tokenSalt}(name, symbol, 18);
+        }
+
+        // Sort tokens by address (bubble sort - fine for small arrays)
+        for (uint256 i = 0; i < numTokens; i++) {
+            for (uint256 j = i + 1; j < numTokens; j++) {
+                if (address(tokens[i]) > address(tokens[j])) {
+                    (tokens[i], tokens[j]) = (tokens[j], tokens[i]);
+                }
+            }
+        }
+    }
+
+    /// @notice Convert MockERC20 array to Currency array
+    function _toCurrencies(MockERC20[] memory tokens) internal pure returns (Currency[] memory currencies) {
+        currencies = new Currency[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            currencies[i] = Currency.wrap(address(tokens[i]));
+        }
+    }
+
+    /// @notice Deploy V4 hook for a Curve pool
+    function _deployHook(ICurveStableSwap curvePool, Currency currency0, Currency currency1)
+        internal
+        returns (StableSwapAggregator hook, PoolKey memory poolKey)
+    {
+        // Hook flags required by ExternalLiqSourceHook
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+
+        // Mine salt for valid hook address
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        (address expectedHookAddress, bytes32 salt) =
+            HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
+
+        // Deploy hook via factory
+        Currency[] memory tokens = new Currency[](2);
+        tokens[0] = currency0;
+        tokens[1] = currency1;
+
+        address hookAddress = hookFactory.createPool(salt, curvePool, tokens, POOL_FEE, TICK_SPACING, SQRT_PRICE_1_1);
+
+        require(hookAddress == expectedHookAddress, "Hook address mismatch");
+        hook = StableSwapAggregator(payable(hookAddress));
+
+        poolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+    }
+
+    /// @notice Deploy V4 hook for a multi-token Curve pool
+    /// @dev Creates V4 pools for all token pairs (N*(N-1)/2 pools)
+    function _deployHookMulti(ICurveStableSwap curvePool, Currency[] memory currencies)
+        internal
+        returns (StableSwapAggregator hook)
+    {
+        // Hook flags required by ExternalLiqSourceHook
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+
+        // Mine salt for valid hook address
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        (address expectedHookAddress, bytes32 salt) =
+            HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
+
+        // Deploy hook via factory (creates V4 pools for all pairs)
+        address hookAddress =
+            hookFactory.createPool(salt, curvePool, currencies, POOL_FEE, TICK_SPACING, SQRT_PRICE_1_1);
+
+        require(hookAddress == expectedHookAddress, "Hook address mismatch");
+        hook = StableSwapAggregator(payable(hookAddress));
+    }
+
+    /// @notice Build a PoolKey for a specific token pair
+    /// @dev Ensures currency0 < currency1 as required by V4
+    function _buildPoolKey(Currency currencyA, Currency currencyB, IHooks hook)
+        internal
+        pure
+        returns (PoolKey memory poolKey)
+    {
+        (Currency currency0, Currency currency1) = Currency.unwrap(currencyA) < Currency.unwrap(currencyB)
+            ? (currencyA, currencyB)
+            : (currencyB, currencyA);
+
+        poolKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: POOL_FEE, tickSpacing: TICK_SPACING, hooks: hook
+        });
+    }
+
+    /// @notice Setup alice with multiple tokens
+    function _setupAliceMulti(MockERC20[] memory tokens, uint256[] memory amounts) internal {
+        require(tokens.length == amounts.length, "Array length mismatch");
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            tokens[i].mint(alice, amounts[i]);
+            // Seed PoolManager with tokens for swaps
+            tokens[i].mint(address(manager), amounts[i]);
+        }
+
+        vm.startPrank(alice);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            tokens[i].approve(address(swapRouter), type(uint256).max);
+        }
+        vm.stopPrank();
+    }
+
+    /// @notice Setup alice with tokens
+    function _setupAlice(MockERC20 token0, MockERC20 token1, uint256 amount0, uint256 amount1) internal {
+        token0.mint(alice, amount0);
+        token1.mint(alice, amount1);
+
+        vm.startPrank(alice);
+        token0.approve(address(swapRouter), type(uint256).max);
+        token1.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+
+        // Seed PoolManager with MORE tokens for swaps (must cover max swap amounts)
+        token0.mint(address(manager), amount0);
+        token1.mint(address(manager), amount1);
+    }
+
+    /// @notice Fuzz test: Swap through V4 hook with random number of tokens (2-4)
+    /// @dev Uses a seed to derive remaining random parameters deterministically
+    function testFuzz_v4SwapMultiToken(uint256 numTokensRaw, uint256 amplificationRaw, uint256 seed) public {
+        // Bound explicit parameters (StableSwap supports 2-4 coins)
+        uint256 numTokens = bound(numTokensRaw, 2, 4);
+        uint256 amplification = bound(amplificationRaw, 10, 500);
+
+        // Create and sort tokens (uses seed for deterministic addresses)
+        MockERC20[] memory tokens = _createSortedTokens(seed, numTokens);
+
+        // Derive balances for each token
+        uint256[] memory balances = _deriveBalances(seed, numTokens);
+
+        // Deploy Curve pool and add liquidity
+        address curvePoolAddr = _deployCurvePoolMulti(tokens, amplification);
+        _addCurveLiquidityMulti(curvePoolAddr, tokens, balances);
+        ICurveStableSwap curvePool = ICurveStableSwap(curvePoolAddr);
+
+        // Deploy V4 hook (creates all pair pools)
+        Currency[] memory currencies = _toCurrencies(tokens);
+        StableSwapAggregator hook = _deployHookMulti(curvePool, currencies);
+
+        // Derive which pair to swap
+        (uint256 tokenInIdx, uint256 tokenOutIdx) = _deriveSwapPair(seed, numTokens);
+
+        // Get the minimum balance of the swap pair to bound swap amount
+        uint256 minPairBalance =
+            balances[tokenInIdx] < balances[tokenOutIdx] ? balances[tokenInIdx] : balances[tokenOutIdx];
+        uint256 swapAmount = _deriveSwapAmount(seed, minPairBalance);
+
+        // Setup alice with all tokens
+        _setupAliceMulti(tokens, balances);
+
+        // Build PoolKey for the selected pair
+        // V4 requires currency0 < currency1, so we need to determine zeroForOne
+        Currency currencyIn = currencies[tokenInIdx];
+        Currency currencyOut = currencies[tokenOutIdx];
+        PoolKey memory poolKey = _buildPoolKey(currencyIn, currencyOut, IHooks(address(hook)));
+
+        // Determine zeroForOne based on sorted order
+        // If tokenIn is currency0, then zeroForOne = true
+        bool zeroForOne = Currency.unwrap(currencyIn) < Currency.unwrap(currencyOut);
+
+        // Get quote from hook (exact-input only for StableSwap)
+        uint256 expectedOut = hook.quote(zeroForOne, -int256(swapAmount), poolKey.toId());
+        assertGt(expectedOut, 0, "Quote should be non-zero");
+
+        MockERC20 tokenOut = tokens[tokenOutIdx];
+        uint256 aliceOutBefore = tokenOut.balanceOf(alice);
+
+        // Execute swap through V4
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(swapAmount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        uint256 aliceOutAfter = tokenOut.balanceOf(alice);
+        uint256 received = aliceOutAfter - aliceOutBefore;
+
+        // Output should match quote
+        assertEq(received, expectedOut, "Received should match quote");
+    }
+
+    /// @notice Fuzz test: Multiple swaps through V4 hook with random token pairs
+    /// @dev Each swap can use a different token pair from the pool
+    function testFuzz_v4MultiSwapsMultiToken(uint256 numTokensRaw, uint256 amplificationRaw, uint256 seed) public {
+        // Bound explicit parameters (StableSwap supports 2-4 coins)
+        uint256 numTokens = bound(numTokensRaw, 2, 4);
+        uint256 amplification = bound(amplificationRaw, 10, 500);
+
+        // Create and sort tokens
+        MockERC20[] memory tokens = _createSortedTokens(seed, numTokens);
+
+        // Derive balances for each token (use higher minimum for multiple swaps)
+        uint256[] memory balances = new uint256[](numTokens);
+        for (uint256 i = 0; i < numTokens; i++) {
+            balances[i] = bound(uint256(keccak256(abi.encode(seed, "balance", i))), 100_000 ether, 10_000_000 ether);
+        }
+
+        // Deploy Curve pool and add liquidity
+        address curvePoolAddr = _deployCurvePoolMulti(tokens, amplification);
+        _addCurveLiquidityMulti(curvePoolAddr, tokens, balances);
+        ICurveStableSwap curvePool = ICurveStableSwap(curvePoolAddr);
+
+        // Deploy V4 hook
+        Currency[] memory currencies = _toCurrencies(tokens);
+        StableSwapAggregator hook = _deployHookMulti(curvePool, currencies);
+
+        // Setup alice with all tokens
+        _setupAliceMulti(tokens, balances);
+
+        // Execute 3 swaps with different derived pairs
+        for (uint256 swapIdx = 0; swapIdx < 3; swapIdx++) {
+            // Derive swap pair for this iteration
+            uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+            (uint256 tokenInIdx, uint256 tokenOutIdx) = _deriveSwapPair(swapSeed, numTokens);
+
+            uint256 minPairBalance =
+                balances[tokenInIdx] < balances[tokenOutIdx] ? balances[tokenInIdx] : balances[tokenOutIdx];
+            uint256 swapAmount =
+                bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
+
+            Currency currencyIn = currencies[tokenInIdx];
+            Currency currencyOut = currencies[tokenOutIdx];
+            PoolKey memory poolKey = _buildPoolKey(currencyIn, currencyOut, IHooks(address(hook)));
+            bool zeroForOne = Currency.unwrap(currencyIn) < Currency.unwrap(currencyOut);
+
+            // Execute and verify swap (exact-input only)
+            MockERC20 tokenOut = tokens[tokenOutIdx];
+            uint256 expectedOut = hook.quote(zeroForOne, -int256(swapAmount), poolKey.toId());
+            uint256 balanceBefore = tokenOut.balanceOf(alice);
+
+            vm.prank(alice);
+            swapRouter.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: zeroForOne,
+                    amountSpecified: -int256(swapAmount),
+                    sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+                }),
+                SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+                ""
+            );
+
+            uint256 balanceAfter = tokenOut.balanceOf(alice);
+            assertEq(balanceAfter - balanceBefore, expectedOut, "Swap should match quote");
+        }
+    }
+
+    /// @notice Helper to execute a swap and verify output matches quote
+    function _executeAndVerifySwap(
+        StableSwapAggregator hook,
+        PoolKey memory poolKey,
+        MockERC20 token0,
+        MockERC20 token1,
+        uint256 swapAmount,
+        bool zeroForOne
+    ) internal {
+        MockERC20 tokenOut = zeroForOne ? token1 : token0;
+
+        // Get quote (exact-input only)
+        uint256 expectedOut = hook.quote(zeroForOne, -int256(swapAmount), poolKey.toId());
+
+        uint256 balanceBefore = tokenOut.balanceOf(alice);
+
+        // Execute swap
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(swapAmount),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        uint256 balanceAfter = tokenOut.balanceOf(alice);
+        assertEq(balanceAfter - balanceBefore, expectedOut, "Swap should match quote");
+    }
+
+    // ========== SEED-BASED DERIVATION HELPERS ==========
+
+    /// @notice Derive initial balances for each token from seed
+    function _deriveBalances(uint256 seed, uint256 numTokens) internal pure returns (uint256[] memory) {
+        uint256[] memory balances = new uint256[](numTokens);
+        for (uint256 i = 0; i < numTokens; i++) {
+            balances[i] = bound(uint256(keccak256(abi.encode(seed, "balance", i))), 10_000 ether, 10_000_000 ether);
+        }
+        return balances;
+    }
+
+    /// @notice Derive which token pair to swap (ensures i != j)
+    function _deriveSwapPair(uint256 seed, uint256 numTokens) internal pure returns (uint256 i, uint256 j) {
+        i = bound(uint256(keccak256(abi.encode(seed, "tokenIn"))), 0, numTokens - 1);
+        j = bound(uint256(keccak256(abi.encode(seed, "tokenOut"))), 0, numTokens - 2);
+        if (j >= i) j++; // Ensure i != j
+    }
+
+    /// @notice Derive swap amount based on the minimum balance in the pair
+    function _deriveSwapAmount(uint256 seed, uint256 balance) internal pure returns (uint256) {
+        return bound(uint256(keccak256(abi.encode(seed, "swapAmount"))), balance / 10000, balance / 20);
+    }
+
+    receive() external payable {}
+}

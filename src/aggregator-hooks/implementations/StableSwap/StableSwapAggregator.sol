@@ -101,8 +101,9 @@ contract StableSwapAggregator is ExternalLiqSourceHook {
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 
-        IERC20(Currency.unwrap(key.currency0)).safeIncreaseAllowance(address(pool), type(uint256).max);
-        IERC20(Currency.unwrap(key.currency1)).safeIncreaseAllowance(address(pool), type(uint256).max);
+        // Use forceApprove to set allowance (safe to call multiple times for multi-token pools)
+        IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
         return IHooks.beforeInitialize.selector;

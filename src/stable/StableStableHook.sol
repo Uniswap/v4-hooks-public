@@ -185,10 +185,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
                     } else {
                         // This case is possible to reach via just swaps.
                         uint256 blocksPassed = block.number - feeState_.blockNumber;
-                        uint256 factorX24 = blocksPassed <= 4
-                            ? StableLibrary.fastPow(feeConfig_.k, blocksPassed)
-                            : (uint256(FixedPointMathLib.expWad(-int256(((feeConfig_.logK) << 40) * blocksPassed)))
-                                        << 24) / 1e18;
+                        uint256 factorX24;
+                        if (blocksPassed <= 4) {
+                            factorX24 = StableLibrary.fastPow(feeConfig_.k, blocksPassed);
+                        } else {
+                            int256 exponent = -int256(uint256(feeConfig_.logK) << 40) * int256(blocksPassed);
+                            factorX24 = (uint256(FixedPointMathLib.expWad(exponent)) << 24) / 1e18;
+                        }
                         flexibleFee = targetFee + ((factorX24 * (previousFee - targetFee)) >> 24);
                     }
                     // Return the fee but in any event not greater than 99%
