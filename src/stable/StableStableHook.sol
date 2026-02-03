@@ -191,14 +191,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2; // closeFee is positive since we are outside the optimal rate
 
         // Step 3: Apply exponential decay toward target
-        if (previousFeeE12 <= targetFeeE12) {
-            // Already at or below target (shouldn't happen in normal operation)
-            flexibleFeeE12 = targetFeeE12;
-        } else {
-            // Apply decay: fee moves from previous toward target
-            flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
-                targetFeeE12, previousFeeE12, config.k, config.logK, block.number - feeState.blockNumber
-            );
-        }
+        flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
+            targetFeeE12, previousFeeE12, config.k, config.logK, block.number - feeState.blockNumber
+        );
     }
 }
