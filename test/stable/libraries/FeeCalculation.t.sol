@@ -72,37 +72,6 @@ contract FeeCalculationTest is Test {
         FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate); // should not revert
     }
 
-    function test_convertToUniswapFee_succeeds() public pure {
-        // Test 1% fee
-        uint40 internalFee = ONE / 100; // 1e12 / 1e2 = 1e10
-        uint24 uniswapFee = FeeCalculation.convertToUniswapFee(internalFee);
-        assertEq(uniswapFee, 10_000); // 1e10 / 1e6 = 1e4 = 10_000
-
-        // Test 10% fee
-        internalFee = ONE / 10; // 1e12 / 1e1 = 1e11
-        uniswapFee = FeeCalculation.convertToUniswapFee(internalFee);
-        assertEq(uniswapFee, 100_000); // 1e11 / 1e6 = 1e5 = 100_000
-
-        // Test fee capping at 99%
-        internalFee = ONE;
-        uniswapFee = FeeCalculation.convertToUniswapFee(internalFee);
-        assertEq(uniswapFee, 990_000); // 1e12 / 1e6 = 1e6 => 990_000
-
-        internalFee = 0;
-        uniswapFee = FeeCalculation.convertToUniswapFee(internalFee);
-        assertEq(uniswapFee, 0); // 0 / 1e6 = 0
-    }
-
-    function test_fuzz_convertToUniswapFee_succeeds(uint40 internalFee) public pure {
-        uint24 uniswapFee = FeeCalculation.convertToUniswapFee(internalFee);
-        if (internalFee >= 990_000_000_000) {
-            assertEq(uniswapFee, 990_000);
-        } else {
-            assertEq(uniswapFee, internalFee / 1e6);
-            assertLt(uniswapFee, 990_000);
-        }
-    }
-
     function test_fuzz_calculateInsideOptimalRateFee_succeeds(
         uint160 priceRatioX96,
         uint24 optimalFeeRate,
@@ -122,5 +91,46 @@ contract FeeCalculationTest is Test {
         ); // should not revert
 
         assertTrue(totalStableFee <= ONE);
+    }
+
+    function test_calculateFarFee_succeeds_left_of_reference() public pure {
+        uint160 priceRatioX96 =
+            uint160(uint256(REFERENCE_SQRT_PRICE_X96) * (1000000 - (OPTIMAL_FEE_RATE + 1))) / 1000000; // lower than the lower boundary
+        uint40 farFee = FeeCalculation.calculateFarFee(priceRatioX96, OPTIMAL_FEE_RATE);
+        assertTrue(farFee > OPTIMAL_FEE_RATE * 2);
+    }
+
+    function test_fuzz_calculateFarFee_succeeds(uint160 priceRatioX96, uint24 optimalFeeRate) public pure {
+        priceRatioX96 = uint160(bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96));
+        optimalFeeRate = uint24(bound(optimalFeeRate, 0, 1e6 - 1));
+        uint40 farFee = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRate);
+        assertTrue(farFee > OPTIMAL_FEE_RATE * 2);
+    }
+
+    function test_fastPow_succeeds() public pure {
+        uint256 k = 16_609_443; // 0.99
+
+        uint256 z;
+        uint256 blocksPassed;
+
+        blocksPassed = 0;
+        z = FeeCalculation.fastPow(k, blocksPassed);
+        assertEq(z, 1 << 24);
+
+        blocksPassed = 1;
+        z = FeeCalculation.fastPow(k, blocksPassed);
+        assertEq(z, k);
+
+        blocksPassed = 2;
+        z = FeeCalculation.fastPow(k, blocksPassed);
+        assertEq(z, k * k >> 24);
+
+        blocksPassed = 3;
+        z = FeeCalculation.fastPow(k, blocksPassed);
+        assertEq(z, k * k * k >> 48);
+
+        blocksPassed = 4;
+        z = FeeCalculation.fastPow(k, blocksPassed);
+        assertEq(z, k * k * k * k >> 72);
     }
 }

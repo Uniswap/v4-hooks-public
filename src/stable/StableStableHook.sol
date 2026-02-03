@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {FeeConfiguration} from "./base/FeeConfiguration.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {StableLibrary} from "./libraries/StableLibrary.sol";
 import {FeeCalculation} from "./libraries/FeeCalculation.sol";
 import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -138,8 +137,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         feeState.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
         feeState.blockNumber = block.number;
 
-        // Convert to Uniswap fee format
-        uint24 uniswapFee = FeeCalculation.convertToUniswapFee(totalStableFee);
+        // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
+        uint24 uniswapFee = uint24(totalStableFee / FeeCalculation.PPM);
 
         return
             (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, uniswapFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
@@ -167,7 +166,6 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint40 previousFee = feeState.previousFee;
 
         // Step 1: Determine if previous fee needs to be reset
-        // Reset if no previous fee (was inside optimal spread)
         if (
             previousFee == FeeCalculation.UNDEFINED_FLEXIBLE_FEE
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceToTheLeft
@@ -178,16 +176,15 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference
             // Adjust previous fee to account for price movement
-            previousFee = FeeCalculation.adjustPreviousFeeForPriceMovement(
-                previousFee, sqrtAmmPriceX96, previousSqrtAmmPriceX96, ammPriceToTheLeft
-            );
+            uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
+            previousFee = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFee);
         } else if (previousFee > farFee) {
             // Price jumped back toward reference but still outside spread
             // Cap at far boundary
             previousFee = farFee;
         }
 
-        // Step 2: Calculate target fee (midpoint between boundaries)
+        // Step 2: Calculate target fee
         uint40 targetFee = farFee - uint40(closeFee) / 2; // closeFee is positive since we are outside the optimal rate
 
         // Step 3: Apply exponential decay toward target
@@ -195,13 +192,10 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Already at or below target (shouldn't happen in normal operation)
             flexibleFee = targetFee;
         } else {
-            // Calculate decay factor based on blocks passed
-            // Handle edge case where block.number might be less than stored value (e.g., in tests)
-            uint256 blocksPassed = block.number >= feeState.blockNumber ? block.number - feeState.blockNumber : 0;
-            uint256 decayFactor = FeeCalculation.calculateDecayFactor(config.k, config.logK, blocksPassed);
-
             // Apply decay: fee moves from previous toward target
-            flexibleFee = FeeCalculation.calculateFlexibleFeeWithDecay(targetFee, previousFee, decayFactor);
+            flexibleFee = FeeCalculation.calculateFlexibleFee(
+                targetFee, previousFee, config.k, config.logK, block.number - feeState.blockNumber
+            );
         }
     }
 }

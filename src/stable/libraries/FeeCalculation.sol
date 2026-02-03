@@ -2,15 +2,11 @@
 pragma solidity 0.8.26;
 
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
-import {StableLibrary} from "../libraries/StableLibrary.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title FeeCalculation
 /// @notice Library providing core mathematical functions for calculating dynamic swap fees
 library FeeCalculation {
-    /// @notice Maximum supported fee in Uniswap format (990_000 = 99%)
-    uint24 public constant MAX_FEE = 990_000;
-
     /// @notice Maximum allowed optimal fee rate
     /// @dev Optimal fee rate must be strictly less than PPM (100%).
     uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1;
@@ -27,21 +23,21 @@ library FeeCalculation {
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint64 internal constant Q48 = 2 ** 48;
 
-    /// @notice Calculate the price ratio between AMM price and reference price in Q96 format
-    /// @param sqrtAmmPriceX96 Current AMM sqrt price in Q96 format
-    /// @param sqrtReferencePriceX96 Reference sqrt price in Q96 format
+    /// @notice Calculate the price ratio between two sqrt prices in Q96 format
+    /// @dev Always returns min(price1, price2) / max(price1, price2), ensuring result <= 2^96
+    /// @param sqrtPrice1X96 First sqrt price in Q96 format
+    /// @param sqrtPrice2X96 Second sqrt price in Q96 format
     /// @return priceRatioX96 Price ratio in Q96 format, always <= 2^96
-    function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePriceX96)
+    function calculatePriceRatioX96(uint160 sqrtPrice1X96, uint160 sqrtPrice2X96)
         internal
         pure
         returns (uint160 priceRatioX96)
     {
-        // If AMM price < reference: sqrtPriceRatioX96 = (ammPrice/refPrice)
-        // If AMM price >= reference: sqrtPriceRatioX96 = (refPrice/ammPrice)
-        /// Multiply by Q48 to preserve precision
-        uint160 sqrtPriceRatioX96 = sqrtAmmPriceX96 < sqrtReferencePriceX96
-            ? uint160(uint256(sqrtAmmPriceX96) * Q48 / sqrtReferencePriceX96)
-            : uint160(uint256(sqrtReferencePriceX96) * Q48 / sqrtAmmPriceX96);
+        // Always compute smaller / larger to get ratio <= 1
+        // Multiply by Q48 to preserve precision during division
+        uint160 sqrtPriceRatioX96 = sqrtPrice1X96 < sqrtPrice2X96
+            ? uint160(uint256(sqrtPrice1X96) * Q48 / sqrtPrice2X96)
+            : uint160(uint256(sqrtPrice2X96) * Q48 / sqrtPrice1X96);
 
         // Square to get full price ratio in Q96 format
         priceRatioX96 = sqrtPriceRatioX96 * sqrtPriceRatioX96;
@@ -49,7 +45,7 @@ library FeeCalculation {
 
     /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
     ///         The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
-    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
     /// @param optimalFeeRate Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
     /// @return closeFee Fee at the "close" boundary. If <= 0, price is inside optimal rate. If > 0, price is outside.
     function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (int40 closeFee) {
@@ -103,7 +99,7 @@ library FeeCalculation {
 
     /// @notice Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
     ///         The far boundary is whichever edge of the optimal rate is farthest from the current AMM price.
-    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
     /// @param optimalFeeRate Optimal fee rate in parts per million
     /// @return farFee Fee to get to the "far" boundary
     function calculateFarFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (uint40 farFee) {
@@ -125,74 +121,63 @@ library FeeCalculation {
     /// @notice Adjust previous fee for price movement
     /// @dev When price moves further from reference, adjust the previous fee to account for the movement
     /// @param previousFee Previous flexible fee
-    /// @param sqrtAmmPriceX96 Current AMM sqrt price
-    /// @param previousSqrtAmmPriceX96 Previous AMM sqrt price
-    /// @param ammPriceToTheLeft True if current AMM price < reference price
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
     /// @return adjustedFee Adjusted previous fee accounting for price movement
-    function adjustPreviousFeeForPriceMovement(
-        uint40 previousFee,
-        uint160 sqrtAmmPriceX96,
-        uint160 previousSqrtAmmPriceX96,
-        bool ammPriceToTheLeft
-    ) internal pure returns (uint40 adjustedFee) {
-        // Calculate ratio of price change (Q96 format)
-        // IMPORTANT: Use uint256 to avoid truncation when squaring
-        uint256 sqrtPriceRatio = ammPriceToTheLeft
-            ? (uint256(sqrtAmmPriceX96) * Q48) / previousSqrtAmmPriceX96
-            : (uint256(previousSqrtAmmPriceX96) * Q48) / sqrtAmmPriceX96;
-
-        uint256 priceRatioX96 = sqrtPriceRatio * sqrtPriceRatio;
-
-        // Adjust previous fee: adjustedFee = 1 - ratio * (1 - previousFee)
-        adjustedFee = uint40(ONE - (priceRatioX96 * (ONE - previousFee)) / FixedPoint96.Q96);
-    }
-
-    /// @notice Calculate exponential decay factor for fee reduction over time
-    /// @dev Uses fast computation for small block counts, exponential for large
-    /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)
-    /// @param logK Natural log of k scaled appropriately
-    /// @param blocksPassed Number of blocks since last fee update
-    /// @return factorX24 Decay factor in Q24 format (2^24 = no decay, 0 = full decay)
-    function calculateDecayFactor(uint256 k, uint256 logK, uint256 blocksPassed)
+    function adjustPreviousFeeForPriceMovement(uint160 priceRatioX96, uint40 previousFee)
         internal
         pure
-        returns (uint256 factorX24)
+        returns (uint40 adjustedFee)
     {
-        if (blocksPassed <= 4) {
-            // Fast path: Direct computation for small block counts
-            factorX24 = StableLibrary.fastPow(k, blocksPassed);
-        } else {
-            // Slow path: Exponential computation for large block counts
-            // exp(-logK * blocksPassed) scaled to Q24
-            factorX24 = (uint256(FixedPointMathLib.expWad(-int256((logK << 40) * blocksPassed))) << 24) / 1e18;
-        }
+        // Adjust previous fee: adjustedFee = 1 - priceRatio * (1 - previousFee)
+        adjustedFee = uint40(ONE - (uint256(priceRatioX96) * (ONE - previousFee)) / FixedPoint96.Q96);
     }
 
     /// @notice Calculate flexible fee with exponential decay
     /// @dev Fee decays from previous fee toward target fee over time
     /// @param targetFee Target fee to decay toward
     /// @param previousFee Previous flexible fee
-    /// @param factorX24 Decay factor in Q24 format from calculateDecayFactor
+    /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)
+    /// @param logK Natural log of k scaled appropriately
+    /// @param blocksPassed Number of blocks since last fee update
     /// @return flexibleFee New flexible fee after decay
-    function calculateFlexibleFeeWithDecay(uint40 targetFee, uint40 previousFee, uint256 factorX24)
+    function calculateFlexibleFee(uint40 targetFee, uint40 previousFee, uint256 k, uint256 logK, uint256 blocksPassed)
         internal
         pure
         returns (uint40 flexibleFee)
     {
+        uint256 factorX24;
+        if (blocksPassed <= 4) {
+            // Fast path: Direct computation for small block counts
+            factorX24 = fastPow(k, blocksPassed);
+        } else {
+            // Slow path: Exponential computation for large block counts
+            // exp(-logK * blocksPassed) scaled to Q24
+            factorX24 = (uint256(FixedPointMathLib.expWad(-int256((logK << 40) * blocksPassed))) << 24) / 1e18;
+        }
+
         // flexibleFee = target + factor * (previous - target)
         flexibleFee = uint40(targetFee + ((uint256(factorX24) * (previousFee - targetFee)) >> 24));
     }
 
-    /// @notice Convert internal fee format to Uniswap fee format
-    /// @param internalFee Fee in internal format (1e12 = 100%)
-    /// @return uniswapFee Fee in Uniswap format (1_000_000 = 100%, max 990_000)
-    function convertToUniswapFee(uint40 internalFee) internal pure returns (uint24 uniswapFee) {
-        // Convert from 1e12 to parts per million (1e12 / 1e6 = 1e6)
-        uniswapFee = uint24(internalFee / PPM);
-
-        // Cap at 99% (990_000 ppm)
-        if (uniswapFee > MAX_FEE) {
-            uniswapFee = MAX_FEE;
+    /// @notice Calculate the fast power of k to the power of blocksPassed
+    /// @param k The base of the power
+    /// @param blocksPassed The power to raise k to. Must be <= 4.
+    /// @return z The result of k to the power of blocksPassed
+    // @dev the split in two with this special case saves 110 gas, see factor() in (Stable)HookParams
+    function fastPow(uint256 k, uint256 blocksPassed) internal pure returns (uint256 z) {
+        assembly {
+            switch blocksPassed
+            case 1 { z := k }
+            case 2 { z := shr(24, mul(k, k)) }
+            case 3 {
+                let zz := mul(k, k)
+                z := shr(48, mul(k, zz))
+            }
+            case 4 {
+                let zz := mul(k, k)
+                z := shr(72, mul(zz, zz))
+            }
+            case 0 { z := shl(24, 1) }
         }
     }
 }

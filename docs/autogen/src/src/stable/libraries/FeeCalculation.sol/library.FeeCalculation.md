@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/c8d33770d8ba5213d85d21e19098c0bee166f83b/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -8,15 +8,6 @@ Library providing core mathematical functions for calculating dynamic swap fees
 
 
 ## State Variables
-### MAX_FEE
-Maximum supported fee in Uniswap format (990_000 = 99%)
-
-
-```solidity
-uint24 public constant MAX_FEE = 990_000
-```
-
-
 ### MAX_OPTIMAL_FEE_RATE
 Maximum allowed optimal fee rate
 
@@ -67,11 +58,13 @@ uint64 internal constant Q48 = 2 ** 48
 ## Functions
 ### calculatePriceRatioX96
 
-Calculate the price ratio between AMM price and reference price in Q96 format
+Calculate the price ratio between two sqrt prices in Q96 format
+
+Always returns min(price1, price2) / max(price1, price2), ensuring result <= 2^96
 
 
 ```solidity
-function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePriceX96)
+function calculatePriceRatioX96(uint160 sqrtPrice1X96, uint160 sqrtPrice2X96)
     internal
     pure
     returns (uint160 priceRatioX96);
@@ -80,8 +73,8 @@ function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePr
 
 |Name|Type|Description|
 |----|----|-----------|
-|`sqrtAmmPriceX96`|`uint160`|Current AMM sqrt price in Q96 format|
-|`sqrtReferencePriceX96`|`uint160`|Reference sqrt price in Q96 format|
+|`sqrtPrice1X96`|`uint160`|First sqrt price in Q96 format|
+|`sqrtPrice2X96`|`uint160`|Second sqrt price in Q96 format|
 
 **Returns**
 
@@ -103,7 +96,7 @@ function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) interna
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96|
+|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
 |`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
@@ -155,7 +148,7 @@ function calculateFarFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal 
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96|
+|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
 |`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million|
 
 **Returns**
@@ -173,21 +166,17 @@ When price moves further from reference, adjust the previous fee to account for 
 
 
 ```solidity
-function adjustPreviousFeeForPriceMovement(
-    uint40 previousFee,
-    uint160 sqrtAmmPriceX96,
-    uint160 previousSqrtAmmPriceX96,
-    bool ammPriceToTheLeft
-) internal pure returns (uint40 adjustedFee);
+function adjustPreviousFeeForPriceMovement(uint160 priceRatioX96, uint40 previousFee)
+    internal
+    pure
+    returns (uint40 adjustedFee);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
+|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
 |`previousFee`|`uint40`|Previous flexible fee|
-|`sqrtAmmPriceX96`|`uint160`|Current AMM sqrt price|
-|`previousSqrtAmmPriceX96`|`uint160`|Previous AMM sqrt price|
-|`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
 
 **Returns**
 
@@ -196,35 +185,7 @@ function adjustPreviousFeeForPriceMovement(
 |`adjustedFee`|`uint40`|Adjusted previous fee accounting for price movement|
 
 
-### calculateDecayFactor
-
-Calculate exponential decay factor for fee reduction over time
-
-Uses fast computation for small block counts, exponential for large
-
-
-```solidity
-function calculateDecayFactor(uint256 k, uint256 logK, uint256 blocksPassed)
-    internal
-    pure
-    returns (uint256 factorX24);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)|
-|`logK`|`uint256`|Natural log of k scaled appropriately|
-|`blocksPassed`|`uint256`|Number of blocks since last fee update|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`factorX24`|`uint256`|Decay factor in Q24 format (2^24 = no decay, 0 = full decay)|
-
-
-### calculateFlexibleFeeWithDecay
+### calculateFlexibleFee
 
 Calculate flexible fee with exponential decay
 
@@ -232,7 +193,7 @@ Fee decays from previous fee toward target fee over time
 
 
 ```solidity
-function calculateFlexibleFeeWithDecay(uint40 targetFee, uint40 previousFee, uint256 factorX24)
+function calculateFlexibleFee(uint40 targetFee, uint40 previousFee, uint256 k, uint256 logK, uint256 blocksPassed)
     internal
     pure
     returns (uint40 flexibleFee);
@@ -243,7 +204,9 @@ function calculateFlexibleFeeWithDecay(uint40 targetFee, uint40 previousFee, uin
 |----|----|-----------|
 |`targetFee`|`uint40`|Target fee to decay toward|
 |`previousFee`|`uint40`|Previous flexible fee|
-|`factorX24`|`uint256`|Decay factor in Q24 format from calculateDecayFactor|
+|`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)|
+|`logK`|`uint256`|Natural log of k scaled appropriately|
+|`blocksPassed`|`uint256`|Number of blocks since last fee update|
 
 **Returns**
 
@@ -252,24 +215,25 @@ function calculateFlexibleFeeWithDecay(uint40 targetFee, uint40 previousFee, uin
 |`flexibleFee`|`uint40`|New flexible fee after decay|
 
 
-### convertToUniswapFee
+### fastPow
 
-Convert internal fee format to Uniswap fee format
+Calculate the fast power of k to the power of blocksPassed
 
 
 ```solidity
-function convertToUniswapFee(uint40 internalFee) internal pure returns (uint24 uniswapFee);
+function fastPow(uint256 k, uint256 blocksPassed) internal pure returns (uint256 z);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`internalFee`|`uint40`|Fee in internal format (1e12 = 100%)|
+|`k`|`uint256`|The base of the power|
+|`blocksPassed`|`uint256`|The power to raise k to. Must be <= 4.|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`uniswapFee`|`uint24`|Fee in Uniswap format (1_000_000 = 100%, max 990_000)|
+|`z`|`uint256`|The result of k to the power of blocksPassed|
 
 
