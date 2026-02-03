@@ -12,6 +12,8 @@ contract MockExternalLiqSource {
     bool public returnHasSettled;
     bool public revertNextCall;
 
+    error RevertNextCall();
+
     function setReturns(uint256 amountSettle, uint256 amountTake, bool hasSettled) external {
         returnAmountSettle = amountSettle;
         returnAmountTake = amountTake;
@@ -28,7 +30,7 @@ contract MockExternalLiqSource {
         view
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
-        if (revertNextCall) revert("MockExternalLiqSource: revert");
+        if (revertNextCall) revert RevertNextCall();
         return (returnAmountSettle, returnAmountTake, returnHasSettled);
     }
 }

@@ -31,14 +31,15 @@ contract MockLiquiditySupplier {
 
     /// @notice Supply tokens to the liquidity layer
     function supply(address token_, uint256 amount_, address from_) external {
-        IFluidLiquidity(liquidityContract).operate(
-            token_,
-            int256(amount_),
-            0, // no borrow
-            address(0),
-            address(0),
-            abi.encode(from_)
-        );
+        IFluidLiquidity(liquidityContract)
+            .operate(
+                token_,
+                int256(amount_),
+                0, // no borrow
+                address(0),
+                address(0),
+                abi.encode(from_)
+            );
     }
 
     /// @notice Supply native ETH to the liquidity layer

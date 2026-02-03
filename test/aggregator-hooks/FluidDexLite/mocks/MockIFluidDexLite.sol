@@ -4,12 +4,18 @@ pragma solidity ^0.8.24;
 import {
     IFluidDexLite
 } from "../../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
+import {
+    IFluidDexLiteCallback
+} from "../../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MockIFluidDexLite
 /// @notice Mock Fluid DEX Lite pool with settable swapSingle return for unit tests.
 contract MockIFluidDexLite is IFluidDexLite {
     uint256 public returnSwapSingle;
     bool public revertSwapSingle;
+
+    error SwapSingleRevert();
 
     function setReturnSwapSingle(uint256 amount) external {
         returnSwapSingle = amount;
@@ -20,20 +26,33 @@ contract MockIFluidDexLite is IFluidDexLite {
     }
 
     function swapSingle(
-        DexKey calldata,
-        bool,
-        int256,
+        DexKey calldata dexKey_,
+        bool swap0to1_,
+        int256 amountSpecified_,
         uint256,
         address to_,
         bool isCallback_,
         bytes calldata,
-        bytes calldata
+        bytes calldata data_
     ) external payable override returns (uint256 amountUnspecified_) {
-        if (revertSwapSingle) revert("MockIFluidDexLite: swapSingle revert");
+        if (revertSwapSingle) revert SwapSingleRevert();
+
+        // Determine tokens based on swap direction
+        address tokenIn = swap0to1_ ? dexKey_.token0 : dexKey_.token1;
+        address tokenOut = swap0to1_ ? dexKey_.token1 : dexKey_.token0;
+
+        // For exact-in (positive amountSpecified_), amountIn = amountSpecified_
+        // For exact-out (negative amountSpecified_), amountIn = returnSwapSingle
+        uint256 amountIn = amountSpecified_ > 0 ? uint256(amountSpecified_) : returnSwapSingle;
+
         if (isCallback_) {
-            // Caller (aggregator) will receive callback; test can handle token flow separately
-            (to_);
+            // Call back the hook to pull tokens
+            IFluidDexLiteCallback(msg.sender).dexCallback(tokenIn, amountIn, data_);
         }
+
+        // Transfer output tokens to recipient
+        IERC20(tokenOut).transfer(to_, returnSwapSingle);
+
         return returnSwapSingle;
     }
 }

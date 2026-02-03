@@ -69,6 +69,9 @@ contract StableSwapFuzz is Test {
 
     address public alice = makeAddr("alice");
 
+    error UnsupportedNumberOfTokens();
+    error AddLiquidityFailed();
+
     function setUp() public {
         curveOwner = makeAddr("curveOwner");
         curveFeeReceiver = makeAddr("curveFeeReceiver");
@@ -202,9 +205,9 @@ contract StableSwapFuzz is Test {
             uint256[4] memory fixedAmounts = [amounts[0], amounts[1], amounts[2], amounts[3]];
             (success,) = pool.call(abi.encodeWithSignature("add_liquidity(uint256[4],uint256)", fixedAmounts, 0));
         } else {
-            revert("Unsupported number of tokens");
+            revert UnsupportedNumberOfTokens();
         }
-        require(success, "Add liquidity failed");
+        if (!success) revert AddLiquidityFailed();
     }
 
     /// @notice Create and sort N mock tokens by address

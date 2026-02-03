@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {IFluidDexT1} from "../../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
+import {IDexCallback} from "../../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MockIFluidDexT1
 /// @notice Mock Fluid DEX T1 pool with settable swap return values for unit tests.
@@ -14,6 +16,15 @@ contract MockIFluidDexT1 is IFluidDexT1 {
     bool public revertSwapOut;
     bool public revertSwapInWithCallback;
     bool public revertSwapOutWithCallback;
+
+    // Tokens for callback simulation
+    address public token0;
+    address public token1;
+
+    error SwapInRevert();
+    error SwapOutRevert();
+    error SwapInWithCallbackRevert();
+    error SwapOutWithCallbackRevert();
 
     function setReturnSwapIn(uint256 amount) external {
         returnSwapIn = amount;
@@ -47,8 +58,13 @@ contract MockIFluidDexT1 is IFluidDexT1 {
         revertSwapOutWithCallback = doRevert;
     }
 
+    function setTokens(address _token0, address _token1) external {
+        token0 = _token0;
+        token1 = _token1;
+    }
+
     function swapIn(bool, uint256, uint256, address to_) external payable override returns (uint256 amountOut_) {
-        if (revertSwapIn) revert("MockIFluidDexT1: swapIn revert");
+        if (revertSwapIn) revert SwapInRevert();
         (to_);
         return returnSwapIn;
     }
@@ -59,30 +75,42 @@ contract MockIFluidDexT1 is IFluidDexT1 {
         override
         returns (uint256 amountIn_)
     {
-        if (revertSwapOut) revert("MockIFluidDexT1: swapOut revert");
+        if (revertSwapOut) revert SwapOutRevert();
         (to_);
         return returnSwapOut;
     }
 
-    function swapInWithCallback(bool, uint256, uint256, address to_)
+    function swapInWithCallback(bool swap0to1_, uint256 amountIn_, uint256, address to_)
         external
         payable
         override
         returns (uint256 amountOut_)
     {
-        if (revertSwapInWithCallback) revert("MockIFluidDexT1: swapInWithCallback revert");
-        (to_);
+        if (revertSwapInWithCallback) revert SwapInWithCallbackRevert();
+        // Determine tokenIn based on swap direction
+        address tokenIn = swap0to1_ ? token0 : token1;
+        address tokenOut = swap0to1_ ? token1 : token0;
+        // Call back the hook to pull tokens (simulating Fluid's callback)
+        IDexCallback(msg.sender).dexCallback(tokenIn, amountIn_);
+        // Transfer output tokens to recipient
+        IERC20(tokenOut).transfer(to_, returnSwapInWithCallback);
         return returnSwapInWithCallback;
     }
 
-    function swapOutWithCallback(bool, uint256, uint256, address to_)
+    function swapOutWithCallback(bool swap0to1_, uint256 amountOut_, uint256, address to_)
         external
         payable
         override
         returns (uint256 amountIn_)
     {
-        if (revertSwapOutWithCallback) revert("MockIFluidDexT1: swapOutWithCallback revert");
-        (to_);
+        if (revertSwapOutWithCallback) revert SwapOutWithCallbackRevert();
+        // Determine tokenIn based on swap direction
+        address tokenIn = swap0to1_ ? token0 : token1;
+        address tokenOut = swap0to1_ ? token1 : token0;
+        // Call back the hook to pull tokens (simulating Fluid's callback)
+        IDexCallback(msg.sender).dexCallback(tokenIn, returnSwapOutWithCallback);
+        // Transfer output tokens to recipient
+        IERC20(tokenOut).transfer(to_, amountOut_);
         return returnSwapOutWithCallback;
     }
 }

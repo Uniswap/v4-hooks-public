@@ -69,6 +69,8 @@ contract FluidDexT1NativeForkedTest is Test {
 
     address public alice;
 
+    error PoolDoesNotContainNativeToken();
+
     function setUp() public {
         // Fork mainnet - requires MAINNET_RPC_URL env var
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
@@ -90,7 +92,7 @@ contract FluidDexT1NativeForkedTest is Test {
         if (fluidToken1 == FLUID_NATIVE_CURRENCY) {
             ercTokenAddress = fluidToken0;
         } else {
-            revert("Pool does not contain native token");
+            revert PoolDoesNotContainNativeToken();
         }
 
         // Native ETH (address(0)) is always currency0 (lowest address)

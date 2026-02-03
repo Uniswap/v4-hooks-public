@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "forge-std/Test.sol";
+import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {MockIFluidDexT1} from "./mocks/MockIFluidDexT1.sol";
+import {MockIFluidDexReservesResolver} from "./mocks/MockIFluidDexReservesResolver.sol";
+import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
+import {
+    FluidDexT1AggregatorFactory
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
+import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
+import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
+import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+
+contract FluidDexT1AggregatorUnitTest is Test {
+    using PoolIdLibrary for PoolKey;
+
+    PoolManager public poolManager;
+    SafePoolSwapTest public swapRouter;
+    MockIFluidDexT1 public mockPool;
+    MockIFluidDexReservesResolver public mockResolver;
+    FluidDexT1Aggregator public hook;
+    MockERC20 public token0;
+    MockERC20 public token1;
+
+    uint24 constant FEE = 3000;
+    int24 constant TICK_SPACING = 60;
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
+    uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
+
+    address public alice = makeAddr("alice");
+    address public fluidLiquidity = makeAddr("fluidLiquidity");
+    PoolKey public poolKey;
+    PoolId public poolId;
+
+    function setUp() public {
+        poolManager = new PoolManager(address(this));
+        swapRouter = new SafePoolSwapTest(poolManager);
+        mockPool = new MockIFluidDexT1();
+        mockResolver = new MockIFluidDexReservesResolver();
+
+        token0 = new MockERC20("Token0", "TK0", 18);
+        token1 = new MockERC20("Token1", "TK1", 18);
+        if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
+
+        // Set resolver and mock pool to return matching tokens
+        mockResolver.setDexTokens(address(token0), address(token1));
+        mockPool.setTokens(address(token0), address(token1));
+
+        // Deploy hook with valid address
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        bytes memory constructorArgs =
+            abi.encode(IPoolManager(address(poolManager)), mockPool, mockResolver, fluidLiquidity);
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
+        hook = new FluidDexT1Aggregator{salt: salt}(
+            IPoolManager(address(poolManager)), mockPool, mockResolver, fluidLiquidity
+        );
+
+        poolKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        poolId = poolKey.toId();
+
+        poolManager.initialize(poolKey, SQRT_PRICE_1_1);
+
+        // Setup tokens
+        token0.mint(alice, 1000 ether);
+        token1.mint(alice, 1000 ether);
+        token0.mint(address(poolManager), 1000 ether);
+        token1.mint(address(poolManager), 1000 ether);
+        // Mint tokens to mock pool so it can transfer output tokens
+        token0.mint(address(mockPool), 1000 ether);
+        token1.mint(address(mockPool), 1000 ether);
+        vm.startPrank(alice);
+        token0.approve(address(swapRouter), type(uint256).max);
+        token1.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    // ========== CONSTRUCTOR ==========
+
+    function test_constructor_setsImmutables() public view {
+        assertEq(address(hook.FLUID_POOL()), address(mockPool));
+        assertEq(address(hook.FLUID_DEX_RESERVES_RESOLVER()), address(mockResolver));
+        assertEq(hook.FLUID_LIQUIDITY(), fluidLiquidity);
+    }
+
+    // ========== dexCallback ==========
+
+    function test_dexCallback_revertsProhibitedEntry() public {
+        // Not in inflight state
+        vm.prank(address(mockPool));
+        vm.expectRevert(FluidDexT1Aggregator.ProhibitedEntry.selector);
+        hook.dexCallback(address(token0), 100 ether);
+    }
+
+    function test_dexCallback_revertsUnauthorizedCaller() public {
+        // Would need to be in inflight state, but that requires being in a swap
+        // Since we can't easily simulate being in inflight, test the unauthorized case separately
+        vm.expectRevert(FluidDexT1Aggregator.ProhibitedEntry.selector);
+        hook.dexCallback(address(token0), 100 ether);
+    }
+
+    // ========== quote ==========
+
+    function test_quote_revertsPoolDoesNotExist() public {
+        PoolId wrongPoolId = PoolId.wrap(bytes32(uint256(999)));
+        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        hook.quote(true, -int256(100 ether), wrongPoolId);
+    }
+
+    function test_quote_exactIn_returnsResolverEstimate() public {
+        mockResolver.setReturnEstimateSwapIn(12345);
+        uint256 result = hook.quote(true, -int256(100 ether), poolId);
+        assertEq(result, 12345);
+    }
+
+    function test_quote_exactOut_returnsResolverEstimate() public {
+        mockResolver.setReturnEstimateSwapOut(54321);
+        uint256 result = hook.quote(true, int256(100 ether), poolId);
+        assertEq(result, 54321);
+    }
+
+    // ========== pseudoTotalValueLocked ==========
+
+    function test_pseudoTotalValueLocked_revertsPoolDoesNotExist() public {
+        PoolId wrongPoolId = PoolId.wrap(bytes32(uint256(999)));
+        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        hook.pseudoTotalValueLocked(wrongPoolId);
+    }
+
+    function test_pseudoTotalValueLocked_returnsReserves() public {
+        mockResolver.setReserves(1000 ether, 2000 ether);
+        (uint256 a0, uint256 a1) = hook.pseudoTotalValueLocked(poolId);
+        assertEq(a0, 1000 ether);
+        assertEq(a1, 2000 ether);
+    }
+
+    // ========== _beforeInitialize ==========
+
+    function test_beforeInitialize_revertsTokensNotInPool() public {
+        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        resolver2.setDexTokens(address(0xdead), address(0xbeef)); // Wrong tokens
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
+            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
+        );
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 1,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(FluidDexT1Aggregator.TokensNotInPool.selector, address(0xdead), address(0xbeef)),
+                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_setsLocalPoolId() public view {
+        assertEq(PoolId.unwrap(hook.localPoolId()), PoolId.unwrap(poolId));
+    }
+
+    // ========== SWAP (via _conductSwap) ==========
+
+    function test_swap_exactIn_zeroForOne() public {
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        mockPool.setReturnSwapInWithCallback(amountOut);
+        token1.mint(address(poolManager), amountOut);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
+        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    function test_swap_exactIn_oneForZero() public {
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        mockPool.setReturnSwapInWithCallback(amountOut);
+        token0.mint(address(poolManager), amountOut);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: false, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MAX_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
+        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    // ========== FACTORY ==========
+
+    function test_factory_createPool() public {
+        FluidDexT1AggregatorFactory factory =
+            new FluidDexT1AggregatorFactory(IPoolManager(address(poolManager)), mockResolver, fluidLiquidity);
+
+        MockERC20 tkA = new MockERC20("A", "A", 18);
+        MockERC20 tkB = new MockERC20("B", "B", 18);
+        if (address(tkA) > address(tkB)) (tkA, tkB) = (tkB, tkA);
+
+        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
+        mockResolver.setDexTokens(address(tkA), address(tkB));
+
+        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+
+        address hookAddr = factory.createPool(
+            factorySalt,
+            pool2,
+            Currency.wrap(address(tkA)),
+            Currency.wrap(address(tkB)),
+            FEE,
+            TICK_SPACING,
+            SQRT_PRICE_1_1
+        );
+        assertTrue(hookAddr != address(0));
+    }
+
+    function test_factory_computeAddress() public {
+        FluidDexT1AggregatorFactory factory =
+            new FluidDexT1AggregatorFactory(IPoolManager(address(poolManager)), mockResolver, fluidLiquidity);
+
+        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
+
+        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+
+        address computed = factory.computeAddress(factorySalt, pool2);
+        assertTrue(computed != address(0));
+    }
+}

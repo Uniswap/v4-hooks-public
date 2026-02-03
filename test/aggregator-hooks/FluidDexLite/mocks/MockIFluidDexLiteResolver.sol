@@ -18,6 +18,9 @@ contract MockIFluidDexLiteResolver is IFluidDexLiteResolver {
     bool public revertGetDexState;
     bool public revertEstimateSwapSingle;
 
+    error GetDexStateRevert();
+    error EstimateSwapSingleRevert();
+
     function setReturnEmptyDexState(bool empty) external {
         returnEmptyDexState = empty;
     }
@@ -49,7 +52,7 @@ contract MockIFluidDexLiteResolver is IFluidDexLiteResolver {
         override
         returns (IFluidDexLite.DexState memory state)
     {
-        if (revertGetDexState) revert("MockIFluidDexLiteResolver: getDexState revert");
+        if (revertGetDexState) revert GetDexStateRevert();
         // Non-empty: at least one of fee, token0Decimals, token1Decimals non-zero
         state.dexVariables.fee = returnEmptyDexState ? 0 : 1;
         state.dexVariables.token0Decimals = returnEmptyDexState ? 0 : 18;
@@ -83,7 +86,7 @@ contract MockIFluidDexLiteResolver is IFluidDexLiteResolver {
     }
 
     function estimateSwapSingle(IFluidDexLite.DexKey calldata, bool, int256) external view override returns (uint256) {
-        if (revertEstimateSwapSingle) revert("MockIFluidDexLiteResolver: estimateSwapSingle revert");
+        if (revertEstimateSwapSingle) revert EstimateSwapSingleRevert();
         return returnEstimateSwapSingle;
     }
 
