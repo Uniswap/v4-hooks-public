@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/7dcd775c7e3ae809200c0a0161e8e569c246c698/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -119,12 +119,12 @@ Calculate flexible fee when price is outside optimal rate
 function _calculateFlexibleFee(
     FeeConfig storage config,
     FeeState storage feeState,
-    uint160 sqrtAmmPriceX96,
-    uint160 sqrtReferencePriceX96,
-    int40 closeFee,
-    uint40 farFee,
+    uint256 sqrtAmmPriceX96,
+    uint256 sqrtReferencePriceX96,
+    int256 closeFeeE12,
+    uint256 farFeeE12,
     bool ammPriceToTheLeft
-) private view returns (uint40 flexibleFee);
+) private view returns (uint256 flexibleFeeE12);
 ```
 **Parameters**
 
@@ -132,16 +132,16 @@ function _calculateFlexibleFee(
 |----|----|-----------|
 |`config`|`FeeConfig`|The FeeConfig of the pool|
 |`feeState`|`FeeState`|The FeeState of the pool|
-|`sqrtAmmPriceX96`|`uint160`|The current AMM sqrt price|
-|`sqrtReferencePriceX96`|`uint160`|The reference sqrt price|
-|`closeFee`|`int40`|The fee to reach the close boundary|
-|`farFee`|`uint40`|The fee to reach the far boundary|
+|`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
+|`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
+|`closeFeeE12`|`int256`|The fee to reach the close boundary|
+|`farFeeE12`|`uint256`|The fee to reach the far boundary|
 |`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`flexibleFee`|`uint40`|The calculated flexible fee|
+|`flexibleFeeE12`|`uint256`|The calculated flexible fee in 1e12 precision|
 
 

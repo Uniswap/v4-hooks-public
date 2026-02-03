@@ -47,7 +47,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _feeConfig The fee config to set
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
-        _validateOptimalFeeRate(_feeConfig.optimalFeeRate);
+        _validateOptimalFeeRateE6(_feeConfig.optimalFeeRateE6);
         _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
@@ -62,15 +62,17 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     }
 
     /// @notice Validate the optimal fee rate
-    /// @param _optimalFeeRate The optimal fee rate to validate
-    function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure {
-        if (_optimalFeeRate > FeeCalculation.MAX_OPTIMAL_FEE_RATE) revert InvalidOptimalFeeRate(_optimalFeeRate);
+    /// @param _optimalFeeRateE6 The optimal fee rate to validate
+    function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure {
+        if (_optimalFeeRateE6 > FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6) {
+            revert InvalidOptimalFeeRateE6(_optimalFeeRateE6);
+        }
     }
 
     /// @notice Validate the reference sqrt price
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
     function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure {
-        if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 > TickMath.MAX_SQRT_PRICE) {
+        if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
             revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
         }
     }
@@ -78,7 +80,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @notice Internal helper to reset fee state
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
-        feeState[_poolId].previousFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE;
+        feeState[_poolId].previousFeeE12 = uint40(FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12);
         feeState[_poolId].blockNumber = block.number;
     }
 }

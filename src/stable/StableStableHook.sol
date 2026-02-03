@@ -91,57 +91,60 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeState storage feeState = feeState[poolId];
 
         (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
-        uint160 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint24 optimalFeeRate = config.optimalFeeRate;
+        uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
+        uint256 optimalFeeRateE6 = config.optimalFeeRateE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
-        uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
+        uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // closeFee is a threshold test to determine if we're inside or outside the optimal rate.
         // The optimal rate has two boundaries around the reference price:
         //   - Lower bound: RP * (1 - optimalFeeRate)
         //   - Upper bound: RP / (1 - optimalFeeRate)
-        //
-        // closeFee represents the fee to reach whichever boundary is closest to the current AMM price.
-        //   - If closeFee <= 0: AMM price is inside the optimal rate (past the close boundary)
-        //   - If closeFee > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
-        int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate);
+
+        // closeFeeE12 represents the fee to reach whichever boundary is closest to the current AMM price.
+        //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
+        //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRateE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
-        uint40 totalStableFee; // the fee to be charged to the swapper in 1e12 precision
-        uint40 flexibleFee;
+        uint256 totalStableFeeE12; // the fee to be charged to the swapper in 1e12 precision
+        uint256 flexibleFeeE12;
 
-        if (closeFee <= 0) {
+        if (closeFeeE12 <= 0) {
             // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
-                priceRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
+            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
+                priceRatioX96, optimalFeeRateE6, ammPriceToTheLeft, userSellsZeroForOne
             );
-            flexibleFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE; // No flexible fee inside optimal fee rate
+            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
         } else {
             // closeFee represents the fee to reach whichever boundary is closest to the current AMM price.
-            uint40 farFee = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRate);
+            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRateE6);
 
-            flexibleFee = _calculateFlexibleFee(
-                config, feeState, sqrtAmmPriceX96, sqrtReferencePriceX96, closeFee, farFee, ammPriceToTheLeft
+            flexibleFeeE12 = _calculateFlexibleFee(
+                config, feeState, sqrtAmmPriceX96, sqrtReferencePriceX96, closeFeeE12, farFeeE12, ammPriceToTheLeft
             );
 
             // Select which fee to charge based on swap direction
-            totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFee;
+            totalStableFeeE12 = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFeeE12;
         }
 
         // Update historical data for next swap's calculations
-        feeState.previousFee = flexibleFee;
-        feeState.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
+        feeState.previousFeeE12 = uint40(flexibleFeeE12);
+        feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
         feeState.blockNumber = block.number;
 
         // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
-        uint24 uniswapFee = uint24(totalStableFee / FeeCalculation.PPM);
+        uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);
 
         return
-            (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, uniswapFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+            (
+                IHooks.beforeSwap.selector,
+                BeforeSwapDeltaLibrary.ZERO_DELTA,
+                uniswapFeeE6 | LPFeeLibrary.OVERRIDE_FEE_FLAG
+            );
     }
 
     /// @notice Calculate flexible fee when price is outside optimal rate
@@ -149,52 +152,52 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     /// @param feeState The FeeState of the pool
     /// @param sqrtAmmPriceX96 The current AMM sqrt price
     /// @param sqrtReferencePriceX96 The reference sqrt price
-    /// @param closeFee The fee to reach the close boundary
-    /// @param farFee The fee to reach the far boundary
+    /// @param closeFeeE12 The fee to reach the close boundary
+    /// @param farFeeE12 The fee to reach the far boundary
     /// @param ammPriceToTheLeft True if current AMM price < reference price
-    /// @return flexibleFee The calculated flexible fee
+    /// @return flexibleFeeE12 The calculated flexible fee in 1e12 precision
     function _calculateFlexibleFee(
         FeeConfig storage config,
         FeeState storage feeState,
-        uint160 sqrtAmmPriceX96,
-        uint160 sqrtReferencePriceX96,
-        int40 closeFee,
-        uint40 farFee,
+        uint256 sqrtAmmPriceX96,
+        uint256 sqrtReferencePriceX96,
+        int256 closeFeeE12,
+        uint256 farFeeE12,
         bool ammPriceToTheLeft
-    ) private view returns (uint40 flexibleFee) {
-        uint160 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
-        uint40 previousFee = feeState.previousFee;
+    ) private view returns (uint256 flexibleFeeE12) {
+        uint256 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
+        uint256 previousFeeE12 = feeState.previousFeeE12;
 
         // Step 1: Determine if previous fee needs to be reset
         if (
-            previousFee == FeeCalculation.UNDEFINED_FLEXIBLE_FEE
+            previousFeeE12 == FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceToTheLeft
         ) {
             // Price just left optimal spread or jumped across reference
             // Start from far boundary
-            previousFee = farFee;
+            previousFeeE12 = farFeeE12;
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference
             // Adjust previous fee to account for price movement
-            uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
-            previousFee = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFee);
-        } else if (previousFee > farFee) {
+            uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
+            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
+        } else if (previousFeeE12 > farFeeE12) {
             // Price jumped back toward reference but still outside spread
             // Cap at far boundary
-            previousFee = farFee;
+            previousFeeE12 = farFeeE12;
         }
 
         // Step 2: Calculate target fee
-        uint40 targetFee = farFee - uint40(closeFee) / 2; // closeFee is positive since we are outside the optimal rate
+        uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2; // closeFee is positive since we are outside the optimal rate
 
         // Step 3: Apply exponential decay toward target
-        if (previousFee <= targetFee) {
+        if (previousFeeE12 <= targetFeeE12) {
             // Already at or below target (shouldn't happen in normal operation)
-            flexibleFee = targetFee;
+            flexibleFeeE12 = targetFeeE12;
         } else {
             // Apply decay: fee moves from previous toward target
-            flexibleFee = FeeCalculation.calculateFlexibleFee(
-                targetFee, previousFee, config.k, config.logK, block.number - feeState.blockNumber
+            flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
+                targetFeeE12, previousFeeE12, config.k, config.logK, block.number - feeState.blockNumber
             );
         }
     }

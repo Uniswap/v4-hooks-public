@@ -6,12 +6,12 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 struct FeeConfig {
     uint256 k; // Decay rate per block; controls how fast fees decrease toward target
     uint256 logK; // Used for efficient decay calculation over many blocks
-    uint24 optimalFeeRate; // Optimal range width in 1e6 precision; inside = consistent buy/sell prices, outside = flexible
-    uint160 referenceSqrtPriceX96; // Reference sqrt price; optimal range centered around this
+    uint24 optimalFeeRateE6; // Optimal rate width in 1e6 precision; inside = consistent buy/sell prices, outside = flexible
+    uint160 referenceSqrtPriceX96; // Reference sqrt price; optimal rate centered around this
 }
 
 struct FeeState {
-    uint40 previousFee; // Last flexible fee charged in 1e12 precision; used for exponential decay calculation
+    uint40 previousFeeE12; // Last flexible fee charged in 1e12 precision; used for exponential decay calculation
     uint160 previousSqrtAmmPriceX96; // AMM sqrt price at last swap; used to detect price movement direction
     uint256 blockNumber; // Block when fee was last updated; determines decay based on blocks elapsed
 }
@@ -28,8 +28,8 @@ interface IFeeConfiguration {
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
     /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeRate The invalid optimal fee rate
-    error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+    /// @param optimalFeeRateE6 The invalid optimal fee rate
+    error InvalidOptimalFeeRateE6(uint24 optimalFeeRateE6);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
