@@ -134,7 +134,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Update historical data for next swap's calculations
         feeState.previousFeeE12 = uint40(flexibleFeeE12);
         feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
-        feeState.blockNumber = _getBlockNumberish();
+        feeState.blockNumber = uint40(_getBlockNumberish());
 
         // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
         uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);

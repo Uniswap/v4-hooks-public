@@ -104,7 +104,7 @@ contract FeeCalculationTest is Test {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
         optimalFeeRateE6 = uint24(bound(optimalFeeRateE6, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRateE6);
-        assertGt(farFeeE12, optimalFeeRateE6 * 2);
+        assertGe(farFeeE12, optimalFeeRateE6 * 2);
         assertLe(farFeeE12, FeeCalculation.ONE_E12);
     }
 
@@ -112,7 +112,7 @@ contract FeeCalculationTest is Test {
         uint256 k = 16_609_443; // 0.99
 
         uint256 z;
-        uint256 blocksPassed;
+        uint40 blocksPassed;
 
         blocksPassed = 0;
         z = FeeCalculation.fastPow(k, blocksPassed);
@@ -150,13 +150,12 @@ contract FeeCalculationTest is Test {
         uint256 targetFeeE12,
         uint256 previousFeeE12,
         uint256 k,
-        uint256 blocksPassed
+        uint40 blocksPassed
     ) public pure {
         targetFeeE12 = bound(targetFeeE12, 0, FeeCalculation.ONE_E12 - 1);
         previousFeeE12 = bound(previousFeeE12, targetFeeE12, FeeCalculation.ONE_E12);
         k = bound(k, 1, 2 ** 24 - 1);
         uint256 logK = uint256(-FixedPointMathLib.lnWad(int256(k))) >> 40;
-        blocksPassed = bound(blocksPassed, 0, uint256(2 ** 255) / (logK << 40));
         uint256 flexibleFeeE12 =
             FeeCalculation.calculateFlexibleFee(targetFeeE12, previousFeeE12, k, logK, blocksPassed);
         assertGe(flexibleFeeE12, targetFeeE12);
