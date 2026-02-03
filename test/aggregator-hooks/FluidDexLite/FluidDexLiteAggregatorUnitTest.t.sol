@@ -21,11 +21,9 @@ import {
 import {
     FluidDexLiteAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol";
-import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
-import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract FluidDexLiteAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -179,7 +177,7 @@ contract FluidDexLiteAggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(ExternalLiqSourceHook.PoolDoesNotExist.selector),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);

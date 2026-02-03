@@ -20,11 +20,7 @@ import {
 import {
     StableSwapNGAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol";
-import {
-    ICurveStableSwapNG
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
-import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 

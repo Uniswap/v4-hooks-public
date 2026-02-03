@@ -30,7 +30,6 @@ import {IFluidDexFactory} from "./interfaces/IFluidDexFactory.sol";
 import {IFluidDexT1DeploymentLogic} from "./interfaces/IFluidDexT1DeploymentLogic.sol";
 import {IFluidLiquidityAdmin} from "./interfaces/IFluidLiquidityAdmin.sol";
 import {IFluidDexT1Admin} from "./interfaces/IFluidDexT1Admin.sol";
-import {IFluidLiquidity} from "./interfaces/IFluidLiquidity.sol";
 import {AdminModuleStructs} from "./libraries/AdminModuleStructs.sol";
 import {DexAdminStructs} from "./libraries/DexAdminStructs.sol";
 import {MockLiquiditySupplier} from "./mocks/MockLiquiditySupplier.sol";
