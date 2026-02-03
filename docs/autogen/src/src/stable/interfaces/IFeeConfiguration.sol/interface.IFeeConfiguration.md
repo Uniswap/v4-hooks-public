@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/bc61b69dbabe6bb31bf5ca2c5c42140a7cb4f0cc/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -96,19 +96,19 @@ error InvalidKAndLogK(uint256 k, uint256 logK);
 |`k`|`uint256`|The invalid k value|
 |`logK`|`uint256`|The invalid logK value|
 
-### InvalidOptimalFeeRate
+### InvalidOptimalFeeRateE6
 Error thrown when optimal fee rate is invalid
 
 
 ```solidity
-error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+error InvalidOptimalFeeRateE6(uint24 optimalFeeRateE6);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`optimalFeeRate`|`uint256`|The invalid optimal fee rate|
+|`optimalFeeRateE6`|`uint24`|The invalid optimal fee rate|
 
 ### InvalidReferenceSqrtPriceX96
 Error thrown when reference sqrt price is invalid

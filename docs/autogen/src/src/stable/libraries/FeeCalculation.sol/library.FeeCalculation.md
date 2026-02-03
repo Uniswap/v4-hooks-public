@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f1e6f575bfe1e9a74ff4f8105848ddf85efaaa12/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/bc61b69dbabe6bb31bf5ca2c5c42140a7cb4f0cc/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -8,50 +8,41 @@ Library providing core mathematical functions for calculating dynamic swap fees
 
 
 ## State Variables
-### MAX_FEE
-Maximum supported fee in Uniswap format (990_000 = 99%)
+### ONE_E6
+Scalar for pips precision (1e6 = 100%)
 
 
 ```solidity
-uint24 public constant MAX_FEE = 990_000
+uint256 internal constant ONE_E6 = 1e6
 ```
 
 
-### MAX_OPTIMAL_FEE_RATE
-Maximum allowed optimal fee rate
-
-Optimal fee rate must be strictly less than PPM (100%).
+### ONE_E12
+Scalar for scaled precision (1e12 = 100%)
 
 
 ```solidity
-uint24 public constant MAX_OPTIMAL_FEE_RATE = PPM - 1
+uint256 internal constant ONE_E12 = 1e12
 ```
 
 
-### ONE
-Fixed-point scalar used for precision where 1e12 == 100%.
+### UNDEFINED_FLEXIBLE_FEE_E12
+Sentinel: no flexible fee (inside optimal rate)
 
 
 ```solidity
-uint40 internal constant ONE = 1e12
+uint256 internal constant UNDEFINED_FLEXIBLE_FEE_E12 = ONE_E12 + 1
 ```
 
 
-### UNDEFINED_FLEXIBLE_FEE
-Sentinel: no flexible fee (inside optimal rate).
+### MAX_OPTIMAL_FEE_RATE_E6
+Maximum allowed optimal fee rate in pips
+
+Optimal fee rate must be strictly less than ONE_E6 (100%).
 
 
 ```solidity
-uint40 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
-```
-
-
-### PPM
-Parts-per-million scalar (1e6 = 100%).
-
-
-```solidity
-uint24 internal constant PPM = 1e6
+uint256 public constant MAX_OPTIMAL_FEE_RATE_E6 = ONE_E6 - 1
 ```
 
 
@@ -60,7 +51,7 @@ Scale used to preserve precision in sqrt ratio math.
 
 
 ```solidity
-uint64 internal constant Q48 = 2 ** 48
+uint256 internal constant Q48 = 2 ** 48
 ```
 
 
@@ -71,23 +62,23 @@ Calculate the price ratio between AMM price and reference price in Q96 format
 
 
 ```solidity
-function calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePriceX96)
+function calculatePriceRatioX96(uint256 sqrtAmmPriceX96, uint256 sqrtReferencePriceX96)
     internal
     pure
-    returns (uint160 priceRatioX96);
+    returns (uint256 priceRatioX96);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`sqrtAmmPriceX96`|`uint160`|Current AMM sqrt price in Q96 format|
-|`sqrtReferencePriceX96`|`uint160`|Reference sqrt price in Q96 format|
+|`sqrtAmmPriceX96`|`uint256`|Current AMM sqrt price in Q96 format|
+|`sqrtReferencePriceX96`|`uint256`|Reference sqrt price in Q96 format|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint160`|Price ratio in Q96 format, always <= 2^96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format, always <= 2^96|
 
 
 ### calculateCloseFee
@@ -97,20 +88,23 @@ The close boundary is whichever edge of the optimal rate is nearest to the curre
 
 
 ```solidity
-function calculateCloseFee(uint160 priceRatioX96, uint24 optimalFeeRate) internal pure returns (int40 closeFee);
+function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeRateE6)
+    internal
+    pure
+    returns (int256 closeFeeE12);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint160`|Price ratio in Q96 format from calculatePriceRatioX96|
-|`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96|
+|`optimalFeeRateE6`|`uint256`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`closeFee`|`int40`|Fee at the "close" boundary. If <= 0, price is inside optimal rate. If > 0, price is outside.|
+|`closeFeeE12`|`int256`|Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal rate. If > 0, price is outside.|
 
 
 ### calculateInsideOptimalRateFee
@@ -120,18 +114,18 @@ Calculate fee when price is inside optimal rate
 
 ```solidity
 function calculateInsideOptimalRateFee(
-    uint160 priceRatioX96,
-    uint24 optimalFeeRate,
+    uint256 priceRatioX96,
+    uint256 optimalFeeRateE6,
     bool ammPriceToTheLeft,
     bool userSellsZeroForOne
-) internal pure returns (uint40 fee);
+) internal pure returns (uint256 feeE12);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint160`|Price ratio in Q96 format|
-|`optimalFeeRate`|`uint24`|Optimal fee rate in parts per million|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format|
+|`optimalFeeRateE6`|`uint256`|Optimal fee rate in parts per million|
 |`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
 
@@ -139,27 +133,6 @@ function calculateInsideOptimalRateFee(
 
 |Name|Type|Description|
 |----|----|-----------|
-|`fee`|`uint40`|Calculated fee in 1e12 precision|
-
-
-### convertToUniswapFee
-
-Convert internal fee format to Uniswap fee format
-
-
-```solidity
-function convertToUniswapFee(uint40 internalFee) internal pure returns (uint24 uniswapFee);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`internalFee`|`uint40`|Fee in internal format (1e12 = 100%)|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`uniswapFee`|`uint24`|Fee in Uniswap format (1_000_000 = 100%, max 990_000)|
+|`feeE12`|`uint256`|Calculated fee in 1e12 precision|
 
 

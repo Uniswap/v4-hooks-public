@@ -91,35 +91,35 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeState storage feeState = feeState[poolId];
 
         (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
-        uint160 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint24 optimalFeeRate = config.optimalFeeRate;
+        uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
+        uint256 optimalFeeRateE6 = config.optimalFeeRateE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
-        uint160 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
+        uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // closeFee is a threshold test to determine if we're inside or outside the optimal rate.
+        // closeFeeE12 is a threshold test to determine if we're inside or outside the optimal rate.
         // The optimal rate has two boundaries around the reference price:
         //   - Lower bound: RP * (1 - optimalFeeRate)
         //   - Upper bound: RP / (1 - optimalFeeRate)
         //
-        // closeFee represents the fee to reach whichever boundary is closest to the current AMM price.
-        //   - If closeFee <= 0: AMM price is inside the optimal rate (past the close boundary)
-        //   - If closeFee > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
-        int40 closeFee = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRate);
+        // closeFeeE12 represents the fee to reach whichever boundary is closest to the current AMM price.
+        //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
+        //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRateE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
-        uint40 totalStableFee; // the fee to be charged to the swapper in 1e12 precision
-        uint40 flexibleFee;
+        uint256 totalStableFeeE12; // the fee to be charged to the swapper in 1e12 precision
+        uint256 flexibleFeeE12;
 
-        if (closeFee <= 0) {
+        if (closeFeeE12 <= 0) {
             // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
-                priceRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
+            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
+                priceRatioX96, optimalFeeRateE6, ammPriceToTheLeft, userSellsZeroForOne
             );
-            flexibleFee = FeeCalculation.UNDEFINED_FLEXIBLE_FEE; // No flexible fee inside optimal fee rate
+            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
         }
         // else {
         //     // outside optimal rate
@@ -127,14 +127,18 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // }
 
         // Update historical data for next swap's calculations
-        feeState.previousFee = flexibleFee;
-        feeState.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
+        feeState.previousFeeE12 = uint40(flexibleFeeE12);
+        feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
         feeState.blockNumber = block.number;
 
-        // Convert to Uniswap fee format
-        uint24 uniswapFee = FeeCalculation.convertToUniswapFee(totalStableFee);
+        // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
+        uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);
 
         return
-            (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, uniswapFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+            (
+                IHooks.beforeSwap.selector,
+                BeforeSwapDeltaLibrary.ZERO_DELTA,
+                uniswapFeeE6 | LPFeeLibrary.OVERRIDE_FEE_FLAG
+            );
     }
 }
