@@ -105,10 +105,6 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
             unspecified = amountIn;
             unspecifiedDelta = int128(uint128(unspecified));
         }
-        // Check if an overflow happened when casting to int128
-        if (uint256(int256(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta)) < unspecified) {
-            revert UnspecifiedAmountExceeded();
-        }
     }
 
     function _internalSettle(PoolKey calldata key, SwapParams calldata params)
