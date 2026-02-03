@@ -10,6 +10,9 @@ import {IFluidLiquidity} from "../../../../lib/fluid-contracts-public/contracts/
 contract MockLiquiditySupplier {
     using SafeERC20 for IERC20;
 
+    /// @notice Fluid's native currency representation
+    address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     address public immutable liquidityContract;
 
     constructor(address liquidityContract_) {
@@ -28,14 +31,27 @@ contract MockLiquiditySupplier {
 
     /// @notice Supply tokens to the liquidity layer
     function supply(address token_, uint256 amount_, address from_) external {
-        IFluidLiquidity(liquidityContract)
-            .operate(
-                token_,
-                int256(amount_),
-                0, // no borrow
-                address(0),
-                address(0),
-                abi.encode(from_)
-            );
+        IFluidLiquidity(liquidityContract).operate(
+            token_,
+            int256(amount_),
+            0, // no borrow
+            address(0),
+            address(0),
+            abi.encode(from_)
+        );
     }
+
+    /// @notice Supply native ETH to the liquidity layer
+    function supplyNative(address from_) external payable {
+        IFluidLiquidity(liquidityContract).operate{value: msg.value}(
+            FLUID_NATIVE_CURRENCY,
+            int256(msg.value),
+            0, // no borrow
+            address(0),
+            address(0),
+            abi.encode(from_)
+        );
+    }
+
+    receive() external payable {}
 }
