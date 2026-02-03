@@ -1,8 +1,8 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/7dcd775c7e3ae809200c0a0161e8e569c246c698/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/831a6061131ddc01156ddc813ee65ad417011f7f/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
-[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
+[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
 
 **Title:**
 FeeConfiguration
@@ -11,6 +11,15 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### Q24
+The scale used to preserve precision in decay factor math.
+
+
+```solidity
+uint256 internal constant Q24 = 2 ** 24
+```
+
+
 ### configManager
 The address of the config manager
 

@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 struct FeeConfig {
-    uint256 k; // Decay rate per block; controls how fast fees decrease toward target
+    uint256 k; // Decay rate per block; controls how fast fees decrease toward target. Stored in Q24 format.
     uint256 logK; // Used for efficient decay calculation over many blocks
     uint24 optimalFeeRateE6; // Optimal rate width in 1e6 precision; inside = consistent buy/sell prices, outside = flexible
     uint160 referenceSqrtPriceX96; // Reference sqrt price; optimal rate centered around this

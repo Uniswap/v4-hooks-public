@@ -23,6 +23,10 @@ library FeeCalculation {
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint256 internal constant Q48 = 2 ** 48;
 
+    /// @notice Maximum blocks passed before fee is considered fully decayed to target
+    /// @dev Prevents overflow in (logK << 40) * blocksPassed calculation
+    uint256 internal constant MAX_BLOCKS_PASSED = 10_000_000;
+
     /// @notice Calculate the price ratio between two sqrt prices in Q96 format
     /// @dev Always returns min(price1, price2) / max(price1, price2), ensuring result <= 2^96
     /// @param sqrtPrice1X96 First sqrt price in Q96 format
@@ -151,6 +155,12 @@ library FeeCalculation {
         uint256 logK,
         uint256 blocksPassed
     ) internal pure returns (uint256 flexibleFeeE12) {
+        // Cap blocksPassed to prevent overflow in (logK << 40) * blocksPassed
+        // After MAX_BLOCKS_PASSED, fee is fully decayed to target
+        if (blocksPassed > MAX_BLOCKS_PASSED) {
+            return targetFeeE12;
+        }
+
         uint256 factorX24;
         if (blocksPassed <= 4) {
             // Fast path: Direct computation for small block counts

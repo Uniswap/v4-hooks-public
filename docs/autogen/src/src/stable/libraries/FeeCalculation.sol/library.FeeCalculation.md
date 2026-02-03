@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/7dcd775c7e3ae809200c0a0161e8e569c246c698/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/831a6061131ddc01156ddc813ee65ad417011f7f/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -52,6 +52,17 @@ Scale used to preserve precision in sqrt ratio math.
 
 ```solidity
 uint256 internal constant Q48 = 2 ** 48
+```
+
+
+### MAX_BLOCKS_PASSED
+Maximum blocks passed before fee is considered fully decayed to target
+
+Prevents overflow in (logK << 40) * blocksPassed calculation
+
+
+```solidity
+uint256 internal constant MAX_BLOCKS_PASSED = 10_000_000
 ```
 
 

@@ -5,10 +5,15 @@ import {IFeeConfiguration, FeeConfig, FeeState} from "../interfaces/IFeeConfigur
 import {FeeCalculation} from "../libraries/FeeCalculation.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
-abstract contract FeeConfiguration is IFeeConfiguration {
+abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
+    /// @notice The scale used to preserve precision in decay factor math.
+    uint256 internal constant Q24 = 2 ** 24; // 16,777,216
+
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
@@ -57,8 +62,20 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _k The k value to validate
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
-        // TODO: set bounds on decay factor
-        // revert InvalidKAndLogK(_k, _logK);
+        if (_k == 0 || _k >= Q24) {
+            revert InvalidKAndLogK(_k, _logK);
+        }
+        // Convert k from Q24 to wad format (1e18 scale)
+        uint256 kWad = (_k * 1e18) >> 24;
+
+        // lnWad computes ln(x) * 1e18
+        // Since k < 1, ln(k) is negative
+        int256 lnK = FixedPointMathLib.lnWad(int256(kWad));
+
+        // expectedLogK = -lnK / 2^40
+        uint256 expectedLogK = uint256(-lnK) >> 40;
+
+        if (_logK > expectedLogK || expectedLogK > _logK) revert InvalidKAndLogK(_k, _logK);
     }
 
     /// @notice Validate the optimal fee rate
@@ -81,6 +98,6 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].previousFeeE12 = uint40(FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12);
-        feeState[_poolId].blockNumber = block.number;
+        feeState[_poolId].blockNumber = _getBlockNumberish();
     }
 }

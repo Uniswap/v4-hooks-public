@@ -101,7 +101,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         //   - Lower bound: RP * (1 - optimalFeeRate)
         //   - Upper bound: RP / (1 - optimalFeeRate)
 
-        // closeFeeE12 represents the fee to reach whichever boundary is closest to the current AMM price.
+        // closeFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
         //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
         int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRateE6);
@@ -120,7 +120,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             );
             flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
         } else {
-            // closeFee represents the fee to reach whichever boundary is closest to the current AMM price.
+            // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
             uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRateE6);
 
             flexibleFeeE12 = _calculateFlexibleFee(
@@ -134,7 +134,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Update historical data for next swap's calculations
         feeState.previousFeeE12 = uint40(flexibleFeeE12);
         feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
-        feeState.blockNumber = block.number;
+        feeState.blockNumber = _getBlockNumberish();
 
         // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
         uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);
@@ -192,7 +192,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         // Step 3: Apply exponential decay toward target
         flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
-            targetFeeE12, previousFeeE12, config.k, config.logK, block.number - feeState.blockNumber
+            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - feeState.blockNumber
         );
     }
 }

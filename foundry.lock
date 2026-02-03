@@ -1,4 +1,10 @@
 {
+  "lib/blocknumberish": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "b911c96b35aaaa45e79715e160b295d2efd56285"
+    }
+  },
   "lib/briefcase": {
     "rev": "2b00819e5694c075a5437a9a0cde109fac0e6578"
   },

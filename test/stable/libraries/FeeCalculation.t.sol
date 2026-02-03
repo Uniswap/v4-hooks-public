@@ -90,21 +90,22 @@ contract FeeCalculationTest is Test {
             priceRatioX96, optimalFeeRateE6, ammPriceToTheLeft, userSellsZeroForOne
         ); // should not revert
 
-        assertTrue(totalStableFeeE12 <= FeeCalculation.ONE_E12);
+        assertLe(totalStableFeeE12, FeeCalculation.ONE_E12);
     }
 
     function test_calculateFarFee_succeeds_left_of_reference() public pure {
         uint160 priceRatioX96 =
             uint160(uint256(REFERENCE_SQRT_PRICE_X96) * (1000000 - (OPTIMAL_FEE_RATE_E6 + 1))) / 1000000; // lower than the lower boundary
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, OPTIMAL_FEE_RATE_E6);
-        assertTrue(farFeeE12 > OPTIMAL_FEE_RATE_E6 * 2);
+        assertGt(farFeeE12, OPTIMAL_FEE_RATE_E6 * 2);
     }
 
     function test_fuzz_calculateFarFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeRateE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
         optimalFeeRateE6 = uint24(bound(optimalFeeRateE6, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRateE6);
-        assertTrue(farFeeE12 > optimalFeeRateE6 * 2);
+        assertGt(farFeeE12, optimalFeeRateE6 * 2);
+        assertLe(farFeeE12, FeeCalculation.ONE_E12);
     }
 
     function test_fastPow_succeeds() public pure {
@@ -132,5 +133,33 @@ contract FeeCalculationTest is Test {
         blocksPassed = 4;
         z = FeeCalculation.fastPow(k, blocksPassed);
         assertEq(z, k * k * k * k >> 72);
+    }
+
+    function test_fuzz_adjustPreviousFeeForPriceMovement_succeeds(uint256 priceRatioX96, uint256 previousFeeE12)
+        public
+        pure
+    {
+        priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96); // price impact
+        previousFeeE12 = bound(previousFeeE12, 0, FeeCalculation.ONE_E12);
+        uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
+        assertGe(adjustedFeeE12, previousFeeE12);
+        assertLe(adjustedFeeE12, FeeCalculation.ONE_E12);
+    }
+
+    function test_fuzz_calculateFlexibleFee_succeeds(
+        uint256 targetFeeE12,
+        uint256 previousFeeE12,
+        uint256 k,
+        uint256 blocksPassed
+    ) public pure {
+        targetFeeE12 = bound(targetFeeE12, 0, FeeCalculation.ONE_E12 - 1);
+        previousFeeE12 = bound(previousFeeE12, targetFeeE12, FeeCalculation.ONE_E12);
+        k = bound(k, 1, 2 ** 24 - 1);
+        uint256 logK = uint256(-FixedPointMathLib.lnWad(int256(k))) >> 40;
+        blocksPassed = bound(blocksPassed, 0, uint256(2 ** 255) / (logK << 40));
+        uint256 flexibleFeeE12 =
+            FeeCalculation.calculateFlexibleFee(targetFeeE12, previousFeeE12, k, logK, blocksPassed);
+        assertGe(flexibleFeeE12, targetFeeE12);
+        assertLe(flexibleFeeE12, FeeCalculation.ONE_E12);
     }
 }
