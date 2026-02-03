@@ -94,14 +94,12 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
 
         if (token0 == address(0)) {
             token0 = FLUID_NATIVE_CURRENCY;
-            _isReversed = true;
-            (token0, token1) = (token1, token0);
         }
 
         // Fluid requires sorted tokens in dexKey (token0 < token1)
-        // After converting native, we may need to swap since 0xEeee... > most addresses
         if (token0 > token1) {
             (token0, token1) = (token1, token0);
+            _isReversed = true;
         }
 
         dexKey = IFluidDexLite.DexKey({token0: token0, token1: token1, salt: salt});

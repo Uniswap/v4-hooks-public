@@ -86,11 +86,12 @@ contract FluidDexLiteNativeFuzz is Test {
     struct PoolSetup {
         MockERC20 ercToken; // The ERC20 token (token1 in V4 terms)
         DexKey dexKey;
-        uint256 liquidityNative; // ETH liquidity (token0 in V4, token1 in Fluid due to address ordering)
-        uint256 liquidityErc; // ERC20 liquidity (token1 in V4, token0 in Fluid due to address ordering)
+        uint256 liquidityNative; // ETH liquidity (token0 in V4)
+        uint256 liquidityErc; // ERC20 liquidity (token1 in V4)
         uint256 fee;
         uint256 rangePercent;
         bytes32 salt;
+        bool ercIsFluidToken0; // True if ERC20 address < FLUID_NATIVE_CURRENCY
     }
 
     /// @dev Struct for hook deployment result
@@ -214,8 +215,13 @@ contract FluidDexLiteNativeFuzz is Test {
         setup.salt = keccak256(abi.encode(seed, "salt"));
 
         // Build dex key for Fluid (sorted: token0 < token1)
-        // Since ERC20 address < 0xEeee...eeee, ERC20 is token0 and FLUID_NATIVE_CURRENCY is token1
-        setup.dexKey = DexKey({token0: address(setup.ercToken), token1: FLUID_NATIVE_CURRENCY, salt: setup.salt});
+        // ERC20 could be either token0 or token1 depending on address comparison with FLUID_NATIVE_CURRENCY
+        setup.ercIsFluidToken0 = address(setup.ercToken) < FLUID_NATIVE_CURRENCY;
+        if (setup.ercIsFluidToken0) {
+            setup.dexKey = DexKey({token0: address(setup.ercToken), token1: FLUID_NATIVE_CURRENCY, salt: setup.salt});
+        } else {
+            setup.dexKey = DexKey({token0: FLUID_NATIVE_CURRENCY, token1: address(setup.ercToken), salt: setup.salt});
+        }
     }
 
     /// @notice Create a mock ERC20 token
@@ -238,8 +244,7 @@ contract FluidDexLiteNativeFuzz is Test {
         vm.stopPrank();
 
         // Build initialization params
-        // dexKey ordering (sorted): token0 = ERC20, token1 = FLUID_NATIVE_CURRENCY
-        // So token0Amount = ERC20 liquidity, token1Amount = Native liquidity
+        // dexKey ordering (sorted): token0Amount and token1Amount must match dexKey ordering
         InitializeParams memory initParams = InitializeParams({
             dexKey: setup.dexKey,
             revenueCut: 0,
@@ -254,8 +259,8 @@ contract FluidDexLiteNativeFuzz is Test {
             shiftTime: 3600,
             minCenterPrice: 1,
             maxCenterPrice: type(uint256).max,
-            token0Amount: setup.liquidityErc, // ERC20 amount (token0 in dexKey)
-            token1Amount: setup.liquidityNative // Native amount (token1 in dexKey)
+            token0Amount: setup.ercIsFluidToken0 ? setup.liquidityErc : setup.liquidityNative,
+            token1Amount: setup.ercIsFluidToken0 ? setup.liquidityNative : setup.liquidityErc
         });
 
         // Encode and execute initialization

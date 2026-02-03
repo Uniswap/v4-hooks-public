@@ -142,66 +142,26 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             }
 
             uint256 totalStableFee;
-            {
-                uint256 flexibleFee;
-                if (insideOptimalSpread) {
-                    totalStableFee = insideOptimalSpreadFee;
-                    flexibleFee = UNDEFINED_FLEXIBLE_FEE;
-                } else {
-                    // Outside the optimal spread, from this point on 0 < closeFee < farFee, both fees are
-                    // less than ONE, recalculate flexibleFee first
-                    uint256 previousSqrtAmmPriceX96 = feeState_.previousSqrtAmmPriceX96;
-                    uint256 previousFee = feeState_.previousFee;
-                    // adjust previousFee if needed
-                    if (
-                        previousFee == UNDEFINED_FLEXIBLE_FEE
-                            || (ammPriceToTheLeft != (previousSqrtAmmPriceX96 < referenceSqrtPriceX96))
-                    ) {
-                        // The AMM price has just left the optimal spread or it has jumped over it.
-                        // Use the far border of the optimal spread as previousFee.
-                        previousFee = farFee;
-                    } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
-                        // Adjust previousFee according to the price change (so that it would be w.r.t. sqrtAmmPrice,
-                        // not w.r.t. previousSqrtAmmPrice).
-                        // we want to use previous flexible fee *including* its price impact,
-                        // so we do not need to adjust previousFee if the previous swap was at flexible fee
-                        // AMM price moved further from the RP hence previous swap was at zero fee (AMM side)
-                        uint256 ratio = ammPriceToTheLeft
-                            ? (uint256(sqrtAmmPriceX96) * 2 ** 48) / previousSqrtAmmPriceX96
-                            : (previousSqrtAmmPriceX96 * 2 ** 48) / sqrtAmmPriceX96;
-                        ratio = ratio * ratio;
-                        previousFee = ONE - (ratio * (ONE - previousFee)) / 2 ** 96;
-                    } else if (previousFee > farFee) {
-                        // The AMM price has just left the optimal spread or it has jumped over it.
-                        // Use the far border of the optimal spread as previousFee.
-                        previousFee = farFee;
-                    }
-
-                    // always > 0 since farFee > closeFee
-                    uint256 targetFee = farFee - uint256(closeFee) / 2;
-                    if (previousFee <= targetFee) {
-                        // This case is impossible to reach via just swaps due to price impact recalculation above.
-                        flexibleFee = targetFee;
-                    } else {
-                        // This case is possible to reach via just swaps.
-                        uint256 blocksPassed = block.number - feeState_.blockNumber;
-                        uint256 factorX24;
-                        if (blocksPassed <= 4) {
-                            factorX24 = StableLibrary.fastPow(feeConfig_.k, blocksPassed);
-                        } else {
-                            int256 exponent = -int256(uint256(feeConfig_.logK) << 40) * int256(blocksPassed);
-                            factorX24 = (uint256(FixedPointMathLib.expWad(exponent)) << 24) / 1e18;
-                        }
-                        flexibleFee = targetFee + ((factorX24 * (previousFee - targetFee)) >> 24);
-                    }
-                    // Return the fee but in any event not greater than 99%
-                    totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFee;
-                }
-
-                feeState_.previousFee = flexibleFee;
-                feeState_.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
-                feeState_.blockNumber = block.number;
+            uint256 flexibleFee;
+            if (insideOptimalSpread) {
+                totalStableFee = insideOptimalSpreadFee;
+                flexibleFee = UNDEFINED_FLEXIBLE_FEE;
+            } else {
+                (totalStableFee, flexibleFee) = _calculateFlexibleFee(
+                    feeState_,
+                    feeConfig_,
+                    sqrtAmmPriceX96,
+                    referenceSqrtPriceX96,
+                    ammPriceToTheLeft,
+                    userSellsZeroForOne,
+                    farFee,
+                    closeFee
+                );
             }
+
+            feeState_.previousFee = flexibleFee;
+            feeState_.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
+            feeState_.blockNumber = block.number;
 
             totalStableFee /= TO_UNISWAP_FEE;
             if (totalStableFee > 990_000) {
@@ -219,5 +179,68 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     function _getSqrtPriceX96(PoolId _poolId) internal view returns (uint256) {
         (uint160 price,,,) = StateLibrary.getSlot0(poolManager, _poolId);
         return price;
+    }
+
+    function _calculateDecayFactor(uint256 logK, uint256 k, uint256 blocksPassed) internal pure returns (uint256) {
+        return blocksPassed <= 4
+            ? StableLibrary.fastPow(k, blocksPassed)
+            : (uint256(FixedPointMathLib.expWad(-int256((logK << 40) * blocksPassed))) << 24) / 1e18;
+    }
+
+    function _calculateFlexibleFee(
+        FeeState storage feeState_,
+        FeeConfig storage feeConfig_,
+        uint256 sqrtAmmPriceX96,
+        uint256 referenceSqrtPriceX96,
+        bool ammPriceToTheLeft,
+        bool userSellsZeroForOne,
+        uint256 farFee,
+        int256 closeFee
+    ) internal view returns (uint256 totalStableFee, uint256 flexibleFee) {
+        unchecked {
+            // Outside the optimal spread, from this point on 0 < closeFee < farFee, both fees are
+            // less than ONE, recalculate flexibleFee first
+            uint256 previousSqrtAmmPriceX96 = feeState_.previousSqrtAmmPriceX96;
+            uint256 previousFee = feeState_.previousFee;
+
+            // adjust previousFee if needed
+            if (
+                previousFee == UNDEFINED_FLEXIBLE_FEE
+                    || (ammPriceToTheLeft != (previousSqrtAmmPriceX96 < referenceSqrtPriceX96))
+            ) {
+                // The AMM price has just left the optimal spread or it has jumped over it.
+                // Use the far border of the optimal spread as previousFee.
+                previousFee = farFee;
+            } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
+                // Adjust previousFee according to the price change (so that it would be w.r.t. sqrtAmmPrice,
+                // not w.r.t. previousSqrtAmmPrice).
+                // we want to use previous flexible fee *including* its price impact,
+                // so we do not need to adjust previousFee if the previous swap was at flexible fee
+                // AMM price moved further from the RP hence previous swap was at zero fee (AMM side)
+                uint256 ratio = ammPriceToTheLeft
+                    ? (sqrtAmmPriceX96 * 2 ** 48) / previousSqrtAmmPriceX96
+                    : (previousSqrtAmmPriceX96 * 2 ** 48) / sqrtAmmPriceX96;
+                ratio = ratio * ratio;
+                previousFee = ONE - (ratio * (ONE - previousFee)) / 2 ** 96;
+            } else if (previousFee > farFee) {
+                // The AMM price has just left the optimal spread or it has jumped over it.
+                // Use the far border of the optimal spread as previousFee.
+                previousFee = farFee;
+            }
+
+            // always > 0 since farFee > closeFee
+            uint256 targetFee = farFee - uint256(closeFee) / 2;
+            if (previousFee <= targetFee) {
+                // This case is impossible to reach via just swaps due to price impact recalculation above.
+                flexibleFee = targetFee;
+            } else {
+                // This case is possible to reach via just swaps.
+                uint256 blocksPassed = block.number - feeState_.blockNumber;
+                uint256 factorX24 = _calculateDecayFactor(feeConfig_.logK, feeConfig_.k, blocksPassed);
+                flexibleFee = targetFee + ((factorX24 * (previousFee - targetFee)) >> 24);
+            }
+            // Return the fee but in any event not greater than 99%
+            totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFee;
+        }
     }
 }
