@@ -228,10 +228,6 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
     }
 
-    // NOTE: Exact-out tests for FluidDexLite are covered in fork tests (FluidDexLiteERC20Test.fork.t.sol)
-    // The unit test mock doesn't properly simulate the exact-out flow which requires
-    // specific Fluid DEX Lite behavior
-
     // ========== REVERSED POOL ORDER (Native Currency) ==========
 
     function test_pseudoTotalValueLocked_reversed_returnsSwappedReserves() public {
