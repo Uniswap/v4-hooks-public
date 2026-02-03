@@ -162,7 +162,7 @@ library FeeCalculation {
         }
 
         // flexibleFee = target + factor * (previous - target)
-        flexibleFeeE12 = targetFeeE12 + (factorX24 * (previousFeeE12 - targetFeeE12)) >> 24;
+        flexibleFeeE12 = targetFeeE12 + ((factorX24 * (previousFeeE12 - targetFeeE12)) >> 24);
     }
 
     /// @notice Calculate the fast power of k to the power of blocksPassed

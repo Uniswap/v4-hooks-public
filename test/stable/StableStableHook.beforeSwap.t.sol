@@ -22,6 +22,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {FeeCalculation} from "../../src/stable/libraries/FeeCalculation.sol";
 
 contract StableStableHookTest is Test, Deployers {
     using StateLibrary for IPoolManager;
@@ -111,27 +112,6 @@ contract StableStableHookTest is Test, Deployers {
     function extsload(bytes32 slot) external view returns (bytes32) {
         assertEq(slot, StateLibrary._getPoolStateSlot(testPoolKey.toId()));
         return bytes32(uint256(sqrtAmmPriceX96) | ((0x000000_000bb8_000000_ffff75) << 160));
-    }
-
-    // Helper function to update historical fee data in storage
-    function updatePreviousSqrtAmmPriceX96(uint160 previousSqrtAmmPriceX96) internal {
-        PoolId poolId = testPoolKey.toId();
-
-        // feeState is at storage slot 2 (after feeConfig at slot 1, and parent class storage at slot 0)
-        // For a mapping, the slot is keccak256(abi.encode(key, slotNumber))
-        bytes32 baseSlot = keccak256(abi.encode(PoolId.unwrap(poolId), uint256(2)));
-
-        // FeeState struct layout (packed into slots):
-        // slot 0: previousFee (uint40, 5 bytes) + previousSqrtAmmPriceX96 (uint160, 20 bytes) + padding (7 bytes)
-        // slot 1: blockNumber (uint256)
-
-        // Read slot 0, update previousSqrtAmmPriceX96 (bytes 5-24), write back
-        bytes32 slot0 = vm.load(address(hook), baseSlot);
-        uint40 previousFee = uint40(uint256(slot0)); // Extract first 5 bytes
-
-        // Pack previousFee and previousSqrtAmmPriceX96 into slot 0
-        bytes32 newSlot0 = bytes32(uint256(previousFee) | (uint256(previousSqrtAmmPriceX96) << 40));
-        vm.store(address(hook), baseSlot, newSlot0);
     }
 
     function test_beforeSwap_insideOptimalRange_exactReferencePrice() public {
@@ -250,12 +230,8 @@ contract StableStableHookTest is Test, Deployers {
         ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // Update the historical fee data to simulate that the price has already moved to this level
-        // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
-        updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
-
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+        assertEq(fee, 209); // 90 (optimal) + 114 (calculated flexible fee)
     }
 
     function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
@@ -272,11 +248,7 @@ contract StableStableHookTest is Test, Deployers {
         ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // Update the historical fee data to simulate that the price has already moved to this level
-        // Get the current historical data from the first swap and update previousSqrtAmmPriceX96
-        updatePreviousSqrtAmmPriceX96(sqrtAmmPriceX96);
-
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertEq(fee, 204); // 90 (optimal) + 114 (calculated flexible fee)
+        assertEq(fee, 209);
     }
 }
