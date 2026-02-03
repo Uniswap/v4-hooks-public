@@ -235,6 +235,188 @@ contract FluidDexT1AggregatorUnitTest is Test {
         assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
     }
 
+    function test_swap_exactOut_zeroForOne() public {
+        uint256 amountOut = 50 ether;
+        uint256 amountIn = 55 ether;
+        mockPool.setReturnSwapOutWithCallback(amountIn);
+        token1.mint(address(mockPool), amountOut); // Mock pool needs tokens to transfer
+        token1.mint(address(hook), amountOut); // Hook needs tokens to transfer to poolManager
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
+        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    function test_swap_exactOut_oneForZero() public {
+        uint256 amountOut = 50 ether;
+        uint256 amountIn = 55 ether;
+        mockPool.setReturnSwapOutWithCallback(amountIn);
+        token0.mint(address(mockPool), amountOut); // Mock pool needs tokens to transfer
+        token0.mint(address(hook), amountOut); // Hook needs tokens to transfer to poolManager
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
+        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    // ========== REVERSED POOL ORDER ==========
+
+    function test_beforeInitialize_revertsTokenNotInPool_token1Only() public {
+        // Resolver returns tokens where token0 matches but token1 doesn't
+        // Use a high address (0xffff...) to ensure we stay in the normal (non-reversed) branch
+        address wrongToken1 = address(0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF);
+        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        resolver2.setDexTokens(address(token0), wrongToken1); // token0 matches, token1 doesn't
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
+            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
+        );
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 2,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken1),
+                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_revertsTokenNotInPool_token0Only() public {
+        // Resolver returns tokens where token1 matches but token0 doesn't
+        // Use address(1) which is small but > address(0), so token0 < token1 stays true
+        address wrongToken0 = address(1);
+        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        resolver2.setDexTokens(wrongToken0, address(token1)); // token0 doesn't match, token1 matches
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
+            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
+        );
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 3,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken0),
+                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_reversedTokenOrder_succeeds() public {
+        // Resolver returns tokens in reversed order (token1, token0)
+        // This triggers the token1 < token0 branch
+        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        // Return tokens reversed: what Fluid calls token0 is actually > what Fluid calls token1
+        resolver2.setDexTokens(address(token1), address(token0)); // Reversed
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
+            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
+        );
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 4,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        // This should succeed and set _isReversed = true
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+        assertEq(PoolId.unwrap(hook2.localPoolId()), PoolId.unwrap(key2.toId()));
+    }
+
+    function test_pseudoTotalValueLocked_reversed_returnsSwappedReserves() public {
+        // Deploy hook with reversed token order
+        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        resolver2.setDexTokens(address(token1), address(token0)); // Reversed order
+        resolver2.setReserves(1000 ether, 2000 ether);
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
+            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
+        );
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 5,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+
+        // With _isReversed = true, reserves should be swapped
+        (uint256 a0, uint256 a1) = hook2.pseudoTotalValueLocked(key2.toId());
+        // token0Reserves=1000, token1Reserves=2000
+        // When reversed: returns (token1Reserves, token0Reserves) = (2000, 1000)
+        assertEq(a0, 2000 ether);
+        assertEq(a1, 1000 ether);
+    }
+
     // ========== FACTORY ==========
 
     function test_factory_createPool() public {

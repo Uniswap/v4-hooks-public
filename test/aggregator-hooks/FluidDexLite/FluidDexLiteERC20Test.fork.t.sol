@@ -315,7 +315,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
     }
 
     /// @notice Test pseudoTotalValueLocked returns non-zero values
-    function test_pseudoTotalValueLocked() public {
+    function test_pseudoTotalValueLocked() public view {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
 
         assertGt(amount0, 0, "amount0 should be non-zero");

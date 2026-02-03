@@ -185,7 +185,7 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
-    function test_beforeInitialize_emitsEvent() public {
+    function test_beforeInitialize_emitsEvent() public view {
         // Already tested via setUp, but verify localPoolId is set
         assertEq(PoolId.unwrap(hook.localPoolId()), PoolId.unwrap(poolId));
     }
@@ -226,6 +226,50 @@ contract FluidDexLiteAggregatorUnitTest is Test {
 
         assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
         assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    // NOTE: Exact-out tests for FluidDexLite are covered in fork tests (FluidDexLiteERC20Test.fork.t.sol)
+    // The unit test mock doesn't properly simulate the exact-out flow which requires
+    // specific Fluid DEX Lite behavior
+
+    // ========== REVERSED POOL ORDER (Native Currency) ==========
+
+    function test_pseudoTotalValueLocked_reversed_returnsSwappedReserves() public {
+        // Deploy hook with native currency which will trigger reversed order
+        // Native currency (address(0)) converts to FLUID_NATIVE_CURRENCY (0xEeee...)
+        // which is > any normal token address, so _isReversed = true
+        MockIFluidDexLiteResolver resolver2 = new MockIFluidDexLiteResolver();
+        resolver2.setReturnEmptyDexState(false);
+        resolver2.setReturnReserves(1000 ether, 2000 ether);
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(FluidDexLiteAggregator).creationCode,
+            args
+        );
+        FluidDexLiteAggregator hook2 =
+            new FluidDexLiteAggregator{salt: salt2}(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
+
+        // Use native currency (address(0)) as currency0
+        // After conversion to FLUID_NATIVE_CURRENCY, it becomes > token1, triggering _isReversed
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(0)), // Native currency
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 1,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+
+        // With _isReversed = true, reserves should be swapped
+        (uint256 a0, uint256 a1) = hook2.pseudoTotalValueLocked(key2.toId());
+        // token0RealReserves=1000, token1RealReserves=2000
+        // When reversed: returns (token1Reserves, token0Reserves) = (2000, 1000)
+        assertEq(a0, 2000 ether);
+        assertEq(a1, 1000 ether);
     }
 
     // ========== FACTORY ==========

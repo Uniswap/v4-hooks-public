@@ -171,6 +171,80 @@ contract StableSwapAggregatorUnitTest is Test {
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
+    function test_beforeInitialize_revertsToken0NotInPool() public {
+        // Create mock pool with only token1 (token0 is missing)
+        address[] memory partialCoins = new address[](2);
+        partialCoins[0] = address(0xdead); // wrong token0
+        partialCoins[1] = address(token1); // correct token1
+        MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), partialPool);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(StableSwapAggregator).creationCode,
+            args
+        );
+        StableSwapAggregator hook2 =
+            new StableSwapAggregator{salt: salt2}(IPoolManager(address(poolManager)), partialPool);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 2,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapAggregator.TokenNotInPool.selector, address(token0)),
+                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_revertsToken1NotInPool() public {
+        // Create mock pool with only token0 (token1 is missing)
+        address[] memory partialCoins = new address[](2);
+        partialCoins[0] = address(token0); // correct token0
+        partialCoins[1] = address(0xbeef); // wrong token1
+        MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
+
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), partialPool);
+        (, bytes32 salt2) = HookMiner.find(
+            address(this),
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            type(StableSwapAggregator).creationCode,
+            args
+        );
+        StableSwapAggregator hook2 =
+            new StableSwapAggregator{salt: salt2}(IPoolManager(address(poolManager)), partialPool);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 3,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapAggregator.TokenNotInPool.selector, address(token1)),
+                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
     function test_beforeInitialize_setsTokenIndices() public view {
         (int128 idx0, int128 idx1) = hook.poolIdToTokenInfo(poolId);
         assertEq(idx0, 0);

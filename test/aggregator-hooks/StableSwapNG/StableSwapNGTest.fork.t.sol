@@ -347,7 +347,7 @@ contract StableSwapNGForkedTest is Test {
     }
 
     /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances for all pairs
-    function test_pseudoTotalValueLocked_AllPairs() public {
+    function test_pseudoTotalValueLocked_AllPairs() public view {
         for (uint256 i = 0; i < tokenPairs.length; i++) {
             TokenPair memory pair = tokenPairs[i];
 
