@@ -1,5 +1,11 @@
 # aggregator-hooks
 
+Aggregator Hook tests must be ran with the following command:
+
+```bash
+FOUNDRY_PROFILE=agg_hooks forge test --match-path "test/aggregator-hooks/*" --skip src/stable/*
+```
+
 ## Fuzz Testing (StableSwapNG)
 
 The StableSwapNG fuzz tests deploy Curve pools locally using precompiled bytecode.
