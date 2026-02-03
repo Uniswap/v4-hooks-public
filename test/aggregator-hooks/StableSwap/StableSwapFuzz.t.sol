@@ -404,6 +404,15 @@ contract StableSwapFuzz is Test {
         _setupAliceMulti(tokens, balances);
     }
 
+    /// @dev Struct to bundle swap context and reduce stack depth
+    struct SwapContext {
+        uint256 tokenInIdx;
+        uint256 tokenOutIdx;
+        uint256 amountIn;
+        uint256 expectedOut;
+        bool zeroForOne;
+    }
+
     /// @notice Execute an exact input swap and verify the output matches the quote
     function _executeExactInSwap(
         StableSwapAggregator hook,
@@ -414,38 +423,53 @@ contract StableSwapFuzz is Test {
         uint256 swapIdx,
         bool zeroForOne
     ) internal {
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        (uint256 tokenInIdx, uint256 tokenOutIdx) = _deriveSwapPairForDirection(swapSeed, tokens.length, zeroForOne);
+        SwapContext memory ctx;
+        ctx.zeroForOne = zeroForOne;
 
-        uint256 minPairBalance =
-            balances[tokenInIdx] < balances[tokenOutIdx] ? balances[tokenInIdx] : balances[tokenOutIdx];
-        uint256 amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
+        // Derive swap parameters in scoped block
+        {
+            uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+            (ctx.tokenInIdx, ctx.tokenOutIdx) = _deriveSwapPairForDirection(swapSeed, tokens.length, zeroForOne);
 
-        PoolKey memory poolKey = _buildPoolKey(currencies[tokenInIdx], currencies[tokenOutIdx], IHooks(address(hook)));
-        MockERC20 tokenIn = tokens[tokenInIdx];
-        MockERC20 tokenOut = tokens[tokenOutIdx];
+            uint256 minPairBalance = balances[ctx.tokenInIdx] < balances[ctx.tokenOutIdx]
+                ? balances[ctx.tokenInIdx]
+                : balances[ctx.tokenOutIdx];
+            ctx.amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
+        }
+
+        PoolKey memory poolKey =
+            _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
 
         // Get quote (negative = exact input)
-        uint256 expectedOut = hook.quote(zeroForOne, -int256(amountIn), poolKey.toId());
-        assertGt(expectedOut, 0, "Quote should be non-zero");
+        ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
+        assertGt(ctx.expectedOut, 0, "Quote should be non-zero");
 
-        uint256 tokenInBefore = tokenIn.balanceOf(alice);
-        uint256 tokenOutBefore = tokenOut.balanceOf(alice);
+        // Execute swap and verify in scoped block
+        {
+            uint256 tokenInBefore = tokens[ctx.tokenInIdx].balanceOf(alice);
+            uint256 tokenOutBefore = tokens[ctx.tokenOutIdx].balanceOf(alice);
 
-        vm.prank(alice);
-        swapRouter.swap(
-            poolKey,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(amountIn),
-                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
-            }),
-            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
+            vm.prank(alice);
+            swapRouter.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: ctx.zeroForOne,
+                    amountSpecified: -int256(ctx.amountIn),
+                    sqrtPriceLimitX96: ctx.zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+                }),
+                SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+                ""
+            );
 
-        assertEq(tokenInBefore - tokenIn.balanceOf(alice), amountIn, "Should spend exact input amount");
-        assertEq(tokenOut.balanceOf(alice) - tokenOutBefore, expectedOut, "Received amount should match quote");
+            assertEq(
+                tokenInBefore - tokens[ctx.tokenInIdx].balanceOf(alice), ctx.amountIn, "Should spend exact input amount"
+            );
+            assertEq(
+                tokens[ctx.tokenOutIdx].balanceOf(alice) - tokenOutBefore,
+                ctx.expectedOut,
+                "Received amount should match quote"
+            );
+        }
     }
 
     /// @notice Derive swap pair indices for a given direction
@@ -472,10 +496,11 @@ contract StableSwapFuzz is Test {
     // ========== SEED-BASED DERIVATION HELPERS ==========
 
     /// @notice Derive initial balances for each token from seed
+    /// @dev Minimum balance must be >= 20_000 ether so that minPairBalance / 20 >= 1000 ether (swap min)
     function _deriveBalances(uint256 seed, uint256 numTokens) internal pure returns (uint256[] memory) {
         uint256[] memory balances = new uint256[](numTokens);
         for (uint256 i = 0; i < numTokens; i++) {
-            balances[i] = bound(uint256(keccak256(abi.encode(seed, "balance", i))), 10_000 ether, 10_000_000 ether);
+            balances[i] = bound(uint256(keccak256(abi.encode(seed, "balance", i))), 20_000 ether, 10_000_000 ether);
         }
         return balances;
     }

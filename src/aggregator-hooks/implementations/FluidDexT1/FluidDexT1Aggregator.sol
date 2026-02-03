@@ -36,8 +36,10 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
     bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
-    // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+    // Fluid's exactOut can sometimes be off so we add a buffer to the amountOut
+    // Buffer scales with amount: max(INACCURACY_BUFFER, amount / INACCURACY_SCALE)
     uint256 private constant INACCURACY_BUFFER = 20;
+    uint256 private constant INACCURACY_SCALE = 1_000_000; // 1 part per million
 
     error UnauthorizedCaller();
     error Reentrancy();
@@ -82,11 +84,12 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
                 address(FLUID_POOL), fluidSwap0to1, uint256(-amountSpecified), 0
             );
         } else {
+            uint256 amount = uint256(amountSpecified);
             amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
-                // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+                // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
                 address(FLUID_POOL),
                 fluidSwap0to1,
-                uint256(amountSpecified) + INACCURACY_BUFFER,
+                amount + _getBuffer(amount),
                 type(uint256).max
             );
         }
@@ -215,14 +218,19 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         if (inputIsNative) {
             revert NativeCurrencyExactOut();
         } else {
-            // Fluid's exactOut can sometimes be off by 1-2 so we add a buffer to the amountOut
+            // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
             amountIn = FLUID_POOL.swapOutWithCallback(
-                fluidSwap0to1, amountOut + INACCURACY_BUFFER, type(uint256).max, recipient
+                fluidSwap0to1, amountOut + _getBuffer(amountOut), type(uint256).max, recipient
             );
             if (!outputIsNative) {
                 settleCurrency.transfer(address(poolManager), amountOut);
             }
         }
+    }
+
+    function _getBuffer(uint256 amount) internal pure returns (uint256) {
+        uint256 scaled = amount / INACCURACY_SCALE;
+        return scaled > INACCURACY_BUFFER ? scaled : INACCURACY_BUFFER;
     }
 
     function _setTransientInflight(bool value) private {

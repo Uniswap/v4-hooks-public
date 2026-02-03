@@ -25,7 +25,7 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
     ICurveStableSwapNG public pool;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
-    uint256 internal constant dBPS = 100_000;
+    uint256 internal constant INACCURACY_SCALE = 100_000; // 1 part per million
 
     struct PoolInfo {
         int128 token0Index;
@@ -58,10 +58,8 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
                 amountUnspecified = pool.get_dy(poolInfo.token1Index, poolInfo.token0Index, uint256(-amountSpecified));
             }
         } else {
-            uint256 _amountSpecified = uint256(amountSpecified) + INACCURACY_BUFFER;
-            if (_amountSpecified < (uint256(amountSpecified) * (dBPS + 1)) / dBPS) {
-                _amountSpecified = (uint256(amountSpecified) * (dBPS + 1)) / dBPS;
-            }
+            uint256 amount = uint256(amountSpecified);
+            uint256 _amountSpecified = amount + _getBuffer(amount);
             if (zeroToOne) {
                 amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, _amountSpecified);
             } else {
@@ -134,12 +132,9 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
             // Exact-In
             amountTake = uint256(-params.amountSpecified);
         } else {
-            uint256 amountSpecified = uint256(params.amountSpecified) + INACCURACY_BUFFER;
-            if (amountSpecified < (uint256(params.amountSpecified) * (dBPS + 1)) / dBPS) {
-                amountSpecified = (uint256(params.amountSpecified) * (dBPS + 1)) / dBPS;
-            }
-            // Exact-Out: find out how much in
-            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, amountSpecified);
+            // Exact-Out: find out how much in (add buffer to cover precision loss)
+            uint256 amount = uint256(params.amountSpecified);
+            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, amount + _getBuffer(amount));
         }
 
         poolManager.take(takeCurrency, address(this), amountTake);
@@ -169,5 +164,10 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
             amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
         }
         poolManager.settle();
+    }
+
+    function _getBuffer(uint256 amount) internal pure returns (uint256) {
+        uint256 scaled = amount / INACCURACY_SCALE;
+        return scaled > INACCURACY_BUFFER ? scaled : INACCURACY_BUFFER;
     }
 }

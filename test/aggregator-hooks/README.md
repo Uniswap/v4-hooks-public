@@ -3,7 +3,7 @@
 Aggregator Hook tests must be ran with the following command:
 
 ```bash
-FOUNDRY_PROFILE=agg_hooks forge test --match-path "test/aggregator-hooks/*" --skip src/stable/*
+FOUNDRY_PROFILE=aggregator_hooks forge test --match-path "test/aggregator-hooks/*" --skip src/stable/*
 ```
 
 ## Fuzz Testing (StableSwapNG)
