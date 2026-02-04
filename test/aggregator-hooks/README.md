@@ -1,16 +1,26 @@
 # aggregator-hooks
 
+## Adding support for a new protocol
+
+When adding a new protocol, the test suite must have the following:
+
+- Unit tests giving 100% coverage
+- Forked tests: tests ran on a forked version of the real, deployed protocol
+- Fuzz tests 
+
+## Testing
+
 Aggregator Hook tests must be ran with the following command:
 
 ```bash
 FOUNDRY_PROFILE=aggregator_hooks forge test --match-path "test/aggregator-hooks/*" --skip src/stable/*
 ```
 
-## Fuzz Testing (StableSwapNG)
+### Fuzz Testing (Curve pools)
 
-The StableSwapNG fuzz tests deploy Curve pools locally using precompiled bytecode.
+The StableSwapNG/StableSwap fuzz tests deploy Curve pools locally using precompiled bytecode.
 
-### Precompiled Bytecode
+#### Precompiled Bytecode
 
 The fuzz tests use precompiled bytecode stored in `test/aggregator-hooks/StableSwapNG/precompiled/`:
 
