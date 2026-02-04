@@ -19,6 +19,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
+/// @custom:security-contact security@uniswap.org
 contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
