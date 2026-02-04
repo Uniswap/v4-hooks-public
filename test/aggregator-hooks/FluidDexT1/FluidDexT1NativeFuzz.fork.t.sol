@@ -44,12 +44,12 @@ contract FluidDexT1NativeFuzz is Test {
     // Fluid's native currency representation
     address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-    // Mainnet addresses
-    address constant LIQUIDITY = 0x52Aa899454998Be5b000Ad077a46Bbe360F4e497;
-    address constant DEX_FACTORY = 0x91716C4EDA1Fb55e84Bf8b4c7085f84285c19085;
-    address constant DEX_RESERVES_RESOLVER = 0x11D80CfF056Cef4F9E6d23da8672fE9873e5cC07;
-    address constant DEX_T1_DEPLOYMENT_LOGIC = 0x7db5101f12555bD7Ef11B89e4928061B7C567D27;
-    address constant TIMELOCK = 0x2386DC45AdDed673317eF068992F19421B481F4c;
+    // Mainnet addresses (loaded from env vars)
+    address liquidity;
+    address dexFactoryAddress;
+    address dexReservesResolver;
+    address dexT1DeploymentLogic;
+    address timelock;
 
     // Fluid contracts (loaded from mainnet fork)
     IFluidDexFactory public dexFactory;
@@ -66,7 +66,7 @@ contract FluidDexT1NativeFuzz is Test {
     // V4 Pool configuration
     uint24 constant POOL_FEE = 5; // 0.0005%
     int24 constant TICK_SPACING = 1;
-    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
@@ -115,17 +115,24 @@ contract FluidDexT1NativeFuzz is Test {
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(rpcUrl);
 
+        // Load addresses from environment variables
+        liquidity = vm.envAddress("FLUID_LIQUIDITY");
+        dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
+        dexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        dexT1DeploymentLogic = vm.envAddress("FLUID_DEX_T1_DEPLOYMENT_LOGIC");
+        timelock = vm.envAddress("FLUID_DEX_T1_TIMELOCK");
+
         // Load mainnet contracts
-        dexFactory = IFluidDexFactory(DEX_FACTORY);
-        liquidityAdmin = IFluidLiquidityAdmin(LIQUIDITY);
-        deploymentLogic = IFluidDexT1DeploymentLogic(DEX_T1_DEPLOYMENT_LOGIC);
-        resolver = IFluidDexReservesResolver(DEX_RESERVES_RESOLVER);
+        dexFactory = IFluidDexFactory(dexFactoryAddress);
+        liquidityAdmin = IFluidLiquidityAdmin(liquidity);
+        deploymentLogic = IFluidDexT1DeploymentLogic(dexT1DeploymentLogic);
+        resolver = IFluidDexReservesResolver(dexReservesResolver);
 
         // Deploy liquidity supplier for prefunding
-        liquiditySupplier = new MockLiquiditySupplier(LIQUIDITY);
+        liquiditySupplier = new MockLiquiditySupplier(liquidity);
 
         // Add this test contract as a deployer and global auth
-        vm.startPrank(TIMELOCK);
+        vm.startPrank(timelock);
         dexFactory.setDeployer(address(this), true);
         dexFactory.setGlobalAuth(address(this), true);
         vm.stopPrank();
@@ -134,7 +141,7 @@ contract FluidDexT1NativeFuzz is Test {
         poolManager = new PoolManager(address(this));
         swapRouter = new SafePoolSwapTest(poolManager);
         hookFactory = new FluidDexT1AggregatorFactory(
-            IPoolManager(address(poolManager)), IFluidDexReservesResolver(DEX_RESERVES_RESOLVER), LIQUIDITY
+            IPoolManager(address(poolManager)), IFluidDexReservesResolver(dexReservesResolver), liquidity
         );
     }
 
@@ -245,7 +252,7 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Configure tokens in the Liquidity layer (rate data + token config)
     function _configureTokensInLiquidity(PoolSetup memory setup) internal {
-        vm.startPrank(TIMELOCK);
+        vm.startPrank(timelock);
 
         // Configure rate data for ERC20 token (native is already configured on mainnet)
         AdminModuleStructs.RateDataV1Params[] memory rateParams = new AdminModuleStructs.RateDataV1Params[](1);
@@ -306,7 +313,7 @@ contract FluidDexT1NativeFuzz is Test {
         }
 
         bytes memory creationCode = abi.encodeCall(deploymentLogic.dexT1, (fluidToken0, fluidToken1, 1e4));
-        return dexFactory.deployDex(DEX_T1_DEPLOYMENT_LOGIC, creationCode);
+        return dexFactory.deployDex(dexT1DeploymentLogic, creationCode);
     }
 
     /// @notice Configure allowances for the pool
@@ -321,7 +328,7 @@ contract FluidDexT1NativeFuzz is Test {
     function _prefundLiquidity(PoolSetup memory setup) internal {
         uint256 prefundAmountErc = setup.liquidityErc * 2;
         setup.ercToken.approve(address(liquiditySupplier), prefundAmountErc);
-        setup.ercToken.approve(LIQUIDITY, prefundAmountErc);
+        setup.ercToken.approve(liquidity, prefundAmountErc);
         liquiditySupplier.supply(address(setup.ercToken), prefundAmountErc, address(this));
         // Note: Native ETH is not prefunded - we rely on mainnet's existing liquidity layer supply
     }
@@ -367,7 +374,7 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Set user supply and borrow allowances for an ERC20 token/pool pair
     function _setUserAllowancesDefault(address token, address pool, uint256 tokenTotalSupply) internal {
-        vm.startPrank(TIMELOCK);
+        vm.startPrank(timelock);
 
         // Supply config
         AdminModuleStructs.UserSupplyConfig[] memory supplyConfigs = new AdminModuleStructs.UserSupplyConfig[](1);
@@ -400,7 +407,7 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Set user supply and borrow allowances for native ETH
     function _setUserAllowancesNative(address pool, uint256 amount) internal {
-        vm.startPrank(TIMELOCK);
+        vm.startPrank(timelock);
 
         // Supply config for native
         AdminModuleStructs.UserSupplyConfig[] memory supplyConfigs = new AdminModuleStructs.UserSupplyConfig[](1);
@@ -436,7 +443,7 @@ contract FluidDexT1NativeFuzz is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(poolManager), setup.fluidPool, address(resolver), LIQUIDITY);
+        bytes memory constructorArgs = abi.encode(address(poolManager), setup.fluidPool, address(resolver), liquidity);
 
         (, bytes32 hookSalt) =
             HookMiner.find(address(hookFactory), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);

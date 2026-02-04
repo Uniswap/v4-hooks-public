@@ -33,14 +33,14 @@ contract FluidDexT1NativeForkedTest is Test {
     // Fluid's native currency representation
     address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-    // Fluid infrastructure addresses (mainnet)
-    address constant FLUID_LIQUIDITY = 0x52Aa899454998Be5b000Ad077a46Bbe360F4e497;
-    address constant FLUID_DEX_RESERVES_RESOLVER = 0x11D80CfF056Cef4F9E6d23da8672fE9873e5cC07;
+    // Fluid infrastructure addresses (loaded from env vars)
+    address fluidLiquidity;
+    address fluidDexReservesResolver;
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
     int24 constant TICK_SPACING = 10;
-    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
@@ -81,8 +81,13 @@ contract FluidDexT1NativeForkedTest is Test {
 
         // Load native pool address from .env
         fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_NATIVE");
+
+        // Load addresses from environment variables
+        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+
         fluidPool = IFluidDexT1(fluidPoolAddress);
-        fluidResolver = IFluidDexReservesResolver(FLUID_DEX_RESERVES_RESOLVER);
+        fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
 
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
@@ -100,7 +105,8 @@ contract FluidDexT1NativeForkedTest is Test {
         currency1 = Currency.wrap(ercTokenAddress);
 
         // Use mainnet PoolManager
-        manager = PoolManager(address(0x000000000004444c5dc75cB358380D2e3dE08A90));
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
@@ -136,11 +142,11 @@ contract FluidDexT1NativeForkedTest is Test {
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         bytes memory constructorArgs =
-            abi.encode(address(manager), address(fluidPool), address(fluidResolver), FLUID_LIQUIDITY);
+            abi.encode(address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, FLUID_LIQUIDITY);
+        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, fluidLiquidity);
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 

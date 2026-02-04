@@ -31,14 +31,14 @@ contract FluidDexT1ERC20ForkedTest is Test {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
-    // Fluid infrastructure addresses (mainnet)
-    address constant FLUID_LIQUIDITY = 0x52Aa899454998Be5b000Ad077a46Bbe360F4e497;
-    address constant FLUID_DEX_RESERVES_RESOLVER = 0x11D80CfF056Cef4F9E6d23da8672fE9873e5cC07;
+    // Fluid infrastructure addresses (loaded from env vars)
+    address fluidLiquidity;
+    address fluidDexReservesResolver;
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
     int24 constant TICK_SPACING = 10;
-    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
@@ -78,11 +78,15 @@ contract FluidDexT1ERC20ForkedTest is Test {
 
         vm.createSelectFork(rpcUrl);
 
+        // Load addresses from environment variables
+        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_erc_v1"))));
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
-        fluidResolver = IFluidDexReservesResolver(FLUID_DEX_RESERVES_RESOLVER);
+        fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
 
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
@@ -146,11 +150,11 @@ contract FluidDexT1ERC20ForkedTest is Test {
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         bytes memory constructorArgs =
-            abi.encode(address(manager), address(fluidPool), address(fluidResolver), FLUID_LIQUIDITY);
+            abi.encode(address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, FLUID_LIQUIDITY);
+        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, fluidLiquidity);
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 
