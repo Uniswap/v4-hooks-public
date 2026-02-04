@@ -78,6 +78,18 @@ contract FluidDexT1NativeFuzz is Test {
     uint256 constant MIN_RANGE_PERCENT = 1 * 1e4; // 1% (1e4 = 1%)
     uint256 constant MAX_RANGE_PERCENT = 20 * 1e4; // 20%
 
+    // Center price bounds (1e27 = 1:1 price)
+    uint256 constant MIN_CENTER_PRICE = 5e26; // 0.5:1
+    uint256 constant MAX_CENTER_PRICE = 2e27; // 2:1
+
+    // Center price limit bounds (as percentage deviation from center price, in 1e4 units)
+    uint256 constant MIN_CENTER_PRICE_DEVIATION = 10 * 1e4; // 10% deviation
+    uint256 constant MAX_CENTER_PRICE_DEVIATION = 30 * 1e4; // 30% deviation
+
+    // Shift threshold bounds (in 1e4 units, 1e4 = 1%)
+    uint256 constant MIN_SHIFT_THRESHOLD = 3 * 1e4; // 3%
+    uint256 constant MAX_SHIFT_THRESHOLD = 8 * 1e4; // 8%
+
     // Liquidity bounds
     // Note: For native pools, we rely on mainnet's existing liquidity layer supply
     // Keep amounts small to stay within mainnet's configured limits
@@ -100,6 +112,11 @@ contract FluidDexT1NativeFuzz is Test {
         uint256 liquidityErc; // ERC20 liquidity (token1 in V4)
         uint256 fee;
         uint256 rangePercent;
+        uint256 centerPrice; // Pool center price (1e27 = 1:1)
+        uint256 maxCenterPrice; // Maximum allowed center price
+        uint256 minCenterPrice; // Minimum allowed center price
+        uint256 upperShiftThreshold; // Upper shift threshold (1e4 = 1%)
+        uint256 lowerShiftThreshold; // Lower shift threshold (1e4 = 1%)
         bool ercIsFluidToken0; // True if ERC20 address < FLUID_NATIVE_CURRENCY
     }
 
@@ -239,6 +256,10 @@ contract FluidDexT1NativeFuzz is Test {
         setup.liquidityErc = _deriveLiquidity(seed, 1);
         setup.fee = _deriveFee(seed);
         setup.rangePercent = _deriveRangePercent(seed);
+        setup.centerPrice = _deriveCenterPrice(seed);
+        (setup.minCenterPrice, setup.maxCenterPrice) = _deriveCenterPriceLimits(seed, setup.centerPrice);
+        setup.upperShiftThreshold = _deriveShiftThreshold(seed, 0);
+        setup.lowerShiftThreshold = _deriveShiftThreshold(seed, 1);
 
         // Determine Fluid token ordering (ERC20 vs FLUID_NATIVE_CURRENCY)
         setup.ercIsFluidToken0 = address(setup.ercToken) < FLUID_NATIVE_CURRENCY;
@@ -280,12 +301,16 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Deploy and initialize a Fluid DexT1 pool with native ETH
     function _deployAndInitializeFluidPool(PoolSetup memory setup) internal {
+        // Calculate liquidity multiplier based on max possible center price ratio
+        // Due to price ratio, plus generous buffer for fees/rounding/multi-use
+        uint256 priceMultiplier = ((MAX_CENTER_PRICE / 1e27) + 1) * 3; // e.g., (10 + 1) * 3 = 33x
+
         // Mint ERC20 tokens (need extra for: liquidity layer supply, pool init, alice, poolManager)
-        uint256 totalMintErc = setup.liquidityErc * 6;
+        uint256 totalMintErc = setup.liquidityErc * priceMultiplier;
         setup.ercToken.mint(address(this), totalMintErc);
 
         // Deal ETH to this contract for native liquidity
-        vm.deal(address(this), setup.liquidityNative * 6);
+        vm.deal(address(this), setup.liquidityNative * priceMultiplier);
 
         // Deploy pool via factory
         setup.fluidPool = _deployFluidPool(setup);
@@ -318,9 +343,10 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Configure allowances for the pool
     function _configureAllowances(PoolSetup memory setup, uint256 totalMintErc) internal {
+        uint256 priceMultiplier = ((MAX_CENTER_PRICE / 1e27) + 1) * 3;
         _setUserAllowancesDefault(address(setup.ercToken), address(liquiditySupplier), totalMintErc);
         _setUserAllowancesDefault(address(setup.ercToken), setup.fluidPool, totalMintErc);
-        _setUserAllowancesNative(setup.fluidPool, setup.liquidityNative * 6);
+        _setUserAllowancesNative(setup.fluidPool, setup.liquidityNative * priceMultiplier);
     }
 
     /// @notice Prefund the liquidity layer
@@ -340,7 +366,18 @@ contract FluidDexT1NativeFuzz is Test {
 
         DexAdminStructs.InitializeVariables memory initParams = _buildInitParams(setup, initAmount);
 
-        uint256 ethValue = setup.ercIsFluidToken0 ? initAmount : initAmount * 2;
+        // Calculate ETH value based on center price and token ordering
+        // If ERC20 is token0: ETH (token1) amount = centerPrice * token0Amt / 1e27
+        // If ETH is token0: ETH amount = token0Amt
+        uint256 ethValue;
+        if (setup.ercIsFluidToken0) {
+            // ERC20 is token0, ETH is token1: need (centerPrice * initAmount / 1e27) ETH
+            // Add buffer for precision and rounding
+            ethValue = (setup.centerPrice * initAmount * 2) / 1e27;
+        } else {
+            // ETH is token0: need initAmount ETH (plus buffer)
+            ethValue = initAmount * 2;
+        }
         IFluidDexT1Admin(setup.fluidPool).initialize{value: ethValue}(initParams);
         IFluidDexT1Admin(setup.fluidPool).toggleOracleActivation(true);
     }
@@ -351,24 +388,23 @@ contract FluidDexT1NativeFuzz is Test {
         pure
         returns (DexAdminStructs.InitializeVariables memory)
     {
-        uint256 centerPrice = 1e27;
         return DexAdminStructs.InitializeVariables({
             smartCol: true,
             token0ColAmt: initAmount,
             smartDebt: true,
             token0DebtAmt: initAmount,
-            centerPrice: centerPrice,
+            centerPrice: setup.centerPrice,
             fee: setup.fee,
             revenueCut: 0,
             upperPercent: setup.rangePercent,
             lowerPercent: setup.rangePercent,
-            upperShiftThreshold: 5 * 1e4,
-            lowerShiftThreshold: 5 * 1e4,
+            upperShiftThreshold: setup.upperShiftThreshold,
+            lowerShiftThreshold: setup.lowerShiftThreshold,
             thresholdShiftTime: 1 days,
             centerPriceAddress: 0,
             hookAddress: 0,
-            maxCenterPrice: (centerPrice * 110) / 100,
-            minCenterPrice: (centerPrice * 90) / 100
+            maxCenterPrice: setup.maxCenterPrice,
+            minCenterPrice: setup.minCenterPrice
         });
     }
 
@@ -474,9 +510,12 @@ contract FluidDexT1NativeFuzz is Test {
 
     /// @notice Setup alice with tokens and approvals
     function _setupAlice(PoolSetup memory setup) internal {
+        // Calculate multiplier based on max center price ratio for sufficient swap funds
+        uint256 priceMultiplier = ((MAX_CENTER_PRICE / 1e27) + 1) * 3;
+
         // Deal ETH and mint ERC20 to alice
-        vm.deal(alice, setup.liquidityNative);
-        setup.ercToken.mint(alice, setup.liquidityErc);
+        vm.deal(alice, setup.liquidityNative * priceMultiplier);
+        setup.ercToken.mint(alice, setup.liquidityErc * priceMultiplier);
 
         // Approve ERC20 for swap router (ETH doesn't need approval)
         vm.startPrank(alice);
@@ -484,8 +523,8 @@ contract FluidDexT1NativeFuzz is Test {
         vm.stopPrank();
 
         // Seed PoolManager with tokens for swap settlements
-        vm.deal(address(poolManager), setup.liquidityNative);
-        setup.ercToken.mint(address(poolManager), setup.liquidityErc);
+        vm.deal(address(poolManager), setup.liquidityNative * priceMultiplier);
+        setup.ercToken.mint(address(poolManager), setup.liquidityErc * priceMultiplier);
     }
 
     // ========== SWAP HELPERS ==========
@@ -625,10 +664,37 @@ contract FluidDexT1NativeFuzz is Test {
         return bound(uint256(keccak256(abi.encode(seed, "range"))), MIN_RANGE_PERCENT, MAX_RANGE_PERCENT);
     }
 
+    /// @notice Derive center price for the pool
+    function _deriveCenterPrice(uint256 seed) internal pure returns (uint256) {
+        return bound(uint256(keccak256(abi.encode(seed, "centerPrice"))), MIN_CENTER_PRICE, MAX_CENTER_PRICE);
+    }
+
+    /// @notice Derive min and max center price limits based on center price
+    function _deriveCenterPriceLimits(uint256 seed, uint256 centerPrice)
+        internal
+        pure
+        returns (uint256 minPrice, uint256 maxPrice)
+    {
+        uint256 deviation = bound(
+            uint256(keccak256(abi.encode(seed, "priceDeviation"))),
+            MIN_CENTER_PRICE_DEVIATION,
+            MAX_CENTER_PRICE_DEVIATION
+        );
+        // deviation is in 1e4 units (1e4 = 1%), so divide by 1e6 to get the multiplier
+        minPrice = centerPrice - (centerPrice * deviation) / 1e6;
+        maxPrice = centerPrice + (centerPrice * deviation) / 1e6;
+    }
+
+    /// @notice Derive shift threshold
+    function _deriveShiftThreshold(uint256 seed, uint256 idx) internal pure returns (uint256) {
+        return
+            bound(uint256(keccak256(abi.encode(seed, "shiftThreshold", idx))), MIN_SHIFT_THRESHOLD, MAX_SHIFT_THRESHOLD);
+    }
+
     /// @notice Derive swap amount based on pool liquidity
-    function _deriveSwapAmount(uint256 seed, uint256 liquidity) internal pure returns (uint256) {
-        uint256 minSwap = liquidity / MIN_SWAP_DIVISOR;
-        uint256 maxSwap = liquidity / MAX_SWAP_DIVISOR;
+    function _deriveSwapAmount(uint256 seed, uint256 poolLiquidity) internal pure returns (uint256) {
+        uint256 minSwap = poolLiquidity / MIN_SWAP_DIVISOR;
+        uint256 maxSwap = poolLiquidity / MAX_SWAP_DIVISOR;
         return bound(uint256(keccak256(abi.encode(seed, "amount"))), minSwap, maxSwap);
     }
 

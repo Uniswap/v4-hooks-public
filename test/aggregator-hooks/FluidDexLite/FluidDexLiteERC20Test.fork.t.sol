@@ -101,8 +101,8 @@ contract FluidDexLiteERC20ForkedTest is Test {
         token1Decimals = IERC20Metadata(token1Address).decimals();
 
         // Use token-specific amounts to handle different decimal tokens
-        swapAmount0 = 10 * (10 ** token0Decimals); // 1000 tokens in token0 decimals
-        swapAmount1 = 10 * (10 ** token1Decimals); // 1000 tokens in token1 decimals
+        swapAmount0 = 1 * (10 ** token0Decimals); // 1000 tokens in token0 decimals
+        swapAmount1 = 1 * (10 ** token1Decimals); // 1000 tokens in token1 decimals
         initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
         initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
 

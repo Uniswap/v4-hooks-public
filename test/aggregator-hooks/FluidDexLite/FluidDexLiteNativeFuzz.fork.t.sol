@@ -68,6 +68,10 @@ contract FluidDexLiteNativeFuzz is Test {
     uint256 constant MIN_RANGE_PERCENT = 100; // 0.01%
     uint256 constant MAX_RANGE_PERCENT = 10000; // 1%
 
+    // Center price bounds (1e27 = 1:1 price)
+    uint256 constant MIN_CENTER_PRICE = 1e26; // 0.1:1
+    uint256 constant MAX_CENTER_PRICE = 1e28; // 10:1
+
     // Liquidity bounds
     uint256 constant MIN_LIQUIDITY = 1_000 ether;
     uint256 constant MAX_LIQUIDITY = 10_000_000 ether;
@@ -88,6 +92,7 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 liquidityErc; // ERC20 liquidity (token1 in V4)
         uint256 fee;
         uint256 rangePercent;
+        uint256 centerPrice; // Pool center price (1e27 = 1:1)
         bytes32 salt;
         bool ercIsFluidToken0; // True if ERC20 address < FLUID_NATIVE_CURRENCY
     }
@@ -210,6 +215,7 @@ contract FluidDexLiteNativeFuzz is Test {
         setup.liquidityErc = _deriveLiquidity(seed, 1);
         setup.fee = _deriveFee(seed);
         setup.rangePercent = _deriveRangePercent(seed);
+        setup.centerPrice = _deriveCenterPrice(seed);
         setup.salt = keccak256(abi.encode(seed, "salt"));
 
         // Build dex key for Fluid (sorted: token0 < token1)
@@ -248,7 +254,7 @@ contract FluidDexLiteNativeFuzz is Test {
             revenueCut: 0,
             fee: setup.fee,
             rebalancingStatus: false,
-            centerPrice: 1e27, // 1:1 center price
+            centerPrice: setup.centerPrice,
             centerPriceContract: 0,
             upperPercent: setup.rangePercent,
             lowerPercent: setup.rangePercent,
@@ -452,6 +458,11 @@ contract FluidDexLiteNativeFuzz is Test {
     /// @notice Derive range percent for the pool
     function _deriveRangePercent(uint256 seed) internal pure returns (uint256) {
         return bound(uint256(keccak256(abi.encode(seed, "range"))), MIN_RANGE_PERCENT, MAX_RANGE_PERCENT);
+    }
+
+    /// @notice Derive center price for the pool
+    function _deriveCenterPrice(uint256 seed) internal pure returns (uint256) {
+        return bound(uint256(keccak256(abi.encode(seed, "centerPrice"))), MIN_CENTER_PRICE, MAX_CENTER_PRICE);
     }
 
     /// @notice Derive swap amount based on pool liquidity

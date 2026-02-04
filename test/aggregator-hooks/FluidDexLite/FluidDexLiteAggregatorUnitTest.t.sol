@@ -79,7 +79,7 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         mockResolver.setReturnEmptyDexState(false);
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        // Setup tokens
+        // Set up tokens
         token0.mint(alice, 1000 ether);
         token1.mint(alice, 1000 ether);
         token0.mint(address(poolManager), 1000 ether);
