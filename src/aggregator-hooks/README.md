@@ -2,6 +2,14 @@
 
 Uniswap V4 hooks that aggregate liquidity from external DEX protocols, enabling unified liquidity access through Uniswap V4's interface.
 
+## Adding support for a new protocol
+
+When adding support for a new protocol, you must follow these guidelines:
+
+- If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
+- If the protocol has a string 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
+- For testing requirements, see test/aggreagtor-hooks/README.md 
+
 ## ID System
 
 The ID system is for convenience of routing programs to know which protocols the external liquidity source belongs to. This is useful for knowing when there is interaction with the same pool more than once in a route. Any random hook address does have a 1/256 chance of a false positive, so anyone relying on the ID system should be aware of that.
