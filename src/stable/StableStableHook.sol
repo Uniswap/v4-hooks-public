@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
 import {FeeConfiguration} from "./base/FeeConfiguration.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {StableLibrary} from "./libraries/StableLibrary.sol";
 import {FeeCalculation} from "./libraries/FeeCalculation.sol";
 import {FeeConfig, FeeState} from "./interfaces/IFeeConfiguration.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -20,6 +19,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
+/// @custom:security-contact security@uniswap.org
 contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
@@ -92,125 +92,119 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeState storage feeState = feeState[poolId];
 
         (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
-        uint160 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint24 optimalFeeRate = config.optimalFeeRate;
+        uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
+        uint256 optimalFeeE6 = config.optimalFeeE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
-        uint160 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
+        uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // distanceFromOptimalRange measures how far the price is from the optimal range boundaries.
-        // The optimal range has two boundaries around the reference price:
-        //   - Lower bound: RP * (1 - optimalFeeRate)
-        //   - Upper bound: RP / (1 - optimalFeeRate)
-        //
-        // distanceFromOptimalRange is a signed distance metric:
-        //   - If <= 0: AMM price is inside the optimal range (negative distance = already crossed the boundary)
-        //   - If > 0: AMM price is outside the optimal range (positive distance = not yet reached the boundary)
-        int40 distanceFromOptimalRange =
-            FeeCalculation.calculateDistanceFromOptimalRange(priceToRPRatioX96, optimalFeeRate);
+        // The optimalFee creates a price range (the "optimal spread") around the reference price:
+        //   - Lower bound: RP * (1 - optimalFee)
+        //   - Upper bound: RP / (1 - optimalFee)
+
+        // distanceFromOptimalRangeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
+        //   - If distanceFromOptimalRangeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
+        //   - If distanceFromOptimalRangeE12 > 0: AMM price is outside the optimal range (hasn't reached the close boundary)
+        int256 distanceFromOptimalRangeE12 =
+            FeeCalculation.calculateDistanceFromOptimalRange(priceToRPRatioX96, optimalFeeE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
-        uint40 totalStableFee; // the fee to be charged to the swapper in 1e12 precision
-        uint40 decayingFee;
+        uint256 totalStableFeeE12; // the fee to be charged to the swapper in 1e12 precision
+        uint256 decayingFeeE12;
 
-        if (distanceFromOptimalRange <= 0) {
+        if (distanceFromOptimalRangeE12 <= 0) {
             // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFee = FeeCalculation.calculateInsideOptimalRateFee(
-                priceToRPRatioX96, optimalFeeRate, ammPriceToTheLeft, userSellsZeroForOne
+            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+                priceToRPRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
             );
-            decayingFee = FeeCalculation.UNDEFINED_DECAYING_FEE; // No decaying fee inside optimal range
+            decayingFeeE12 = FeeCalculation.UNDEFINED_DECAYING_FEE_E12; // No decaying fee inside optimal range
         } else {
-            // distanceFromOptimalRange represents the distance to whichever boundary is closest to the current AMM price.
-            uint40 farFee = FeeCalculation.calculateFarFee(priceToRPRatioX96, optimalFeeRate);
+            // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
+            // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
+            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceToRPRatioX96, optimalFeeE6);
 
-            decayingFee = _calculateDecayingFee(
+            // distanceFromOptimalRangeE12 is positive since we are outside the optimal range
+            decayingFeeE12 = _calculateDecayingFee(
                 config,
                 feeState,
                 sqrtAmmPriceX96,
                 sqrtReferencePriceX96,
-                distanceFromOptimalRange,
-                farFee,
+                uint256(distanceFromOptimalRangeE12),
+                farFeeE12,
                 ammPriceToTheLeft
             );
 
             // Select which fee to charge based on swap direction
-            totalStableFee = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : decayingFee;
+            totalStableFeeE12 = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : decayingFeeE12;
         }
 
         // Update historical data for next swap's calculations
-        feeState.previousFee = decayingFee;
-        feeState.previousSqrtAmmPriceX96 = sqrtAmmPriceX96;
-        feeState.blockNumber = block.number;
+        feeState.previousFeeE12 = uint40(decayingFeeE12);
+        feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
+        feeState.blockNumber = uint40(_getBlockNumberish());
 
-        // Convert to Uniswap fee format
-        uint24 uniswapFee = FeeCalculation.convertToUniswapFee(totalStableFee);
+        // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
+        uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);
 
         return
-            (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, uniswapFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+            (
+                IHooks.beforeSwap.selector,
+                BeforeSwapDeltaLibrary.ZERO_DELTA,
+                uniswapFeeE6 | LPFeeLibrary.OVERRIDE_FEE_FLAG
+            );
     }
 
     /// @notice Calculate decaying fee when price is outside optimal range
-    /// @dev Fee starts high and exponentially decays toward target over time to encourage arbitrage
     /// @param config The FeeConfig of the pool
     /// @param feeState The FeeState of the pool
     /// @param sqrtAmmPriceX96 The current AMM sqrt price
     /// @param sqrtReferencePriceX96 The reference sqrt price
-    /// @param distanceFromOptimalRange Distance from optimal range (positive = outside, negative = inside)
-    /// @param farFee The fee to reach the far boundary
+    /// @param distanceFromOptimalRangeE12 Distance from optimal range (positive = outside, negative = inside)
+    /// @param farFeeE12 The fee to reach the far boundary
     /// @param ammPriceToTheLeft True if current AMM price < reference price
-    /// @return decayingFee The calculated decaying fee
+    /// @return decayingFeeE12 The calculated decaying fee in 1e12 precision
     function _calculateDecayingFee(
         FeeConfig storage config,
         FeeState storage feeState,
-        uint160 sqrtAmmPriceX96,
-        uint160 sqrtReferencePriceX96,
-        int40 distanceFromOptimalRange,
-        uint40 farFee,
+        uint256 sqrtAmmPriceX96,
+        uint256 sqrtReferencePriceX96,
+        uint256 distanceFromOptimalRangeE12,
+        uint256 farFeeE12,
         bool ammPriceToTheLeft
-    ) private view returns (uint40 decayingFee) {
-        uint160 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
-        uint40 previousFee = feeState.previousFee;
+    ) private view returns (uint256 decayingFeeE12) {
+        uint256 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
+        uint256 previousFeeE12 = feeState.previousFeeE12;
 
         // Step 1: Determine if previous fee needs to be reset
-        // Reset if no previous fee (was inside optimal range)
         if (
-            previousFee == FeeCalculation.UNDEFINED_DECAYING_FEE
+            previousFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceToTheLeft
         ) {
             // Price just left optimal range or jumped across reference
             // Start from far boundary
-            previousFee = farFee;
+            previousFeeE12 = farFeeE12;
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference
             // Adjust previous fee to account for price movement
-            previousFee = FeeCalculation.adjustPreviousFeeForPriceMovement(
-                previousFee, sqrtAmmPriceX96, previousSqrtAmmPriceX96, ammPriceToTheLeft
-            );
-        } else if (previousFee > farFee) {
+            uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
+            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceToRPRatioX96, previousFeeE12);
+        } else if (previousFeeE12 > farFeeE12) {
             // Price jumped back toward reference but still outside spread
             // Cap at far boundary
-            previousFee = farFee;
+            previousFeeE12 = farFeeE12;
         }
 
-        // Step 2: Calculate target fee (midpoint between boundaries)
-        // Target is midpoint: when at close boundary (distance=0), target = farFee
-        uint40 targetFee = farFee - uint40(distanceFromOptimalRange) / 2; // distanceFromOptimalRange is positive since we are outside the optimal range
+        // Step 2: Calculate target fee
+        // Target fee is farFee reduced by half the closeFee.
+        // The further outside the optimal range (larger closeFee), the more the target drops below farFee.
+        uint256 targetFeeE12 = farFeeE12 - distanceFromOptimalRangeE12 / 2;
 
         // Step 3: Apply exponential decay toward target
-        if (previousFee <= targetFee) {
-            // Already at or below target (shouldn't happen in normal operation)
-            decayingFee = targetFee;
-        } else {
-            // Calculate decay factor based on blocks passed
-            // Handle edge case where block.number might be less than stored value (e.g., in tests)
-            uint256 blocksPassed = block.number >= feeState.blockNumber ? block.number - feeState.blockNumber : 0;
-            uint256 decayFactor = FeeCalculation.calculateDecayFactor(config.k, config.logK, blocksPassed);
-
-            // Apply decay: fee moves from previous toward target
-            decayingFee = FeeCalculation.calculateDecayingFee(targetFee, previousFee, decayFactor);
-        }
+        decayingFeeE12 = FeeCalculation.calculateDecayingFee(
+            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - feeState.blockNumber
+        );
     }
 }

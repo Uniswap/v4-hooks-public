@@ -4,16 +4,16 @@ pragma solidity ^0.8.0;
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 struct FeeConfig {
-    uint256 k; // Decay rate per block; controls how fast fees decrease toward target
-    uint256 logK; // Used for efficient decay calculation over many blocks
-    uint24 optimalFeeRate; // Optimal range width in 1e6 precision; inside = consistent buy/sell prices, outside = decaying fee
-    uint160 referenceSqrtPriceX96; // Reference sqrt price; optimal range centered around this
+    uint24 k; // Decay rate per block in Q24 format (2^24 = 1.0). E.g., 0.99 decays 1% per block.
+    uint24 logK; // -ln(k) >> 40; precomputed for efficient multi-block decay via exp(-logK * blocks)
+    uint24 optimalFeeE6; // Optimal fee when amm price = reference price in 1e6 precision
+    uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
 }
 
 struct FeeState {
-    uint40 previousFee; // Last decaying fee charged in 1e12 precision; used for exponential decay calculation
+    uint40 previousFeeE12; // Last decaying fee charged in 1e12 precision; used for exponential decay calculation
     uint160 previousSqrtAmmPriceX96; // AMM sqrt price at last swap; used to detect price movement direction
-    uint256 blockNumber; // Block when fee was last updated; determines decay based on blocks elapsed
+    uint40 blockNumber; // Block when fee was last updated; determines decay based on blocks elapsed
 }
 
 /// @notice Interface for the FeeConfiguration
@@ -27,13 +27,13 @@ interface IFeeConfiguration {
     /// @param logK The invalid logK value
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
-    /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeRate The invalid optimal fee rate
-    error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+    /// @notice Error thrown when optimal fee is invalid
+    /// @param optimalFeeE6 The invalid optimal fee
+    error InvalidOptimalFeeE6(uint256 optimalFeeE6);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
-    error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
+    error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 
     /// @notice Event emitted when the config manager is updated
     /// @param configManager The new config manager
