@@ -2,8 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "forge-std/console2.sol";
-
 import {FluidDexLiteAdminModule} from "lib/fluid-contracts-public/contracts/protocols/dexLite/adminModule/main.sol";
 import {DexKey} from "lib/fluid-contracts-public/contracts/protocols/dexLite/other/structs.sol";
 import {InitializeParams} from "lib/fluid-contracts-public/contracts/protocols/dexLite/adminModule/structs.sol";

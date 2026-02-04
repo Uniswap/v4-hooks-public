@@ -537,7 +537,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
     }
 
     function test_beforeInitialize_reversed_revertsTokenNotInPool_token0() public {
-        // Test reversed token order with token0 mismatch (Line 127-128)
+        // Test reversed token order with token0 mismatch
         // Need: token1 < token0 (reversed) AND token0 != key.currency1
         MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
         // Create a scenario where Fluid's tokens are reversed relative to Uniswap order
@@ -578,7 +578,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
     }
 
     function test_beforeInitialize_reversed_revertsTokenNotInPool_token1() public {
-        // Test reversed token order with token1 mismatch (Line 129-130)
+        // Test reversed token order with token1 mismatch
         // Need: token1 < token0 (reversed) AND token0 == key.currency1 AND token1 != key.currency0
         MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
         // Fluid token0 matches key.currency1, but Fluid token1 doesn't match key.currency0
@@ -618,7 +618,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
     }
 
     function test_beforeInitialize_nonReversed_revertsTokensNotInPool() public {
-        // Test non-reversed with both tokens mismatched (Line 134-135)
+        // Test non-reversed with both tokens mismatched
         // Need: token1 >= token0 (non-reversed) AND both tokens don't match
         MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
         // Both tokens are wrong, but in correct order (token0 < token1)
@@ -912,7 +912,6 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     function test_dexCallback_convertsNativeCurrencyAddress() public {
         // Test that dexCallback correctly converts FLUID_NATIVE_CURRENCY to address(0)
-        // This exercises the if (token == FLUID_NATIVE_CURRENCY) branch at line 67-68
         //
         // We use an ERC20-ERC20 pool but configure the mock to pass FLUID_NATIVE_CURRENCY in callback.
         // The callback will try to take native currency from the pool manager.
@@ -934,6 +933,5 @@ contract FluidDexT1AggregatorUnitTest is Test {
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
-        // The branch at line 67-68 is exercised even though the swap reverts later
     }
 }

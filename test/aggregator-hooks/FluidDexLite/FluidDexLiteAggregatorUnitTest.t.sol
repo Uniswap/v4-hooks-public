@@ -314,11 +314,10 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         assertTrue(computed != address(0));
     }
 
-    // ========== NATIVE CURRENCY CALLBACK TEST (Line 63) ==========
+    // ========== NATIVE CURRENCY CALLBACK TEST ==========
 
     function test_dexCallback_convertsNativeCurrencyAddress() public {
         // Test that dexCallback correctly converts FLUID_NATIVE_CURRENCY (0xEeee...) to address(0)
-        // This exercises line 62-64 in FluidDexLiteAggregator.sol
         //
         // We configure the mock to pass FLUID_NATIVE_CURRENCY in the callback.
         // The callback will convert it to address(0) and try to take native currency.
@@ -338,6 +337,5 @@ contract FluidDexLiteAggregatorUnitTest is Test {
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
-        // Line 63 (token = address(0)) is exercised even though the swap reverts later
     }
 }
