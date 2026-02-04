@@ -52,7 +52,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _feeConfig The fee config to set
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
-        _validateOptimalFeeRateE6(_feeConfig.optimalFeeRateE6);
+        _validateOptimalFeeE6(_feeConfig.optimalFeeE6);
         _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
@@ -62,7 +62,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _k The k value to validate
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
-        if (_k == 0 || _k >= Q24) {
+        if (_k == 0 || _logK == 0) {
             revert InvalidKAndLogK(_k, _logK);
         }
         // Convert k from Q24 to wad format (1e18 scale)
@@ -75,20 +75,20 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
         // expectedLogK = -lnK / 2^40
         uint256 expectedLogK = uint256(-lnK) >> 40;
 
-        if (_logK > expectedLogK || expectedLogK > _logK) revert InvalidKAndLogK(_k, _logK);
+        if (_logK != expectedLogK) revert InvalidKAndLogK(_k, _logK);
     }
 
     /// @notice Validate the optimal fee rate
-    /// @param _optimalFeeRateE6 The optimal fee rate to validate
-    function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure {
-        if (_optimalFeeRateE6 > FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6) {
-            revert InvalidOptimalFeeRateE6(_optimalFeeRateE6);
+    /// @param _optimalFeeE6 The optimal fee rate to validate
+    function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure {
+        if (_optimalFeeE6 > FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6) {
+            revert InvalidOptimalFeeE6(_optimalFeeE6);
         }
     }
 
     /// @notice Validate the reference sqrt price
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
-    function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure {
+    function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure {
         if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
             revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
         }

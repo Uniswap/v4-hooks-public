@@ -44,82 +44,74 @@ library FeeCalculation {
     /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
     ///         The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
-    /// @param optimalFeeRateE6 Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
+    /// @param optimalFeeE6 Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
     /// @return closeFeeE12 Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal rate. If > 0, price is outside.
-    function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeRateE6)
-        internal
-        pure
-        returns (int256 closeFeeE12)
-    {
+    function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (int256 closeFeeE12) {
         // Case 1: ammPrice < RP (price to the left)
         //   - priceRatio = ammPrice / RP ≤ 1
-        //   - Close boundary = RP * (1 - optimalFeeRate) [lower bound]
-        //   - Target equation: ammPrice / (1 - closeFee) = RP * (1 - optimalFeeRate)
+        //   - Close boundary = RP * (1 - optimalFee) [lower bound]
+        //   - Target equation: ammPrice / (1 - closeFee) = RP * (1 - optimalFee)
 
         // Case 2: ammPrice > RP (price to the right)
         //   - priceRatio = RP / ammPrice ≤ 1
-        //   - Close boundary = RP / (1 - optimalFeeRate) [upper bound]
-        //   - Target equation: ammPrice * (1 - closeFee) = RP / (1 - optimalFeeRate)
+        //   - Close boundary = RP / (1 - optimalFee) [upper bound]
+        //   - Target equation: ammPrice * (1 - closeFee) = RP / (1 - optimalFee)
 
         // Both cases use the same formula:
-        //   closeFee = 1 - priceRatio / (1 - optimalFeeRate)
-        closeFeeE12 = int256(ONE_E12)
-            - int256((ONE_E12 * priceRatioX96 * ONE_E6) / (ONE_E6 - optimalFeeRateE6) / FixedPoint96.Q96);
+        //   closeFee = 1 - priceRatio / (1 - optimalFee)
+        closeFeeE12 =
+            int256(ONE_E12) - int256((ONE_E12 * priceRatioX96 * ONE_E6) / (ONE_E6 - optimalFeeE6) / FixedPoint96.Q96);
     }
 
     /// @notice Calculate fee when price is inside optimal rate
     /// @param priceRatioX96 Price ratio in Q96 format
-    /// @param optimalFeeRateE6 Optimal fee rate in parts per million
+    /// @param optimalFeeE6 Optimal fee rate in parts per million
     /// @param ammPriceToTheLeft True if AMM price < reference price
     /// @param userSellsZeroForOne True if user is selling token0 for token1
     /// @return feeE12 Calculated fee in 1e12 precision
     function calculateInsideOptimalRateFee(
         uint256 priceRatioX96,
-        uint256 optimalFeeRateE6,
+        uint256 optimalFeeE6,
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) internal pure returns (uint256 feeE12) {
         // Note: This calculation assumes the price is inside the optimal rate.
-        // (i.e., priceRatioX96 >= Q96 * (ONE_E6 - optimalFeeRateE6) / ONE_E6
+        // (i.e., priceRatioX96 >= Q96 * (ONE_E6 - optimalFee) / ONE_E6
 
-        // if userSellsZeroForOne => sellPrice = (1 - optimalFeeRate) * RP [lower bound]
-        // ammPrice * (1 - fee) = (1 - optimalFeeRate) * RP
-        // fee = 1 - (1 - optimalFeeRate) * RP / ammPrice
+        // if userSellsZeroForOne => sellPrice = (1 - optimalFee) * RP [lower bound]
+        // ammPrice * (1 - fee) = (1 - optimalFee) * RP
+        // fee = 1 - (1 - optimalFee) * RP / ammPrice
 
-        // if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFeeRate) [upper bound]
-        // ammPrice / (1 - fee) = RP / (1 - optimalFeeRate)
-        // fee = 1 - (1 - optimalFeeRate) * ammPrice / RP
+        // if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFee) [upper bound]
+        // ammPrice / (1 - fee) = RP / (1 - optimalFee)
+        // fee = 1 - (1 - optimalFee) * ammPrice / RP
 
         if (ammPriceToTheLeft == userSellsZeroForOne) {
-            feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeRateE6) * FixedPoint96.Q96) / priceRatioX96 / ONE_E6;
+            feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * FixedPoint96.Q96) / priceRatioX96 / ONE_E6;
         } else {
-            feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeRateE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;
+            feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;
         }
     }
 
     /// @notice Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
     ///         The far boundary is whichever edge of the optimal rate is farthest from the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
-    /// @param optimalFeeRateE6 Optimal fee rate in parts per million
+    /// @param optimalFeeE6 Optimal fee rate in parts per million
     /// @return farFeeE12 Fee to get to the "far" boundary in 1e12 precision
-    function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeRateE6)
-        internal
-        pure
-        returns (uint256 farFeeE12)
-    {
+    function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farFeeE12) {
         // Case 1: ammPrice < RP
         //   - priceRatio = ammPrice / RP ≤ 1
-        //   - Far boundary = RP / (1 - optimalFeeRate) [upper bound]
-        //   - Target equation: ammPrice / (1 - farFee) = RP / (1 - optimalFeeRate)
+        //   - Far boundary = RP / (1 - optimalFee) [upper bound]
+        //   - Target equation: ammPrice / (1 - farFee) = RP / (1 - optimalFee)
 
         /// Case 2: ammPrice > RP
         //   - priceRatio = RP / ammPrice ≤ 1
-        //   - Far boundary = RP * (1 - optimalFeeRate) [lower bound]
-        //   - Target equation: ammPrice * (1 - farFee) = RP * (1 - optimalFeeRate)
+        //   - Far boundary = RP * (1 - optimalFee) [lower bound]
+        //   - Target equation: ammPrice * (1 - farFee) = RP * (1 - optimalFee)
 
         // Both cases use the same formula:
-        //   farFee = 1 - (1 - optimalFeeRate) * priceRatio
-        farFeeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeRateE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;
+        //   farFee = 1 - (1 - optimalFee) * priceRatio
+        farFeeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;
     }
 
     /// @notice Adjust previous fee for price movement

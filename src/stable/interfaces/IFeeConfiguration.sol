@@ -4,10 +4,10 @@ pragma solidity ^0.8.0;
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 struct FeeConfig {
-    uint256 k; // Decay rate per block; controls how fast fees decrease toward target. Stored in Q24 format.
-    uint256 logK; // Used for efficient decay calculation over many blocks
-    uint24 optimalFeeRateE6; // Optimal rate width in 1e6 precision; inside = consistent buy/sell prices, outside = flexible
-    uint160 referenceSqrtPriceX96; // Reference sqrt price; optimal rate centered around this
+    uint24 k; // Decay rate per block in Q24 format (2^24 = 1.0). E.g., 0.99 decays 1% per block.
+    uint24 logK; // -ln(k) >> 40; precomputed for efficient multi-block decay via exp(-logK * blocks)
+    uint24 optimalFeeE6; // Optimal fee when amm price = reference price in 1e6 precision
+    uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
 }
 
 struct FeeState {
@@ -28,12 +28,12 @@ interface IFeeConfiguration {
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
     /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeRateE6 The invalid optimal fee rate
-    error InvalidOptimalFeeRateE6(uint24 optimalFeeRateE6);
+    /// @param optimalFeeE6 The invalid optimal fee rate
+    error InvalidOptimalFeeE6(uint256 optimalFeeE6);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
-    error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
+    error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 
     /// @notice Event emitted when the config manager is updated
     /// @param configManager The new config manager

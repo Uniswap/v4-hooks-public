@@ -92,19 +92,19 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
         uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint256 optimalFeeRateE6 = config.optimalFeeRateE6;
+        uint256 optimalFeeE6 = config.optimalFeeE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // The optimal rate has two boundaries around the reference price:
-        //   - Lower bound: RP * (1 - optimalFeeRate)
-        //   - Upper bound: RP / (1 - optimalFeeRate)
+        // The optimalFee creates a price range (the "optimal spread") around the reference price:
+        //   - Lower bound: RP * (1 - optimalFee)
+        //   - Upper bound: RP / (1 - optimalFee)
 
         // closeFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
         //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRateE6);
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
@@ -112,16 +112,17 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 flexibleFeeE12;
 
         if (closeFeeE12 <= 0) {
-            // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
+            // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
             totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
-                priceRatioX96, optimalFeeRateE6, ammPriceToTheLeft, userSellsZeroForOne
+                priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
             );
             flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
         } else {
+            // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
             // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
-            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeRateE6);
+            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
 
             flexibleFeeE12 = _calculateFlexibleFee(
                 config, feeState, sqrtAmmPriceX96, sqrtReferencePriceX96, closeFeeE12, farFeeE12, ammPriceToTheLeft

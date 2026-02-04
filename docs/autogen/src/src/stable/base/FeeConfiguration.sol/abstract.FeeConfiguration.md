@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/831a6061131ddc01156ddc813ee65ad417011f7f/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/212d67197db95402e0c7050941534ae8c084bb31/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -131,19 +131,19 @@ function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 |`_logK`|`uint256`|The logK value to validate|
 
 
-### _validateOptimalFeeRateE6
+### _validateOptimalFeeE6
 
 Validate the optimal fee rate
 
 
 ```solidity
-function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure;
+function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_optimalFeeRateE6`|`uint24`|The optimal fee rate to validate|
+|`_optimalFeeE6`|`uint256`|The optimal fee rate to validate|
 
 
 ### _validateReferenceSqrtPriceX96
@@ -152,13 +152,13 @@ Validate the reference sqrt price
 
 
 ```solidity
-function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure;
+function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
+|`_referenceSqrtPriceX96`|`uint256`|The reference sqrt price to validate|
 
 
 ### _resetFeeState

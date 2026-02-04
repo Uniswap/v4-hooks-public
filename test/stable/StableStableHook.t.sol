@@ -23,9 +23,9 @@ contract StableStableHookTest is Test, Deployers {
 
     event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
 
-    uint256 public constant LOG_K = 9140;
-    uint256 public constant K = 16_609_443;
-    uint24 public constant OPTIMAL_FEE_RATE_E6 = 90; // 0.9 bps
+    uint24 public constant LOG_K = 9140;
+    uint24 public constant K = 16_609_443;
+    uint24 public constant OPTIMAL_FEE_E6 = 90; // 0.9 bps
     uint160 public constant REFERENCE_SQRT_PRICE_X96 = Constants.SQRT_RATIO_1_1;
     int24 constant TICK_SPACING = 60;
 
@@ -37,7 +37,7 @@ contract StableStableHookTest is Test, Deployers {
     FeeConfig public feeConfig = FeeConfig({
         k: K,
         logK: LOG_K,
-        optimalFeeRateE6: OPTIMAL_FEE_RATE_E6, // 0.9 bps
+        optimalFeeE6: OPTIMAL_FEE_E6, // 0.9 bps
         referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
     });
 
@@ -141,11 +141,11 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(slot0SqrtPriceX96, Constants.SQRT_RATIO_1_1);
         assertEq(slot0ProtocolFee, 0);
         assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_RATIO_1_1));
-        (uint256 k, uint256 logK, uint24 optimalFeeRateE6, uint160 referenceSqrtPriceX96) =
+        (uint256 k, uint256 logK, uint24 optimalFeeE6, uint160 referenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
-        assertEq(optimalFeeRateE6, OPTIMAL_FEE_RATE_E6);
+        assertEq(optimalFeeE6, OPTIMAL_FEE_E6);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
         (uint256 previousFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             hook.feeState(testPoolKey.toId());

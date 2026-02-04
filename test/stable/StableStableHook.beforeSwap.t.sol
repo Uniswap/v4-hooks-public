@@ -29,9 +29,9 @@ contract StableStableHookTest is Test, Deployers {
 
     event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
 
-    uint256 public constant LOG_K = 9140;
-    uint256 public constant K = 16_609_443;
-    uint24 public constant OPTIMAL_FEE_RATE_E6 = 90; // 0.9 bps
+    uint24 public constant LOG_K = 9140;
+    uint24 public constant K = 16_609_443;
+    uint24 public constant OPTIMAL_FEE_E6 = 90; // 0.9 bps
     uint160 public constant REFERENCE_SQRT_PRICE_X96 = Constants.SQRT_RATIO_1_1;
     int24 constant TICK_SPACING = 60;
     uint160 internal sqrtAmmPriceX96 = Constants.SQRT_RATIO_1_1;
@@ -44,7 +44,7 @@ contract StableStableHookTest is Test, Deployers {
     FeeConfig public feeConfig = FeeConfig({
         k: K,
         logK: LOG_K,
-        optimalFeeRateE6: OPTIMAL_FEE_RATE_E6, // 0.9 bps
+        optimalFeeE6: OPTIMAL_FEE_E6, // 0.9 bps
         referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
     });
 
@@ -87,17 +87,17 @@ contract StableStableHookTest is Test, Deployers {
         internal
         returns (uint24)
     {
-        (uint256 beforeK, uint256 beforeLogK, uint24 beforeOptimalFeeRate, uint160 beforeReferenceSqrtPriceX96) =
+        (uint256 beforeK, uint256 beforeLogK, uint24 beforeOptimalFeeE6, uint160 beforeReferenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
         SwapParams memory swapParams = SwapParams(zeroForOne, amountSpecified, sqrtPriceLimitX96);
         (bytes4 selector, BeforeSwapDelta delta, uint24 fee) =
             hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
-        (uint256 afterK, uint256 afterLogK, uint24 afterOptimalFeeRate, uint160 afterReferenceSqrtPriceX96) =
+        (uint256 afterK, uint256 afterLogK, uint24 afterOptimalFeeE6, uint160 afterReferenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
 
         assertEq(beforeK, afterK);
         assertEq(beforeLogK, afterLogK);
-        assertEq(beforeOptimalFeeRate, afterOptimalFeeRate);
+        assertEq(beforeOptimalFeeE6, afterOptimalFeeE6);
         assertEq(beforeReferenceSqrtPriceX96, afterReferenceSqrtPriceX96);
 
         assertEq(selector, IHooks.beforeSwap.selector);
@@ -121,43 +121,42 @@ contract StableStableHookTest is Test, Deployers {
 
         // Sell token0 at reference price - should charge optimal fee
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertEq(fee, OPTIMAL_FEE_RATE_E6);
+        assertEq(fee, OPTIMAL_FEE_E6);
 
         // Buy token0 at reference price - should charge optimal fee
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertEq(fee, OPTIMAL_FEE_RATE_E6);
+        assertEq(fee, OPTIMAL_FEE_E6);
     }
 
     function test_beforeSwap_insideOptimalRange_lowerBoundary() public {
-        // Lower boundary = RP * (1 - optimalFeeRateE6) = RP * 0.999910
+        // Lower boundary = RP * (1 - optimalFeeE6) = RP * 0.999910
         // Compute boundary in price-space (Q192), then convert back to sqrtPriceX96 (Q96) via sqrt.
         uint256 ammPriceX192 =
-            (uint256(REFERENCE_SQRT_PRICE_X96)
-                    * uint256(REFERENCE_SQRT_PRICE_X96)
-                    * (1_000_000 - (OPTIMAL_FEE_RATE_E6 - 1))) / 1_000_000; // slightly inside the lower boundary
+            (uint256(REFERENCE_SQRT_PRICE_X96) * uint256(REFERENCE_SQRT_PRICE_X96) * (1_000_000 - (OPTIMAL_FEE_E6 - 1)))
+                / 1_000_000; // slightly inside the lower boundary
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
 
         // Sell token0 (pushing price down, away from boundary) - should have minimal fee
         uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertLt(sellFee, OPTIMAL_FEE_RATE_E6);
+        assertLt(sellFee, OPTIMAL_FEE_E6);
 
         // Buy token0 (pushing price up, toward reference) - should charge higher fee to reach buy price
         uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertGt(buyFee, OPTIMAL_FEE_RATE_E6);
+        assertGt(buyFee, OPTIMAL_FEE_E6);
     }
 
     function test_beforeSwap_insideOptimalRange_upperBoundary() public {
-        // Upper boundary = RP / (1 - optimalFeeRateE6) = RP / 0.999910 ≈ RP * 1.000090009
+        // Upper boundary = RP / (1 - optimalFeeE6) = RP / 0.999910 ≈ RP * 1.000090009
         uint256 ammPriceX192 = (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 1_000_090) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
 
         // Buy token0 (pushing price up, away from boundary) - should have minimal fee
         uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertLt(buyFee, OPTIMAL_FEE_RATE_E6);
+        assertLt(buyFee, OPTIMAL_FEE_E6);
 
         // Sell token0 (pushing price down, toward reference) - should charge higher fee to reach sell price
         uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertGt(sellFee, OPTIMAL_FEE_RATE_E6);
+        assertGt(sellFee, OPTIMAL_FEE_E6);
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_leftOfReference(uint24 priceBps) public {
@@ -171,8 +170,8 @@ contract StableStableHookTest is Test, Deployers {
         uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
         uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
 
-        assertLe(sellFee, OPTIMAL_FEE_RATE_E6);
-        assertGe(buyFee, OPTIMAL_FEE_RATE_E6);
+        assertLe(sellFee, OPTIMAL_FEE_E6);
+        assertGe(buyFee, OPTIMAL_FEE_E6);
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_rightOfReference(uint24 priceBps) public {
@@ -186,8 +185,8 @@ contract StableStableHookTest is Test, Deployers {
         uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
         uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
 
-        assertLe(buyFee, OPTIMAL_FEE_RATE_E6);
-        assertGe(sellFee, OPTIMAL_FEE_RATE_E6);
+        assertLe(buyFee, OPTIMAL_FEE_E6);
+        assertGe(sellFee, OPTIMAL_FEE_E6);
     }
 
     function test_fuzz_beforeSwap_insideOptimalRange_consistentEffectivePrices(uint24 priceBps) public {

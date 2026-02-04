@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/7dcd775c7e3ae809200c0a0161e8e569c246c698/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/212d67197db95402e0c7050941534ae8c084bb31/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -96,31 +96,31 @@ error InvalidKAndLogK(uint256 k, uint256 logK);
 |`k`|`uint256`|The invalid k value|
 |`logK`|`uint256`|The invalid logK value|
 
-### InvalidOptimalFeeRateE6
+### InvalidOptimalFeeE6
 Error thrown when optimal fee rate is invalid
 
 
 ```solidity
-error InvalidOptimalFeeRateE6(uint24 optimalFeeRateE6);
+error InvalidOptimalFeeE6(uint256 optimalFeeE6);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`optimalFeeRateE6`|`uint24`|The invalid optimal fee rate|
+|`optimalFeeE6`|`uint256`|The invalid optimal fee rate|
 
 ### InvalidReferenceSqrtPriceX96
 Error thrown when reference sqrt price is invalid
 
 
 ```solidity
-error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
+error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 ```
 
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`invalidSqrtPrice`|`uint160`|The invalid reference sqrt price|
+|`invalidSqrtPrice`|`uint256`|The invalid reference sqrt price|
 

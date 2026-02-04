@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/7c6c94a9d529537069df88d535101c9c9b3d1269/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/212d67197db95402e0c7050941534ae8c084bb31/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -90,17 +90,14 @@ The close boundary is whichever edge of the optimal rate is nearest to the curre
 
 
 ```solidity
-function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeRateE6)
-    internal
-    pure
-    returns (int256 closeFeeE12);
+function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (int256 closeFeeE12);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
-|`optimalFeeRateE6`|`uint256`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
+|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
 
@@ -117,7 +114,7 @@ Calculate fee when price is inside optimal rate
 ```solidity
 function calculateInsideOptimalRateFee(
     uint256 priceRatioX96,
-    uint256 optimalFeeRateE6,
+    uint256 optimalFeeE6,
     bool ammPriceToTheLeft,
     bool userSellsZeroForOne
 ) internal pure returns (uint256 feeE12);
@@ -127,7 +124,7 @@ function calculateInsideOptimalRateFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format|
-|`optimalFeeRateE6`|`uint256`|Optimal fee rate in parts per million|
+|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
 |`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
 
@@ -145,17 +142,14 @@ The far boundary is whichever edge of the optimal rate is farthest from the curr
 
 
 ```solidity
-function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeRateE6)
-    internal
-    pure
-    returns (uint256 farFeeE12);
+function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farFeeE12);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
-|`optimalFeeRateE6`|`uint256`|Optimal fee rate in parts per million|
+|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
 
 **Returns**
 
