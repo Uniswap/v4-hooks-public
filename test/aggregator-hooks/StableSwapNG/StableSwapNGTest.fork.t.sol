@@ -115,11 +115,9 @@ contract StableSwapNGForkedTest is Test {
     }
 
     function _deployHookViaFactory() internal {
-        // Hook flags required by ExternalLiqSourceHook
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        // Mine salt for valid hook address (deployed from factory)
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(factory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);

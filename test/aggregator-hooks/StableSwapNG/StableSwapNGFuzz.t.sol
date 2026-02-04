@@ -238,11 +238,10 @@ contract StableSwapNGFuzz is Test {
         internal
         returns (StableSwapNGAggregator hook, PoolKey memory poolKey)
     {
-        // Hook flags required by ExternalLiqSourceHook
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+        );
 
-        // Mine salt for valid hook address
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
@@ -272,11 +271,10 @@ contract StableSwapNGFuzz is Test {
         internal
         returns (StableSwapNGAggregator hook)
     {
-        // Hook flags required by ExternalLiqSourceHook
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+        );
 
-        // Mine salt for valid hook address
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
@@ -552,7 +550,7 @@ contract StableSwapNGFuzz is Test {
         }
     }
 
-    // ========== SEED-BASED DERIVATION HELPERS ==========
+    // ========== SEED-BASED DERIVATION HELPER ==========
 
     /// @notice Derive initial balances for each token from seed
     /// @dev Minimum balance must be >= 20_000 ether so that minPairBalance / 20 >= 1000 ether (swap min)

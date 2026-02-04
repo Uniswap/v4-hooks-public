@@ -124,16 +124,13 @@ contract StableSwapForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by ExternalLiqSourceHook
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        // Mine salt for hook address
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
-        // Deploy hook
         hook = new StableSwapAggregator{salt: salt}(manager, curvePool);
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
