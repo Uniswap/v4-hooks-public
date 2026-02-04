@@ -68,7 +68,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
         // Convert k from Q24 to wad format (1e18 scale)
         uint256 kWad = (_k * 1e18) >> 24;
 
-        // lnWad computes ln(x) * 1e18
+        // lnWad computes ln(k) * 1e18
         // Since k < 1, ln(k) is negative
         int256 lnK = FixedPointMathLib.lnWad(int256(kWad));
 

@@ -21,7 +21,7 @@ contract FeeCalculationTest is Test {
         assertEq(priceRatioX96, expected);
 
         // Ratio should be less than or equal to 2^96 (1)
-        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
+        assertLe(priceRatioX96, FixedPoint96.Q96);
     }
 
     function test_calculatePriceRatioX96_right_succeeds() public pure {
@@ -33,7 +33,7 @@ contract FeeCalculationTest is Test {
         assertEq(priceRatioX96, expected);
 
         // Ratio should be less than or equal to 2^96 (1)
-        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
+        assertLe(priceRatioX96, FixedPoint96.Q96);
     }
 
     function test_fuzz_calculatePriceRatioX96(uint160 sqrtAmmPriceX96, uint160 sqrtReferencePriceX96) public pure {
@@ -42,26 +42,30 @@ contract FeeCalculationTest is Test {
 
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        assertTrue(priceRatioX96 <= FixedPoint96.Q96);
+        assertLe(priceRatioX96, FixedPoint96.Q96);
     }
 
-    function test_calculateCloseFee_succeeds_inside_optimal_rate() public pure {
+    function test_calculateCloseFee_succeeds_inside_optimal_range() public pure {
         uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
         int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertTrue(closeFeeE12 < 0); // close fee should be negative since the price is inside the optimal range
-    }
-
-    function test_calculateCloseFee_succeeds_outside_optimal_rate() public pure {
-        // at the boundary of the optimal range
-        /// 1000000 - OPTIMAL_FEE_E6 = 999910
-        uint160 priceRatioX96 = (uint160(REFERENCE_SQRT_PRICE_X96) * (1000000 - OPTIMAL_FEE_E6)) / 1000000; // the lower boundary of the optimal range
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertTrue(closeFeeE12 > 0);
+        assertLt(closeFeeE12, 0); // close fee should be negative since the price is inside the optimal range
 
         // just inside the boundary of the optimal range (89)
-        priceRatioX96 = (uint160(REFERENCE_SQRT_PRICE_X96) * (1000000 - (OPTIMAL_FEE_E6 - 1))) / 1000000;
+        priceRatioX96 = uint160(
+            (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - (OPTIMAL_FEE_E6 - 1))) / FeeCalculation.ONE_E6
+        );
         closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertTrue(closeFeeE12 < 0);
+        assertLt(closeFeeE12, 0);
+    }
+
+    function test_calculateCloseFee_succeeds_outside_optimal_range() public pure {
+        // at the boundary of the optimal range
+        /// 1000000 - OPTIMAL_FEE_E6 = 999910
+        uint160 priceRatioX96 = uint160(
+            (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - OPTIMAL_FEE_E6)) / FeeCalculation.ONE_E6
+        ); // the lower boundary of the optimal range
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertGt(closeFeeE12, 0);
     }
 
     function test_fuzz_calculateCloseFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
@@ -70,7 +74,7 @@ contract FeeCalculationTest is Test {
         FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6); // should not revert
     }
 
-    function test_fuzz_calculateInsideOptimalRateFee_succeeds(
+    function test_fuzz_calculateInsideOptimalRangeFee_succeeds(
         uint256 priceRatioX96,
         uint24 optimalFeeE6,
         bool ammPriceToTheLeft,
@@ -93,17 +97,19 @@ contract FeeCalculationTest is Test {
     }
 
     function test_calculateFarFee_succeeds_left_of_reference() public pure {
-        uint160 priceRatioX96 = uint160(uint256(REFERENCE_SQRT_PRICE_X96) * (1000000 - (OPTIMAL_FEE_E6 + 1))) / 1000000; // lower than the lower boundary
+        uint160 priceRatioX96 = uint160(
+            (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - (OPTIMAL_FEE_E6 + 1))) / FeeCalculation.ONE_E6
+        ); // lower than the lower boundary
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertGt(farFeeE12, OPTIMAL_FEE_E6 * 2);
+        assertGt(farFeeE12, OPTIMAL_FEE_E6 * 2); // greater than 2 times the optimal fee
     }
 
     function test_fuzz_calculateFarFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
-        assertGe(farFeeE12, optimalFeeE6 * 2);
-        assertLe(farFeeE12, FeeCalculation.ONE_E12);
+        assertGe(farFeeE12, optimalFeeE6 * 2); // >= 2 times the optimal fee
+        assertLe(farFeeE12, FeeCalculation.ONE_E12); // <= 100%
     }
 
     function test_fastPow_succeeds() public pure {
