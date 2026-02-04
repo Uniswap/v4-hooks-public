@@ -8,6 +8,7 @@ When adding support for a new protocol, you must follow these guidelines:
 
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
 - If the protocol has a string 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
+- Update the MineAggregatorHook script to handle mining hooks for new protocol
 - For testing requirements, see test/aggreagtor-hooks/README.md 
 
 ## ID System
