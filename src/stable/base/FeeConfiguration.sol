@@ -90,9 +90,25 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     }
 
     /// @notice Validate the reference sqrt price
+    /// @dev The reference price is bounded such that the optimal range (referencePrice * (1 - maxOptimalFee)
+    ///      to referencePrice / (1 - maxOptimalFee)) stays within valid v4 price bounds.
+    ///      Note: MIN_SQRT_PRICE is valid (inclusive) but MAX_SQRT_PRICE is invalid (exclusive) in v4.
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
     function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure {
-        if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
+        // Calculate bounds that ensure optimal range stays within v4 price limits
+        // minBound: referencePrice * (1 - maxOptimalFee) >= MIN_SQRT_PRICE
+        //           => referencePrice >= MIN_SQRT_PRICE / (1 - maxOptimalFee)
+        // maxBound: referencePrice / (1 - maxOptimalFee) < MAX_SQRT_PRICE  (strictly less than!)
+        //           => referencePrice < MAX_SQRT_PRICE * (1 - maxOptimalFee)
+        uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - MAX_OPTIMAL_FEE_E6;
+        uint256 minBoundedReferenceSqrtPrice =
+            (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + oneMinusMaxFee - 1) / oneMinusMaxFee;
+        uint256 maxBoundedReferenceSqrtPrice = uint256(TickMath.MAX_SQRT_PRICE) * oneMinusMaxFee / FeeCalculation.ONE_E6;
+
+        if (
+            _referenceSqrtPriceX96 < minBoundedReferenceSqrtPrice
+                || _referenceSqrtPriceX96 >= maxBoundedReferenceSqrtPrice
+        ) {
             revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
         }
     }
