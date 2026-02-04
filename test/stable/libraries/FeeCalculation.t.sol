@@ -9,6 +9,7 @@ import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 
 contract FeeCalculationTest is Test {
     uint24 constant OPTIMAL_FEE_E6 = 90; // 0.009%
+    uint256 constant MAX_OPTIMAL_FEE_E6 = 1e4;
     uint160 constant REFERENCE_SQRT_PRICE_X96 = uint160(FixedPoint96.Q96); // 1:1 price
     uint256 constant Q48 = 2 ** 48;
 
@@ -105,11 +106,19 @@ contract FeeCalculationTest is Test {
     }
 
     function test_fuzz_calculateFarFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
-        priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
-        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
+        priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96);
+        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, MAX_OPTIMAL_FEE_E6));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
+        assertGt(farFeeE12, 0);
         assertGe(farFeeE12, optimalFeeE6 * 2); // >= 2 times the optimal fee
         assertLe(farFeeE12, FeeCalculation.ONE_E12); // <= 100%
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6);
+        if (closeFeeE12 > 0) {
+            assertGe(farFeeE12, uint256(closeFeeE12));
+            uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2;
+            assertLe(targetFeeE12, farFeeE12);
+            assertGt(targetFeeE12, 0);
+        }
     }
 
     function test_fastPow_succeeds() public pure {

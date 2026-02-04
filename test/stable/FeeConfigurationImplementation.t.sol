@@ -70,10 +70,10 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithInvalidOptimalFeeE6() public {
         FeeConfig memory newConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 1e6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 1e4 + 1, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
         vm.prank(poolFeeController);
-        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidOptimalFeeE6.selector, 1e6));
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidOptimalFeeE6.selector, 1e4 + 1));
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 

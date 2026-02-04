@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -11,6 +11,15 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### MAX_OPTIMAL_FEE_E6
+The maximum optimal fee in 1e6 precision: 1%
+
+
+```solidity
+uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4
+```
+
+
 ### Q24
 The scale used to preserve precision in decay factor math.
 

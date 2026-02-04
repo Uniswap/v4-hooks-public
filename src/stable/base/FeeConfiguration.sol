@@ -11,6 +11,8 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
 abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
+    /// @notice The maximum optimal fee in 1e6 precision: 1%
+    uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4;
     /// @notice The scale used to preserve precision in decay factor math.
     uint256 internal constant Q24 = 2 ** 24; // 16,777,216
 
@@ -62,6 +64,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _k The k value to validate
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
+        // k == 0 instant decay, logk == 0 no decay
         if (_k == 0 || _logK == 0) {
             revert InvalidKAndLogK(_k, _logK);
         }
@@ -81,7 +84,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @notice Validate the optimal fee
     /// @param _optimalFeeE6 The optimal fee to validate
     function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure {
-        if (_optimalFeeE6 > FeeCalculation.ONE_E6 - 1) {
+        if (_optimalFeeE6 > MAX_OPTIMAL_FEE_E6) {
             revert InvalidOptimalFeeE6(_optimalFeeE6);
         }
     }

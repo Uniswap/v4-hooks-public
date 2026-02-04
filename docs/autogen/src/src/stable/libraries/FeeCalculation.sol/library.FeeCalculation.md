@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -85,7 +85,7 @@ function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
@@ -137,7 +137,7 @@ function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal p
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
 
 **Returns**
@@ -164,7 +164,7 @@ function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previo
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
 |`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
 
 **Returns**
@@ -195,10 +195,10 @@ function calculateFlexibleFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`targetFeeE12`|`uint256`|Target fee to decay toward in 1e12 precision|
-|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
-|`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)|
+|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision, previousFee > targetFee|
+|`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24|
 |`logK`|`uint256`|Natural log of k scaled appropriately|
-|`blocksPassed`|`uint256`|Number of blocks since last fee update|
+|`blocksPassed`|`uint256`|Number of blocks since last fee update, <= type(uint40).max|
 
 **Returns**
 

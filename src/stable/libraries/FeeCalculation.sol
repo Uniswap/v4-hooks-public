@@ -39,7 +39,7 @@ library FeeCalculation {
 
     /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
     ///         The close boundary is whichever edge of the optimal range is nearest to the current AMM price.
-    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @param optimalFeeE6 Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
     /// @return closeFeeE12 Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal range. If > 0, price is outside.
     function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (int256 closeFeeE12) {
@@ -91,7 +91,7 @@ library FeeCalculation {
 
     /// @notice Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
     ///         The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
-    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @param optimalFeeE6 Optimal fee in parts per million
     /// @return farFeeE12 Fee to get to the "far" boundary in 1e12 precision
     function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farFeeE12) {
@@ -113,7 +113,7 @@ library FeeCalculation {
     /// @notice Adjust previous fee for price movement
     /// @dev When price moves further from reference, adjust the previous fee to account for the movement
     /// @param previousFeeE12 Previous flexible fee in 1e12 precision
-    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
+    /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @return adjustedFeeE12 Adjusted previous fee accounting for price movement in 1e12 precision
     function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousFeeE12)
         internal
@@ -127,10 +127,10 @@ library FeeCalculation {
     /// @notice Calculate flexible fee with exponential decay
     /// @dev Fee decays from previous fee toward target fee over time
     /// @param targetFeeE12 Target fee to decay toward in 1e12 precision
-    /// @param previousFeeE12 Previous flexible fee in 1e12 precision
-    /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99)
+    /// @param previousFeeE12 Previous flexible fee in 1e12 precision, previousFee > targetFee
+    /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24
     /// @param logK Natural log of k scaled appropriately
-    /// @param blocksPassed Number of blocks since last fee update
+    /// @param blocksPassed Number of blocks since last fee update, <= type(uint40).max
     /// @return flexibleFeeE12 New flexible fee after decay in 1e12 precision
     function calculateFlexibleFee(
         uint256 targetFeeE12,

@@ -125,8 +125,15 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
             uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
 
+            // closeFeeE12 is positive since we are outside the optimal range
             flexibleFeeE12 = _calculateFlexibleFee(
-                config, feeState, sqrtAmmPriceX96, sqrtReferencePriceX96, closeFeeE12, farFeeE12, ammPriceToTheLeft
+                config,
+                feeState,
+                sqrtAmmPriceX96,
+                sqrtReferencePriceX96,
+                uint256(closeFeeE12),
+                farFeeE12,
+                ammPriceToTheLeft
             );
 
             // Select which fee to charge based on swap direction
@@ -154,7 +161,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     /// @param feeState The FeeState of the pool
     /// @param sqrtAmmPriceX96 The current AMM sqrt price
     /// @param sqrtReferencePriceX96 The reference sqrt price
-    /// @param closeFeeE12 The fee to reach the close boundary
+    /// @param closeFeeE12 The fee to reach the close boundary, > 0 since we are outside the optimal range
     /// @param farFeeE12 The fee to reach the far boundary
     /// @param ammPriceToTheLeft True if current AMM price < reference price
     /// @return flexibleFeeE12 The calculated flexible fee in 1e12 precision
@@ -163,7 +170,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeState storage feeState,
         uint256 sqrtAmmPriceX96,
         uint256 sqrtReferencePriceX96,
-        int256 closeFeeE12,
+        uint256 closeFeeE12,
         uint256 farFeeE12,
         bool ammPriceToTheLeft
     ) private view returns (uint256 flexibleFeeE12) {
@@ -190,7 +197,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Step 2: Calculate target fee
-        uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2; // closeFee is positive since we are outside the optimal range
+        // Target fee is farFee reduced by half the closeFee.
+        // The further outside the optimal range (larger closeFee), the more the target drops below farFee.
+        uint256 targetFeeE12 = farFeeE12 - closeFeeE12 / 2;
 
         // Step 3: Apply exponential decay toward target
         flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
