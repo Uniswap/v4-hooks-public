@@ -103,8 +103,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         //   - Upper bound: RP / (1 - optimalFee)
 
         // closeFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
-        //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
-        //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
+        //   - If closeFeeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
+        //   - If closeFeeE12 > 0: AMM price is outside the optimal range (hasn't reached the close boundary)
         int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
@@ -116,10 +116,10 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
+            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
                 priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
             );
-            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
+            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal range
         } else {
             // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
             // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
@@ -149,7 +149,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             );
     }
 
-    /// @notice Calculate flexible fee when price is outside optimal rate
+    /// @notice Calculate flexible fee when price is outside optimal range
     /// @param config The FeeConfig of the pool
     /// @param feeState The FeeState of the pool
     /// @param sqrtAmmPriceX96 The current AMM sqrt price
@@ -190,7 +190,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Step 2: Calculate target fee
-        uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2; // closeFee is positive since we are outside the optimal rate
+        uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2; // closeFee is positive since we are outside the optimal range
 
         // Step 3: Apply exponential decay toward target
         flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(

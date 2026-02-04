@@ -78,10 +78,10 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
         if (_logK != expectedLogK) revert InvalidKAndLogK(_k, _logK);
     }
 
-    /// @notice Validate the optimal fee rate
-    /// @param _optimalFeeE6 The optimal fee rate to validate
+    /// @notice Validate the optimal fee
+    /// @param _optimalFeeE6 The optimal fee to validate
     function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure {
-        if (_optimalFeeE6 > FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6) {
+        if (_optimalFeeE6 > FeeCalculation.ONE_E6 - 1) {
             revert InvalidOptimalFeeE6(_optimalFeeE6);
         }
     }

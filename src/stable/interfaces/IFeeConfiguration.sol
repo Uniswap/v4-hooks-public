@@ -27,8 +27,8 @@ interface IFeeConfiguration {
     /// @param logK The invalid logK value
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
-    /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeE6 The invalid optimal fee rate
+    /// @notice Error thrown when optimal fee is invalid
+    /// @param optimalFeeE6 The invalid optimal fee
     error InvalidOptimalFeeE6(uint256 optimalFeeE6);
 
     /// @notice Error thrown when reference sqrt price is invalid

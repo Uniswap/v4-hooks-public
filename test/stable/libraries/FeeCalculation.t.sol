@@ -46,10 +46,9 @@ contract FeeCalculationTest is Test {
     }
 
     function test_calculateCloseFee_succeeds_inside_optimal_rate() public pure {
-        // Price very close to reference (should be inside optimal rate)
         uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
         int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertTrue(closeFeeE12 < 0);
+        assertTrue(closeFeeE12 < 0); // close fee should be negative since the price is inside the optimal range
     }
 
     function test_calculateCloseFee_succeeds_outside_optimal_rate() public pure {
@@ -67,7 +66,7 @@ contract FeeCalculationTest is Test {
 
     function test_fuzz_calculateCloseFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
-        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6));
+        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
         FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6); // should not revert
     }
 
@@ -77,16 +76,16 @@ contract FeeCalculationTest is Test {
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) public pure {
-        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6));
+        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
 
-        // Calculate the minimum priceRatioX96 that's inside the optimal rate
+        // Calculate the minimum priceRatioX96 that's inside the optimal range
         uint256 minPriceRatio =
             (uint256(FixedPoint96.Q96) * (FeeCalculation.ONE_E6 - optimalFeeE6)) / FeeCalculation.ONE_E6;
 
-        // Bound priceRatioX96 to be inside the optimal rate
+        // Bound priceRatioX96 to be inside the optimal range
         priceRatioX96 = bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96);
 
-        uint256 totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
+        uint256 totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
             priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
         ); // should not revert
 
@@ -101,7 +100,7 @@ contract FeeCalculationTest is Test {
 
     function test_fuzz_calculateFarFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
-        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6));
+        optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
         assertGe(farFeeE12, optimalFeeE6 * 2);
         assertLe(farFeeE12, FeeCalculation.ONE_E12);

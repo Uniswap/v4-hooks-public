@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/212d67197db95402e0c7050941534ae8c084bb31/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -27,22 +27,11 @@ uint256 internal constant ONE_E12 = 1e12
 
 
 ### UNDEFINED_FLEXIBLE_FEE_E12
-Sentinel: no flexible fee (inside optimal rate)
+Sentinel: no flexible fee (inside optimal range)
 
 
 ```solidity
 uint256 internal constant UNDEFINED_FLEXIBLE_FEE_E12 = ONE_E12 + 1
-```
-
-
-### MAX_OPTIMAL_FEE_RATE_E6
-Maximum allowed optimal fee rate in pips
-
-Optimal fee rate must be strictly less than ONE_E6 (100%).
-
-
-```solidity
-uint256 public constant MAX_OPTIMAL_FEE_RATE_E6 = ONE_E6 - 1
 ```
 
 
@@ -86,7 +75,7 @@ function calculatePriceRatioX96(uint256 sqrtPrice1X96, uint256 sqrtPrice2X96)
 ### calculateCloseFee
 
 Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
-The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
+The close boundary is whichever edge of the optimal range is nearest to the current AMM price.
 
 
 ```solidity
@@ -97,22 +86,22 @@ function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
-|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
+|`optimalFeeE6`|`uint256`|Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`closeFeeE12`|`int256`|Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal rate. If > 0, price is outside.|
+|`closeFeeE12`|`int256`|Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal range. If > 0, price is outside.|
 
 
-### calculateInsideOptimalRateFee
+### calculateInsideOptimalRangeFee
 
-Calculate fee when price is inside optimal rate
+Calculate fee when price is inside optimal range
 
 
 ```solidity
-function calculateInsideOptimalRateFee(
+function calculateInsideOptimalRangeFee(
     uint256 priceRatioX96,
     uint256 optimalFeeE6,
     bool ammPriceToTheLeft,
@@ -124,7 +113,7 @@ function calculateInsideOptimalRateFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format|
-|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
+|`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
 |`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
 
@@ -138,7 +127,7 @@ function calculateInsideOptimalRateFee(
 ### calculateFarFee
 
 Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
-The far boundary is whichever edge of the optimal rate is farthest from the current AMM price.
+The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
 
 
 ```solidity
@@ -149,7 +138,7 @@ function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal p
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96|
-|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
+|`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
 
 **Returns**
 

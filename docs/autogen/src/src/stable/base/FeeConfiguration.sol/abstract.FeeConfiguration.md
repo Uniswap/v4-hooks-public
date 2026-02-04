@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/212d67197db95402e0c7050941534ae8c084bb31/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -133,7 +133,7 @@ function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 
 ### _validateOptimalFeeE6
 
-Validate the optimal fee rate
+Validate the optimal fee
 
 
 ```solidity
@@ -143,7 +143,7 @@ function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_optimalFeeE6`|`uint256`|The optimal fee rate to validate|
+|`_optimalFeeE6`|`uint256`|The optimal fee to validate|
 
 
 ### _validateReferenceSqrtPriceX96

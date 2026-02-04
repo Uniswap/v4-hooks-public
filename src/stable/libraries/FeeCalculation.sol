@@ -13,12 +13,8 @@ library FeeCalculation {
     /// @notice Scalar for scaled precision (1e12 = 100%)
     uint256 internal constant ONE_E12 = 1e12;
 
-    /// @notice Sentinel: no flexible fee (inside optimal rate)
+    /// @notice Sentinel: no flexible fee (inside optimal range)
     uint256 internal constant UNDEFINED_FLEXIBLE_FEE_E12 = ONE_E12 + 1;
-
-    /// @notice Maximum allowed optimal fee rate in pips
-    /// @dev Optimal fee rate must be strictly less than ONE_E6 (100%).
-    uint256 public constant MAX_OPTIMAL_FEE_RATE_E6 = ONE_E6 - 1;
 
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint256 internal constant Q48 = 2 ** 48;
@@ -42,10 +38,10 @@ library FeeCalculation {
     }
 
     /// @notice Calculate close fee - the fee that would place the effective price exactly at the "close" boundary.
-    ///         The close boundary is whichever edge of the optimal rate is nearest to the current AMM price.
+    ///         The close boundary is whichever edge of the optimal range is nearest to the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
-    /// @param optimalFeeE6 Optimal fee rate in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
-    /// @return closeFeeE12 Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal rate. If > 0, price is outside.
+    /// @param optimalFeeE6 Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
+    /// @return closeFeeE12 Fee at the "close" boundary in 1e12. If <= 0, price is inside optimal range. If > 0, price is outside.
     function calculateCloseFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (int256 closeFeeE12) {
         // Case 1: ammPrice < RP (price to the left)
         //   - priceRatio = ammPrice / RP ≤ 1
@@ -63,19 +59,19 @@ library FeeCalculation {
             int256(ONE_E12) - int256((ONE_E12 * priceRatioX96 * ONE_E6) / (ONE_E6 - optimalFeeE6) / FixedPoint96.Q96);
     }
 
-    /// @notice Calculate fee when price is inside optimal rate
+    /// @notice Calculate fee when price is inside optimal range
     /// @param priceRatioX96 Price ratio in Q96 format
-    /// @param optimalFeeE6 Optimal fee rate in parts per million
+    /// @param optimalFeeE6 Optimal fee in parts per million
     /// @param ammPriceToTheLeft True if AMM price < reference price
     /// @param userSellsZeroForOne True if user is selling token0 for token1
     /// @return feeE12 Calculated fee in 1e12 precision
-    function calculateInsideOptimalRateFee(
+    function calculateInsideOptimalRangeFee(
         uint256 priceRatioX96,
         uint256 optimalFeeE6,
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) internal pure returns (uint256 feeE12) {
-        // Note: This calculation assumes the price is inside the optimal rate.
+        // Note: This calculation assumes the price is inside the optimal range.
         // (i.e., priceRatioX96 >= Q96 * (ONE_E6 - optimalFee) / ONE_E6
 
         // if userSellsZeroForOne => sellPrice = (1 - optimalFee) * RP [lower bound]
@@ -94,9 +90,9 @@ library FeeCalculation {
     }
 
     /// @notice Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
-    ///         The far boundary is whichever edge of the optimal rate is farthest from the current AMM price.
+    ///         The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be >= Q96
-    /// @param optimalFeeE6 Optimal fee rate in parts per million
+    /// @param optimalFeeE6 Optimal fee in parts per million
     /// @return farFeeE12 Fee to get to the "far" boundary in 1e12 precision
     function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farFeeE12) {
         // Case 1: ammPrice < RP

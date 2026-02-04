@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/95d13b76febed1f602bb6472c59a2a6fa82df4df/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -115,7 +115,7 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 
 ### _calculateFlexibleFee
 
-Calculate flexible fee when price is outside optimal rate
+Calculate flexible fee when price is outside optimal range
 
 
 ```solidity
