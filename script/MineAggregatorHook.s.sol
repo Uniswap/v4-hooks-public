@@ -25,6 +25,11 @@ contract MineAggregatorHookScript is Script {
         // Increment by 160_444 (MAX_LOOP) for each subsequent attempt
         uint256 saltOffset = vm.envOr("SALT_OFFSET", uint256(0));
 
+        // Read deployer address from environment variable (default to CREATE2_DEPLOYER)
+        // When using a factory, pass the factory address as the deployer
+        // When self-deploying, pass the wallet address that will deploy
+        address deployer = vm.envOr("DEPLOYER", CREATE2_DEPLOYER);
+
         // Load constructor arguments from environment variable
         bytes memory constructorArgs = vm.envBytes("CONSTRUCTOR_ARGS");
 
@@ -54,17 +59,19 @@ contract MineAggregatorHookScript is Script {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
+        console.log("Deployer address:", deployer);
         console.log("Searching with salt offset:", saltOffset);
 
         // Mine a salt that will produce a hook address with the correct flags and first byte
         (address hookAddress, bytes32 salt) =
-            AggregatorHookMiner.find(CREATE2_DEPLOYER, flags, firstByte, creationCode, constructorArgs, saltOffset);
+            AggregatorHookMiner.find(deployer, flags, firstByte, creationCode, constructorArgs, saltOffset);
 
         // Output the results
         console.log("=== Aggregator Hook Mining Results ===");
         console.log("Hook Address:", vm.toString(hookAddress));
         console.log("Salt (bytes32):", vm.toString(salt));
         console.log("Salt (uint256):", uint256(salt));
+        console.log("Deployer:", deployer);
         console.log("First Byte:", firstByte);
         console.log("Flags:", flags);
         console.log("=====================================");
