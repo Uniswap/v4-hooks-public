@@ -49,6 +49,7 @@ contract FluidDexT1NativeForkedTest is Test {
     // Loaded from .env
     address fluidPoolAddress;
     address ercTokenAddress; // The ERC20 token in the pair (not native)
+    address poolManagerAddress;
 
     // Test amounts (in 18 decimals)
     int256 constant SWAP_AMOUNT = 1 ether;
@@ -85,9 +86,11 @@ contract FluidDexT1NativeForkedTest is Test {
         // Load addresses from environment variables
         fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
         fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
         fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
+        manager = PoolManager(poolManagerAddress);
 
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
@@ -103,10 +106,6 @@ contract FluidDexT1NativeForkedTest is Test {
         // Native ETH (address(0)) is always currency0 (lowest address)
         currency0 = Currency.wrap(address(0));
         currency1 = Currency.wrap(ercTokenAddress);
-
-        // Use mainnet PoolManager
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
-        manager = PoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
