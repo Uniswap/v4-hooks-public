@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -19,7 +19,7 @@ import {console} from "forge-std/console.sol";
 /// @title FluidDexT1Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
 /// @dev Implements Fluid's IDexCallback interface for swap callbacks
-contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
+contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
@@ -53,7 +53,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         IFluidDexT1 _fluidDex,
         IFluidDexReservesResolver _fluidDexReservesResolver,
         address _fluidLiquidity
-    ) ExternalLiqSourceHook(_manager) {
+    ) BaseAggregatorHook(_manager) {
         FLUID_POOL = _fluidDex;
         FLUID_LIQUIDITY = _fluidLiquidity;
         FLUID_DEX_RESERVES_RESOLVER = _fluidDexReservesResolver;
@@ -70,7 +70,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         poolManager.take(Currency.wrap(token), FLUID_LIQUIDITY, amount);
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         external
         payable
@@ -95,7 +95,7 @@ contract FluidDexT1Aggregator is ExternalLiqSourceHook, IDexCallback {
         }
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         (bool success, bytes memory data) = address(FLUID_DEX_RESERVES_RESOLVER)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -17,7 +17,7 @@ import "forge-std/Test.sol";
 /// @title StableSwapNGAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
 /// @dev Supports both exact-input and exact-output swaps
-contract StableSwapNGAggregator is ExternalLiqSourceHook {
+contract StableSwapNGAggregator is BaseAggregatorHook {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
@@ -39,11 +39,11 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
-    constructor(IPoolManager _manager, ICurveStableSwapNG _pool) ExternalLiqSourceHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwapNG _pool) BaseAggregatorHook(_manager) {
         pool = _pool;
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         external
         payable
@@ -68,7 +68,7 @@ contract StableSwapNGAggregator is ExternalLiqSourceHook {
         }
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));

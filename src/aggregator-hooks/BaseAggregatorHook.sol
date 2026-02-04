@@ -15,8 +15,12 @@ import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
+import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
 
-abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
+/// @title BaseAggregatorHook
+/// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
+/// @dev Implements the IAggregatorHook interface and extends the BaseHook contract
+abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
@@ -25,37 +29,17 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
-    error InsufficientLiquidity();
-    error UnspecifiedAmountExceeded();
-    error PoolDoesNotExist();
-
-    event AggregatorPoolRegistered(PoolId indexed poolId);
-
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
-    /// @notice Quotes amount of unspecified side for a given amount of specified side
-    /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
-    /// @param amountSpecified The amount of tokens in or out (negative for exact-in, positive for exact-out)
-    /// @return amountUnspecified amount of unspecified side (always positive)
-    /// @dev This function is meant to be called as a view function even though it is not one. This is because the swap
-    /// might be simulated but not finalized
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
-        virtual
-        returns (uint256 amountUnspecified);
+    /// @inheritdoc IAggregatorHook
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable virtual returns (uint256 amountUnspecified);
 
-    /// @notice Returns the pseudo TVL: the amount of the UniswapV4 pool's tokens locked in the aggregated pool
-    /// @param poolId The pool ID of the UniswapV4 pool
-    /// @return amount0 The amount of token0 in the aggregated pool
-    /// @return amount1 The amount of token1 in the aggregated pool
+    /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
 
-    /// @notice Returns the permissions this hook requires
-    /// @dev Enables beforeSwap, beforeSwapReturnDelta, and beforeInitialize
-    /// @return permissions The hook permissions struct indicating which hooks are enabled
+    /// @inheritdoc BaseHook
     function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
         permissions.beforeSwap = true;
         permissions.beforeSwapReturnDelta = true;
