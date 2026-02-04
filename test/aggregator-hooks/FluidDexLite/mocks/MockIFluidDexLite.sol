@@ -14,6 +14,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract MockIFluidDexLite is IFluidDexLite {
     uint256 public returnSwapSingle;
     bool public revertSwapSingle;
+    bool public useNativeCurrencyInCallback;
+    address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     error SwapSingleRevert();
 
@@ -24,6 +26,12 @@ contract MockIFluidDexLite is IFluidDexLite {
     function setRevertSwapSingle(bool doRevert) external {
         revertSwapSingle = doRevert;
     }
+
+    function setUseNativeCurrencyInCallback(bool useNative) external {
+        useNativeCurrencyInCallback = useNative;
+    }
+
+    receive() external payable {}
 
     function swapSingle(
         DexKey calldata dexKey_,
@@ -47,11 +55,19 @@ contract MockIFluidDexLite is IFluidDexLite {
 
         if (isCallback_) {
             // Call back the hook to pull tokens
-            IFluidDexLiteCallback(msg.sender).dexCallback(tokenIn, amountIn, data_);
+            // Use FLUID_NATIVE_CURRENCY if flag is set (for testing native currency conversion)
+            address callbackToken = useNativeCurrencyInCallback ? FLUID_NATIVE_CURRENCY : tokenIn;
+            IFluidDexLiteCallback(msg.sender).dexCallback(callbackToken, amountIn, data_);
         }
 
         // Transfer output tokens to recipient
-        IERC20(tokenOut).transfer(to_, returnSwapSingle);
+        if (tokenOut == FLUID_NATIVE_CURRENCY || tokenOut == address(0)) {
+            // Native currency output
+            (bool success,) = to_.call{value: returnSwapSingle}("");
+            require(success, "ETH transfer failed");
+        } else {
+            IERC20(tokenOut).transfer(to_, returnSwapSingle);
+        }
 
         return returnSwapSingle;
     }
