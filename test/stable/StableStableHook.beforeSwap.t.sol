@@ -215,6 +215,14 @@ contract StableStableHookTest is Test, Deployers {
         assertApproxEqRel(effectiveBuyPrice, targetBuyPrice, 0.000001e18);
     }
 
+    /// @notice Tests fee adjustment when price moves further from reference
+    /// @dev When price moves further from reference, previousFee is adjusted upward via
+    /// adjustPreviousFeeForPriceMovement() to maintain the same effective price. The adjusted
+    /// fee then decays toward targetFee over time.
+    ///
+    /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
+    /// swaps always move the price. Equal prices bypass adjustPreviousFeeForPriceMovement(),
+    /// causing the test to use a stale fee that doesn't reflect actual price movement.
     function test_beforeSwap_unitSwapAmmPriceBiggerThanOptimalSpreadTargetMovedOpposite() public {
         uint24 fee;
         uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
@@ -225,14 +233,29 @@ contract StableStableHookTest is Test, Deployers {
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
         assertEq(fee, 0);
 
-        // Move price further right
+        // Move price further right (from 1.00013 to 1.00014)
         ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
+        // With 0 blocks passed: fee is adjusted upward to maintain effective price, no decay yet
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
-        assertEq(fee, 209); // 90 (optimal) + 114 (calculated flexible fee)
+        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted flexible fee, no decay)
+
+        // With 750 blocks passed: adjusted fee decays toward targetFee
+        vm.roll(block.number + 750);
+
+        fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
+        assertEq(fee, 204); // 90 (optimal) + 114 (decayed toward targetFee)
     }
 
+    /// @notice Tests fee adjustment when price moves further from reference (price below reference)
+    /// @dev When price moves further from reference, previousFee is adjusted upward via
+    /// adjustPreviousFeeForPriceMovement() to maintain the same effective price. The adjusted
+    /// fee then decays toward targetFee over time.
+    ///
+    /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
+    /// swaps always move the price. Equal prices bypass adjustPreviousFeeForPriceMovement(),
+    /// causing the test to use a stale fee that doesn't reflect actual price movement.
     function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
         uint24 fee;
         uint160 ammPrice = uint160(999_870 * 2 ** 96) / 1_000_000;
@@ -243,11 +266,18 @@ contract StableStableHookTest is Test, Deployers {
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 99) / 100);
         assertEq(fee, 0);
 
-        // Move price further left
+        // Move price further left (from 0.99987 to 0.99986)
         ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
+        // With 0 blocks passed: fee is adjusted upward to maintain effective price, no decay yet
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
-        assertEq(fee, 209);
+        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted flexible fee, no decay)
+
+        // With 750 blocks passed: adjusted fee decays toward targetFee
+        vm.roll(block.number + 750);
+
+        fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
+        assertEq(fee, 204); // 90 (optimal) + 114 (decayed toward targetFee)
     }
 }
