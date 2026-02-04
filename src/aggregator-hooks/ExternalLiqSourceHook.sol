@@ -35,20 +35,6 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     /// @param _manager The Uniswap V4 PoolManager contract
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
-    /// @notice Returns the permissions this hook requires
-    /// @dev Enables beforeSwap, beforeSwapReturnDelta, and beforeInitialize
-    /// @return permissions The hook permissions struct indicating which hooks are enabled
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
-        permissions.beforeSwap = true;
-        permissions.beforeSwapReturnDelta = true;
-        permissions.beforeInitialize = true;
-    }
-
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
-        emit AggregatorPoolRegistered(key.toId());
-        return IHooks.beforeInitialize.selector;
-    }
-
     /// @notice Quotes amount of unspecified side for a given amount of specified side
     /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
     /// @param amountSpecified The amount of tokens in or out (negative for exact-in, positive for exact-out)
@@ -67,11 +53,24 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     /// @return amount1 The amount of token1 in the aggregated pool
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
 
+    /// @notice Returns the permissions this hook requires
+    /// @dev Enables beforeSwap, beforeSwapReturnDelta, and beforeInitialize
+    /// @return permissions The hook permissions struct indicating which hooks are enabled
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
+        permissions.beforeSwap = true;
+        permissions.beforeSwapReturnDelta = true;
+        permissions.beforeInitialize = true;
+    }
+
+    /// @notice Hook called before the pool is initialized
+    /// @dev Emits an event when the pool is registered
+    function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
+        emit AggregatorPoolRegistered(key.toId());
+        return IHooks.beforeInitialize.selector;
+    }
+
     /// @notice Hook called before each swap
-    /// @dev Validates signatures, calculates custom pricing, and settles deltas
-    /// @param key The pool key
-    /// @param params The swap parameters
-    /// @return Function selector, delta to apply, and LP fee
+    /// @dev Communicates with the aggregated pool to get the unspecified amount and potentially settle the swap
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
