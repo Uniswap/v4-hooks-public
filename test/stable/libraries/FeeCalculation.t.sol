@@ -6,7 +6,6 @@ import {FeeCalculation} from "../../../src/stable/libraries/FeeCalculation.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
-import {console2} from "forge-std/console2.sol";
 
 contract FeeCalculationTest is Test {
     uint24 constant OPTIMAL_FEE_E6 = 90; // 0.009%
