@@ -29,6 +29,9 @@ The fuzz tests use precompiled bytecode stored in `test/aggregator-hooks/StableS
 - `StableSwapNGMath.bin` - Math library (from `0xc9CBC565A9F4120a2740ec6f64CC24AeB2bB3E5E` on Mainnet Ethereum)
 - `StableSwapNGViews.bin` - Views contract (from `0xFF53042865dF617de4bB871bD0988E7B93439cCF` on Mainnet Ethereum)
 
+### Fuzz Testing (Fluid pools)
+
+The FluidDexLite/FluidDexT1 fuzz tests use pre-deployed infrastructure on forked versions of chains where the respective Fluid Dex infrastructure is already deployed. This is because adding aggregator-hook tests on top of Fluid's infrastructure deployment scripts cause multiple compilation issues, including memory/stack/depth issues, even with --via-ir. Everything else (pools, liquidity positions, etc) is bespokely created in the test.
 
 ## Testing (Fork Tests)
 
