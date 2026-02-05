@@ -98,9 +98,11 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // The optimalFee creates a price range (the "optimal spread") around the reference price:
-        //   - Lower bound: RP * (1 - optimalFee)
-        //   - Upper bound: RP / (1 - optimalFee)
+        // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
+        // Let P_ref = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
+        // The optimal range bounds are:
+        //   - Lower bound (price): P_ref * (1 - optimalFee)
+        //   - Upper bound (price): P_ref / (1 - optimalFee)
 
         // closeFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If closeFeeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
