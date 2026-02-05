@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/8fe1b2a4383ba7acecad71ba23c30b82aa8680d9/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/41c71a048fa24d78a5635a90a45ac5309c241613/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)

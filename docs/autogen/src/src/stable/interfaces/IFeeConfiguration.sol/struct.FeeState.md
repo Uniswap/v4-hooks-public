@@ -1,5 +1,5 @@
 # FeeState
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/8fe1b2a4383ba7acecad71ba23c30b82aa8680d9/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/41c71a048fa24d78a5635a90a45ac5309c241613/src/stable/interfaces/IFeeConfiguration.sol)
 
 
 ```solidity

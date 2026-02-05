@@ -16,6 +16,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FeeConfig, FeeState, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {FeeCalculation} from "../../src/stable/libraries/FeeCalculation.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
@@ -56,7 +57,7 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
-    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96() public {
+    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_belowMin() public {
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE - 1
         });
@@ -65,6 +66,84 @@ contract FeeConfigurationImplementationTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, TickMath.MIN_SQRT_PRICE - 1)
         );
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMin() public {
+        // MIN_SQRT_PRICE is now invalid because the optimal range would extend below it
+        // minBoundedRef = MIN_SQRT_PRICE * 1e6 / sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6)
+        // = MIN_SQRT_PRICE * 1e6 / sqrt(990000 * 1e6) > MIN_SQRT_PRICE
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(
+            abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, TickMath.MIN_SQRT_PRICE)
+        );
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMax() public {
+        // MAX_SQRT_PRICE - 1 is now invalid because the optimal range would extend above MAX_SQRT_PRICE
+        // maxBoundedRef = MAX_SQRT_PRICE * sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6) / 1e6
+        // = MAX_SQRT_PRICE * sqrt(990000 * 1e6) / 1e6 < MAX_SQRT_PRICE
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MAX_SQRT_PRICE - 1
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(
+            abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, TickMath.MAX_SQRT_PRICE - 1)
+        );
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_succeedsWithBoundedReferencePrices() public {
+        // Calculate the bounded min/max reference prices using sqrt(1 - fee)
+        // The optimal range is price-based, so sqrt price bounds use sqrt(1 - fee)
+        uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - feeConfigurationImplementation.MAX_OPTIMAL_FEE_E6();
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
+        uint256 minBoundedRef = (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + sqrtOneMinusMaxFeeE6 - 1)
+            / sqrtOneMinusMaxFeeE6;
+        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
+
+        // Test minimum bounded reference price (inclusive - MIN_SQRT_PRICE is valid in v4)
+        FeeConfig memory minConfig =
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(minBoundedRef)});
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), minConfig);
+
+        // Test maximum bounded reference price - 1 (exclusive - MAX_SQRT_PRICE is invalid in v4)
+        // maxBoundedRef itself is invalid, so we use maxBoundedRef - 1
+        FeeConfig memory maxConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(maxBoundedRef - 1)
+        });
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), maxConfig);
+
+        // Verify the optimal range at boundaries stays within v4 limits
+        // At minBoundedRef: lowerOptimal = minBoundedRef * sqrt(1 - maxOptimalFee) >= MIN_SQRT_PRICE
+        uint256 lowerOptimalAtMin = minBoundedRef * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
+        assertGe(lowerOptimalAtMin, TickMath.MIN_SQRT_PRICE);
+
+        // At maxBoundedRef - 1: upperOptimal = (maxBoundedRef - 1) / sqrt(1 - maxOptimalFee) < MAX_SQRT_PRICE
+        uint256 upperOptimalAtMax = (maxBoundedRef - 1) * FeeCalculation.ONE_E6 / sqrtOneMinusMaxFeeE6;
+        assertLt(upperOptimalAtMax, TickMath.MAX_SQRT_PRICE);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMaxBounded() public {
+        // maxBoundedRef is exactly at the exclusive boundary, so it should fail
+        // Uses sqrt(1 - fee) since the optimal range is price-based
+        uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - feeConfigurationImplementation.MAX_OPTIMAL_FEE_E6();
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
+        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
+
+        FeeConfig memory newConfig =
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(maxBoundedRef)});
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, maxBoundedRef));
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
