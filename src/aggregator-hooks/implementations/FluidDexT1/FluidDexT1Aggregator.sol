@@ -145,6 +145,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         return IHooks.beforeInitialize.selector;
     }
 
+    /// @inheritdoc BaseAggregatorHook
     function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId)
         internal
         override

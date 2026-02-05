@@ -50,15 +50,26 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         permissions.beforeInitialize = true;
     }
 
-    /// @notice Hook called before the pool is initialized
-    /// @dev Emits an event when the pool is registered
+    /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
+    /// @param settleCurrency The currency to be settled on the V4 PoolManager (swapper's output currency)
+    /// @param takeCurrency The currency to be taken from the V4 PoolManager (swapper's input currency)
+    /// @param params The swap parameters
+    /// @param poolId The V4 Pool ID
+    /// @return amountSettle The amount of the currency being settled (swapper's output amount)
+    /// @return amountTake The amount of the currency being taken (swapper's input amount)
+    /// @return hasSettled Whether the swap has been settled inside of the _conductSwap function
+    /// @dev To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+    ///      settle' pattern and set hasSettled to true
+    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+        internal
+        virtual
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
         return IHooks.beforeInitialize.selector;
     }
 
-    /// @notice Hook called before each swap
-    /// @dev Communicates with the aggregated pool to get the unspecified amount and potentially settle the swap
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
@@ -110,11 +121,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
 
         return (amountTake, amountSettle);
     }
-
-    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
-        internal
-        virtual
-        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
         if (token.balanceOf(payer) >= amount) {

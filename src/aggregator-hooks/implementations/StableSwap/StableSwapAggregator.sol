@@ -109,6 +109,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
         return IHooks.beforeInitialize.selector;
     }
 
+    /// @inheritdoc BaseAggregatorHook
     function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
         internal
         override
