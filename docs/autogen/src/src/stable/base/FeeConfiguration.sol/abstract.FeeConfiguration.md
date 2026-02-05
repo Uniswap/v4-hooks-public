@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ed81fe2a4a0d3051e856ceb7db85c49785fdfa56/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -12,7 +12,7 @@ Abstract contract that implements the IFeeConfiguration interface
 
 ## State Variables
 ### MAX_OPTIMAL_FEE_E6
-The maximum optimal fee in 1e6 precision: 1%
+The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
 
 
 ```solidity

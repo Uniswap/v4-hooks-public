@@ -186,13 +186,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Start from far boundary
             previousFeeE12 = farFeeE12;
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
-            // Price moved further from reference
-            // Adjust previous fee to account for price movement
+            // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
+            // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
             uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
             previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
         } else if (previousFeeE12 > farFeeE12) {
-            // Price jumped back toward reference but still outside spread
-            // Cap at far boundary
+            // Price moved toward reference, lowering farFee below previousFee
+            // Cap at the new far boundary
             previousFeeE12 = farFeeE12;
         }
 

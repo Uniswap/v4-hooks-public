@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ed81fe2a4a0d3051e856ceb7db85c49785fdfa56/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -47,9 +47,7 @@ uint256 internal constant Q48 = 2 ** 48
 ## Functions
 ### calculatePriceRatioX96
 
-Calculate the price ratio between two sqrt prices in Q96 format
-
-Always returns min(price1, price2) / max(price1, price2), ensuring result <= 2^96
+Calculate the price ratio between two sqrt prices in Q96 format, ensuring result <= 2^96
 
 
 ```solidity
@@ -149,9 +147,7 @@ function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal p
 
 ### adjustPreviousFeeForPriceMovement
 
-Adjust previous fee for price movement
-
-When price moves further from reference, adjust the previous fee to account for the movement
+Adjust previous fee to preserve the same effective price when AMM price moves further from reference
 
 
 ```solidity
@@ -164,7 +160,7 @@ function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previo
 
 |Name|Type|Description|
 |----|----|-----------|
-|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)|
 |`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
 
 **Returns**
@@ -176,9 +172,7 @@ function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previo
 
 ### calculateFlexibleFee
 
-Calculate flexible fee with exponential decay
-
-Fee decays from previous fee toward target fee over time
+Calculate flexible fee with exponential decay. Fee decays from previous fee toward target fee over time.
 
 
 ```solidity
@@ -195,7 +189,7 @@ function calculateFlexibleFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`targetFeeE12`|`uint256`|Target fee to decay toward in 1e12 precision|
-|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision, previousFee > targetFee|
+|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision, previousFee >= targetFee|
 |`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24|
 |`logK`|`uint256`|Natural log of k scaled appropriately|
 |`blocksPassed`|`uint256`|Number of blocks since last fee update, <= type(uint40).max|

@@ -152,7 +152,7 @@ contract FeeCalculationTest is Test {
         public
         pure
     {
-        priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96); // price impact
+        priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96); // price impact
         previousFeeE12 = bound(previousFeeE12, 0, FeeCalculation.ONE_E12);
         uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
         assertGe(adjustedFeeE12, previousFeeE12);
