@@ -46,33 +46,34 @@ contract FeeCalculationTest is Test {
         assertLe(priceRatioX96, FixedPoint96.Q96);
     }
 
-    function test_calculateCloseFee_succeeds_inside_optimal_range() public pure {
+    function test_calculateCloseBoundaryFee_succeeds_inside_optimal_range() public pure {
+        // Price very close to reference (should be inside optimal range)
         uint160 priceRatioX96 = uint160(FixedPoint96.Q96); // Exactly at reference
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertLt(closeFeeE12, 0); // close fee should be negative since the price is inside the optimal range
+        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertLt(closeBoundaryFeeE12, 0); // should be negative since the price is inside the optimal range
 
         // just inside the boundary of the optimal range (89)
         priceRatioX96 = uint160(
             (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - (OPTIMAL_FEE_E6 - 1))) / FeeCalculation.ONE_E6
         );
-        closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertLt(closeFeeE12, 0);
+        closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertLt(closeBoundaryFeeE12, 0);
     }
 
-    function test_calculateCloseFee_succeeds_outside_optimal_range() public pure {
+    function test_calculateCloseBoundaryFee_succeeds_outside_optimal_range() public pure {
         // at the boundary of the optimal range
         /// 1000000 - OPTIMAL_FEE_E6 = 999910
         uint160 priceRatioX96 = uint160(
             (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - OPTIMAL_FEE_E6)) / FeeCalculation.ONE_E6
         ); // the lower boundary of the optimal range
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertGt(closeFeeE12, 0);
+        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertGt(closeBoundaryFeeE12, 0);
     }
 
-    function test_fuzz_calculateCloseFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
+    function test_fuzz_calculateCloseBoundaryFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96);
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
-        FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6); // should not revert
+        FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, optimalFeeE6); // should not revert
     }
 
     function test_fuzz_calculateInsideOptimalRangeFee_succeeds(
@@ -97,25 +98,25 @@ contract FeeCalculationTest is Test {
         assertLe(totalStableFeeE12, FeeCalculation.ONE_E12);
     }
 
-    function test_calculateFarFee_succeeds_left_of_reference() public pure {
+    function test_calculateFarBoundaryFee_succeeds_left_of_reference() public pure {
         uint160 priceRatioX96 = uint160(
             (uint256(REFERENCE_SQRT_PRICE_X96) * (FeeCalculation.ONE_E6 - (OPTIMAL_FEE_E6 + 1))) / FeeCalculation.ONE_E6
         ); // lower than the lower boundary
-        uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, OPTIMAL_FEE_E6);
-        assertGt(farFeeE12, OPTIMAL_FEE_E6 * 2); // greater than 2 times the optimal fee
+        uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertGt(farBoundaryFeeE12, OPTIMAL_FEE_E6 * 2); // greater than 2 times the optimal fee
     }
 
-    function test_fuzz_calculateFarFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
+    function test_fuzz_calculateFarBoundaryFee_succeeds(uint256 priceRatioX96, uint24 optimalFeeE6) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96);
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, MAX_OPTIMAL_FEE_E6));
-        uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
-        assertGe(farFeeE12, optimalFeeE6 * 2); // >= 2 times the optimal fee
-        assertLe(farFeeE12, FeeCalculation.ONE_E12); // <= 100%
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6);
-        if (closeFeeE12 > 0) {
-            assertGe(farFeeE12, uint256(closeFeeE12));
-            uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2;
-            assertLe(targetFeeE12, farFeeE12);
+        uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, optimalFeeE6);
+        assertGe(farBoundaryFeeE12, optimalFeeE6 * 2); // >= 2 times the optimal fee
+        assertLe(farBoundaryFeeE12, FeeCalculation.ONE_E12); // <= 100%
+        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, optimalFeeE6);
+        if (closeBoundaryFeeE12 > 0) {
+            assertGe(farBoundaryFeeE12, uint256(closeBoundaryFeeE12));
+            uint256 targetFeeE12 = farBoundaryFeeE12 - uint256(closeBoundaryFeeE12) / 2;
+            assertLe(targetFeeE12, farBoundaryFeeE12);
             assertGt(targetFeeE12, 0);
         }
     }
@@ -158,7 +159,7 @@ contract FeeCalculationTest is Test {
         assertLe(adjustedFeeE12, FeeCalculation.ONE_E12);
     }
 
-    function test_fuzz_calculateFlexibleFee_succeeds(
+    function test_fuzz_calculateDecayingFee_succeeds(
         uint256 targetFeeE12,
         uint256 previousFeeE12,
         uint24 k,
@@ -171,7 +172,7 @@ contract FeeCalculationTest is Test {
         uint24 logK = uint24(uint256(-FixedPointMathLib.lnWad(int256(kWad))) >> 40);
         vm.assume(logK > 0);
         uint256 flexibleFeeE12 =
-            FeeCalculation.calculateFlexibleFee(targetFeeE12, previousFeeE12, k, logK, blocksPassed);
+            FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, blocksPassed);
         assertGe(flexibleFeeE12, targetFeeE12);
         assertLe(flexibleFeeE12, FeeCalculation.ONE_E12);
     }
