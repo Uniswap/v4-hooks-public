@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/41c71a048fa24d78a5635a90a45ac5309c241613/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/04ad3a000564c09067c88d373672d810542d8220/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -78,7 +78,7 @@ Used for both far boundary and inside optimal range fee calculations
 
 
 ```solidity
-function _calculateFeeToOptimalBoundary(uint256 ammToRPRatioX96, uint256 optimalFeeE6, bool invertRatio)
+function _calculateFeeToOptimalBoundary(uint256 priceRatioX96, uint256 optimalFeeE6, bool invertRatio)
     private
     pure
     returns (uint40 fee);
@@ -87,7 +87,7 @@ function _calculateFeeToOptimalBoundary(uint256 ammToRPRatioX96, uint256 optimal
 
 |Name|Type|Description|
 |----|----|-----------|
-|`ammToRPRatioX96`|`uint256`|Price ratio to reference price in Q96 format|
+|`priceRatioX96`|`uint256`|Price ratio to reference price in Q96 format|
 |`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
 |`invertRatio`|`bool`|If true, use inverted ratio (Q96 / priceRatio instead of priceRatio)|
 
@@ -105,7 +105,7 @@ Returns a fee metric where negative values mean inside the range, positive means
 
 
 ```solidity
-function calculateCloseBoundaryFee(uint256 ammToRPRatioX96, uint256 optimalFeeE6)
+function calculateCloseBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
     internal
     pure
     returns (int256 closeBoundaryFeeE12);
@@ -114,7 +114,7 @@ function calculateCloseBoundaryFee(uint256 ammToRPRatioX96, uint256 optimalFeeE6
 
 |Name|Type|Description|
 |----|----|-----------|
-|`ammToRPRatioX96`|`uint256`|Price ratio to reference price in Q96 format from calculatePriceRatioX96|
+|`priceRatioX96`|`uint256`|Price ratio to reference price in Q96 format from calculatePriceRatioX96|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.|
 
 **Returns**
@@ -131,7 +131,7 @@ Calculate fee when price is inside optimal range
 
 ```solidity
 function calculateInsideOptimalRangeFee(
-    uint256 ammToRPRatioX96,
+    uint256 priceRatioX96,
     uint256 optimalFeeE6,
     bool ammPriceToTheLeft,
     bool userSellsZeroForOne
@@ -141,7 +141,7 @@ function calculateInsideOptimalRangeFee(
 
 |Name|Type|Description|
 |----|----|-----------|
-|`ammToRPRatioX96`|`uint256`|Price ratio in Q96 format|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
 |`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
@@ -160,7 +160,7 @@ The far boundary is whichever edge of the optimal range is farthest from the cur
 
 
 ```solidity
-function calculateFarBoundaryFee(uint256 ammToRPRatioX96, uint256 optimalFeeE6)
+function calculateFarBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
     internal
     pure
     returns (uint256 farBoundaryFeeE12);
@@ -169,7 +169,7 @@ function calculateFarBoundaryFee(uint256 ammToRPRatioX96, uint256 optimalFeeE6)
 
 |Name|Type|Description|
 |----|----|-----------|
-|`ammToRPRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
 
 **Returns**
@@ -185,7 +185,7 @@ Adjust previous fee to preserve the same effective price when AMM price moves fu
 
 
 ```solidity
-function adjustPreviousFeeForPriceMovement(uint256 ammToRPRatioX96, uint256 previousFeeE12)
+function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousFeeE12)
     internal
     pure
     returns (uint256 adjustedFeeE12);
@@ -194,7 +194,7 @@ function adjustPreviousFeeForPriceMovement(uint256 ammToRPRatioX96, uint256 prev
 
 |Name|Type|Description|
 |----|----|-----------|
-|`ammToRPRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)|
+|`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)|
 |`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
 
 **Returns**
