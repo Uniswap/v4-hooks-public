@@ -5,20 +5,20 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {MockExternalLiqSource} from "./MockExternalLiqSource.sol";
 
 /// @title MockExternalLiqSourceHook
-/// @notice Concrete ExternalLiqSourceHook that delegates _conductSwap to MockExternalLiqSource.
+/// @notice Concrete BaseAggregatorHook that delegates _conductSwap to MockExternalLiqSource.
 /// @dev quote and pseudoTotalValueLocked use settable storage for tests.
-contract MockExternalLiqSourceHook is ExternalLiqSourceHook {
+contract MockExternalLiqSourceHook is BaseAggregatorHook {
     MockExternalLiqSource public immutable externalSource;
 
     uint256 public mockQuoteReturn;
     uint256 public mockPseudoTVL0;
     uint256 public mockPseudoTVL1;
 
-    constructor(IPoolManager _manager, MockExternalLiqSource _source) ExternalLiqSourceHook(_manager) {
+    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager) {
         externalSource = _source;
     }
 

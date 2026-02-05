@@ -17,7 +17,8 @@ import {SafePoolSwapTest} from "./shared/SafePoolSwapTest.sol";
 import {MockExternalLiqSource} from "./mocks/MockExternalLiqSource.sol";
 import {MockExternalLiqSourceHook} from "./mocks/MockExternalLiqSourceHook.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
-import {ExternalLiqSourceHook} from "../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../src/aggregator-hooks/BaseAggregatorHook.sol";
+import {IAggregatorHook} from "../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 
 contract ExternalLiqSourceHookUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -102,7 +103,7 @@ contract ExternalLiqSourceHookUnitTest is Test {
             hooks: IHooks(address(hook2))
         });
         vm.expectEmit(true, true, true, true);
-        emit ExternalLiqSourceHook.AggregatorPoolRegistered(key2.toId());
+        emit IAggregatorHook.AggregatorPoolRegistered(key2.toId());
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
@@ -155,7 +156,7 @@ contract ExternalLiqSourceHookUnitTest is Test {
                 CustomRevert.WrappedError.selector,
                 address(hook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ExternalLiqSourceHook.InsufficientLiquidity.selector),
+                abi.encodeWithSelector(IAggregatorHook.InsufficientLiquidity.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );

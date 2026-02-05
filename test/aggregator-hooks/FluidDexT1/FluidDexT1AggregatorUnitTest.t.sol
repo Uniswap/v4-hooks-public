@@ -20,7 +20,7 @@ import {
     FluidDexT1AggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
-import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
+import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
@@ -124,7 +124,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     function test_quote_revertsPoolDoesNotExist() public {
         PoolId wrongPoolId = PoolId.wrap(bytes32(uint256(999)));
-        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        vm.expectRevert(IAggregatorHook.PoolDoesNotExist.selector);
         hook.quote(true, -int256(100 ether), wrongPoolId);
     }
 
@@ -144,7 +144,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     function test_pseudoTotalValueLocked_revertsPoolDoesNotExist() public {
         PoolId wrongPoolId = PoolId.wrap(bytes32(uint256(999)));
-        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        vm.expectRevert(IAggregatorHook.PoolDoesNotExist.selector);
         hook.pseudoTotalValueLocked(wrongPoolId);
     }
 
