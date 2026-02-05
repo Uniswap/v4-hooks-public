@@ -71,8 +71,8 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMin() public {
         // MIN_SQRT_PRICE is now invalid because the optimal range would extend below it
-        // minBoundedRef = MIN_SQRT_PRICE * 1e6 / (1e6 - MAX_OPTIMAL_FEE_E6)
-        // = MIN_SQRT_PRICE * 1e6 / 990000 > MIN_SQRT_PRICE
+        // minBoundedRef = MIN_SQRT_PRICE * 1e6 / sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6)
+        // = MIN_SQRT_PRICE * 1e6 / sqrt(990000 * 1e6) > MIN_SQRT_PRICE
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE
         });
@@ -86,8 +86,8 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMax() public {
         // MAX_SQRT_PRICE - 1 is now invalid because the optimal range would extend above MAX_SQRT_PRICE
-        // maxBoundedRef = MAX_SQRT_PRICE * (1e6 - MAX_OPTIMAL_FEE_E6) / 1e6
-        // = MAX_SQRT_PRICE * 990000 / 1e6 < MAX_SQRT_PRICE
+        // maxBoundedRef = MAX_SQRT_PRICE * sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6) / 1e6
+        // = MAX_SQRT_PRICE * sqrt(990000 * 1e6) / 1e6 < MAX_SQRT_PRICE
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MAX_SQRT_PRICE - 1
         });

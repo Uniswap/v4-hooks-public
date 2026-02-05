@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/41c71a048fa24d78a5635a90a45ac5309c241613/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -115,7 +115,7 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 
 ### _calculateDecayingFee
 
-Calculate flexible fee when price is outside optimal range
+Calculate decaying fee when price is outside optimal range
 
 
 ```solidity
@@ -127,7 +127,7 @@ function _calculateDecayingFee(
     uint256 closeBoundaryFeeE12,
     uint256 farBoundaryFeeE12,
     bool ammPriceToTheLeft
-) private view returns (uint256 flexibleFeeE12);
+) private view returns (uint256 decayingFeeE12);
 ```
 **Parameters**
 
@@ -137,14 +137,14 @@ function _calculateDecayingFee(
 |`feeState`|`FeeState`|The FeeState of the pool|
 |`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
 |`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
-|`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary, > 0 since we are outside the optimal range|
-|`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary|
+|`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary of the optimal range (negative = already inside)|
+|`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary of the optimal range|
 |`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`flexibleFeeE12`|`uint256`|The calculated flexible fee in 1e12 precision|
+|`decayingFeeE12`|`uint256`|The calculated decaying fee in 1e12 precision|
 
 
