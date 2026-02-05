@@ -98,9 +98,11 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // The optimalFee creates a price range (the "optimal spread") around the reference price:
-        //   - Lower bound: RP * (1 - optimalFee)
-        //   - Upper bound: RP / (1 - optimalFee)
+        // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
+        // Let P_ref = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
+        // The optimal range bounds are:
+        //   - Lower bound (price): P_ref * (1 - optimalFee)
+        //   - Upper bound (price): P_ref / (1 - optimalFee)
 
         // distanceFromOptimalRangeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If distanceFromOptimalRangeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
@@ -187,13 +189,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Start from far boundary
             previousFeeE12 = farFeeE12;
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
-            // Price moved further from reference
-            // Adjust previous fee to account for price movement
+            // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
+            // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
             uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
             previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceToRPRatioX96, previousFeeE12);
         } else if (previousFeeE12 > farFeeE12) {
-            // Price jumped back toward reference but still outside spread
-            // Cap at far boundary
+            // Price moved toward reference, lowering farFee below previousFee
+            // Cap at the new far boundary
             previousFeeE12 = farFeeE12;
         }
 

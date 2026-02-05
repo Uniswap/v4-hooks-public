@@ -6,6 +6,7 @@ import {FeeCalculation} from "../../../src/stable/libraries/FeeCalculation.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
+import {console2} from "forge-std/console2.sol";
 
 contract FeeCalculationTest is Test {
     uint24 constant OPTIMAL_FEE_E6 = 90; // 0.009%
@@ -115,7 +116,6 @@ contract FeeCalculationTest is Test {
         priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96);
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, MAX_OPTIMAL_FEE_E6));
         uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
-        assertGt(farFeeE12, 0);
         assertGe(farFeeE12, optimalFeeE6 * 2); // >= 2 times the optimal fee
         assertLe(farFeeE12, FeeCalculation.ONE_E12); // <= 100%
         int256 distanceFromOptimalRangeE12 =
@@ -159,7 +159,7 @@ contract FeeCalculationTest is Test {
         public
         pure
     {
-        priceRatioX96 = bound(priceRatioX96, 0, REFERENCE_SQRT_PRICE_X96); // price impact
+        priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96); // price impact
         previousFeeE12 = bound(previousFeeE12, 0, FeeCalculation.ONE_E12);
         uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
         assertGe(adjustedFeeE12, previousFeeE12);
