@@ -122,14 +122,14 @@ function calculateInsideOptimalRangeFee(
 |`feeE12`|`uint256`|Calculated fee in 1e12 precision|
 
 
-### calculateFarFee
+### calculateFarBoundaryFee
 
-Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
+Calculate far boundary fee - the fee that would place the effective price exactly at the "far" boundary.
 The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
 
 
 ```solidity
-function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farFeeE12);
+function calculateFarBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal pure returns (uint256 farBoundaryFeeE12);
 ```
 **Parameters**
 
@@ -142,7 +142,7 @@ function calculateFarFee(uint256 priceRatioX96, uint256 optimalFeeE6) internal p
 
 |Name|Type|Description|
 |----|----|-----------|
-|`farFeeE12`|`uint256`|Fee to get to the "far" boundary in 1e12 precision|
+|`farBoundaryFeeE12`|`uint256`|Fee to get to the "far" boundary in 1e12 precision|
 
 
 ### adjustPreviousFeeForPriceMovement
