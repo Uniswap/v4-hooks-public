@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/8fe1b2a4383ba7acecad71ba23c30b82aa8680d9/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/5c4ff2a94bbb8b6306358079d61dd8a80443c324/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -81,7 +81,7 @@ Used for both far boundary and inside optimal range fee calculations
 function _calculateFeeToOptimalBoundary(uint256 priceRatioX96, uint256 optimalFeeE6, bool invertRatio)
     private
     pure
-    returns (uint40 fee);
+    returns (uint256 fee);
 ```
 **Parameters**
 
@@ -95,7 +95,7 @@ function _calculateFeeToOptimalBoundary(uint256 priceRatioX96, uint256 optimalFe
 
 |Name|Type|Description|
 |----|----|-----------|
-|`fee`|`uint40`|Calculated fee in 1e12 precision, always non-negative|
+|`fee`|`uint256`|Calculated fee in 1e12 precision, always non-negative|
 
 
 ### calculateCloseBoundaryFee

@@ -45,7 +45,7 @@ library FeeCalculation {
     function _calculateFeeToOptimalBoundary(uint256 priceRatioX96, uint256 optimalFeeE6, bool invertRatio)
         private
         pure
-        returns (uint40 fee)
+        returns (uint256 fee)
     {
         // Formula: fee = 1 - (1 - optimalFeeE6) * ratio
         // Where ratio is either:
