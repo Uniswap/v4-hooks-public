@@ -14,7 +14,6 @@ import {IDexCallback} from "./interfaces/IDexCallback.sol";
 import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {console} from "forge-std/console.sol";
 
 /// @title FluidDexT1Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools

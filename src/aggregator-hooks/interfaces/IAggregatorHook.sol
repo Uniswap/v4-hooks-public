@@ -30,5 +30,4 @@ interface IAggregatorHook {
     /// @return amount0 The amount of token0 in the aggregated pool
     /// @return amount1 The amount of token1 in the aggregated pool
     function pseudoTotalValueLocked(PoolId poolId) external view returns (uint256 amount0, uint256 amount1);
-
 }

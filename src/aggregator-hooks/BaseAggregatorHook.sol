@@ -34,7 +34,11 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
     /// @inheritdoc IAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable virtual returns (uint256 amountUnspecified);
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        external
+        payable
+        virtual
+        returns (uint256 amountUnspecified);
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);

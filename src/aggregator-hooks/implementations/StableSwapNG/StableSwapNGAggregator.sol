@@ -12,7 +12,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {ICurveStableSwapNG} from "./interfaces/IStableSwapNG.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "forge-std/Test.sol";
 
 /// @title StableSwapNGAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
