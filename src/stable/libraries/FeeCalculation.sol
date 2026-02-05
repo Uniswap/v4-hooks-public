@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";

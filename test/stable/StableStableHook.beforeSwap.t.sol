@@ -223,7 +223,7 @@ contract StableStableHookTest is Test, Deployers {
     /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
     /// swaps always move the price. Equal prices bypass adjustPreviousFeeForPriceMovement(),
     /// causing the test to use a stale fee that doesn't reflect actual price movement.
-    function test_beforeSwap_unitSwapAmmPriceBiggerThanOptimalSpreadTargetMovedOpposite() public {
+    function test_beforeSwap_unitSwapAmmPriceBiggerThanOptimalSpreadTarget() public {
         uint24 fee;
         uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
@@ -256,7 +256,7 @@ contract StableStableHookTest is Test, Deployers {
     /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
     /// swaps always move the price. Equal prices bypass adjustPreviousFeeForPriceMovement(),
     /// causing the test to use a stale fee that doesn't reflect actual price movement.
-    function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTargetMovedOpposite() public {
+    function test_beforeSwap_unitSwapAmmPriceLessThanOptimalSpreadTarget() public {
         uint24 fee;
         uint160 ammPrice = uint160(999_870 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
@@ -279,5 +279,75 @@ contract StableStableHookTest is Test, Deployers {
 
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_RATIO_1_1 * 101) / 100);
         assertEq(fee, 204); // 90 (optimal) + 114 (decayed toward targetFee)
+    }
+
+    // =============================================================================
+    // INVARIANT: beforeSwap never reverts for any valid price, direction, and block gap
+    // Exercises all state transitions in _calculateFlexibleFee:
+    //   - Inside/outside optimal range
+    //   - Price moving toward/away from reference
+    //   - Price crossing reference
+    //   - Fee state reset, adjustment, cap, and pass-through
+    //   - Decay over varying block gaps
+    //   - Reference price at any valid position in the v4 range
+    // =============================================================================
+
+    /// @notice Fuzz test: beforeSwap never reverts across 5 sequential swaps with arbitrary
+    /// AMM prices (full v4 range), fuzzed reference prices, directions, and block gaps.
+    /// Fee is always <= 1_000_000 (100%).
+    function test_fuzz_beforeSwap_neverReverts(
+        uint160 fuzzedRefSqrtPrice,
+        uint160 sqrtPrice1,
+        uint160 sqrtPrice2,
+        uint160 sqrtPrice3,
+        uint160 sqrtPrice4,
+        uint160 sqrtPrice5,
+        uint256 directions,
+        uint256 blockGaps
+    ) public {
+        // Calculate reference price bounds ensuring optimal range stays within v4 limits
+        // Uses sqrt(1 - maxOptimalFee) since the optimal range is price-based (PR #18)
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt((FeeCalculation.ONE_E6 - 1e4) * FeeCalculation.ONE_E6);
+        uint256 minRef = (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + sqrtOneMinusMaxFeeE6 - 1)
+            / sqrtOneMinusMaxFeeE6;
+        uint256 maxRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
+
+        // Fuzz reference price within valid bounds
+        fuzzedRefSqrtPrice = uint160(bound(fuzzedRefSqrtPrice, minRef, maxRef - 1));
+
+        // Update fee config with fuzzed reference price
+        FeeConfig memory newFeeConfig =
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: fuzzedRefSqrtPrice});
+        vm.prank(configManager);
+        hook.updateFeeConfig(testPoolKey.toId(), newFeeConfig);
+
+        // Decode directions and block gaps from single fuzzed values
+        bool[5] memory zeroForOne;
+        for (uint256 i = 0; i < 5; i++) {
+            zeroForOne[i] = (directions >> i) & 1 == 1;
+        }
+
+        uint256[4] memory gaps;
+        gaps[0] = bound(blockGaps & 0xFFFF, 0, 10_000);
+        gaps[1] = bound((blockGaps >> 16) & 0xFFFF, 0, 10_000);
+        gaps[2] = bound((blockGaps >> 32) & 0xFFFF, 0, 10_000);
+        gaps[3] = bound((blockGaps >> 48) & 0xFFFF, 0, 10_000);
+
+        // Fuzz AMM prices across the full valid v4 range
+        uint160[5] memory prices;
+        prices[0] = uint160(bound(sqrtPrice1, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1));
+        prices[1] = uint160(bound(sqrtPrice2, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1));
+        prices[2] = uint160(bound(sqrtPrice3, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1));
+        prices[3] = uint160(bound(sqrtPrice4, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1));
+        prices[4] = uint160(bound(sqrtPrice5, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1));
+
+        for (uint256 i = 0; i < 5; i++) {
+            sqrtAmmPriceX96 = prices[i];
+            if (i > 0) vm.roll(block.number + gaps[i - 1]);
+
+            uint160 limit = zeroForOne[i] ? TickMath.MIN_SQRT_PRICE : TickMath.MAX_SQRT_PRICE - 1;
+            uint24 fee = callBeforeSwap(zeroForOne[i], 1000 * 1e18, limit);
+            assertLe(fee, 1_000_000, "fee must be <= 100%");
+        }
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
@@ -139,6 +139,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             );
 
             // Select which fee to charge based on swap direction
+            // Price is moving further from reference: charge 0 fee. Otherwise, charge the flexible fee.
             totalStableFeeE12 = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFeeE12;
         }
 
