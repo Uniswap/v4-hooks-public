@@ -16,6 +16,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FeeConfig, FeeState, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {FeeCalculation} from "../../src/stable/libraries/FeeCalculation.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 contract FeeConfigurationImplementationTest is Test {
     using StateLibrary for IPoolManager;
@@ -99,11 +100,13 @@ contract FeeConfigurationImplementationTest is Test {
     }
 
     function test_updateFeeConfig_succeedsWithBoundedReferencePrices() public {
-        // Calculate the bounded min/max reference prices
+        // Calculate the bounded min/max reference prices using sqrt(1 - fee)
+        // The optimal range is price-based, so sqrt price bounds use sqrt(1 - fee)
         uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - feeConfigurationImplementation.MAX_OPTIMAL_FEE_E6();
-        uint256 minBoundedRef =
-            (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + oneMinusMaxFee - 1) / oneMinusMaxFee;
-        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * oneMinusMaxFee / FeeCalculation.ONE_E6;
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
+        uint256 minBoundedRef = (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + sqrtOneMinusMaxFeeE6 - 1)
+            / sqrtOneMinusMaxFeeE6;
+        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
 
         // Test minimum bounded reference price (inclusive - MIN_SQRT_PRICE is valid in v4)
         FeeConfig memory minConfig =
@@ -120,19 +123,21 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), maxConfig);
 
         // Verify the optimal range at boundaries stays within v4 limits
-        // At minBoundedRef: lowerOptimal = minBoundedRef * (1 - maxOptimalFee) >= MIN_SQRT_PRICE
-        uint256 lowerOptimalAtMin = minBoundedRef * oneMinusMaxFee / FeeCalculation.ONE_E6;
+        // At minBoundedRef: lowerOptimal = minBoundedRef * sqrt(1 - maxOptimalFee) >= MIN_SQRT_PRICE
+        uint256 lowerOptimalAtMin = minBoundedRef * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
         assertGe(lowerOptimalAtMin, TickMath.MIN_SQRT_PRICE);
 
-        // At maxBoundedRef - 1: upperOptimal = (maxBoundedRef - 1) / (1 - maxOptimalFee) < MAX_SQRT_PRICE
-        uint256 upperOptimalAtMax = (maxBoundedRef - 1) * FeeCalculation.ONE_E6 / oneMinusMaxFee;
+        // At maxBoundedRef - 1: upperOptimal = (maxBoundedRef - 1) / sqrt(1 - maxOptimalFee) < MAX_SQRT_PRICE
+        uint256 upperOptimalAtMax = (maxBoundedRef - 1) * FeeCalculation.ONE_E6 / sqrtOneMinusMaxFeeE6;
         assertLt(upperOptimalAtMax, TickMath.MAX_SQRT_PRICE);
     }
 
     function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_atMaxBounded() public {
         // maxBoundedRef is exactly at the exclusive boundary, so it should fail
+        // Uses sqrt(1 - fee) since the optimal range is price-based
         uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - feeConfigurationImplementation.MAX_OPTIMAL_FEE_E6();
-        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * oneMinusMaxFee / FeeCalculation.ONE_E6;
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
+        uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
 
         FeeConfig memory newConfig =
             FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(maxBoundedRef)});

@@ -90,20 +90,25 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     }
 
     /// @notice Validate the reference sqrt price
-    /// @dev The reference price is bounded such that the optimal range (referencePrice * (1 - maxOptimalFee)
-    ///      to referencePrice / (1 - maxOptimalFee)) stays within valid v4 price bounds.
+    /// @dev The optimal range is defined in terms of PRICE (not sqrt price):
+    ///      [referencePrice * (1 - maxOptimalFee), referencePrice / (1 - maxOptimalFee)]
+    ///      Since price = sqrtPrice², the sqrt price bounds are:
+    ///      [referenceSqrtPrice * sqrt(1 - maxOptimalFee), referenceSqrtPrice / sqrt(1 - maxOptimalFee)]
     ///      Note: MIN_SQRT_PRICE is valid (inclusive) but MAX_SQRT_PRICE is invalid (exclusive) in v4.
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
     function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure {
-        // Calculate bounds that ensure optimal range stays within v4 price limits
-        // minBound: referencePrice * (1 - maxOptimalFee) >= MIN_SQRT_PRICE
-        //           => referencePrice >= MIN_SQRT_PRICE / (1 - maxOptimalFee)
-        // maxBound: referencePrice / (1 - maxOptimalFee) < MAX_SQRT_PRICE  (strictly less than!)
-        //           => referencePrice < MAX_SQRT_PRICE * (1 - maxOptimalFee)
+        // Calculate bounds that ensure optimal range stays within v4 sqrt price limits
+        // The optimal range boundaries in sqrt price terms use sqrt(1 - fee), not (1 - fee)
+        // minBound: referenceSqrtPrice * sqrt(1 - maxOptimalFee) >= MIN_SQRT_PRICE
+        //           => referenceSqrtPrice >= MIN_SQRT_PRICE / sqrt(1 - maxOptimalFee)
+        // maxBound: referenceSqrtPrice / sqrt(1 - maxOptimalFee) < MAX_SQRT_PRICE  (strictly less than!)
+        //           => referenceSqrtPrice < MAX_SQRT_PRICE * sqrt(1 - maxOptimalFee)
         uint256 oneMinusMaxFee = FeeCalculation.ONE_E6 - MAX_OPTIMAL_FEE_E6;
+        uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
         uint256 minBoundedReferenceSqrtPrice =
-            (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + oneMinusMaxFee - 1) / oneMinusMaxFee;
-        uint256 maxBoundedReferenceSqrtPrice = uint256(TickMath.MAX_SQRT_PRICE) * oneMinusMaxFee / FeeCalculation.ONE_E6;
+            (uint256(TickMath.MIN_SQRT_PRICE) * FeeCalculation.ONE_E6 + sqrtOneMinusMaxFeeE6 - 1) / sqrtOneMinusMaxFeeE6;
+        uint256 maxBoundedReferenceSqrtPrice =
+            uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
 
         if (
             _referenceSqrtPriceX96 < minBoundedReferenceSqrtPrice
