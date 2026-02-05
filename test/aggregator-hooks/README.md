@@ -6,7 +6,9 @@ When adding a new protocol, the test suite must have the following:
 
 - Unit tests giving 100% coverage
 - Forked tests: tests ran on a forked version of the real, deployed protocol
-- Fuzz tests 
+- Fuzz tests
+
+Note: Fork tests must be ran on a USDT pool atleast once (since USDT has slightly different behavior than other tokens).
 
 ## Testing
 
@@ -31,7 +33,7 @@ The fuzz tests use precompiled bytecode stored in `test/aggregator-hooks/StableS
 
 ### Fuzz Testing (Fluid pools)
 
-The FluidDexLite/FluidDexT1 fuzz tests use pre-deployed infrastructure on forked versions of chains where the respective Fluid Dex infrastructure is already deployed. This is because adding aggregator-hook tests on top of Fluid's infrastructure deployment scripts cause multiple compilation issues, including memory/stack/depth issues, even with --via-ir. Everything else (pools, liquidity positions, etc) is bespokely created in the test.
+The FluidDexLite/FluidDexT1 fuzz tests use pre-deployed infrastructure on forked versions of chains where the respective Fluid Dex infrastructure is already deployed. This is because adding aggregator-hook tests on top of Fluid's infrastructure deployment scripts cause multiple compilation issues, including memory/stack/depth issues, even with --via-ir. Everything else (pools, liquidity positions, tokens, etc) is bespokely created in the test.
 
 ## Testing (Fork Tests)
 
