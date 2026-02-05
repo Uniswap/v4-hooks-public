@@ -36,32 +36,6 @@ library FeeCalculation {
         priceRatioX96 = sqrtPriceRatioX96 * sqrtPriceRatioX96;
     }
 
-    /// @notice Calculate close boundary fee
-    /// @dev Returns negative if price is inside optimal range (negative fee), positive if outside
-    ///      The numeric value represents the fee to reach the close boundary:
-    ///      - Negative: Inside range, fee to nearest boundary (already crossed it)
-    ///      - Positive: Outside range, fee to nearest boundary (not yet reached)
-    /// @param ammToRPRatioX96 Price ratio to reference price in Q96 format
-    /// @param optimalFeeE6 Optimal fee rate in parts per million
-    /// @return fee Close boundary fee in 1e12 precision, can be negative
-    function _calculateCloseBoundaryFee(uint160 ammToRPRatioX96, uint24 optimalFeeE6)
-        private
-        pure
-        returns (int256 fee)
-    {
-        // Formula: fee = 1 - priceRatio / (1 - optimalFeeE6)
-        // Step-by-step breakdown:
-        //   1. numerator = ammToRPRatioX96 * ONE_E6 (scale ratio to ONE_E6-compatible units)
-        //   2. denominator = (ONE_E6 - optimalFeeE6) * Q96 (scale optimal rate complement to Q96)
-        //   3. fraction = numerator / denominator (compute priceRatio / (1 - optimalRate))
-        //   4. fee = ONE_E12 - fraction (complete the formula)
-        //
-        // All calculations use int256 to preserve sign for potentially negative results
-        fee = int256(uint256(ONE_E12))
-            - (int256(uint256(ONE_E12)) * int256(uint256(ammToRPRatioX96)) * int256(uint256(ONE_E6)))
-            / int256(uint256(ONE_E6 - optimalFeeE6)) / int256(uint256(FixedPoint96.Q96));
-    }
-
     /// @notice Calculate fee to reach an optimal range boundary
     /// @dev Used for both far boundary and inside optimal range fee calculations
     /// @param ammToRPRatioX96 Price ratio to reference price in Q96 format
