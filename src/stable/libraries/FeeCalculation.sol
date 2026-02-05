@@ -36,15 +36,15 @@ library FeeCalculation {
         priceRatioX96 = sqrtPriceRatioX96 * sqrtPriceRatioX96;
     }
 
-    /// @notice Calculate distance from optimal range
-    /// @dev Returns negative if price is inside optimal range (negative distance), positive if outside
-    ///      The numeric value represents how far from the optimal range boundaries:
-    ///      - Negative: Inside range, distance to nearest boundary (already crossed it)
-    ///      - Positive: Outside range, distance to nearest boundary (not yet reached)
+    /// @notice Calculate close boundary fee
+    /// @dev Returns negative if price is inside optimal range (negative fee), positive if outside
+    ///      The numeric value represents the fee to reach the close boundary:
+    ///      - Negative: Inside range, fee to nearest boundary (already crossed it)
+    ///      - Positive: Outside range, fee to nearest boundary (not yet reached)
     /// @param priceToRPRatioX96 Price ratio to reference price in Q96 format
     /// @param optimalFeeE6 Optimal fee rate in parts per million
-    /// @return fee Distance from optimal range in 1e12 precision, can be negative
-    function _calculateDistanceFromOptimalRange(uint160 priceToRPRatioX96, uint24 optimalFeeE6)
+    /// @return fee Close boundary fee in 1e12 precision, can be negative
+    function _calculateCloseBoundaryFee(uint160 priceToRPRatioX96, uint24 optimalFeeE6)
         private
         pure
         returns (int256 fee)
@@ -100,29 +100,29 @@ library FeeCalculation {
         fee = uint40(ONE_E12 - scaledValue);
     }
 
-    /// @notice Calculate distance from optimal range - measures how far the current price is from the optimal range boundaries.
-    ///         Returns a distance metric where negative values mean inside the range, positive means outside.
+    /// @notice Calculate close boundary fee - measures the fee to reach the close boundary of the optimal range.
+    ///         Returns a fee metric where negative values mean inside the range, positive means outside.
     /// @param priceToRPRatioX96 Price ratio to reference price in Q96 format from calculatePriceRatioX96
     /// @param optimalFeeE6 Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
-    /// @return distanceFromOptimalRangeE12 Distance from optimal range. If <= 0, price is inside optimal range. If > 0, price is outside.
-    function calculateDistanceFromOptimalRange(uint256 priceToRPRatioX96, uint256 optimalFeeE6)
+    /// @return closeBoundaryFeeE12 Close boundary fee. If <= 0, price is inside optimal range. If > 0, price is outside.
+    function calculateCloseBoundaryFee(uint256 priceToRPRatioX96, uint256 optimalFeeE6)
         internal
         pure
-        returns (int256 distanceFromOptimalRangeE12)
+        returns (int256 closeBoundaryFeeE12)
     {
         // Case 1: ammPrice < RP (price to the left)
         //   - priceRatio = ammPrice / RP ≤ 1
         //   - Close boundary = RP * (1 - optimalFee) [lower bound]
-        //   - Target equation: ammPrice / (1 - distanceFromOptimalRangeE12) = RP * (1 - optimalFee)
+        //   - Target equation: ammPrice / (1 - closeBoundaryFeeE12) = RP * (1 - optimalFee)
 
         // Case 2: ammPrice > RP (price to the right)
         //   - priceRatio = RP / ammPrice ≤ 1
         //   - Close boundary = RP / (1 - optimalFee) [upper bound]
-        //   - Target equation: ammPrice * (1 - distanceFromOptimalRangeE12) = RP / (1 - optimalFee)
+        //   - Target equation: ammPrice * (1 - closeBoundaryFeeE12) = RP / (1 - optimalFee)
 
         // Both cases use the same formula:
-        //   distanceFromOptimalRangeE12 = 1 - priceRatio / (1 - optimalFee)
-        distanceFromOptimalRangeE12 = int256(ONE_E12)
+        //   closeBoundaryFeeE12 = 1 - priceRatio / (1 - optimalFee)
+        closeBoundaryFeeE12 = int256(ONE_E12)
             - int256((ONE_E12 * priceToRPRatioX96 * ONE_E6) / (ONE_E6 - optimalFeeE6) / FixedPoint96.Q96);
     }
 
@@ -154,29 +154,29 @@ library FeeCalculation {
         feeE12 = _calculateFeeToOptimalBoundary(priceToRPRatioX96, optimalFeeE6, invertRatio);
     }
 
-    /// @notice Calculate far fee - the fee that would place the effective price exactly at the "far" boundary.
+    /// @notice Calculate far boundary fee - the fee that would place the effective price exactly at the "far" boundary.
     ///         The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
     /// @param priceToRPRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @param optimalFeeE6 Optimal fee in parts per million
-    /// @return farFeeE12 Fee to get to the "far" boundary in 1e12 precision
-    function calculateFarFee(uint256 priceToRPRatioX96, uint256 optimalFeeE6)
+    /// @return farBoundaryFeeE12 Fee to get to the "far" boundary in 1e12 precision
+    function calculateFarBoundaryFee(uint256 priceToRPRatioX96, uint256 optimalFeeE6)
         internal
         pure
-        returns (uint256 farFeeE12)
+        returns (uint256 farBoundaryFeeE12)
     {
         // Case 1: ammPrice < RP
         //   - priceRatio = ammPrice / RP ≤ 1
         //   - Far boundary = RP / (1 - optimalFee) [upper bound]
-        //   - Target equation: ammPrice / (1 - farFee) = RP / (1 - optimalFee)
+        //   - Target equation: ammPrice / (1 - farBoundaryFee) = RP / (1 - optimalFee)
 
         /// Case 2: ammPrice > RP
         //   - priceRatio = RP / ammPrice ≤ 1
         //   - Far boundary = RP * (1 - optimalFee) [lower bound]
-        //   - Target equation: ammPrice * (1 - farFee) = RP * (1 - optimalFee)
+        //   - Target equation: ammPrice * (1 - farBoundaryFee) = RP * (1 - optimalFee)
 
         // Both cases use the same formula:
-        //   farFee = 1 - (1 - optimalFeeE6) * priceRatio
-        farFeeE12 = _calculateFeeToOptimalBoundary(priceToRPRatioX96, optimalFeeE6, false);
+        //   farBoundaryFee = 1 - (1 - optimalFeeE6) * priceRatio
+        farBoundaryFeeE12 = _calculateFeeToOptimalBoundary(priceToRPRatioX96, optimalFeeE6, false);
     }
 
     /// @notice Adjust previous fee to preserve the same effective price when AMM price moves further from reference

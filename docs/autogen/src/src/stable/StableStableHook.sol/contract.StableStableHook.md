@@ -124,8 +124,8 @@ function _calculateDecayingFee(
     FeeState storage feeState,
     uint256 sqrtAmmPriceX96,
     uint256 sqrtReferencePriceX96,
-    uint256 closeFeeE12,
-    uint256 farFeeE12,
+    uint256 closeBoundaryFeeE12,
+    uint256 farBoundaryFeeE12,
     bool ammPriceToTheLeft
 ) private view returns (uint256 flexibleFeeE12);
 ```
@@ -137,8 +137,8 @@ function _calculateDecayingFee(
 |`feeState`|`FeeState`|The FeeState of the pool|
 |`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
 |`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
-|`closeFeeE12`|`uint256`|The fee to reach the close boundary, > 0 since we are outside the optimal range|
-|`farFeeE12`|`uint256`|The fee to reach the far boundary|
+|`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary, > 0 since we are outside the optimal range|
+|`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary|
 |`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
 
 **Returns**
