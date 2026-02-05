@@ -96,7 +96,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 optimalFeeE6 = config.optimalFeeE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
-        uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
+        uint256 ammToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
         // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
         // Let P_ref = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
@@ -107,7 +107,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         // closeBoundaryFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If closeBoundaryFeeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
         //   - If closeBoundaryFeeE12 > 0: AMM price is outside the optimal range (hasn't reached the close boundary)
-        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceToRPRatioX96, optimalFeeE6);
+        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(ammToRPRatioX96, optimalFeeE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
@@ -119,13 +119,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
             totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
-                priceToRPRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
+                ammToRPRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
             );
             decayingFeeE12 = FeeCalculation.UNDEFINED_DECAYING_FEE_E12; // No decaying fee inside optimal range
         } else {
             // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
             // farBoundaryFeeE12 represents the fee to reach whichever boundary is farther from the current AMM price.
-            uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceToRPRatioX96, optimalFeeE6);
+            uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(ammToRPRatioX96, optimalFeeE6);
 
             // closeBoundaryFeeE12 is positive since we are outside the optimal range
             decayingFeeE12 = _calculateDecayingFee(
@@ -190,8 +190,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
             // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
-            uint256 priceToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
-            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceToRPRatioX96, previousFeeE12);
+            uint256 ammToRPRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
+            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(ammToRPRatioX96, previousFeeE12);
         } else if (previousFeeE12 > farBoundaryFeeE12) {
             // Price moved toward reference, lowering farBoundaryFee below previousFee
             // Cap at the new far boundary
