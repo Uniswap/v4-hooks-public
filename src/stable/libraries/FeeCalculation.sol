@@ -19,8 +19,7 @@ library FeeCalculation {
     /// @notice Scale used to preserve precision in sqrt ratio math.
     uint256 internal constant Q48 = 2 ** 48;
 
-    /// @notice Calculate the price ratio between two sqrt prices in Q96 format
-    /// @dev Always returns min(price1, price2) / max(price1, price2), ensuring result <= 2^96
+    /// @notice Calculate the price ratio between two sqrt prices in Q96 format, ensuring result <= 2^96
     /// @param sqrtPrice1X96 First sqrt price in Q96 format
     /// @param sqrtPrice2X96 Second sqrt price in Q96 format
     /// @return priceRatioX96 Price ratio in Q96 format, always <= 2^96
@@ -180,10 +179,9 @@ library FeeCalculation {
         farFeeE12 = _calculateFeeToOptimalBoundary(priceToRPRatioX96, optimalFeeE6, false);
     }
 
-    /// @notice Adjust previous fee for price movement
-    /// @dev When price moves further from reference, adjust the previous fee to account for the movement
+    /// @notice Adjust previous fee to preserve the same effective price when AMM price moves further from reference
+    /// @param priceToRPRatioX96 Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)
     /// @param previousFeeE12 Previous flexible fee in 1e12 precision
-    /// @param priceToRPRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @return adjustedFeeE12 Adjusted previous fee accounting for price movement in 1e12 precision
     function adjustPreviousFeeForPriceMovement(uint256 priceToRPRatioX96, uint256 previousFeeE12)
         internal
@@ -194,10 +192,9 @@ library FeeCalculation {
         adjustedFeeE12 = ONE_E12 - (priceToRPRatioX96 * (ONE_E12 - previousFeeE12)) / FixedPoint96.Q96;
     }
 
-    /// @notice Calculate flexible fee with exponential decay
-    /// @dev Fee decays from previous fee toward target fee over time
+    /// @notice Calculate flexible fee with exponential decay. Fee decays from previous fee toward target fee over time.
     /// @param targetFeeE12 Target fee to decay toward in 1e12 precision
-    /// @param previousFeeE12 Previous flexible fee in 1e12 precision, previousFee > targetFee
+    /// @param previousFeeE12 Previous flexible fee in 1e12 precision, previousFee >= targetFee
     /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24
     /// @param logK Natural log of k scaled appropriately
     /// @param blocksPassed Number of blocks since last fee update, <= type(uint40).max
@@ -227,7 +224,6 @@ library FeeCalculation {
     /// @param k The base of the power
     /// @param blocksPassed The power to raise k to. Must be <= 4.
     /// @return z The result of k to the power of blocksPassed
-    // @dev the split in two with this special case saves 110 gas, see factor() in (Stable)HookParams
     function fastPow(uint256 k, uint256 blocksPassed) internal pure returns (uint256 z) {
         assembly {
             switch blocksPassed
