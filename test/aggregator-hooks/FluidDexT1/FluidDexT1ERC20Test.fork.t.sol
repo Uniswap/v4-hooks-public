@@ -72,15 +72,16 @@ contract FluidDexT1ERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
         fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_ERC");
+        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
         vm.createSelectFork(rpcUrl);
-
-        // Load addresses from environment variables
-        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
-        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_erc_v1"))));

@@ -104,16 +104,16 @@ contract FluidDexT1ERC20Fuzz is Test {
     }
 
     function setUp() public {
-        // Fork mainnet
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        vm.createSelectFork(rpcUrl);
-
-        // Load addresses from environment variables
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
         liquidity = vm.envAddress("FLUID_LIQUIDITY");
         dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
         dexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
         dexT1DeploymentLogic = vm.envAddress("FLUID_DEX_T1_DEPLOYMENT_LOGIC");
         timelock = vm.envAddress("FLUID_DEX_T1_TIMELOCK");
+
+        vm.createSelectFork(rpcUrl);
 
         // Load mainnet contracts
         dexFactory = IFluidDexFactory(dexFactoryAddress);

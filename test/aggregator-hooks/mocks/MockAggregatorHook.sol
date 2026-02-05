@@ -8,10 +8,10 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BaseAggregatorHook} from "../../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {MockExternalLiqSource} from "./MockExternalLiqSource.sol";
 
-/// @title MockExternalLiqSourceHook
+/// @title MockAggregatorHook
 /// @notice Concrete BaseAggregatorHook that delegates _conductSwap to MockExternalLiqSource.
 /// @dev quote and pseudoTotalValueLocked use settable storage for tests.
-contract MockExternalLiqSourceHook is BaseAggregatorHook {
+contract MockAggregatorHook is BaseAggregatorHook {
     MockExternalLiqSource public immutable externalSource;
 
     uint256 public mockQuoteReturn;

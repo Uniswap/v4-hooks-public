@@ -33,6 +33,7 @@ contract MockIFluidDexLite is IFluidDexLite {
 
     receive() external payable {}
 
+    /// @inheritdoc IFluidDexLite
     function swapSingle(
         DexKey calldata dexKey_,
         bool swap0to1_,
@@ -45,7 +46,6 @@ contract MockIFluidDexLite is IFluidDexLite {
     ) external payable override returns (uint256 amountUnspecified_) {
         if (revertSwapSingle) revert SwapSingleRevert();
 
-        // Determine tokens based on swap direction
         address tokenIn = swap0to1_ ? dexKey_.token0 : dexKey_.token1;
         address tokenOut = swap0to1_ ? dexKey_.token1 : dexKey_.token0;
 
@@ -60,9 +60,7 @@ contract MockIFluidDexLite is IFluidDexLite {
             IFluidDexLiteCallback(msg.sender).dexCallback(callbackToken, amountIn, data_);
         }
 
-        // Transfer output tokens to recipient
         if (tokenOut == FLUID_NATIVE_CURRENCY || tokenOut == address(0)) {
-            // Native currency output
             (bool success,) = to_.call{value: returnSwapSingle}("");
             require(success, "ETH transfer failed");
         } else {

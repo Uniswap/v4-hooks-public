@@ -63,6 +63,10 @@ contract FluidDexLiteERC20Fuzz is Test {
     uint256 constant MIN_RANGE_PERCENT = 100; // 0.01%
     uint256 constant MAX_RANGE_PERCENT = 10000; // 1%
 
+    // Center price bounds (1e27 = 1:1 price)
+    uint256 constant MIN_CENTER_PRICE = 1e26; // 0.1:1
+    uint256 constant MAX_CENTER_PRICE = 1e28; // 10:1
+
     // Liquidity bounds
     uint256 constant MIN_LIQUIDITY = 1_000 ether;
     uint256 constant MAX_LIQUIDITY = 10_000_000 ether;
@@ -82,6 +86,7 @@ contract FluidDexLiteERC20Fuzz is Test {
         uint256 liquidity1;
         uint256 fee;
         uint256 rangePercent;
+        uint256 centerPrice;
         bytes32 salt;
     }
 
@@ -93,14 +98,15 @@ contract FluidDexLiteERC20Fuzz is Test {
     }
 
     function setUp() public {
-        // Fork mainnet and load Fluid addresses from env
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        vm.createSelectFork(rpcUrl);
-
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
         dexLite = IFluidDexLite(vm.envAddress("FLUID_DEX_LITE"));
         dexLiteAdminModule = vm.envAddress("FLUID_DEX_LITE_ADMIN_MODULE");
         resolver = IFluidDexLiteResolver(vm.envAddress("FLUID_DEX_LITE_RESOLVER"));
         fluidDexLiteAuth = vm.envAddress("FLUID_DEX_LITE_AUTH");
+
+        vm.createSelectFork(rpcUrl);
 
         // Deploy V4 infrastructure
         poolManager = new PoolManager(address(this));
@@ -177,6 +183,7 @@ contract FluidDexLiteERC20Fuzz is Test {
         setup.liquidity1 = _deriveLiquidity(seed, 1);
         setup.fee = _deriveFee(seed);
         setup.rangePercent = _deriveRangePercent(seed);
+        setup.centerPrice = _deriveCenterPrice(seed);
         setup.salt = keccak256(abi.encode(seed, "salt"));
 
         // Build dex key
@@ -215,7 +222,7 @@ contract FluidDexLiteERC20Fuzz is Test {
             revenueCut: 0,
             fee: setup.fee,
             rebalancingStatus: false,
-            centerPrice: 1e27, // 1:1 center price
+            centerPrice: setup.centerPrice,
             centerPriceContract: 0,
             upperPercent: setup.rangePercent,
             lowerPercent: setup.rangePercent,
@@ -397,6 +404,11 @@ contract FluidDexLiteERC20Fuzz is Test {
     /// @notice Derive range percent for the pool
     function _deriveRangePercent(uint256 seed) internal pure returns (uint256) {
         return bound(uint256(keccak256(abi.encode(seed, "range"))), MIN_RANGE_PERCENT, MAX_RANGE_PERCENT);
+    }
+
+    /// @notice Derive center price for the pool
+    function _deriveCenterPrice(uint256 seed) internal pure returns (uint256) {
+        return bound(uint256(keccak256(abi.encode(seed, "centerPrice"))), MIN_CENTER_PRICE, MAX_CENTER_PRICE);
     }
 
     /// @notice Derive swap amount based on pool liquidity

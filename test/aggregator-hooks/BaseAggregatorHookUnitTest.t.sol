@@ -15,18 +15,18 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "./shared/SafePoolSwapTest.sol";
 import {MockExternalLiqSource} from "./mocks/MockExternalLiqSource.sol";
-import {MockExternalLiqSourceHook} from "./mocks/MockExternalLiqSourceHook.sol";
+import {MockAggregatorHook} from "./mocks/MockAggregatorHook.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {BaseAggregatorHook} from "../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {IAggregatorHook} from "../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 
-contract ExternalLiqSourceHookUnitTest is Test {
+contract BaseAggregatorHookUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     PoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
     MockExternalLiqSource public externalSource;
-    MockExternalLiqSourceHook public hook;
+    MockAggregatorHook public hook;
     MockERC20 public token0;
     MockERC20 public token1;
 
@@ -52,9 +52,8 @@ contract ExternalLiqSourceHookUnitTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
         bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), externalSource);
-        (, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(MockExternalLiqSourceHook).creationCode, constructorArgs);
-        hook = new MockExternalLiqSourceHook{salt: salt}(IPoolManager(address(poolManager)), externalSource);
+        (, bytes32 salt) = HookMiner.find(address(this), flags, type(MockAggregatorHook).creationCode, constructorArgs);
+        hook = new MockAggregatorHook{salt: salt}(IPoolManager(address(poolManager)), externalSource);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -90,11 +89,10 @@ contract ExternalLiqSourceHookUnitTest is Test {
         (, bytes32 salt2) = HookMiner.find(
             address(this),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(MockExternalLiqSourceHook).creationCode,
+            type(MockAggregatorHook).creationCode,
             args
         );
-        MockExternalLiqSourceHook hook2 =
-            new MockExternalLiqSourceHook{salt: salt2}(IPoolManager(address(poolManager)), src2);
+        MockAggregatorHook hook2 = new MockAggregatorHook{salt: salt2}(IPoolManager(address(poolManager)), src2);
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),

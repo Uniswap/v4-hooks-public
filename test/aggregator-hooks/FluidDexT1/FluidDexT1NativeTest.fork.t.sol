@@ -48,7 +48,7 @@ contract FluidDexT1NativeForkedTest is Test {
 
     // Loaded from .env
     address fluidPoolAddress;
-    address ercTokenAddress; // The ERC20 token in the pair (not native)
+    address erc20TokenAddress; // The ERC20 token in the pair (not native)
     address poolManagerAddress;
 
     // Test amounts (in 18 decimals)
@@ -73,20 +73,19 @@ contract FluidDexT1NativeForkedTest is Test {
     error PoolDoesNotContainNativeToken();
 
     function setUp() public {
-        // Fork mainnet - requires MAINNET_RPC_URL env var
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
+        fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_NATIVE");
+        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        // Load V4 infrastructure address from env vars
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+
         vm.createSelectFork(rpcUrl);
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_native_v1"))));
-
-        // Load native pool address from .env
-        fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_NATIVE");
-
-        // Load addresses from environment variables
-        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
-        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
-        poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
         fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
@@ -98,14 +97,14 @@ contract FluidDexT1NativeForkedTest is Test {
         // Identify which token is native and which is ERC20
         // Native should always be token1 in fluid
         if (fluidToken1 == FLUID_NATIVE_CURRENCY) {
-            ercTokenAddress = fluidToken0;
+            erc20TokenAddress = fluidToken0;
         } else {
             revert PoolDoesNotContainNativeToken();
         }
 
         // Native ETH (address(0)) is always currency0 (lowest address)
         currency0 = Currency.wrap(address(0));
-        currency1 = Currency.wrap(ercTokenAddress);
+        currency1 = Currency.wrap(erc20TokenAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
@@ -127,11 +126,11 @@ contract FluidDexT1NativeForkedTest is Test {
 
         // Deal tokens to alice for testing
         vm.deal(alice, INITIAL_BALANCE);
-        deal(ercTokenAddress, alice, INITIAL_BALANCE);
+        deal(erc20TokenAddress, alice, INITIAL_BALANCE);
 
         // Approve swap router for alice (only ERC20 token needs approval)
         vm.startPrank(alice);
-        IERC20(ercTokenAddress).approve(address(swapRouter), type(uint256).max);
+        IERC20(erc20TokenAddress).approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -159,7 +158,7 @@ contract FluidDexT1NativeForkedTest is Test {
         assertGt(expectedOut, 0, "Quote should return non-zero");
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercBefore = IERC20(erc20TokenAddress).balanceOf(alice);
 
         vm.prank(alice);
         swapRouter.swap{value: uint256(amountIn)}(
@@ -170,7 +169,7 @@ contract FluidDexT1NativeForkedTest is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercAfter = IERC20(erc20TokenAddress).balanceOf(alice);
 
         // ETH should decrease by approximately the input amount (small variance allowed for native handling)
         uint256 ethSpent = ethBefore - ethAfter;
@@ -190,7 +189,7 @@ contract FluidDexT1NativeForkedTest is Test {
         assertGt(expectedOut, 0, "Quote should return non-zero");
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercBefore = IERC20(erc20TokenAddress).balanceOf(alice);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -201,7 +200,7 @@ contract FluidDexT1NativeForkedTest is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercAfter = IERC20(erc20TokenAddress).balanceOf(alice);
 
         // ERC20 should decrease by exact input amount
         assertEq(ercBefore - ercAfter, uint256(amountIn), "ERC20 should decrease by exact input amount");
@@ -242,7 +241,7 @@ contract FluidDexT1NativeForkedTest is Test {
         uint256 expectedIn = hook.quote(false, (amountOut), poolId);
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercBefore = IERC20(erc20TokenAddress).balanceOf(alice);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -253,7 +252,7 @@ contract FluidDexT1NativeForkedTest is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = IERC20(ercTokenAddress).balanceOf(alice);
+        uint256 ercAfter = IERC20(erc20TokenAddress).balanceOf(alice);
 
         // ETH should increase by approximately the output amount (allow 0.1% variance)
         uint256 ethReceived = ethAfter - ethBefore;

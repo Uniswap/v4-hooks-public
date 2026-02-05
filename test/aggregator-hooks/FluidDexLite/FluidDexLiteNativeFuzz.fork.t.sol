@@ -86,10 +86,10 @@ contract FluidDexLiteNativeFuzz is Test {
     /// @dev Struct to hold pool setup parameters (reduces stack depth)
     /// @dev For native pools: token0 is always native ETH (address(0) in V4), token1 is the ERC20
     struct PoolSetup {
-        MockERC20 ercToken; // The ERC20 token (token1 in V4 terms)
+        MockERC20 erc20Token; // The ERC20 token (token1 in V4 terms)
         DexKey dexKey;
         uint256 liquidityNative; // ETH liquidity (token0 in V4)
-        uint256 liquidityErc; // ERC20 liquidity (token1 in V4)
+        uint256 liquidityErc20; // ERC20 liquidity (token1 in V4)
         uint256 fee;
         uint256 rangePercent;
         uint256 centerPrice; // Pool center price (1e27 = 1:1)
@@ -105,14 +105,15 @@ contract FluidDexLiteNativeFuzz is Test {
     }
 
     function setUp() public {
-        // Fork mainnet and load Fluid addresses from env
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        vm.createSelectFork(rpcUrl);
-
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
         dexLite = IFluidDexLite(vm.envAddress("FLUID_DEX_LITE"));
         dexLiteAdminModule = vm.envAddress("FLUID_DEX_LITE_ADMIN_MODULE");
         resolver = IFluidDexLiteResolver(vm.envAddress("FLUID_DEX_LITE_RESOLVER"));
         fluidDexLiteAuth = vm.envAddress("FLUID_DEX_LITE_AUTH");
+
+        vm.createSelectFork(rpcUrl);
 
         // Deploy V4 infrastructure
         poolManager = new PoolManager(address(this));
@@ -152,7 +153,8 @@ contract FluidDexLiteNativeFuzz is Test {
 
         // Derive swap amount
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", 0)));
-        uint256 minLiquidity = setup.liquidityNative < setup.liquidityErc ? setup.liquidityNative : setup.liquidityErc;
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         if (amountOut == 0) amountOut = 1 ether;
 
@@ -208,11 +210,11 @@ contract FluidDexLiteNativeFuzz is Test {
     /// @notice Derive all pool parameters from a single seed
     function _derivePoolSetup(uint256 seed) internal returns (PoolSetup memory setup) {
         // Create ERC20 token (will be token1 in V4 since address > address(0))
-        setup.ercToken = _createErcToken(seed);
+        setup.erc20Token = _createErc20Token(seed);
 
         // Derive pool parameters
         setup.liquidityNative = _deriveLiquidity(seed, 0);
-        setup.liquidityErc = _deriveLiquidity(seed, 1);
+        setup.liquidityErc20 = _deriveLiquidity(seed, 1);
         setup.fee = _deriveFee(seed);
         setup.rangePercent = _deriveRangePercent(seed);
         setup.centerPrice = _deriveCenterPrice(seed);
@@ -220,17 +222,17 @@ contract FluidDexLiteNativeFuzz is Test {
 
         // Build dex key for Fluid (sorted: token0 < token1)
         // ERC20 could be either token0 or token1 depending on address comparison with FLUID_NATIVE_CURRENCY
-        setup.ercIsFluidToken0 = address(setup.ercToken) < FLUID_NATIVE_CURRENCY;
+        setup.ercIsFluidToken0 = address(setup.erc20Token) < FLUID_NATIVE_CURRENCY;
         if (setup.ercIsFluidToken0) {
-            setup.dexKey = DexKey({token0: address(setup.ercToken), token1: FLUID_NATIVE_CURRENCY, salt: setup.salt});
+            setup.dexKey = DexKey({token0: address(setup.erc20Token), token1: FLUID_NATIVE_CURRENCY, salt: setup.salt});
         } else {
-            setup.dexKey = DexKey({token0: FLUID_NATIVE_CURRENCY, token1: address(setup.ercToken), salt: setup.salt});
+            setup.dexKey = DexKey({token0: FLUID_NATIVE_CURRENCY, token1: address(setup.erc20Token), salt: setup.salt});
         }
     }
 
     /// @notice Create a mock ERC20 token
-    function _createErcToken(uint256 seed) internal returns (MockERC20 token) {
-        bytes32 tokenSalt = keccak256(abi.encode(seed, "ercToken"));
+    function _createErc20Token(uint256 seed) internal returns (MockERC20 token) {
+        bytes32 tokenSalt = keccak256(abi.encode(seed, "erc20Token"));
         token = new MockERC20{salt: tokenSalt}("Token", "TKN", 18);
     }
 
@@ -238,13 +240,13 @@ contract FluidDexLiteNativeFuzz is Test {
     /// @return success Whether pool initialization succeeded
     function _initializeFluidPool(PoolSetup memory setup) internal returns (bool success) {
         // Mint ERC20 tokens to the auth address
-        setup.ercToken.mint(fluidDexLiteAuth, setup.liquidityErc);
+        setup.erc20Token.mint(fluidDexLiteAuth, setup.liquidityErc20);
         // Deal ETH to the auth address for native liquidity
         vm.deal(fluidDexLiteAuth, setup.liquidityNative);
 
         // Approve ERC20 token
         vm.startPrank(fluidDexLiteAuth);
-        setup.ercToken.approve(address(dexLite), setup.liquidityErc);
+        setup.erc20Token.approve(address(dexLite), setup.liquidityErc20);
         vm.stopPrank();
 
         // Build initialization params
@@ -263,8 +265,8 @@ contract FluidDexLiteNativeFuzz is Test {
             shiftTime: 3600,
             minCenterPrice: 1,
             maxCenterPrice: type(uint256).max,
-            token0Amount: setup.ercIsFluidToken0 ? setup.liquidityErc : setup.liquidityNative,
-            token1Amount: setup.ercIsFluidToken0 ? setup.liquidityNative : setup.liquidityErc
+            token0Amount: setup.ercIsFluidToken0 ? setup.liquidityErc20 : setup.liquidityNative,
+            token1Amount: setup.ercIsFluidToken0 ? setup.liquidityNative : setup.liquidityErc20
         });
 
         // Encode and execute initialization
@@ -290,7 +292,7 @@ contract FluidDexLiteNativeFuzz is Test {
             hookSalt,
             setup.salt,
             Currency.wrap(address(0)), // Native ETH is currency0
-            Currency.wrap(address(setup.ercToken)), // ERC20 is currency1
+            Currency.wrap(address(setup.erc20Token)), // ERC20 is currency1
             POOL_FEE,
             TICK_SPACING,
             SQRT_PRICE_1_1
@@ -299,8 +301,8 @@ contract FluidDexLiteNativeFuzz is Test {
         deployment.hook = FluidDexLiteAggregator(payable(hookAddress));
 
         deployment.poolKey = PoolKey({
-            currency0: Currency.wrap(address(0)), // Native ETH
-            currency1: Currency.wrap(address(setup.ercToken)),
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(setup.erc20Token)),
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
             hooks: IHooks(hookAddress)
@@ -313,16 +315,16 @@ contract FluidDexLiteNativeFuzz is Test {
     function _setupAlice(PoolSetup memory setup) internal {
         // Deal ETH and mint ERC20 to alice
         vm.deal(alice, setup.liquidityNative);
-        setup.ercToken.mint(alice, setup.liquidityErc);
+        setup.erc20Token.mint(alice, setup.liquidityErc20);
 
         // Approve ERC20 for swap router (ETH doesn't need approval)
         vm.startPrank(alice);
-        setup.ercToken.approve(address(swapRouter), type(uint256).max);
+        setup.erc20Token.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
 
         // Seed PoolManager with tokens for swap settlements
         vm.deal(address(poolManager), setup.liquidityNative);
-        setup.ercToken.mint(address(poolManager), setup.liquidityErc);
+        setup.erc20Token.mint(address(poolManager), setup.liquidityErc20);
     }
 
     // ========== SWAP HELPERS ==========
@@ -336,7 +338,8 @@ contract FluidDexLiteNativeFuzz is Test {
     ) internal {
         // Derive swap amount
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity = setup.liquidityNative < setup.liquidityErc ? setup.liquidityNative : setup.liquidityErc;
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         uint256 amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
 
         // Get quote before swap (negative amountSpecified = exact input)
@@ -344,7 +347,7 @@ contract FluidDexLiteNativeFuzz is Test {
         assertGt(expectedOut, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = setup.ercToken.balanceOf(alice);
+        uint256 ercBefore = setup.erc20Token.balanceOf(alice);
 
         // Execute exact input swap with ETH value
         vm.prank(alice);
@@ -356,7 +359,7 @@ contract FluidDexLiteNativeFuzz is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.ercToken.balanceOf(alice);
+        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
 
         // Verify ETH was spent (approximately, small variance for native handling)
         uint256 ethSpent = ethBefore - ethAfter;
@@ -374,7 +377,8 @@ contract FluidDexLiteNativeFuzz is Test {
     ) internal {
         // Derive swap amount
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity = setup.liquidityNative < setup.liquidityErc ? setup.liquidityNative : setup.liquidityErc;
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         uint256 amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
 
         // Get quote before swap (negative amountSpecified = exact input)
@@ -382,7 +386,7 @@ contract FluidDexLiteNativeFuzz is Test {
         assertGt(expectedOut, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = setup.ercToken.balanceOf(alice);
+        uint256 ercBefore = setup.erc20Token.balanceOf(alice);
 
         // Execute exact input swap (no ETH value needed for ERC20 input)
         vm.prank(alice);
@@ -394,7 +398,7 @@ contract FluidDexLiteNativeFuzz is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.ercToken.balanceOf(alice);
+        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
 
         // Verify ERC20 was spent
         assertEq(ercBefore - ercAfter, amountIn, "Should spend exact input amount");
@@ -412,7 +416,8 @@ contract FluidDexLiteNativeFuzz is Test {
     ) internal {
         // Derive swap amount (use smaller amounts for exact output)
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity = setup.liquidityNative < setup.liquidityErc ? setup.liquidityNative : setup.liquidityErc;
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         if (amountOut == 0) amountOut = 1 ether;
 
@@ -421,7 +426,7 @@ contract FluidDexLiteNativeFuzz is Test {
         assertGt(expectedIn, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
-        uint256 ercBefore = setup.ercToken.balanceOf(alice);
+        uint256 ercBefore = setup.erc20Token.balanceOf(alice);
 
         // Execute exact output swap
         vm.prank(alice);
@@ -433,7 +438,7 @@ contract FluidDexLiteNativeFuzz is Test {
         );
 
         uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.ercToken.balanceOf(alice);
+        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
 
         // Verify ETH output (approximately for native handling)
         uint256 ethReceived = ethAfter - ethBefore;

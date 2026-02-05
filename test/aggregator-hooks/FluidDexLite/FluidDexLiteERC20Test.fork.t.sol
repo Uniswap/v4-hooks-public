@@ -72,13 +72,16 @@ contract FluidDexLiteERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Fluid infrastructure addresses from env vars
         fluidDexLiteAddress = vm.envAddress("FLUID_DEX_LITE");
         fluidDexLiteResolverAddress = vm.envAddress("FLUID_DEX_LITE_RESOLVER");
         dexSalt = vm.envBytes32("FLUID_DEX_LITE_SALT_ERC");
         token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC");
         token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC");
+        // Load V4 infrastructure address from env vars
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
         vm.createSelectFork(rpcUrl);
 

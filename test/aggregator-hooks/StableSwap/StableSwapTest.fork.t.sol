@@ -58,9 +58,12 @@ contract StableSwapForkedTest is Test {
     address public alice = makeAddr("alice");
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        // Forking requires an RPC URL env var
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_POOL");
+        // Load V4 infrastructure address from env vars
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
         vm.createSelectFork(rpcUrl);
 
