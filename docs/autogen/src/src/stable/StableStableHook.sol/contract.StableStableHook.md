@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/2e697d19d9bd1bca99a9588352933864b9fd42b0/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -8,6 +8,9 @@
 StableStableHook
 
 Dynamic fee hook for stable/stable pools
+
+**Note:**
+security-contact: security@uniswap.org
 
 
 ## Functions
@@ -108,5 +111,40 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 |`<none>`|`bytes4`|selector The function selector for IHooks.beforeSwap|
 |`<none>`|`BeforeSwapDelta`|delta BeforeSwapDelta (always zero for this hook)|
 |`<none>`|`uint24`|lpFeeOverride The calculated dynamic fee with override flag|
+
+
+### _calculateFlexibleFee
+
+Calculate flexible fee when price is outside optimal range
+
+
+```solidity
+function _calculateFlexibleFee(
+    FeeConfig storage config,
+    FeeState storage feeState,
+    uint256 sqrtAmmPriceX96,
+    uint256 sqrtReferencePriceX96,
+    uint256 closeFeeE12,
+    uint256 farFeeE12,
+    bool ammPriceToTheLeft
+) private view returns (uint256 flexibleFeeE12);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`config`|`FeeConfig`|The FeeConfig of the pool|
+|`feeState`|`FeeState`|The FeeState of the pool|
+|`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
+|`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
+|`closeFeeE12`|`uint256`|The fee to reach the close boundary, > 0 since we are outside the optimal range|
+|`farFeeE12`|`uint256`|The fee to reach the far boundary|
+|`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`flexibleFeeE12`|`uint256`|The calculated flexible fee in 1e12 precision|
 
 

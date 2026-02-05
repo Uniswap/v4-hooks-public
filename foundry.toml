@@ -2,7 +2,7 @@
 out = 'foundry-out'
 solc_version = '0.8.26'
 optimizer_runs = 44444444
-via_ir = true
+via_ir = false
 ffi = true
 fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }]
 evm_version = "cancun"
@@ -22,3 +22,6 @@ unichain_sepolia = "https://sepolia.unichain.org"
 base_sepolia = "https://sepolia.base.org"
 arbitrum_sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
 mainnet = "https://mainnet.infura.io/v3/${INFURA_API_KEY}"
+
+[lint]
+lint_on_build=false

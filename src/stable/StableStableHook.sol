@@ -19,6 +19,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title StableStableHook
 /// @notice Dynamic fee hook for stable/stable pools
+/// @custom:security-contact security@uniswap.org
 contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
@@ -92,20 +93,21 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
         uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint256 optimalFeeRateE6 = config.optimalFeeRateE6;
+        uint256 optimalFeeE6 = config.optimalFeeE6;
 
         // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
-        // closeFeeE12 is a threshold test to determine if we're inside or outside the optimal rate.
-        // The optimal rate has two boundaries around the reference price:
-        //   - Lower bound: RP * (1 - optimalFeeRate)
-        //   - Upper bound: RP / (1 - optimalFeeRate)
-        //
-        // closeFeeE12 represents the fee to reach whichever boundary is closest to the current AMM price.
-        //   - If closeFeeE12 <= 0: AMM price is inside the optimal rate (past the close boundary)
-        //   - If closeFeeE12 > 0: AMM price is outside the optimal rate (hasn't reached the close boundary)
-        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeRateE6);
+        // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
+        // Let P_ref = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
+        // The optimal range bounds are:
+        //   - Lower bound (price): P_ref * (1 - optimalFee)
+        //   - Upper bound (price): P_ref / (1 - optimalFee)
+
+        // closeFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
+        //   - If closeFeeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
+        //   - If closeFeeE12 > 0: AMM price is outside the optimal range (hasn't reached the close boundary)
+        int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, optimalFeeE6);
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceToTheLeft = sqrtAmmPriceX96 < sqrtReferencePriceX96;
@@ -113,23 +115,37 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 flexibleFeeE12;
 
         if (closeFeeE12 <= 0) {
-            // Inside optimal rate: The fee is calculated such that all swappers face consistent buy/sell prices:
+            // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRateFee(
-                priceRatioX96, optimalFeeRateE6, ammPriceToTheLeft, userSellsZeroForOne
+            totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+                priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
             );
-            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal fee rate
+            flexibleFeeE12 = FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12; // No flexible fee inside optimal range
+        } else {
+            // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
+            // farFee represents the fee to reach whichever boundary is farther from the current AMM price.
+            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, optimalFeeE6);
+
+            // closeFeeE12 is positive since we are outside the optimal range
+            flexibleFeeE12 = _calculateFlexibleFee(
+                config,
+                feeState,
+                sqrtAmmPriceX96,
+                sqrtReferencePriceX96,
+                uint256(closeFeeE12),
+                farFeeE12,
+                ammPriceToTheLeft
+            );
+
+            // Select which fee to charge based on swap direction
+            totalStableFeeE12 = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : flexibleFeeE12;
         }
-        // else {
-        //     // outside optimal rate
-        //     // TODO
-        // }
 
         // Update historical data for next swap's calculations
         feeState.previousFeeE12 = uint40(flexibleFeeE12);
         feeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
-        feeState.blockNumber = block.number;
+        feeState.blockNumber = uint40(_getBlockNumberish());
 
         // Convert to Uniswap fee format (1e12 / 1e6 = 1e6)
         uint24 uniswapFeeE6 = uint24(totalStableFeeE12 / FeeCalculation.ONE_E6);
@@ -140,5 +156,56 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
                 BeforeSwapDeltaLibrary.ZERO_DELTA,
                 uniswapFeeE6 | LPFeeLibrary.OVERRIDE_FEE_FLAG
             );
+    }
+
+    /// @notice Calculate flexible fee when price is outside optimal range
+    /// @param config The FeeConfig of the pool
+    /// @param feeState The FeeState of the pool
+    /// @param sqrtAmmPriceX96 The current AMM sqrt price
+    /// @param sqrtReferencePriceX96 The reference sqrt price
+    /// @param closeFeeE12 The fee to reach the close boundary, > 0 since we are outside the optimal range
+    /// @param farFeeE12 The fee to reach the far boundary
+    /// @param ammPriceToTheLeft True if current AMM price < reference price
+    /// @return flexibleFeeE12 The calculated flexible fee in 1e12 precision
+    function _calculateFlexibleFee(
+        FeeConfig storage config,
+        FeeState storage feeState,
+        uint256 sqrtAmmPriceX96,
+        uint256 sqrtReferencePriceX96,
+        uint256 closeFeeE12,
+        uint256 farFeeE12,
+        bool ammPriceToTheLeft
+    ) private view returns (uint256 flexibleFeeE12) {
+        uint256 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
+        uint256 previousFeeE12 = feeState.previousFeeE12;
+
+        // Step 1: Determine if previous fee needs to be reset
+        if (
+            previousFeeE12 == FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12
+                || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceToTheLeft
+        ) {
+            // Price just left optimal spread or jumped across reference
+            // Start from far boundary
+            previousFeeE12 = farFeeE12;
+        } else if (ammPriceToTheLeft == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
+            // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
+            // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
+            uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
+            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
+        } else if (previousFeeE12 > farFeeE12) {
+            // Price moved toward reference, lowering farFee below previousFee
+            // Cap at the new far boundary
+            previousFeeE12 = farFeeE12;
+        }
+
+        // Step 2: Calculate target fee
+        // Target fee is farFee reduced by half the closeFee.
+        // The further outside the optimal range (larger closeFee), the more the target drops below farFee.
+        uint256 targetFeeE12 = farFeeE12 - closeFeeE12 / 2;
+
+        // Step 3: Apply exponential decay toward target
+        flexibleFeeE12 = FeeCalculation.calculateFlexibleFee(
+            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - feeState.blockNumber
+        );
     }
 }

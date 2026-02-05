@@ -5,10 +5,17 @@ import {IFeeConfiguration, FeeConfig, FeeState} from "../interfaces/IFeeConfigur
 import {FeeCalculation} from "../libraries/FeeCalculation.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title FeeConfiguration
 /// @notice Abstract contract that implements the IFeeConfiguration interface
-abstract contract FeeConfiguration is IFeeConfiguration {
+abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
+    /// @notice The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
+    uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4;
+    /// @notice The scale used to preserve precision in decay factor math.
+    uint256 internal constant Q24 = 2 ** 24; // 16,777,216
+
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
@@ -47,7 +54,7 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _feeConfig The fee config to set
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
-        _validateOptimalFeeRateE6(_feeConfig.optimalFeeRateE6);
+        _validateOptimalFeeE6(_feeConfig.optimalFeeE6);
         _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
@@ -57,21 +64,34 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _k The k value to validate
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
-        // TODO: set bounds on decay factor
-        // revert InvalidKAndLogK(_k, _logK);
+        // k == 0 causes instant decay (invalid), k == 1 causes no decay which would make logK == 0 (invalid)
+        if (_k == 0 || _logK == 0) {
+            revert InvalidKAndLogK(_k, _logK);
+        }
+        // Convert k from Q24 to wad format (1e18 scale)
+        uint256 kWad = (_k * 1e18) >> 24;
+
+        // lnWad computes ln(k) * 1e18
+        // Since k < 1, ln(k) is negative
+        int256 lnK = FixedPointMathLib.lnWad(int256(kWad));
+
+        // expectedLogK = -lnK / 2^40
+        uint256 expectedLogK = uint256(-lnK) >> 40;
+
+        if (_logK != expectedLogK) revert InvalidKAndLogK(_k, _logK);
     }
 
-    /// @notice Validate the optimal fee rate
-    /// @param _optimalFeeRateE6 The optimal fee rate to validate
-    function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure {
-        if (_optimalFeeRateE6 > FeeCalculation.MAX_OPTIMAL_FEE_RATE_E6) {
-            revert InvalidOptimalFeeRateE6(_optimalFeeRateE6);
+    /// @notice Validate the optimal fee
+    /// @param _optimalFeeE6 The optimal fee to validate
+    function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure {
+        if (_optimalFeeE6 > MAX_OPTIMAL_FEE_E6) {
+            revert InvalidOptimalFeeE6(_optimalFeeE6);
         }
     }
 
     /// @notice Validate the reference sqrt price
     /// @param _referenceSqrtPriceX96 The reference sqrt price to validate
-    function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure {
+    function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure {
         if (_referenceSqrtPriceX96 < TickMath.MIN_SQRT_PRICE || _referenceSqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
             revert InvalidReferenceSqrtPriceX96(_referenceSqrtPriceX96);
         }
@@ -81,6 +101,6 @@ abstract contract FeeConfiguration is IFeeConfiguration {
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].previousFeeE12 = uint40(FeeCalculation.UNDEFINED_FLEXIBLE_FEE_E12);
-        feeState[_poolId].blockNumber = block.number;
+        feeState[_poolId].blockNumber = uint40(_getBlockNumberish());
     }
 }

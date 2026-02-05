@@ -1,8 +1,8 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/bc61b69dbabe6bb31bf5ca2c5c42140a7cb4f0cc/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/ed81fe2a4a0d3051e856ceb7db85c49785fdfa56/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
-[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
+[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
 
 **Title:**
 FeeConfiguration
@@ -11,6 +11,24 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
+### MAX_OPTIMAL_FEE_E6
+The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
+
+
+```solidity
+uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4
+```
+
+
+### Q24
+The scale used to preserve precision in decay factor math.
+
+
+```solidity
+uint256 internal constant Q24 = 2 ** 24
+```
+
+
 ### configManager
 The address of the config manager
 
@@ -122,19 +140,19 @@ function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 |`_logK`|`uint256`|The logK value to validate|
 
 
-### _validateOptimalFeeRateE6
+### _validateOptimalFeeE6
 
-Validate the optimal fee rate
+Validate the optimal fee
 
 
 ```solidity
-function _validateOptimalFeeRateE6(uint24 _optimalFeeRateE6) internal pure;
+function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_optimalFeeRateE6`|`uint24`|The optimal fee rate to validate|
+|`_optimalFeeE6`|`uint256`|The optimal fee to validate|
 
 
 ### _validateReferenceSqrtPriceX96
@@ -143,13 +161,13 @@ Validate the reference sqrt price
 
 
 ```solidity
-function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure;
+function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
+|`_referenceSqrtPriceX96`|`uint256`|The reference sqrt price to validate|
 
 
 ### _resetFeeState
