@@ -181,6 +181,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     ) private view returns (uint256 decayingFeeE12) {
         uint256 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
         uint256 previousFeeE12 = feeState.previousFeeE12;
+        uint256 previousBlockNumber = feeState.blockNumber;
 
         // Step 1: Determine if previous fee needs to be reset
         if (
@@ -208,7 +209,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         // Step 3: Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - feeState.blockNumber
+            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - previousBlockNumber
         );
     }
 }
