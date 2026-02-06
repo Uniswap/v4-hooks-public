@@ -7,7 +7,7 @@ no-section-label = true
 additional-js = ["solidity.min.js"]
 additional-css = ["book.css"]
 mathjax-support = true
-git-repository-url = "https://github.com/Uniswap/v4-hooks"
+git-repository-url = "https://github.com/Uniswap/v4-hooks-public"
 
 [output.html.fold]
 enable = true
