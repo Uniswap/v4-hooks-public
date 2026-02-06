@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/d85a4c0f234196b046ed00df089e0e78e98074ef/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/07fec24f094c79e6a5b292ffc2d378f074af31bb/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -68,34 +68,6 @@ function calculatePriceRatioX96(uint256 sqrtPrice1X96, uint256 sqrtPrice2X96)
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format, always <= 2^96|
-
-
-### _calculateFeeToOptimalBoundary
-
-Calculate fee to reach an optimal range boundary
-
-Used for both far boundary and inside optimal range fee calculations
-
-
-```solidity
-function _calculateFeeToOptimalBoundary(uint256 priceRatioX96, uint256 optimalFeeE6, bool invertRatio)
-    private
-    pure
-    returns (uint256 fee);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`priceRatioX96`|`uint256`|Price ratio to reference price in Q96 format|
-|`optimalFeeE6`|`uint256`|Optimal fee rate in parts per million|
-|`invertRatio`|`bool`|If true, use inverted ratio (Q96 / priceRatio instead of priceRatio)|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`fee`|`uint256`|Calculated fee in 1e12 precision, always non-negative|
 
 
 ### calculateCloseBoundaryFee
