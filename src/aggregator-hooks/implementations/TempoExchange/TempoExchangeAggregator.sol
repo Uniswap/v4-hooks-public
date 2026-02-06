@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -14,8 +14,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title TempoExchangeAggregator
-/// @notice Uniswap V4 hook that aggregates liquidity from Tempo's enshrined stablecoin DEX
-/// @dev Supports both exact-input and exact-output swaps
+/// @notice Singleton Uniswap V4 hook that aggregates liquidity from Tempo's enshrined stablecoin DEX
+/// @dev Supports multiple pools and both exact-input and exact-output swaps
 /// @dev Tempo uses uint128 for amounts; this contract handles the conversion from uint256
 contract TempoExchangeAggregator is ExternalLiqSourceHook {
     using StateLibrary for IPoolManager;
@@ -24,15 +24,16 @@ contract TempoExchangeAggregator is ExternalLiqSourceHook {
     /// @notice The Tempo stablecoin exchange (precompiled contract)
     ITempoExchange public immutable TEMPO_EXCHANGE;
 
-    /// @notice The Uniswap V4 pool ID associated with this aggregator
-    PoolId public localPoolId;
+    /// @notice Token pair info for each registered pool
+    struct PoolTokens {
+        address token0;
+        address token1;
+    }
 
-    /// @notice Token addresses for the pool
-    address public token0;
-    address public token1;
+    /// @notice Maps Uniswap V4 pool IDs to their token addresses
+    mapping(PoolId => PoolTokens) public poolIdToTokens;
 
     error AmountExceedsUint128();
-    error TokenNotSupported(address token);
     error TokensNotSupported(address token0, address token1);
 
     /// @param _manager The Uniswap V4 PoolManager contract
@@ -49,10 +50,11 @@ contract TempoExchangeAggregator is ExternalLiqSourceHook {
         override
         returns (uint256 amountUnspecified)
     {
-        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        PoolTokens storage tokens = poolIdToTokens[poolId];
+        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
 
-        address tokenIn = zeroToOne ? token0 : token1;
-        address tokenOut = zeroToOne ? token1 : token0;
+        address tokenIn = zeroToOne ? tokens.token0 : tokens.token1;
+        address tokenOut = zeroToOne ? tokens.token1 : tokens.token0;
 
         if (amountSpecified < 0) {
             // Exact-In: get expected output
@@ -67,16 +69,16 @@ contract TempoExchangeAggregator is ExternalLiqSourceHook {
 
     /// @inheritdoc ExternalLiqSourceHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
-        if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
+        PoolTokens storage tokens = poolIdToTokens[poolId];
+        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
         // Tempo exchange is a precompiled contract, query token balances directly
-        amount0 = IERC20(token0).balanceOf(address(TEMPO_EXCHANGE));
-        amount1 = IERC20(token1).balanceOf(address(TEMPO_EXCHANGE));
+        amount0 = IERC20(tokens.token0).balanceOf(address(TEMPO_EXCHANGE));
+        amount1 = IERC20(tokens.token1).balanceOf(address(TEMPO_EXCHANGE));
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        // Store token addresses for this pool
-        token0 = Currency.unwrap(key.currency0);
-        token1 = Currency.unwrap(key.currency1);
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
 
         // Validate tokens are supported by querying a small quote
         // If tokens aren't supported, the quote will revert
@@ -85,11 +87,12 @@ contract TempoExchangeAggregator is ExternalLiqSourceHook {
             revert TokensNotSupported(token0, token1);
         }
 
-        localPoolId = key.toId();
+        // Store token addresses for this pool
+        poolIdToTokens[key.toId()] = PoolTokens({token0: token0, token1: token1});
 
-        // Approve Tempo exchange to spend tokens
-        IERC20(token0).safeIncreaseAllowance(address(TEMPO_EXCHANGE), type(uint256).max);
-        IERC20(token1).safeIncreaseAllowance(address(TEMPO_EXCHANGE), type(uint256).max);
+        // Approve Tempo exchange to spend tokens (forceApprove handles repeated approvals safely)
+        IERC20(token0).forceApprove(address(TEMPO_EXCHANGE), type(uint256).max);
+        IERC20(token1).forceApprove(address(TEMPO_EXCHANGE), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
         return IHooks.beforeInitialize.selector;
