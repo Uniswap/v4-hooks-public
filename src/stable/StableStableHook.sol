@@ -180,7 +180,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 previousDecayingFeeE12 = poolFeeState.previousDecayingFeeE12;
         uint256 previousBlockNumber = poolFeeState.blockNumber;
 
-        // Step 1: Adjust previous fee based on how the price moved since the last swap
+        // Adjust previous fee based on how the price moved since the last swap
         uint256 adjustedFeeE12;
         if (
             previousDecayingFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
@@ -205,8 +205,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         // Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            // Calculate target fee. This is a tuning choice: the further outside the optimal range (larger
-            // closeBoundaryFee), the more the target drops below farBoundaryFee, incentivizing price to return.
+            // Calculate target fee. Subtracting half the closeBoundaryFee is a design choice that controls how
+            // aggressively the target fee drops below farBoundaryFee as price moves further from optimal range.
             farBoundaryFeeE12 - closeBoundaryFeeE12 / 2,
             adjustedFeeE12,
             poolFeeConfig.k,
