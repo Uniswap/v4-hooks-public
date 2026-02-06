@@ -147,9 +147,9 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(logK, LOG_K);
         assertEq(optimalFeeE6, OPTIMAL_FEE_E6);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
-        (uint256 previousFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
+        (uint256 previousDecayingFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             hook.feeState(testPoolKey.toId());
-        assertEq(previousFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
+        assertEq(previousDecayingFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
         assertEq(previousSqrtAmmPriceX96, 0);
         assertEq(blockNumber, block.number);
     }

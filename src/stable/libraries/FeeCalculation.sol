@@ -118,27 +118,27 @@ library FeeCalculation {
 
     /// @notice Adjust previous fee to preserve the same effective price when AMM price moves further from reference
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)
-    /// @param previousFeeE12 Previous flexible fee in 1e12 precision
+    /// @param previousDecayingFeeE12 Previous flexible fee in 1e12 precision
     /// @return adjustedFeeE12 Adjusted previous fee accounting for price movement in 1e12 precision
-    function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousFeeE12)
+    function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousDecayingFeeE12)
         internal
         pure
         returns (uint256 adjustedFeeE12)
     {
         // Adjust previous fee: adjustedFee = 1 - priceRatio * (1 - previousFee)
-        adjustedFeeE12 = ONE_E12 - (priceRatioX96 * (ONE_E12 - previousFeeE12)) / FixedPoint96.Q96;
+        adjustedFeeE12 = ONE_E12 - (priceRatioX96 * (ONE_E12 - previousDecayingFeeE12)) / FixedPoint96.Q96;
     }
 
     /// @notice Calculate flexible fee with exponential decay. Fee decays from previous fee toward target fee over time.
     /// @param targetFeeE12 Target fee to decay toward in 1e12 precision
-    /// @param previousFeeE12 Previous flexible fee in 1e12 precision, previousFee >= targetFee
+    /// @param previousDecayingFeeE12 Previous flexible fee in 1e12 precision, previousFee >= targetFee
     /// @param k Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24
     /// @param logK Natural log of k scaled appropriately
     /// @param blocksPassed Number of blocks since last fee update, <= type(uint40).max
     /// @return decayingFeeE12 New flexible fee after decay in 1e12 precision
     function calculateDecayingFee(
         uint256 targetFeeE12,
-        uint256 previousFeeE12,
+        uint256 previousDecayingFeeE12,
         uint256 k,
         uint256 logK,
         uint256 blocksPassed
@@ -154,7 +154,7 @@ library FeeCalculation {
         }
 
         // decayingFee = target + factor * (previous - target)
-        decayingFeeE12 = targetFeeE12 + ((factorX24 * (previousFeeE12 - targetFeeE12)) >> 24);
+        decayingFeeE12 = targetFeeE12 + ((factorX24 * (previousDecayingFeeE12 - targetFeeE12)) >> 24);
     }
 
     /// @notice Calculate the fast power of k to the power of blocksPassed

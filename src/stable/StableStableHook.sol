@@ -146,7 +146,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Update historical data for next swap's calculations
-        poolFeeState.previousFeeE12 = uint40(decayingFeeE12);
+        poolFeeState.previousDecayingFeeE12 = uint40(decayingFeeE12);
         poolFeeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
         poolFeeState.blockNumber = uint40(_getBlockNumberish());
 
@@ -177,13 +177,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         bool ammPriceBelowRP
     ) private view returns (uint256 decayingFeeE12) {
         uint256 previousSqrtAmmPriceX96 = poolFeeState.previousSqrtAmmPriceX96;
-        uint256 previousFeeE12 = poolFeeState.previousFeeE12;
+        uint256 previousDecayingFeeE12 = poolFeeState.previousDecayingFeeE12;
         uint256 previousBlockNumber = poolFeeState.blockNumber;
 
         // Step 1: Adjust previous fee based on how the price moved since the last swap
         uint256 adjustedFeeE12;
         if (
-            previousFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
+            previousDecayingFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceBelowRP
         ) {
             // Price just left optimal range or jumped across reference: start from far boundary
@@ -193,13 +193,14 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
             uint256 priceMovementRatioX96 =
                 FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
-            adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceMovementRatioX96, previousFeeE12);
-        } else if (previousFeeE12 > farBoundaryFeeE12) {
+            adjustedFeeE12 =
+                FeeCalculation.adjustPreviousFeeForPriceMovement(priceMovementRatioX96, previousDecayingFeeE12);
+        } else if (previousDecayingFeeE12 > farBoundaryFeeE12) {
             // Price moved toward reference, lowering farBoundaryFee below previousFee: cap at the new far boundary
             adjustedFeeE12 = farBoundaryFeeE12;
         } else {
             // Price moved toward reference but previousFee is still within bounds — no adjustment needed
-            adjustedFeeE12 = previousFeeE12;
+            adjustedFeeE12 = previousDecayingFeeE12;
         }
 
         // Apply exponential decay toward target

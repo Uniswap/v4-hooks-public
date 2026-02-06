@@ -214,9 +214,9 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
 
         // Verify FeeState was reset
-        (uint256 previousFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
+        (uint256 previousDecayingFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             feeConfigurationImplementation.feeState(testPoolKey.toId());
-        assertEq(previousFeeE12, 1e12 + 1);
+        assertEq(previousDecayingFeeE12, 1e12 + 1);
         assertEq(previousSqrtAmmPriceX96, 0);
         assertEq(blockNumber, block.number);
     }
@@ -233,16 +233,16 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.setFeeState(
             testPoolKey.toId(),
             FeeState({
-                previousFeeE12: 500_000,
+                previousDecayingFeeE12: 500_000,
                 previousSqrtAmmPriceX96: uint160(2 ** 96 + 1000),
                 blockNumber: uint40(block.number)
             })
         );
 
         // Verify non-default state is set
-        (uint256 previousFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
+        (uint256 previousDecayingFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             feeConfigurationImplementation.feeState(testPoolKey.toId());
-        assertEq(previousFeeE12, 500_000);
+        assertEq(previousDecayingFeeE12, 500_000);
         assertEq(previousSqrtAmmPriceX96, uint160(2 ** 96 + 1000));
 
         // Update fee config again - should reset fee state
@@ -251,9 +251,9 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
 
         // Verify feeState was reset
-        (previousFeeE12, previousSqrtAmmPriceX96, blockNumber) =
+        (previousDecayingFeeE12, previousSqrtAmmPriceX96, blockNumber) =
             feeConfigurationImplementation.feeState(testPoolKey.toId());
-        assertEq(previousFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
+        assertEq(previousDecayingFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
         // previousSqrtAmmPriceX96 is intentionally NOT reset (see _resetFeeState comment)
         assertEq(previousSqrtAmmPriceX96, uint160(2 ** 96 + 1000));
         assertEq(blockNumber, block.number);
