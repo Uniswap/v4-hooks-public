@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/6f0bc048cd23c50aa10d7002608266ee2d62bb42/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/9d55d934108997d23c71cbea024ed3fecf2b9d95/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -104,7 +104,7 @@ Calculate fee when price is inside optimal range
 function calculateInsideOptimalRangeFee(
     uint256 priceRatioX96,
     uint256 optimalFeeE6,
-    bool ammPriceToTheLeft,
+    bool ammPriceBelowRP,
     bool userSellsZeroForOne
 ) internal pure returns (uint256 feeE12);
 ```
@@ -114,7 +114,7 @@ function calculateInsideOptimalRangeFee(
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
-|`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
+|`ammPriceBelowRP`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
 
 **Returns**
@@ -156,7 +156,7 @@ Adjust previous fee to preserve the same effective price when AMM price moves fu
 
 
 ```solidity
-function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousFeeE12)
+function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousDecayingFeeE12)
     internal
     pure
     returns (uint256 adjustedFeeE12);
@@ -166,7 +166,7 @@ function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previo
 |Name|Type|Description|
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)|
-|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
+|`previousDecayingFeeE12`|`uint256`|Previous flexible fee in 1e12 precision|
 
 **Returns**
 
@@ -183,7 +183,7 @@ Calculate flexible fee with exponential decay. Fee decays from previous fee towa
 ```solidity
 function calculateDecayingFee(
     uint256 targetFeeE12,
-    uint256 previousFeeE12,
+    uint256 previousDecayingFeeE12,
     uint256 k,
     uint256 logK,
     uint256 blocksPassed
@@ -194,7 +194,7 @@ function calculateDecayingFee(
 |Name|Type|Description|
 |----|----|-----------|
 |`targetFeeE12`|`uint256`|Target fee to decay toward in 1e12 precision|
-|`previousFeeE12`|`uint256`|Previous flexible fee in 1e12 precision, previousFee >= targetFee|
+|`previousDecayingFeeE12`|`uint256`|Previous flexible fee in 1e12 precision, previousFee >= targetFee|
 |`k`|`uint256`|Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), <= Q24|
 |`logK`|`uint256`|Natural log of k scaled appropriately|
 |`blocksPassed`|`uint256`|Number of blocks since last fee update, <= type(uint40).max|

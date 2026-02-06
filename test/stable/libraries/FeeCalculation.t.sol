@@ -91,7 +91,7 @@ contract FeeCalculationTest is Test {
     function test_fuzz_calculateInsideOptimalRangeFee_succeeds(
         uint256 priceRatioX96,
         uint24 optimalFeeE6,
-        bool ammPriceToTheLeft,
+        bool ammPriceBelowRP,
         bool userSellsZeroForOne
     ) public pure {
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
@@ -103,11 +103,11 @@ contract FeeCalculationTest is Test {
         // Bound priceRatioX96 to be inside the optimal range
         priceRatioX96 = bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96);
 
-        uint256 totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
-            priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
+        uint256 lpFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+            priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
         ); // should not revert
 
-        assertLe(totalStableFeeE12, FeeCalculation.ONE_E12);
+        assertLe(lpFeeE12, FeeCalculation.ONE_E12);
     }
 
     // =============================================================================
@@ -175,14 +175,14 @@ contract FeeCalculationTest is Test {
     // (price movement further from reference can only increase the fee)
     // =============================================================================
 
-    function test_fuzz_adjustPreviousFeeForPriceMovement_succeeds(uint256 priceRatioX96, uint256 previousFeeE12)
+    function test_fuzz_adjustPreviousFeeForPriceMovement_succeeds(uint256 priceRatioX96, uint256 previousDecayingFeeE12)
         public
         pure
     {
         priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96); // price impact
-        previousFeeE12 = bound(previousFeeE12, 0, FeeCalculation.ONE_E12);
-        uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
-        assertGe(adjustedFeeE12, previousFeeE12);
+        previousDecayingFeeE12 = bound(previousDecayingFeeE12, 0, FeeCalculation.ONE_E12);
+        uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousDecayingFeeE12);
+        assertGe(adjustedFeeE12, previousDecayingFeeE12);
         assertLe(adjustedFeeE12, FeeCalculation.ONE_E12);
     }
 
@@ -193,18 +193,18 @@ contract FeeCalculationTest is Test {
 
     function test_fuzz_calculateDecayingFee_succeeds(
         uint256 targetFeeE12,
-        uint256 previousFeeE12,
+        uint256 previousDecayingFeeE12,
         uint24 k,
         uint40 blocksPassed
     ) public pure {
         targetFeeE12 = bound(targetFeeE12, 0, FeeCalculation.ONE_E12 - 1);
-        previousFeeE12 = bound(previousFeeE12, targetFeeE12, FeeCalculation.ONE_E12);
+        previousDecayingFeeE12 = bound(previousDecayingFeeE12, targetFeeE12, FeeCalculation.ONE_E12);
         k = uint24(bound(k, 1, 2 ** 24 - 1));
         uint256 kWad = (uint256(k) * 1e18) >> 24;
         uint24 logK = uint24(uint256(-FixedPointMathLib.lnWad(int256(kWad))) >> 40);
         vm.assume(logK > 0);
         uint256 decayingFeeE12 =
-            FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, blocksPassed);
+            FeeCalculation.calculateDecayingFee(targetFeeE12, previousDecayingFeeE12, k, logK, blocksPassed);
         assertGe(decayingFeeE12, targetFeeE12);
         assertLe(decayingFeeE12, FeeCalculation.ONE_E12);
     }
@@ -236,16 +236,18 @@ contract FeeCalculationTest is Test {
 
     function test_calculateDecayingFee_convergesWithLargeBlocksPassed() public pure {
         uint256 targetFeeE12 = 100_000_000; // some target
-        uint256 previousFeeE12 = 500_000_000; // much higher than target
+        uint256 previousDecayingFeeE12 = 500_000_000; // much higher than target
         uint24 k = 16_609_443; // 0.99 in Q24
         uint24 logK = 9140;
 
         // With a very large number of blocks, fee should converge to target
-        uint256 decayingFeeE12 = FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, 1_000_000);
+        uint256 decayingFeeE12 =
+            FeeCalculation.calculateDecayingFee(targetFeeE12, previousDecayingFeeE12, k, logK, 1_000_000);
         assertEq(decayingFeeE12, targetFeeE12);
 
         // Even with uint40 max blocks
-        decayingFeeE12 = FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, type(uint40).max);
+        decayingFeeE12 =
+            FeeCalculation.calculateDecayingFee(targetFeeE12, previousDecayingFeeE12, k, logK, type(uint40).max);
         assertEq(decayingFeeE12, targetFeeE12);
     }
 
@@ -278,7 +280,7 @@ contract FeeCalculationTest is Test {
         uint256 oldTargetFeeE12 = oldFarFeeE12 - uint256(oldCloseFeeE12) / 2;
 
         // Previous fee has fully decayed to old target
-        uint256 previousFeeE12 = oldTargetFeeE12;
+        uint256 previousDecayingFeeE12 = oldTargetFeeE12;
 
         // Price impact ratio between old and new position
         // priceImpactRatio = newPriceRatio / oldPriceRatio (how much price moved)
@@ -288,7 +290,8 @@ contract FeeCalculationTest is Test {
         // We can compute it directly: smaller/larger
         uint256 priceImpactX96 = (newPriceRatioX96 * FixedPoint96.Q96) / oldPriceRatioX96;
 
-        uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceImpactX96, previousFeeE12);
+        uint256 adjustedFeeE12 =
+            FeeCalculation.adjustPreviousFeeForPriceMovement(priceImpactX96, previousDecayingFeeE12);
 
         // Compute new target at new price
         int256 newCloseFeeE12 = FeeCalculation.calculateCloseBoundaryFee(newPriceRatioX96, optimalFeeE6);
