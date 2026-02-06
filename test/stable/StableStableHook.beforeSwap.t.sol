@@ -287,7 +287,10 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
 
     function test_beforeSwap_insideOptimalRange_gas() public {
         sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
-        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // construct swap params, and call beforeSwap
+        SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        (bytes4 selector,,) = hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
         vm.snapshotGasLastCall("beforeSwap_insideOptimalRange");
     }
 
@@ -295,7 +298,9 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
         vm.roll(block.number + 750);
-        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        (bytes4 selector,,) = hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
         vm.snapshotGasLastCall("beforeSwap_outsideOptimalRange");
     }
 
