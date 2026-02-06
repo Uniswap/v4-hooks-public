@@ -32,7 +32,7 @@ contract FeeCalculationSpreadsheetTest is Test {
             uint256 expectedFarFeeE12 = vm.parseUint(cols[2]);
             uint256 expectedTargetFeeE12 = vm.parseUint(cols[3]);
 
-            // Convert price to sqrtPriceX96 using Q192 space (same approach as committed tests)
+            // Convert price to sqrtPriceX96 using Q192 space
             uint256 ammPriceX192 = uint256(REF) * uint256(REF) * priceE5 / 100_000;
             uint160 sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
             uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, REF);

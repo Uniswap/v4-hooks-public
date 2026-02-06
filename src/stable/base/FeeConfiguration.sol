@@ -65,7 +65,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
         // k == 0 causes instant decay (invalid).
-        // logK == 0 rejects k values so close to Q24 (1.0) that -ln(k) >> 40 rounds to 0,
+        // logK == 0 coincides with k values so close to Q24 (1.0) that -ln(k) >> 40 rounds to 0,
         // which would make the decay factor always 1.0 (fee never decays).
         if (_k == 0 || _logK == 0) {
             revert InvalidKAndLogK(_k, _logK);
