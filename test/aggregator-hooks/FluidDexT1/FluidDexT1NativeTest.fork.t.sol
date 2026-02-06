@@ -21,6 +21,7 @@ import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDe
 import {
     IFluidDexReservesResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title FluidDexT1NativeForkedTest
 /// @notice Tests for Fluid DEX T1 with native ETH token pairs
@@ -29,6 +30,7 @@ contract FluidDexT1NativeForkedTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
+    using SafeERC20 for IERC20;
 
     // Fluid's native currency representation
     address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
@@ -95,24 +97,22 @@ contract FluidDexT1NativeForkedTest is Test {
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
 
         // Identify which token is native and which is ERC20
-        // Native should always be token1 in fluid
+        // Native should usually be token1 in fluid
         if (fluidToken1 == FLUID_NATIVE_CURRENCY) {
             erc20TokenAddress = fluidToken0;
+        } else if (fluidToken0 == FLUID_NATIVE_CURRENCY) {
+            erc20TokenAddress = fluidToken1;
         } else {
             revert PoolDoesNotContainNativeToken();
         }
 
-        // Native ETH (address(0)) is always currency0 (lowest address)
         currency0 = Currency.wrap(address(0));
         currency1 = Currency.wrap(erc20TokenAddress);
 
-        // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
 
-        // Deploy hook with correct address flags
         _deployHook();
 
-        // Initialize the pool
         poolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -129,8 +129,9 @@ contract FluidDexT1NativeForkedTest is Test {
         deal(erc20TokenAddress, alice, INITIAL_BALANCE);
 
         // Approve swap router for alice (only ERC20 token needs approval)
+        // Use forceApprove for non-standard tokens like USDT
         vm.startPrank(alice);
-        IERC20(erc20TokenAddress).approve(address(swapRouter), type(uint256).max);
+        IERC20(erc20TokenAddress).forceApprove(address(swapRouter), type(uint256).max);
         vm.stopPrank();
     }
 

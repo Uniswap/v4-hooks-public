@@ -87,6 +87,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
         token1.mint(alice, 1000 ether);
         token0.mint(address(poolManager), 1000 ether);
         token1.mint(address(poolManager), 1000 ether);
+
         // Mint tokens to mock pool so it can transfer output tokens
         token0.mint(address(mockPool), 1000 ether);
         token1.mint(address(mockPool), 1000 ether);

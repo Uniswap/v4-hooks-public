@@ -92,7 +92,6 @@ contract FluidDexT1ERC20ForkedTest is Test {
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
 
-        // Order tokens correctly for v4 (lower address = currency0)
         if (fluidToken0 < fluidToken1) {
             token0Address = fluidToken0;
             token1Address = fluidToken1;
@@ -104,22 +103,18 @@ contract FluidDexT1ERC20ForkedTest is Test {
         currency0 = Currency.wrap(token0Address);
         currency1 = Currency.wrap(token1Address);
 
-        // Get token decimals and set appropriate test amounts for each token
         token0Decimals = IERC20Metadata(token0Address).decimals();
         token1Decimals = IERC20Metadata(token1Address).decimals();
 
-        // Use token-specific amounts to handle different decimal tokens (e.g., GHO 18 decimals, USDC 6 decimals)
-        swapAmount0 = 1000 * (10 ** token0Decimals); // 1000 tokens in token0 decimals
-        swapAmount1 = 1000 * (10 ** token1Decimals); // 1000 tokens in token1 decimals
-        initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
-        initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
+        swapAmount0 = 1000 * (10 ** token0Decimals);
+        swapAmount1 = 1000 * (10 ** token1Decimals);
+        initialBalance0 = 100_000 * (10 ** token0Decimals);
+        initialBalance1 = 100_000 * (10 ** token1Decimals);
 
         manager = PoolManager(poolManagerAddress);
 
-        // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
 
-        // Deploy hook with correct address flags
         _deployHook();
 
         // Initialize the pool
@@ -134,7 +129,6 @@ contract FluidDexT1ERC20ForkedTest is Test {
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        // Deal tokens to alice for testing
         deal(token0Address, alice, initialBalance0);
         deal(token1Address, alice, initialBalance1);
 
