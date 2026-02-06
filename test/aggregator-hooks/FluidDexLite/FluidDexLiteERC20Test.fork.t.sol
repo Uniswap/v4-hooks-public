@@ -77,9 +77,9 @@ contract FluidDexLiteERC20ForkedTest is Test {
         // Load Fluid infrastructure addresses from env vars
         fluidDexLiteAddress = vm.envAddress("FLUID_DEX_LITE");
         fluidDexLiteResolverAddress = vm.envAddress("FLUID_DEX_LITE_RESOLVER");
-        dexSalt = vm.envBytes32("FLUID_DEX_LITE_SALT_ERC");
-        token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC");
-        token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC");
+        dexSalt = vm.envBytes32("FLUID_DEX_LITE_SALT_ERC20");
+        token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC20");
+        token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC20");
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
