@@ -39,6 +39,7 @@ contract FeeCalculationSpreadsheetTest is Test {
 
             int256 closeFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
             uint256 farFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+            // Safe to cast: all test prices are outside the optimal range, so closeFeeE12 is always positive
             uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2;
 
             assertApproxEqAbs(uint256(closeFeeE12), expectedCloseFeeE12, TOLERANCE_E12, "closeFee mismatch");

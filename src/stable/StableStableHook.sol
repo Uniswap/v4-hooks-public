@@ -202,8 +202,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Step 2: Calculate target fee
-        // This is a tuning choice: the further outside the optimal range (larger closeBoundaryFee),
-        // the more the target drops below farBoundaryFee, incentivizing price to return.
+        // Subtracting half the closeBoundaryFee is a design choice that controls how aggressively
+        // the target fee drops below farBoundaryFee as price moves further from optimal range.
         uint256 targetFeeE12 = farBoundaryFeeE12 - closeBoundaryFeeE12 / 2;
 
         // Step 3: Apply exponential decay toward target
