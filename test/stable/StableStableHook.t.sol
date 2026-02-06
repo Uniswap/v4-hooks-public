@@ -16,7 +16,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IStableStableHook} from "../../src/stable/interfaces/IStableStableHook.sol";
 import {FeeConfig, IFeeConfiguration} from "../../src/stable/interfaces/IFeeConfiguration.sol";
-import {Constants} from "../../test/utils/Constants.sol";
+import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 
 contract StableStableHookTest is Test, Deployers {
     using StateLibrary for IPoolManager;
@@ -26,7 +26,7 @@ contract StableStableHookTest is Test, Deployers {
     uint24 public constant LOG_K = 9140;
     uint24 public constant K = 16_609_443;
     uint24 public constant OPTIMAL_FEE_E6 = 90; // 0.9 bps
-    uint160 public constant REFERENCE_SQRT_PRICE_X96 = Constants.SQRT_RATIO_1_1;
+    uint160 public constant REFERENCE_SQRT_PRICE_X96 = Constants.SQRT_PRICE_1_1;
     int24 constant TICK_SPACING = 60;
 
     StableStableHook public hook;
@@ -86,7 +86,7 @@ contract StableStableHookTest is Test, Deployers {
     function test_initializePool_revertsWithOwnableUnauthorizedAccount() public {
         vm.prank(address(this));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
-        hook.initializePool(testPoolKey, Constants.SQRT_RATIO_1_1, feeConfig);
+        hook.initializePool(testPoolKey, Constants.SQRT_PRICE_1_1, feeConfig);
     }
 
     function test_initializePool_revertsWithMustUseDynamicFee() public {
@@ -99,7 +99,7 @@ contract StableStableHookTest is Test, Deployers {
         });
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IStableStableHook.MustUseDynamicFee.selector, LPFeeLibrary.MAX_LP_FEE));
-        hook.initializePool(poolKey, Constants.SQRT_RATIO_1_1, feeConfig);
+        hook.initializePool(poolKey, Constants.SQRT_PRICE_1_1, feeConfig);
     }
 
     function test_initializePool_revertsWithInvalidInitializer() public {
@@ -128,19 +128,19 @@ contract StableStableHookTest is Test, Deployers {
         });
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IStableStableHook.InvalidHookAddress.selector, address(0)));
-        hook.initializePool(poolKey, Constants.SQRT_RATIO_1_1, feeConfig);
+        hook.initializePool(poolKey, Constants.SQRT_PRICE_1_1, feeConfig);
     }
 
     function test_initializePool_succeeds() public {
         vm.expectEmit(true, false, false, true);
-        emit PoolInitialized(testPoolKey, Constants.SQRT_RATIO_1_1, feeConfig);
+        emit PoolInitialized(testPoolKey, Constants.SQRT_PRICE_1_1, feeConfig);
         vm.prank(owner);
-        hook.initializePool(testPoolKey, Constants.SQRT_RATIO_1_1, feeConfig);
+        hook.initializePool(testPoolKey, Constants.SQRT_PRICE_1_1, feeConfig);
 
         (uint160 slot0SqrtPriceX96, int24 slot0Tick, uint24 slot0ProtocolFee,) = manager.getSlot0(testPoolKey.toId());
-        assertEq(slot0SqrtPriceX96, Constants.SQRT_RATIO_1_1);
+        assertEq(slot0SqrtPriceX96, Constants.SQRT_PRICE_1_1);
         assertEq(slot0ProtocolFee, 0);
-        assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_RATIO_1_1));
+        assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_PRICE_1_1));
         (uint256 k, uint256 logK, uint24 optimalFeeE6, uint160 referenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
         assertEq(k, K);

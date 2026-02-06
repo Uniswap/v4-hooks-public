@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/07fec24f094c79e6a5b292ffc2d378f074af31bb/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/6f0bc048cd23c50aa10d7002608266ee2d62bb42/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -73,7 +73,6 @@ function calculatePriceRatioX96(uint256 sqrtPrice1X96, uint256 sqrtPrice2X96)
 ### calculateCloseBoundaryFee
 
 Calculate close boundary fee - measures the fee to reach the close boundary of the optimal range.
-Returns a fee metric where negative values mean inside the range, positive means outside.
 
 
 ```solidity

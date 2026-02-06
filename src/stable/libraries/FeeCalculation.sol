@@ -37,7 +37,6 @@ library FeeCalculation {
     }
 
     /// @notice Calculate close boundary fee - measures the fee to reach the close boundary of the optimal range.
-    ///         Returns a fee metric where negative values mean inside the range, positive means outside.
     /// @param priceRatioX96 Price ratio to reference price in Q96 format from calculatePriceRatioX96
     /// @param optimalFeeE6 Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
     /// @return closeBoundaryFeeE12 Close boundary fee. If <= 0, price is inside optimal range. If > 0, price is outside.
@@ -74,7 +73,7 @@ library FeeCalculation {
         bool ammPriceToTheLeft,
         bool userSellsZeroForOne
     ) internal pure returns (uint256 feeE12) {
-        // Note: This calculation assumes the price is inside the optimal range.
+        // Note: This calculation assumes the price is inside the optimal range. Else it will revert with arithmetic underflow.
         // (i.e., priceRatioX96 >= Q96 * (ONE_E6 - optimalFee) / ONE_E6
 
         // if userSellsZeroForOne => sellPrice = (1 - optimalFee) * RP [lower bound]

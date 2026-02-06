@@ -114,6 +114,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 totalStableFeeE12; // the fee to be charged to the swapper in 1e12 precision
         uint256 decayingFeeE12;
 
+        // closeBoundaryFee is the fee that would place the effective price at the close boundary.
+        // A negative value means the AMM price is already inside the optimal range (past the close boundary).
         if (closeBoundaryFeeE12 <= 0) {
             // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
@@ -200,8 +202,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Step 2: Calculate target fee
-        // Target fee is farBoundaryFee reduced by half the closeBoundaryFee.
-        // The further outside the optimal range (larger closeBoundaryFee), the more the target drops below farBoundaryFee.
+        // This is a tuning choice: the further outside the optimal range (larger closeBoundaryFee),
+        // the more the target drops below farBoundaryFee, incentivizing price to return.
         uint256 targetFeeE12 = farBoundaryFeeE12 - closeBoundaryFeeE12 / 2;
 
         // Step 3: Apply exponential decay toward target

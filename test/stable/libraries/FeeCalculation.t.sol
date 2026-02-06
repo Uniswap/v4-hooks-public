@@ -230,6 +230,26 @@ contract FeeCalculationTest is Test {
     }
 
     // =============================================================================
+    // INVARIANT: with extreme blocksPassed, decayingFee converges to targetFee
+    // (decay factor approaches 0, so fee = target + 0 * (previous - target) = target)
+    // =============================================================================
+
+    function test_calculateDecayingFee_convergesWithLargeBlocksPassed() public pure {
+        uint256 targetFeeE12 = 100_000_000; // some target
+        uint256 previousFeeE12 = 500_000_000; // much higher than target
+        uint24 k = 16_609_443; // 0.99 in Q24
+        uint24 logK = 9140;
+
+        // With a very large number of blocks, fee should converge to target
+        uint256 decayingFeeE12 = FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, 1_000_000);
+        assertEq(decayingFeeE12, targetFeeE12);
+
+        // Even with uint40 max blocks
+        decayingFeeE12 = FeeCalculation.calculateDecayingFee(targetFeeE12, previousFeeE12, k, logK, type(uint40).max);
+        assertEq(decayingFeeE12, targetFeeE12);
+    }
+
+    // =============================================================================
     // INVARIANT: adjustedFee >= newTargetFee after price moves further from reference
     // When price moves further from reference while outside optimal range:
     //   - The old fee (which may have decayed to old target) gets adjusted upward
