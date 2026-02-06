@@ -37,8 +37,8 @@ contract FeeCalculationSpreadsheetTest is Test {
             uint160 sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
             uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, REF);
 
-            int256 closeFeeE12 = FeeCalculation.calculateCloseFee(priceRatioX96, OPTIMAL_FEE_E6);
-            uint256 farFeeE12 = FeeCalculation.calculateFarFee(priceRatioX96, OPTIMAL_FEE_E6);
+            int256 closeFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+            uint256 farFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
             uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2;
 
             assertApproxEqAbs(uint256(closeFeeE12), expectedCloseFeeE12, TOLERANCE_E12, "closeFee mismatch");

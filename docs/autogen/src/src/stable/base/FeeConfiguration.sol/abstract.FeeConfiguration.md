@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/ed81fe2a4a0d3051e856ceb7db85c49785fdfa56/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/d85a4c0f234196b046ed00df089e0e78e98074ef/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -158,6 +158,12 @@ function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 ### _validateReferenceSqrtPriceX96
 
 Validate the reference sqrt price
+
+The optimal range is defined in terms of PRICE (not sqrt price):
+[referencePrice * (1 - maxOptimalFee), referencePrice / (1 - maxOptimalFee)]
+Since price = sqrtPrice², the sqrt price bounds are:
+[referenceSqrtPrice * sqrt(1 - maxOptimalFee), referenceSqrtPrice / sqrt(1 - maxOptimalFee)]
+Note: MIN_SQRT_PRICE is valid (inclusive) but MAX_SQRT_PRICE is invalid (exclusive) in v4.
 
 
 ```solidity

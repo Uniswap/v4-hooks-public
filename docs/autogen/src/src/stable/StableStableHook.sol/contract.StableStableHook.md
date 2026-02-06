@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/5eeca29ad7f3ed644f5902527e7d8949072469e8/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/d85a4c0f234196b046ed00df089e0e78e98074ef/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -113,21 +113,21 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 |`<none>`|`uint24`|lpFeeOverride The calculated dynamic fee with override flag|
 
 
-### _calculateFlexibleFee
+### _calculateDecayingFee
 
-Calculate flexible fee when price is outside optimal range
+Calculate decaying fee when price is outside optimal range
 
 
 ```solidity
-function _calculateFlexibleFee(
+function _calculateDecayingFee(
     FeeConfig storage config,
     FeeState storage feeState,
     uint256 sqrtAmmPriceX96,
     uint256 sqrtReferencePriceX96,
-    uint256 closeFeeE12,
-    uint256 farFeeE12,
+    uint256 closeBoundaryFeeE12,
+    uint256 farBoundaryFeeE12,
     bool ammPriceToTheLeft
-) private view returns (uint256 flexibleFeeE12);
+) private view returns (uint256 decayingFeeE12);
 ```
 **Parameters**
 
@@ -137,14 +137,14 @@ function _calculateFlexibleFee(
 |`feeState`|`FeeState`|The FeeState of the pool|
 |`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
 |`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
-|`closeFeeE12`|`uint256`|The fee to reach the close boundary, > 0 since we are outside the optimal range|
-|`farFeeE12`|`uint256`|The fee to reach the far boundary|
+|`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary of the optimal range (negative = already inside)|
+|`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary of the optimal range|
 |`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
 
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`flexibleFeeE12`|`uint256`|The calculated flexible fee in 1e12 precision|
+|`decayingFeeE12`|`uint256`|The calculated decaying fee in 1e12 precision|
 
 
