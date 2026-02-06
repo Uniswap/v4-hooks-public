@@ -180,34 +180,34 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 previousFeeE12 = poolFeeState.previousFeeE12;
         uint256 previousBlockNumber = poolFeeState.blockNumber;
 
-        // Step 1: Determine if previous fee needs to be reset
+        // Step 1: Adjust previous fee based on how the price moved since the last swap
+        uint256 adjustedFeeE12;
         if (
             previousFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceBelowRP
         ) {
-            // Price just left optimal range or jumped across reference
-            // Start from far boundary
-            previousFeeE12 = farBoundaryFeeE12;
+            // Price just left optimal range or jumped across reference: start from far boundary
+            adjustedFeeE12 = farBoundaryFeeE12;
         } else if (ammPriceBelowRP == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
             // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
-            uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96); // price impact
-            previousFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousFeeE12);
+            uint256 priceMovementRatioX96 =
+                FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
+            adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceMovementRatioX96, previousFeeE12);
         } else if (previousFeeE12 > farBoundaryFeeE12) {
-            // Price moved toward reference, lowering farBoundaryFee below previousFee
-            // Cap at the new far boundary
-            previousFeeE12 = farBoundaryFeeE12;
+            // Price moved toward reference, lowering farBoundaryFee below previousFee: cap at the new far boundary
+            adjustedFeeE12 = farBoundaryFeeE12;
+        } else {
+            // Price moved toward reference but previousFee is still within bounds — no adjustment needed
+            adjustedFeeE12 = previousFeeE12;
         }
 
-        // Step 2: Calculate target fee
-        // This is a tuning choice: the further outside the optimal range (larger closeBoundaryFee),
-        // the more the target drops below farBoundaryFee, incentivizing price to return.
-        uint256 targetFeeE12 = farBoundaryFeeE12 - closeBoundaryFeeE12 / 2;
-
-        // Step 3: Apply exponential decay toward target
+        // Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            targetFeeE12,
-            previousFeeE12,
+            // Calculate target fee. This is a tuning choice: the further outside the optimal range (larger
+            // closeBoundaryFee), the more the target drops below farBoundaryFee, incentivizing price to return.
+            farBoundaryFeeE12 - closeBoundaryFeeE12 / 2,
+            adjustedFeeE12,
             poolFeeConfig.k,
             poolFeeConfig.logK,
             _getBlockNumberish() - previousBlockNumber
