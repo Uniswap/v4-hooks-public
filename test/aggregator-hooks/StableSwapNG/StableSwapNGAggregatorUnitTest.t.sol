@@ -17,9 +17,6 @@ import {MockCurveStableSwapNG} from "../StableSwapNG/mocks/MockCurveStableSwapNG
 import {
     StableSwapNGAggregator
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
-import {
-    StableSwapNGAggregatorFactory
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -59,12 +56,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         mockPool = new MockCurveStableSwapNG(coins);
 
         // Deploy hook with valid address
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), mockPool);
-        (, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
-        hook = new StableSwapNGAggregator{salt: salt}(IPoolManager(address(poolManager)), mockPool);
+        hook = _deployHook(mockPool);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -92,6 +84,17 @@ contract StableSwapNGAggregatorUnitTest is Test {
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function _deployHook(MockCurveStableSwapNG _mockPool) internal returns (StableSwapNGAggregator) {
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), _mockPool);
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
+        StableSwapNGAggregator newHook =
+            new StableSwapNGAggregator{salt: salt}(IPoolManager(address(poolManager)), _mockPool);
+        return newHook;
     }
 
     // ========== CONSTRUCTOR ==========
@@ -145,15 +148,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         wrongCoins[1] = address(0xbeef);
         MockCurveStableSwapNG wrongPool = new MockCurveStableSwapNG(wrongCoins);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), wrongPool);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(StableSwapNGAggregator).creationCode,
-            args
-        );
-        StableSwapNGAggregator hook2 =
-            new StableSwapNGAggregator{salt: salt2}(IPoolManager(address(poolManager)), wrongPool);
+        StableSwapNGAggregator hook2 = _deployHook(wrongPool);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -186,15 +181,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[1] = address(token1); // correct token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), partialPool);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(StableSwapNGAggregator).creationCode,
-            args
-        );
-        StableSwapNGAggregator hook2 =
-            new StableSwapNGAggregator{salt: salt2}(IPoolManager(address(poolManager)), partialPool);
+        StableSwapNGAggregator hook2 = _deployHook(partialPool);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -223,15 +210,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[1] = address(0xbeef); // wrong token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), partialPool);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(StableSwapNGAggregator).creationCode,
-            args
-        );
-        StableSwapNGAggregator hook2 =
-            new StableSwapNGAggregator{salt: salt2}(IPoolManager(address(poolManager)), partialPool);
+        StableSwapNGAggregator hook2 = _deployHook(partialPool);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -314,60 +293,5 @@ contract StableSwapNGAggregatorUnitTest is Test {
 
         assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
         assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
-    }
-
-    // ========== FACTORY ==========
-
-    function test_factory_createPool() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
-
-        MockERC20 tkA = new MockERC20("A", "A", 18);
-        MockERC20 tkB = new MockERC20("B", "B", 18);
-        if (address(tkA) > address(tkB)) (tkA, tkB) = (tkB, tkA);
-
-        address[] memory coins2 = new address[](2);
-        coins2[0] = address(tkA);
-        coins2[1] = address(tkB);
-        MockCurveStableSwapNG pool2 = new MockCurveStableSwapNG(coins2);
-
-        Currency[] memory tokens = new Currency[](2);
-        tokens[0] = Currency.wrap(address(tkA));
-        tokens[1] = Currency.wrap(address(tkB));
-
-        bytes memory args = abi.encode(address(poolManager), address(pool2));
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(StableSwapNGAggregator).creationCode,
-            args
-        );
-
-        address hookAddr = factory.createPool(factorySalt, pool2, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
-        assertTrue(hookAddr != address(0));
-    }
-
-    function test_factory_computeAddress() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
-
-        bytes memory args = abi.encode(address(poolManager), address(mockPool));
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(StableSwapNGAggregator).creationCode,
-            args
-        );
-
-        address computed = factory.computeAddress(factorySalt, mockPool);
-        assertTrue(computed != address(0));
-    }
-
-    function test_factory_revertsInsufficientTokens() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
-
-        Currency[] memory tokens = new Currency[](1);
-        tokens[0] = Currency.wrap(address(token0));
-
-        vm.expectRevert(StableSwapNGAggregatorFactory.InsufficientTokens.selector);
-        factory.createPool(bytes32(0), mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
     }
 }

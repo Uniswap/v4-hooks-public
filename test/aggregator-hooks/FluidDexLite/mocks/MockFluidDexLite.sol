@@ -9,9 +9,9 @@ import {
 } from "../../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @title MockIFluidDexLite
+/// @title MockFluidDexLite
 /// @notice Mock Fluid DEX Lite pool with settable swapSingle return for unit tests.
-contract MockIFluidDexLite is IFluidDexLite {
+contract MockFluidDexLite is IFluidDexLite {
     uint256 public returnSwapSingle;
     bool public revertSwapSingle;
     bool public useNativeCurrencyInCallback;

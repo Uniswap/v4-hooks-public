@@ -30,11 +30,14 @@ contract BaseAggregatorHookUnitTest is Test {
     MockERC20 public token0;
     MockERC20 public token1;
 
-    uint24 constant FEE = 3000;
-    int24 constant TICK_SPACING = 60;
-    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    // Pool configuration
+    uint24 constant FEE = 3000; // 0.3% fee
+    int24 constant TICK_SPACING = 60; // Default tick spacing for a 0.3% fee pool
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
+
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
+    uint256 public constant INITIAL_BALANCE = 1000 ether;
 
     address public alice = makeAddr("alice");
     PoolKey public poolKey;
@@ -65,10 +68,10 @@ contract BaseAggregatorHookUnitTest is Test {
         poolId = poolKey.toId();
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        token0.mint(alice, 1000 ether);
-        token1.mint(alice, 1000 ether);
-        token0.mint(address(poolManager), 1000 ether);
-        token1.mint(address(poolManager), 1000 ether);
+        token0.mint(alice, INITIAL_BALANCE);
+        token1.mint(alice, INITIAL_BALANCE);
+        token0.mint(address(poolManager), INITIAL_BALANCE);
+        token1.mint(address(poolManager), INITIAL_BALANCE);
         vm.startPrank(alice);
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
@@ -119,8 +122,8 @@ contract BaseAggregatorHookUnitTest is Test {
             ""
         );
 
-        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     function test_beforeSwap_exactOut() public {
@@ -138,8 +141,8 @@ contract BaseAggregatorHookUnitTest is Test {
         );
 
         // oneForZero exact-out: alice pays token1 (amountIn), receives token0 (amountOut)
-        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
-        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE + amountOut);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
     }
 
     function test_InsufficientLiquidity_payerBalanceLessThanSettle() public {

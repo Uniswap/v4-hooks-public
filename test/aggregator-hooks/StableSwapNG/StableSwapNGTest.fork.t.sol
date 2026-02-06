@@ -33,7 +33,7 @@ contract StableSwapNGForkedTest is Test {
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
@@ -66,14 +66,19 @@ contract StableSwapNGForkedTest is Test {
     address public alice = makeAddr("alice");
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Load pool address from .env
         curvePool = ICurveStableSwapNG(curvePoolAddress);
@@ -283,10 +288,8 @@ contract StableSwapNGForkedTest is Test {
         uint256 tokenInAfter = IERC20(tokenIn).balanceOf(alice);
         uint256 tokenOutAfter = IERC20(tokenOut).balanceOf(alice);
 
-        // Verify tokenOut increased by the exact output amount (Curve pools may have 1-2 wei rounding)
-        assertApproxEqAbs(
-            tokenOutAfter - tokenOutBefore, amountOut, 2, "TokenOut should increase by ~exact output amount"
-        );
+        // Verify tokenOut increased by the exact output amount
+        assertEq(tokenOutAfter - tokenOutBefore, amountOut, "TokenOut should increase by ~exact output amount");
 
         // Verify tokenIn spent matches quote
         uint256 tokenInSpent = tokenInBefore - tokenInAfter;

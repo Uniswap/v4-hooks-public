@@ -6,9 +6,9 @@ import {
     IFluidDexReservesResolver
 } from "../../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
 
-/// @title MockIFluidDexReservesResolver
+/// @title MockFluidDexReservesResolver
 /// @notice Mock Fluid DEX T1 reserves resolver with settable getDexTokens, getPoolWithReserves, estimateSwapIn/Out for unit tests.
-contract MockIFluidDexReservesResolver is IFluidDexReservesResolver {
+contract MockFluidDexReservesResolver is IFluidDexReservesResolver {
     address public returnToken0;
     address public returnToken1;
     uint256 public returnToken0Reserves;

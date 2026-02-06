@@ -80,7 +80,7 @@ contract FluidDexLiteNativeFuzz is Test {
     uint256 constant MIN_SWAP_DIVISOR = 10000; // min swap = liquidity / 10000
     uint256 constant MAX_SWAP_DIVISOR = 100; // max swap = liquidity / 100
 
-    // Create alice address that doesn't have code on mainnet (deterministic but unlikely to collide)
+    // Create alice address that doesn't have code on the forked chain (deterministic but unlikely to collide)
     address public alice = address(uint160(uint256(keccak256("fluid_dex_lite_test_alice_native_v1"))));
 
     /// @dev Struct to hold pool setup parameters (reduces stack depth)
@@ -105,15 +105,20 @@ contract FluidDexLiteNativeFuzz is Test {
     }
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         dexLite = IFluidDexLite(vm.envAddress("FLUID_DEX_LITE"));
         dexLiteAdminModule = vm.envAddress("FLUID_DEX_LITE_ADMIN_MODULE");
         resolver = IFluidDexLiteResolver(vm.envAddress("FLUID_DEX_LITE_RESOLVER"));
         fluidDexLiteAuth = vm.envAddress("FLUID_DEX_LITE_AUTH");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Deploy V4 infrastructure
         poolManager = new PoolManager(address(this));
@@ -155,6 +160,7 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", 0)));
         uint256 minLiquidity =
             setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
+        // Use very small amounts for exact output (1/1000 of liquidity) to stay well within internal imaginary reserves
         uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         if (amountOut == 0) amountOut = 1 ether;
 

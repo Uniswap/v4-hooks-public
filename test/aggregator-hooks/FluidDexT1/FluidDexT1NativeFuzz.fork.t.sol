@@ -128,8 +128,9 @@ contract FluidDexT1NativeFuzz is Test {
     }
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         liquidity = vm.envAddress("FLUID_LIQUIDITY");
         dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
@@ -137,7 +138,11 @@ contract FluidDexT1NativeFuzz is Test {
         dexT1DeploymentLogic = vm.envAddress("FLUID_DEX_T1_DEPLOYMENT_LOGIC");
         timelock = vm.envAddress("FLUID_DEX_T1_TIMELOCK");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Load mainnet contracts
         dexFactory = IFluidDexFactory(dexFactoryAddress);
@@ -643,9 +648,8 @@ contract FluidDexT1NativeFuzz is Test {
         uint256 ethAfter = alice.balance;
         uint256 ercAfter = setup.erc20Token.balanceOf(alice);
 
-        // Verify ETH output (approximately for native handling and Fluid's exactOut inaccuracy)
         uint256 ethReceived = ethAfter - ethBefore;
-        assertApproxEqAbs(ethReceived, amountOut, 1, "ETH received should be close to output amount");
+        assertEq(ethReceived, amountOut, "ETH received should equal output amount");
         // Verify ERC20 input matches quote
         uint256 ercSpent = ercBefore - ercAfter;
         assertEq(ercSpent, expectedIn, "ERC20 spent should match quote");

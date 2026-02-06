@@ -37,7 +37,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
@@ -72,8 +72,9 @@ contract FluidDexT1ERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_ERC");
         fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
@@ -81,7 +82,11 @@ contract FluidDexT1ERC20ForkedTest is Test {
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_erc_v1"))));
@@ -233,8 +238,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
         uint256 token1Received = token1After - token1Before;
-        // Fluid's exactOut can be off by 1 wei
-        assertApproxEqAbs(token1Received, amountOut, 1, "Token1 received should match exact output amount");
+        assertEq(token1Received, amountOut, "Token1 received should match exact output amount");
 
         uint256 token0Spent = token0Before - token0After;
         assertEq(token0Spent, expectedIn, "Token0 spent should match quote");
@@ -263,8 +267,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
         uint256 token0Received = token0After - token0Before;
-        // Fluid's exactOut can be off by 1 wei
-        assertApproxEqAbs(token0Received, amountOut, 1, "Token0 received should match exact output amount");
+        assertEq(token0Received, amountOut, "Token0 received should match exact output amount");
 
         uint256 token1Spent = token1Before - token1After;
         assertEq(token1Spent, expectedIn, "Token1 spent should match quote");

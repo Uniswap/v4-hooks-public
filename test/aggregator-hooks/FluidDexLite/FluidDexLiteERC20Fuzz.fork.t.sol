@@ -98,15 +98,20 @@ contract FluidDexLiteERC20Fuzz is Test {
     }
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         dexLite = IFluidDexLite(vm.envAddress("FLUID_DEX_LITE"));
         dexLiteAdminModule = vm.envAddress("FLUID_DEX_LITE_ADMIN_MODULE");
         resolver = IFluidDexLiteResolver(vm.envAddress("FLUID_DEX_LITE_RESOLVER"));
         fluidDexLiteAuth = vm.envAddress("FLUID_DEX_LITE_AUTH");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Deploy V4 infrastructure
         poolManager = new PoolManager(address(this));

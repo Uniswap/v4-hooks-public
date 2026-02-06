@@ -85,7 +85,7 @@ contract FluidDexT1ERC20Fuzz is Test {
 
     address public alice = makeAddr("alice");
 
-    /// @dev Struct to hold pool setup parameters (reduces stack depth)
+    /// @dev Struct to hold pool setup parameters (to reduce stack depth)
     struct PoolSetup {
         MockERC20 token0;
         MockERC20 token1;
@@ -104,8 +104,9 @@ contract FluidDexT1ERC20Fuzz is Test {
     }
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         liquidity = vm.envAddress("FLUID_LIQUIDITY");
         dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
@@ -113,7 +114,11 @@ contract FluidDexT1ERC20Fuzz is Test {
         dexT1DeploymentLogic = vm.envAddress("FLUID_DEX_T1_DEPLOYMENT_LOGIC");
         timelock = vm.envAddress("FLUID_DEX_T1_TIMELOCK");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Load mainnet contracts
         dexFactory = IFluidDexFactory(dexFactoryAddress);
@@ -471,10 +476,8 @@ contract FluidDexT1ERC20Fuzz is Test {
         // Derive swap amount (use much smaller amounts for exact output to stay within pool reserves)
         uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
         uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
-        // Use very small amounts for exact output (1/1000 of liquidity) to stay well within reserves
-        uint256 amountOut = minLiquidity / 1000;
-        // Add some variation based on seed
-        amountOut = bound(uint256(keccak256(abi.encode(swapSeed, "exactOut"))), amountOut / 10, amountOut);
+        // Use very small amounts for exact output (1/1000 of liquidity) to stay well within internal imaginary reserves
+        uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         // Ensure minimum amount
         if (amountOut == 0) amountOut = 1 ether;
 
@@ -504,8 +507,8 @@ contract FluidDexT1ERC20Fuzz is Test {
         uint256 tokenInAfter = tokenIn.balanceOf(alice);
         uint256 tokenOutAfter = tokenOut.balanceOf(alice);
 
-        // Verify exact output amount was received (allow 1 wei tolerance for Fluid's exactOut inaccuracy)
-        assertApproxEqAbs(tokenOutAfter - tokenOutBefore, amountOut, 1, "Should receive exact output amount");
+        // Verify exact output amount was received
+        assertEq(tokenOutAfter - tokenOutBefore, amountOut, "Should receive exact output amount");
         // Verify input matches quote
         assertEq(tokenInBefore - tokenInAfter, expectedIn, "Input amount should match quote");
     }
@@ -528,9 +531,9 @@ contract FluidDexT1ERC20Fuzz is Test {
     }
 
     /// @notice Derive swap amount based on pool liquidity
-    function _deriveSwapAmount(uint256 seed, uint256 liquidity) internal pure returns (uint256) {
-        uint256 minSwap = liquidity / MIN_SWAP_DIVISOR;
-        uint256 maxSwap = liquidity / MAX_SWAP_DIVISOR;
+    function _deriveSwapAmount(uint256 seed, uint256 _liquidity) internal pure returns (uint256) {
+        uint256 minSwap = _liquidity / MIN_SWAP_DIVISOR;
+        uint256 maxSwap = _liquidity / MAX_SWAP_DIVISOR;
         return bound(uint256(keccak256(abi.encode(seed, "amount"))), minSwap, maxSwap);
     }
 

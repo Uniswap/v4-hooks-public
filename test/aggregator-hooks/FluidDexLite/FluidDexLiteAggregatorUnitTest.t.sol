@@ -13,14 +13,11 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {MockIFluidDexLite} from "./mocks/MockIFluidDexLite.sol";
-import {MockIFluidDexLiteResolver} from "./mocks/MockIFluidDexLiteResolver.sol";
+import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
+import {MockFluidDexLiteResolver} from "./mocks/MockFluidDexLiteResolver.sol";
 import {
     FluidDexLiteAggregator
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
-import {
-    FluidDexLiteAggregatorFactory
-} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -30,18 +27,21 @@ contract FluidDexLiteAggregatorUnitTest is Test {
 
     PoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
-    MockIFluidDexLite public mockDex;
-    MockIFluidDexLiteResolver public mockResolver;
+    MockFluidDexLite public mockDex;
+    MockFluidDexLiteResolver public mockResolver;
     FluidDexLiteAggregator public hook;
     MockERC20 public token0;
     MockERC20 public token1;
 
-    uint24 constant FEE = 3000;
-    int24 constant TICK_SPACING = 60;
-    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    // Pool configuration
+    uint24 constant FEE = 3000; // 0.3% fee
+    int24 constant TICK_SPACING = 60; // Default tick spacing for a 0.3% fee pool
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
+    bytes32 constant DEX_SALT = bytes32(uint256(1));
+
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
-    bytes32 constant DEX_SALT = bytes32(uint256(1));
+    uint256 public constant INITIAL_BALANCE = 1000 ether;
 
     address public alice = makeAddr("alice");
     PoolKey public poolKey;
@@ -50,21 +50,15 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     function setUp() public {
         poolManager = new PoolManager(address(this));
         swapRouter = new SafePoolSwapTest(poolManager);
-        mockDex = new MockIFluidDexLite();
-        mockResolver = new MockIFluidDexLiteResolver();
+        mockDex = new MockFluidDexLite();
+        mockResolver = new MockFluidDexLiteResolver();
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
         if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
 
         // Deploy hook with valid address
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), mockDex, mockResolver, DEX_SALT);
-        (, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
-        hook =
-            new FluidDexLiteAggregator{salt: salt}(IPoolManager(address(poolManager)), mockDex, mockResolver, DEX_SALT);
+        hook = _deployHook(mockResolver);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -80,17 +74,28 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
 
         // Set up tokens
-        token0.mint(alice, 1000 ether);
-        token1.mint(alice, 1000 ether);
-        token0.mint(address(poolManager), 1000 ether);
-        token1.mint(address(poolManager), 1000 ether);
+        token0.mint(alice, INITIAL_BALANCE);
+        token1.mint(alice, INITIAL_BALANCE);
+        token0.mint(address(poolManager), INITIAL_BALANCE);
+        token1.mint(address(poolManager), INITIAL_BALANCE);
+
         // Mint tokens to mock dex so it can transfer output tokens
-        token0.mint(address(mockDex), 1000 ether);
-        token1.mint(address(mockDex), 1000 ether);
+        token0.mint(address(mockDex), INITIAL_BALANCE);
+        token1.mint(address(mockDex), INITIAL_BALANCE);
         vm.startPrank(alice);
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function _deployHook(MockFluidDexLiteResolver _mockResolver) internal returns (FluidDexLiteAggregator) {
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
+        return
+            new FluidDexLiteAggregator{salt: salt}(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
     }
 
     // ========== CONSTRUCTOR ==========
@@ -150,18 +155,10 @@ contract FluidDexLiteAggregatorUnitTest is Test {
 
     function test_beforeInitialize_revertsPoolDoesNotExist_emptyState() public {
         // Deploy new hook
-        MockIFluidDexLiteResolver resolver2 = new MockIFluidDexLiteResolver();
+        MockFluidDexLiteResolver resolver2 = new MockFluidDexLiteResolver();
         resolver2.setReturnEmptyDexState(true); // isEmpty() returns true
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexLiteAggregator).creationCode,
-            args
-        );
-        FluidDexLiteAggregator hook2 =
-            new FluidDexLiteAggregator{salt: salt2}(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
+        FluidDexLiteAggregator hook2 = _deployHook(resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -204,8 +201,8 @@ contract FluidDexLiteAggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     function test_swap_exactIn_oneForZero() public {
@@ -222,8 +219,8 @@ contract FluidDexLiteAggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     // ========== REVERSED POOL ORDER (Native Currency) ==========
@@ -232,19 +229,11 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         // Deploy hook with native currency which will trigger reversed order
         // Native currency (address(0)) converts to FLUID_NATIVE_CURRENCY (0xEeee...)
         // which is > any normal token address, so _isReversed = true
-        MockIFluidDexLiteResolver resolver2 = new MockIFluidDexLiteResolver();
+        MockFluidDexLiteResolver resolver2 = new MockFluidDexLiteResolver();
         resolver2.setReturnEmptyDexState(false);
         resolver2.setReturnReserves(1000 ether, 2000 ether);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexLiteAggregator).creationCode,
-            args
-        );
-        FluidDexLiteAggregator hook2 =
-            new FluidDexLiteAggregator{salt: salt2}(IPoolManager(address(poolManager)), mockDex, resolver2, DEX_SALT);
+        FluidDexLiteAggregator hook2 = _deployHook(resolver2);
 
         // Use native currency (address(0)) as currency0
         // After conversion to FLUID_NATIVE_CURRENCY, it becomes > token1, triggering _isReversed
@@ -264,54 +253,6 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         // When reversed: returns (token1Reserves, token0Reserves) = (2000, 1000)
         assertEq(a0, 2000 ether);
         assertEq(a1, 1000 ether);
-    }
-
-    // ========== FACTORY ==========
-
-    function test_factory_createPool() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(IPoolManager(address(poolManager)), mockDex, mockResolver);
-
-        MockERC20 tkA = new MockERC20("A", "A", 18);
-        MockERC20 tkB = new MockERC20("B", "B", 18);
-        if (address(tkA) > address(tkB)) (tkA, tkB) = (tkB, tkA);
-
-        bytes32 dexSalt = bytes32(uint256(42));
-        bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexLiteAggregator).creationCode,
-            args
-        );
-
-        address hookAddr = factory.createPool(
-            factorySalt,
-            dexSalt,
-            Currency.wrap(address(tkA)),
-            Currency.wrap(address(tkB)),
-            FEE,
-            TICK_SPACING,
-            SQRT_PRICE_1_1
-        );
-        assertTrue(hookAddr != address(0));
-    }
-
-    function test_factory_computeAddress() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(IPoolManager(address(poolManager)), mockDex, mockResolver);
-
-        bytes32 dexSalt = bytes32(uint256(99));
-        bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexLiteAggregator).creationCode,
-            args
-        );
-
-        address computed = factory.computeAddress(factorySalt, dexSalt);
-        assertTrue(computed != address(0));
     }
 
     // ========== NATIVE CURRENCY CALLBACK TEST ==========

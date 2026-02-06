@@ -30,7 +30,7 @@ contract StableSwapFuzz is Test {
 
     // V4 Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps

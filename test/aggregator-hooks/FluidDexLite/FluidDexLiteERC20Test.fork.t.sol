@@ -35,7 +35,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
@@ -43,6 +43,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
     uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
 
     // Loaded from .env
+    address poolManagerAddress;
     address fluidDexLiteAddress;
     address fluidDexLiteResolverAddress;
     bytes32 dexSalt;
@@ -72,8 +73,9 @@ contract FluidDexLiteERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        // Forking requires an RPC URL env var
+        // Forking requires an RPC URL env var and an optional block number
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         fluidDexLiteAddress = vm.envAddress("FLUID_DEX_LITE");
         fluidDexLiteResolverAddress = vm.envAddress("FLUID_DEX_LITE_RESOLVER");
@@ -81,9 +83,13 @@ contract FluidDexLiteERC20ForkedTest is Test {
         token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC20");
         token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC20");
         // Load V4 infrastructure address from env vars
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_lite_test_alice_erc_v1"))));
@@ -291,7 +297,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
             ""
         );
 
-        // Third swap: exact output (receive token1)
+        // Third swap: Token0 -> Token1 (exact output)
         vm.prank(alice);
         swapRouter.swap(
             poolKey,

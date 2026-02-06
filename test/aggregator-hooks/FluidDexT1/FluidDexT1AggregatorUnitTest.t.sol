@@ -13,12 +13,9 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {MockIFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockIFluidDexT1.sol";
-import {MockIFluidDexReservesResolver} from "./mocks/MockIFluidDexReservesResolver.sol";
+import {MockFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockFluidDexT1.sol";
+import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
-import {
-    FluidDexT1AggregatorFactory
-} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -29,17 +26,20 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     PoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
-    MockIFluidDexT1 public mockPool;
-    MockIFluidDexReservesResolver public mockResolver;
+    MockFluidDexT1 public mockPool;
+    MockFluidDexReservesResolver public mockResolver;
     FluidDexT1Aggregator public hook;
     MockERC20 public token0;
     MockERC20 public token1;
 
-    uint24 constant FEE = 3000;
-    int24 constant TICK_SPACING = 60;
-    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    // Pool configuration
+    uint24 constant FEE = 3000; // 0.3% fee
+    int24 constant TICK_SPACING = 60; // Default tick spacing for a 0.3% fee pool
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
+
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
+    uint256 public constant INITIAL_BALANCE = 1000 ether;
 
     address public alice = makeAddr("alice");
     address public fluidLiquidity = makeAddr("fluidLiquidity");
@@ -49,8 +49,8 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function setUp() public {
         poolManager = new PoolManager(address(this));
         swapRouter = new SafePoolSwapTest(poolManager);
-        mockPool = new MockIFluidDexT1();
-        mockResolver = new MockIFluidDexReservesResolver();
+        mockPool = new MockFluidDexT1();
+        mockResolver = new MockFluidDexReservesResolver();
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -61,15 +61,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
         mockPool.setTokens(address(token0), address(token1));
 
         // Deploy hook with valid address
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs =
-            abi.encode(IPoolManager(address(poolManager)), mockPool, mockResolver, fluidLiquidity);
-        (, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
-        hook = new FluidDexT1Aggregator{salt: salt}(
-            IPoolManager(address(poolManager)), mockPool, mockResolver, fluidLiquidity
-        );
+        hook = _deployHook(mockPool, mockResolver);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -83,18 +75,34 @@ contract FluidDexT1AggregatorUnitTest is Test {
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
 
         // Setup tokens
-        token0.mint(alice, 1000 ether);
-        token1.mint(alice, 1000 ether);
-        token0.mint(address(poolManager), 1000 ether);
-        token1.mint(address(poolManager), 1000 ether);
+        token0.mint(alice, INITIAL_BALANCE);
+        token1.mint(alice, INITIAL_BALANCE);
+        token0.mint(address(poolManager), INITIAL_BALANCE);
+        token1.mint(address(poolManager), INITIAL_BALANCE);
 
         // Mint tokens to mock pool so it can transfer output tokens
-        token0.mint(address(mockPool), 1000 ether);
-        token1.mint(address(mockPool), 1000 ether);
+        token0.mint(address(mockPool), INITIAL_BALANCE);
+        token1.mint(address(mockPool), INITIAL_BALANCE);
         vm.startPrank(alice);
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function _deployHook(MockFluidDexT1 _mockPool, MockFluidDexReservesResolver _mockResolver)
+        internal
+        returns (FluidDexT1Aggregator)
+    {
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+        );
+        bytes memory constructorArgs =
+            abi.encode(IPoolManager(address(poolManager)), _mockPool, _mockResolver, fluidLiquidity);
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
+        return new FluidDexT1Aggregator{salt: salt}(
+            IPoolManager(address(poolManager)), _mockPool, _mockResolver, fluidLiquidity
+        );
     }
 
     // ========== CONSTRUCTOR ==========
@@ -159,19 +167,10 @@ contract FluidDexT1AggregatorUnitTest is Test {
     // ========== _beforeInitialize ==========
 
     function test_beforeInitialize_revertsTokensNotInPool() public {
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(address(0xdead), address(0xbeef)); // Wrong tokens
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -213,8 +212,8 @@ contract FluidDexT1AggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     function test_swap_exactIn_oneForZero() public {
@@ -231,8 +230,8 @@ contract FluidDexT1AggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     function test_swap_exactOut_zeroForOne() public {
@@ -250,8 +249,8 @@ contract FluidDexT1AggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token0.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token1.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     function test_swap_exactOut_oneForZero() public {
@@ -269,8 +268,8 @@ contract FluidDexT1AggregatorUnitTest is Test {
             ""
         );
 
-        assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
-        assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE + amountOut);
     }
 
     // ========== REVERSED POOL ORDER ==========
@@ -279,19 +278,10 @@ contract FluidDexT1AggregatorUnitTest is Test {
         // Resolver returns tokens where token0 matches but token1 doesn't
         // Use a high address (0xffff...) to ensure we stay in the normal (non-reversed) branch
         address wrongToken1 = address(0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF);
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(address(token0), wrongToken1); // token0 matches, token1 doesn't
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -317,19 +307,10 @@ contract FluidDexT1AggregatorUnitTest is Test {
         // Resolver returns tokens where token1 matches but token0 doesn't
         // Use address(1) which is small but > address(0), so token0 < token1 stays true
         address wrongToken0 = address(1);
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(wrongToken0, address(token1)); // token0 doesn't match, token1 matches
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -354,20 +335,11 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_beforeInitialize_reversedTokenOrder_succeeds() public {
         // Resolver returns tokens in reversed order (token1, token0)
         // This triggers the token1 < token0 branch
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Return tokens reversed: what Fluid calls token0 is actually > what Fluid calls token1
         resolver2.setDexTokens(address(token1), address(token0)); // Reversed
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -384,20 +356,11 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     function test_pseudoTotalValueLocked_reversed_returnsSwappedReserves() public {
         // Deploy hook with reversed token order
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(address(token1), address(token0)); // Reversed order
         resolver2.setReserves(1000 ether, 2000 ether);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -417,57 +380,6 @@ contract FluidDexT1AggregatorUnitTest is Test {
         assertEq(a1, 1000 ether);
     }
 
-    // ========== FACTORY ==========
-
-    function test_factory_createPool() public {
-        FluidDexT1AggregatorFactory factory =
-            new FluidDexT1AggregatorFactory(IPoolManager(address(poolManager)), mockResolver, fluidLiquidity);
-
-        MockERC20 tkA = new MockERC20("A", "A", 18);
-        MockERC20 tkB = new MockERC20("B", "B", 18);
-        if (address(tkA) > address(tkB)) (tkA, tkB) = (tkB, tkA);
-
-        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
-        mockResolver.setDexTokens(address(tkA), address(tkB));
-
-        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-
-        address hookAddr = factory.createPool(
-            factorySalt,
-            pool2,
-            Currency.wrap(address(tkA)),
-            Currency.wrap(address(tkB)),
-            FEE,
-            TICK_SPACING,
-            SQRT_PRICE_1_1
-        );
-        assertTrue(hookAddr != address(0));
-    }
-
-    function test_factory_computeAddress() public {
-        FluidDexT1AggregatorFactory factory =
-            new FluidDexT1AggregatorFactory(IPoolManager(address(poolManager)), mockResolver, fluidLiquidity);
-
-        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
-
-        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
-        (, bytes32 factorySalt) = HookMiner.find(
-            address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-
-        address computed = factory.computeAddress(factorySalt, pool2);
-        assertTrue(computed != address(0));
-    }
-
     // ========== NATIVE CURRENCY TESTS ==========
 
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
@@ -475,20 +387,11 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_beforeInitialize_nativeCurrency_token0() public {
         // Test when Fluid returns FLUID_NATIVE_CURRENCY for token0
         // This triggers the token0 == FLUID_NATIVE_CURRENCY branch
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Native currency (converted to address(0)) should be less than token1
         resolver2.setDexTokens(FLUID_NATIVE_CURRENCY, address(token1));
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         // Create pool with native currency (address(0)) as currency0
         PoolKey memory key2 = PoolKey({
@@ -508,21 +411,12 @@ contract FluidDexT1AggregatorUnitTest is Test {
         // This triggers the token1 == FLUID_NATIVE_CURRENCY branch
         // For this, token1 needs to be native currency and token0 needs to be an ERC20
         // Since we need token0 < token1 and native = address(0), we need a reversed scenario
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Return tokens where token1 is native - this will be reversed since
         // token0 > token1 (token0 is ERC20 address, token1 converts to address(0))
         resolver2.setDexTokens(address(token0), FLUID_NATIVE_CURRENCY);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         // Create pool with native currency (address(0)) as currency0 (Uniswap sorts by address)
         PoolKey memory key2 = PoolKey({
@@ -540,23 +434,14 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_beforeInitialize_reversed_revertsTokenNotInPool_token0() public {
         // Test reversed token order with token0 mismatch
         // Need: token1 < token0 (reversed) AND token0 != key.currency1
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Create a scenario where Fluid's tokens are reversed relative to Uniswap order
         // Fluid token0 (higher address) should NOT match key.currency1
         address wrongToken0 = address(0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF);
         // token1 < token0 to trigger reversed branch
         resolver2.setDexTokens(wrongToken0, address(token0)); // token0 is actually lower
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -581,22 +466,13 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_beforeInitialize_reversed_revertsTokenNotInPool_token1() public {
         // Test reversed token order with token1 mismatch
         // Need: token1 < token0 (reversed) AND token0 == key.currency1 AND token1 != key.currency0
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Fluid token0 matches key.currency1, but Fluid token1 doesn't match key.currency0
         address wrongToken1 = address(1); // Very low address
         // Set token1 < token0 to trigger reversed branch
         resolver2.setDexTokens(address(token1), wrongToken1);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)), // wrongToken1 != token0
@@ -621,22 +497,13 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_beforeInitialize_nonReversed_revertsTokensNotInPool() public {
         // Test non-reversed with both tokens mismatched
         // Need: token1 >= token0 (non-reversed) AND both tokens don't match
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         // Both tokens are wrong, but in correct order (token0 < token1)
         address wrongToken0 = address(2);
         address wrongToken1 = address(3);
         resolver2.setDexTokens(wrongToken0, wrongToken1);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 = new FluidDexT1Aggregator{salt: salt2}(
-            IPoolManager(address(poolManager)), mockPool, resolver2, fluidLiquidity
-        );
+        FluidDexT1Aggregator hook2 = _deployHook(mockPool, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -662,22 +529,14 @@ contract FluidDexT1AggregatorUnitTest is Test {
 
     function test_swap_exactIn_nativeInput_zeroForOne() public {
         // Create a pool with native currency as token0
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(FLUID_NATIVE_CURRENCY, address(token1));
 
-        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
+        MockFluidDexT1 pool2 = new MockFluidDexT1();
         pool2.setTokens(address(0), address(token1));
         pool2.setReturnSwapIn(95 ether);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 =
-            new FluidDexT1Aggregator{salt: salt2}(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
+        FluidDexT1Aggregator hook2 = _deployHook(pool2, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(0)), // Native currency
@@ -716,22 +575,14 @@ contract FluidDexT1AggregatorUnitTest is Test {
         // Test swap where OUTPUT is native ETH (exercises outputIsNative=true branch)
         // Pool: currency0 = native, currency1 = ERC20
         // Swap: oneForZero (ERC20 -> native)
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(FLUID_NATIVE_CURRENCY, address(token1));
 
-        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
+        MockFluidDexT1 pool2 = new MockFluidDexT1();
         pool2.setTokens(address(0), address(token1));
         pool2.setReturnSwapInWithCallback(95 ether); // Will use callback since input is ERC20
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 =
-            new FluidDexT1Aggregator{salt: salt2}(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
+        FluidDexT1Aggregator hook2 = _deployHook(pool2, resolver2);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(0)), // Native currency
@@ -774,23 +625,14 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_swap_exactOut_nativeInput_revertsNativeCurrencyExactOut() public {
         // Create a pool with native currency as token0
         // Attempting exactOut with native input should revert
-        MockIFluidDexReservesResolver resolver2 = new MockIFluidDexReservesResolver();
+        MockFluidDexReservesResolver resolver2 = new MockFluidDexReservesResolver();
         resolver2.setDexTokens(FLUID_NATIVE_CURRENCY, address(token1));
 
-        MockIFluidDexT1 pool2 = new MockIFluidDexT1();
+        MockFluidDexT1 pool2 = new MockFluidDexT1();
         pool2.setTokens(address(0), address(token1));
         pool2.setReturnSwapOutWithCallback(55 ether);
 
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
-        (, bytes32 salt2) = HookMiner.find(
-            address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
-            type(FluidDexT1Aggregator).creationCode,
-            args
-        );
-        FluidDexT1Aggregator hook2 =
-            new FluidDexT1Aggregator{salt: salt2}(IPoolManager(address(poolManager)), pool2, resolver2, fluidLiquidity);
-
+        FluidDexT1Aggregator hook2 = _deployHook(pool2, resolver2);
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(0)), // Native currency
             currency1: Currency.wrap(address(token1)),

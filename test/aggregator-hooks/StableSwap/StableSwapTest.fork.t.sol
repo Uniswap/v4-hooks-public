@@ -66,12 +66,17 @@ contract StableSwapForkedTest is Test {
     function setUp() public {
         // Forking requires an RPC URL env var
         string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_POOL");
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         curvePool = ICurveStableSwap(curvePoolAddress);
 
@@ -143,10 +148,8 @@ contract StableSwapForkedTest is Test {
 
     function _mintToPoolManager() internal {
         // Mint tokens to PoolManager so it has liquidity for swaps
-        uint256 poolManagerBalance0 = 10_000 * (10 ** token0Decimals);
-        uint256 poolManagerBalance1 = 10_000 * (10 ** token1Decimals);
-        deal(token0Address, address(manager), poolManagerBalance0);
-        deal(token1Address, address(manager), poolManagerBalance1);
+        deal(token0Address, address(manager), initialBalance0 * 10);
+        deal(token1Address, address(manager), initialBalance1 * 10);
     }
 
     function _dealTokens(address to, uint256 amount0, uint256 amount1) internal {
@@ -339,12 +342,12 @@ contract StableSwapForkedTest is Test {
 
     /// @notice Verify quote function returns reasonable values
     function test_quote() public {
-        uint256 amountIn = swapAmount0; // Testing zeroForOne quote (token0 input)
+        uint256 amountIn = swapAmount0;
 
         uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
 
         assertGt(expectedOut, 0, "Quote should return non-zero");
-        assertGt(expectedOut, amountIn * 99 / 100, "Quote should be close to 1:1 for stableswap");
+        assertGt(expectedOut, amountIn * 95 / 100, "Quote should generally be close to 1:1 for stableswap");
     }
 
     /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances

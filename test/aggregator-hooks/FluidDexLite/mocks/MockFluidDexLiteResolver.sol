@@ -8,9 +8,9 @@ import {
     IFluidDexLiteResolver
 } from "../../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
 
-/// @title MockIFluidDexLiteResolver
+/// @title MockFluidDexLiteResolver
 /// @notice Mock Fluid DEX Lite resolver with settable getDexState, getPricesAndReserves, estimateSwapSingle for unit tests.
-contract MockIFluidDexLiteResolver is IFluidDexLiteResolver {
+contract MockFluidDexLiteResolver is IFluidDexLiteResolver {
     bool public returnEmptyDexState; // if true, return state that isEmpty() => true
     uint256 public returnToken0Reserves;
     uint256 public returnToken1Reserves;

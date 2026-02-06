@@ -31,9 +31,9 @@ contract UnauthorizedCallbackCaller {
     }
 }
 
-/// @title MockIFluidDexT1
+/// @title MockFluidDexT1
 /// @notice Mock Fluid DEX T1 pool with settable swap return values for unit tests.
-contract MockIFluidDexT1 is IFluidDexT1 {
+contract MockFluidDexT1 is IFluidDexT1 {
     uint256 public returnSwapIn;
     uint256 public returnSwapOut;
     uint256 public returnSwapInWithCallback;
@@ -131,12 +131,7 @@ contract MockIFluidDexT1 is IFluidDexT1 {
 
     receive() external payable {}
 
-    function swapOut(bool, uint256 amountOut_, uint256, address to_)
-        external
-        payable
-        override
-        returns (uint256 amountIn_)
-    {
+    function swapOut(bool, uint256, uint256, address to_) external payable override returns (uint256 amountIn_) {
         if (revertSwapOut) revert SwapOutRevert();
         (to_);
         return returnSwapOut;
