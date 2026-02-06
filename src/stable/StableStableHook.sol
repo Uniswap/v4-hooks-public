@@ -145,9 +145,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             lpFeeE12 = (ammPriceBelowRP == userSellsZeroForOne) ? 0 : decayingFeeE12;
         }
 
-        // Update historical data for next swap's calculations
-        poolFeeState.previousDecayingFeeE12 = uint40(decayingFeeE12);
-        poolFeeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
+        // Update stored swap data for use in next swap's calculations
+        poolFeeState.decayingFeeE12 = uint40(decayingFeeE12);
+        poolFeeState.sqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
         poolFeeState.blockNumber = uint40(_getBlockNumberish());
 
         // Uniswap v4 handles fees in E6 not E12
@@ -176,8 +176,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 farBoundaryFeeE12,
         bool ammPriceBelowRP
     ) private view returns (uint256 decayingFeeE12) {
-        uint256 previousSqrtAmmPriceX96 = poolFeeState.previousSqrtAmmPriceX96;
-        uint256 previousDecayingFeeE12 = poolFeeState.previousDecayingFeeE12;
+        // Load the state stored about the previous swap on this pool
+        uint256 previousSqrtAmmPriceX96 = poolFeeState.sqrtAmmPriceX96;
+        uint256 previousDecayingFeeE12 = poolFeeState.decayingFeeE12;
         uint256 previousBlockNumber = poolFeeState.blockNumber;
 
         // Determine the starting fee for exponential decay based on how the price moved since the last swap
