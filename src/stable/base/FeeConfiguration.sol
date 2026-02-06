@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
 import {IFeeConfiguration, FeeConfig, FeeState} from "../interfaces/IFeeConfiguration.sol";
@@ -64,7 +64,9 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _k The k value to validate
     /// @param _logK The logK value to validate
     function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure {
-        // k == 0 causes instant decay (invalid), k == 1 causes no decay which would make logK == 0 (invalid)
+        // k == 0 causes instant decay (invalid).
+        // logK == 0 coincides with k values so close to Q24 (1.0) that -ln(k) >> 40 rounds to 0,
+        // which would make the decay factor always 1.0 (fee never decays).
         if (_k == 0 || _logK == 0) {
             revert InvalidKAndLogK(_k, _logK);
         }
@@ -123,5 +125,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].previousFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
         feeState[_poolId].blockNumber = uint40(_getBlockNumberish());
+        // previousSqrtAmmPriceX96 is intentionally not reset: the UNDEFINED_DECAYING_FEE_E12 sentinel
+        // causes _calculateDecayingFee to ignore the stale value and start fresh from farBoundaryFee.
     }
 }

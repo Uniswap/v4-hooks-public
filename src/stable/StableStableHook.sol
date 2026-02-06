@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
 import {IStableStableHook} from "./interfaces/IStableStableHook.sol";
@@ -99,10 +99,10 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
         // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
-        // Let P_ref = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
+        // Let RP = the actual reference price (i.e., sqrtReferencePriceX96² expressed as a price).
         // The optimal range bounds are:
-        //   - Lower bound (price): P_ref * (1 - optimalFee)
-        //   - Upper bound (price): P_ref / (1 - optimalFee)
+        //   - Lower bound (price): RP * (1 - optimalFee)
+        //   - Upper bound (price): RP / (1 - optimalFee)
 
         // closeBoundaryFeeE12 represents the fee to reach whichever boundary is closer to the current AMM price.
         //   - If closeBoundaryFeeE12 <= 0: AMM price is inside the optimal range (past the close boundary)
@@ -114,6 +114,8 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 totalStableFeeE12; // the fee to be charged to the swapper in 1e12 precision
         uint256 decayingFeeE12;
 
+        // closeBoundaryFee is the fee that would place the effective price at the close boundary.
+        // A negative value means the AMM price is already inside the optimal range (past the close boundary).
         if (closeBoundaryFeeE12 <= 0) {
             // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
@@ -139,6 +141,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             );
 
             // Select which fee to charge based on swap direction
+            // Price is moving further from reference: charge 0 fee. Otherwise, charge the decaying fee.
             totalStableFeeE12 = (ammPriceToTheLeft == userSellsZeroForOne) ? 0 : decayingFeeE12;
         }
 
@@ -178,6 +181,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
     ) private view returns (uint256 decayingFeeE12) {
         uint256 previousSqrtAmmPriceX96 = feeState.previousSqrtAmmPriceX96;
         uint256 previousFeeE12 = feeState.previousFeeE12;
+        uint256 previousBlockNumber = feeState.blockNumber;
 
         // Step 1: Determine if previous fee needs to be reset
         if (
@@ -199,13 +203,13 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         }
 
         // Step 2: Calculate target fee
-        // Target fee is farBoundaryFee reduced by half the closeBoundaryFee.
-        // The further outside the optimal range (larger closeBoundaryFee), the more the target drops below farBoundaryFee.
+        // Subtracting half the closeBoundaryFee is a design choice that controls how aggressively
+        // the target fee drops below farBoundaryFee as price moves further from optimal range.
         uint256 targetFeeE12 = farBoundaryFeeE12 - closeBoundaryFeeE12 / 2;
 
         // Step 3: Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - feeState.blockNumber
+            targetFeeE12, previousFeeE12, config.k, config.logK, _getBlockNumberish() - previousBlockNumber
         );
     }
 }

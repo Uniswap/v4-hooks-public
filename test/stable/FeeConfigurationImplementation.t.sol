@@ -156,12 +156,36 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
-    function test_updateFeeConfig_revertsWithInvalidKAndLogK() public {
+    function test_updateFeeConfig_revertsWithInvalidKAndLogK_bothZero() public {
         FeeConfig memory newConfig =
             FeeConfig({k: 0, logK: 0, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
         vm.prank(poolFeeController);
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidKAndLogK.selector, 0, 0));
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidKAndLogK_mismatchedLogK() public {
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K + 1, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidKAndLogK.selector, K, LOG_K + 1));
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
+    function test_updateFeeConfig_revertsWithInvalidKAndLogK_kMaxUint24() public {
+        // uint24 max = 2^24 - 1 = 16_777_215, just below Q24 (1.0 in Q24 format)
+        // This represents k ≈ 0.99999994, which barely decays. logK from lnWad rounds to 0,
+        // so no valid logK exists for this k.
+        uint24 maxK = type(uint24).max;
+        FeeConfig memory newConfig = FeeConfig({
+            k: maxK, logK: 1, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidKAndLogK.selector, maxK, 1));
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
@@ -197,6 +221,44 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(blockNumber, block.number);
     }
 
+    function test_updateFeeConfig_resetsFeeStateWithExistingSwapHistory() public {
+        // Set up valid fee config
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+        // Simulate existing swap history with non-default feeState
+        feeConfigurationImplementation.setFeeState(
+            testPoolKey.toId(),
+            FeeState({
+                previousFeeE12: 500_000,
+                previousSqrtAmmPriceX96: uint160(2 ** 96 + 1000),
+                blockNumber: uint40(block.number)
+            })
+        );
+
+        // Verify non-default state is set
+        (uint256 previousFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
+            feeConfigurationImplementation.feeState(testPoolKey.toId());
+        assertEq(previousFeeE12, 500_000);
+        assertEq(previousSqrtAmmPriceX96, uint160(2 ** 96 + 1000));
+
+        // Update fee config again - should reset fee state
+        vm.roll(block.number + 100);
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+        // Verify feeState was reset
+        (previousFeeE12, previousSqrtAmmPriceX96, blockNumber) =
+            feeConfigurationImplementation.feeState(testPoolKey.toId());
+        assertEq(previousFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
+        // previousSqrtAmmPriceX96 is intentionally NOT reset (see _resetFeeState comment)
+        assertEq(previousSqrtAmmPriceX96, uint160(2 ** 96 + 1000));
+        assertEq(blockNumber, block.number);
+    }
+
     function test_updateFeeConfig_gas() public {
         FeeConfig memory newConfig = FeeConfig({
             k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
@@ -220,6 +282,26 @@ contract FeeConfigurationImplementationTest is Test {
         vm.prank(poolFeeController);
         feeConfigurationImplementation.setConfigManager(address(1));
         assertEq(feeConfigurationImplementation.configManager(), address(1));
+    }
+
+    function test_setConfigManager_toZeroAddress_disablesFurtherUpdates() public {
+        // Set config manager to address(0)
+        vm.prank(poolFeeController);
+        feeConfigurationImplementation.setConfigManager(address(0));
+        assertEq(feeConfigurationImplementation.configManager(), address(0));
+
+        // updateFeeConfig should revert
+        FeeConfig memory newConfig = FeeConfig({
+            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, poolFeeController));
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+        // setConfigManager should also revert (cannot recover)
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, poolFeeController));
+        feeConfigurationImplementation.setConfigManager(poolFeeController);
     }
 
     function test_setConfigManager_gas() public {
