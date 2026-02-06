@@ -91,7 +91,7 @@ contract FeeCalculationTest is Test {
     function test_fuzz_calculateInsideOptimalRangeFee_succeeds(
         uint256 priceRatioX96,
         uint24 optimalFeeE6,
-        bool ammPriceToTheLeft,
+        bool ammPriceBelowRP,
         bool userSellsZeroForOne
     ) public pure {
         optimalFeeE6 = uint24(bound(optimalFeeE6, 0, FeeCalculation.ONE_E6 - 1));
@@ -103,11 +103,11 @@ contract FeeCalculationTest is Test {
         // Bound priceRatioX96 to be inside the optimal range
         priceRatioX96 = bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96);
 
-        uint256 totalStableFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
-            priceRatioX96, optimalFeeE6, ammPriceToTheLeft, userSellsZeroForOne
+        uint256 swapperFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+            priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
         ); // should not revert
 
-        assertLe(totalStableFeeE12, FeeCalculation.ONE_E12);
+        assertLe(swapperFeeE12, FeeCalculation.ONE_E12);
     }
 
     // =============================================================================

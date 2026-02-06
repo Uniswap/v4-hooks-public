@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/6f0bc048cd23c50aa10d7002608266ee2d62bb42/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/aa75b6e1ce013ea16a3b1ceccd1fa927adc9723e/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -104,7 +104,7 @@ Calculate fee when price is inside optimal range
 function calculateInsideOptimalRangeFee(
     uint256 priceRatioX96,
     uint256 optimalFeeE6,
-    bool ammPriceToTheLeft,
+    bool ammPriceBelowRP,
     bool userSellsZeroForOne
 ) internal pure returns (uint256 feeE12);
 ```
@@ -114,7 +114,7 @@ function calculateInsideOptimalRangeFee(
 |----|----|-----------|
 |`priceRatioX96`|`uint256`|Price ratio in Q96 format|
 |`optimalFeeE6`|`uint256`|Optimal fee in parts per million|
-|`ammPriceToTheLeft`|`bool`|True if AMM price < reference price|
+|`ammPriceBelowRP`|`bool`|True if AMM price < reference price|
 |`userSellsZeroForOne`|`bool`|True if user is selling token0 for token1|
 
 **Returns**

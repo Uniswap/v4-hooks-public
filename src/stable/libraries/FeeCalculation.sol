@@ -64,13 +64,13 @@ library FeeCalculation {
     /// @notice Calculate fee when price is inside optimal range
     /// @param priceRatioX96 Price ratio in Q96 format
     /// @param optimalFeeE6 Optimal fee in parts per million
-    /// @param ammPriceToTheLeft True if AMM price < reference price
+    /// @param ammPriceBelowRP True if AMM price < reference price
     /// @param userSellsZeroForOne True if user is selling token0 for token1
     /// @return feeE12 Calculated fee in 1e12 precision
     function calculateInsideOptimalRangeFee(
         uint256 priceRatioX96,
         uint256 optimalFeeE6,
-        bool ammPriceToTheLeft,
+        bool ammPriceBelowRP,
         bool userSellsZeroForOne
     ) internal pure returns (uint256 feeE12) {
         // Note: This calculation assumes the price is inside the optimal range. Else it will revert with arithmetic underflow.
@@ -84,7 +84,7 @@ library FeeCalculation {
         // ammPrice / (1 - fee) = RP / (1 - optimalFee)
         // fee = 1 - (1 - optimalFee) * ammPrice / RP
 
-        if (ammPriceToTheLeft == userSellsZeroForOne) {
+        if (ammPriceBelowRP == userSellsZeroForOne) {
             feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * FixedPoint96.Q96) / priceRatioX96 / ONE_E6;
         } else {
             feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;

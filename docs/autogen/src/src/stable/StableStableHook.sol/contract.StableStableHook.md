@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/d85a4c0f234196b046ed00df089e0e78e98074ef/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/aa75b6e1ce013ea16a3b1ceccd1fa927adc9723e/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -120,26 +120,26 @@ Calculate decaying fee when price is outside optimal range
 
 ```solidity
 function _calculateDecayingFee(
-    FeeConfig storage config,
-    FeeState storage feeState,
+    FeeConfig storage poolFeeConfig,
+    FeeState storage poolFeeState,
     uint256 sqrtAmmPriceX96,
     uint256 sqrtReferencePriceX96,
     uint256 closeBoundaryFeeE12,
     uint256 farBoundaryFeeE12,
-    bool ammPriceToTheLeft
+    bool ammPriceBelowRP
 ) private view returns (uint256 decayingFeeE12);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`config`|`FeeConfig`|The FeeConfig of the pool|
-|`feeState`|`FeeState`|The FeeState of the pool|
+|`poolFeeConfig`|`FeeConfig`|The FeeConfig of the pool|
+|`poolFeeState`|`FeeState`|The FeeState of the pool|
 |`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
 |`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
 |`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary of the optimal range (negative = already inside)|
 |`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary of the optimal range|
-|`ammPriceToTheLeft`|`bool`|True if current AMM price < reference price|
+|`ammPriceBelowRP`|`bool`|True if current AMM price < reference price|
 
 **Returns**
 
