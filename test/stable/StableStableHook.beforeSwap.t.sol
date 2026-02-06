@@ -290,7 +290,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
 
         // construct swap params, and call beforeSwap
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
-        (bytes4 selector,,) = hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
         vm.snapshotGasLastCall("beforeSwap_insideOptimalRange");
     }
 
@@ -300,7 +300,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         vm.roll(block.number + 750);
 
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
-        (bytes4 selector,,) = hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
         vm.snapshotGasLastCall("beforeSwap_outsideOptimalRange");
     }
 
