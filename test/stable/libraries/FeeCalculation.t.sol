@@ -103,11 +103,11 @@ contract FeeCalculationTest is Test {
         // Bound priceRatioX96 to be inside the optimal range
         priceRatioX96 = bound(priceRatioX96, minPriceRatio, REFERENCE_SQRT_PRICE_X96);
 
-        uint256 swapperFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+        uint256 lpFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
             priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
         ); // should not revert
 
-        assertLe(swapperFeeE12, FeeCalculation.ONE_E12);
+        assertLe(lpFeeE12, FeeCalculation.ONE_E12);
     }
 
     // =============================================================================
