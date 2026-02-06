@@ -111,7 +111,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         bool userSellsZeroForOne = params.zeroForOne;
         bool ammPriceBelowRP = sqrtAmmPriceX96 < sqrtReferencePriceX96;
-        uint256 swapperFeeE12; // the fee to be charged to the swapper in 1e12 precision
+        uint256 lpFeeE12; // the lp fee for this swap in 1e12 precision
         uint256 decayingFeeE12;
 
         // closeBoundaryFee is the fee that would place the effective price at the close boundary.
@@ -120,7 +120,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
             //   - All buys happen at the lower bound
             //   - All sells happen at the upper bound
-            swapperFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
+            lpFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
                 priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
             );
             decayingFeeE12 = FeeCalculation.UNDEFINED_DECAYING_FEE_E12; // No decaying fee inside optimal range
@@ -142,19 +142,19 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
             // Select which fee to charge based on swap direction
             // Price is moving further from reference: charge 0 fee. Otherwise, charge the decaying fee.
-            swapperFeeE12 = (ammPriceBelowRP == userSellsZeroForOne) ? 0 : decayingFeeE12;
+            lpFeeE12 = (ammPriceBelowRP == userSellsZeroForOne) ? 0 : decayingFeeE12;
         }
 
-        // Update historical data for next swap's calculations
-        poolFeeState.previousDecayingFeeE12 = uint40(decayingFeeE12);
-        poolFeeState.previousSqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
+        // Update stored swap data for use in next swap's calculations
+        poolFeeState.decayingFeeE12 = uint40(decayingFeeE12);
+        poolFeeState.sqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
         poolFeeState.blockNumber = uint40(_getBlockNumberish());
 
         // Uniswap v4 handles fees in E6 not E12
         return (
             IHooks.beforeSwap.selector,
             BeforeSwapDeltaLibrary.ZERO_DELTA,
-            uint24(swapperFeeE12 / FeeCalculation.ONE_E6) | LPFeeLibrary.OVERRIDE_FEE_FLAG
+            uint24(lpFeeE12 / FeeCalculation.ONE_E6) | LPFeeLibrary.OVERRIDE_FEE_FLAG
         );
     }
 
@@ -176,39 +176,40 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 farBoundaryFeeE12,
         bool ammPriceBelowRP
     ) private view returns (uint256 decayingFeeE12) {
-        uint256 previousSqrtAmmPriceX96 = poolFeeState.previousSqrtAmmPriceX96;
-        uint256 previousDecayingFeeE12 = poolFeeState.previousDecayingFeeE12;
+        // Load the state stored about the previous swap on this pool
+        uint256 previousSqrtAmmPriceX96 = poolFeeState.sqrtAmmPriceX96;
+        uint256 previousDecayingFeeE12 = poolFeeState.decayingFeeE12;
         uint256 previousBlockNumber = poolFeeState.blockNumber;
 
-        // Step 1: Adjust previous fee based on how the price moved since the last swap
-        uint256 adjustedFeeE12;
+        // Determine the starting fee for exponential decay based on how the price moved since the last swap
+        uint256 decayStartFeeE12;
         if (
             previousDecayingFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
                 || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceBelowRP
         ) {
             // Price just left optimal range or jumped across reference: start from far boundary
-            adjustedFeeE12 = farBoundaryFeeE12;
+            decayStartFeeE12 = farBoundaryFeeE12;
         } else if (ammPriceBelowRP == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
             // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
             uint256 priceMovementRatioX96 =
                 FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
-            adjustedFeeE12 =
+            decayStartFeeE12 =
                 FeeCalculation.adjustPreviousFeeForPriceMovement(priceMovementRatioX96, previousDecayingFeeE12);
         } else if (previousDecayingFeeE12 > farBoundaryFeeE12) {
             // Price moved toward reference, lowering farBoundaryFee below previousFee: cap at the new far boundary
-            adjustedFeeE12 = farBoundaryFeeE12;
+            decayStartFeeE12 = farBoundaryFeeE12;
         } else {
             // Price moved toward reference but previousFee is still within bounds — no adjustment needed
-            adjustedFeeE12 = previousDecayingFeeE12;
+            decayStartFeeE12 = previousDecayingFeeE12;
         }
 
         // Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            // Calculate target fee. This is a tuning choice: the further outside the optimal range (larger
-            // closeBoundaryFee), the more the target drops below farBoundaryFee, incentivizing price to return.
+            // Calculate target fee. Subtracting half the closeBoundaryFee is a design choice that controls how
+            // aggressively the target fee drops below farBoundaryFee as price moves further from optimal range.
             farBoundaryFeeE12 - closeBoundaryFeeE12 / 2,
-            adjustedFeeE12,
+            decayStartFeeE12,
             poolFeeConfig.k,
             poolFeeConfig.logK,
             _getBlockNumberish() - previousBlockNumber

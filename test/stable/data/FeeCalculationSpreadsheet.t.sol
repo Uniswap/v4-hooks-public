@@ -32,13 +32,14 @@ contract FeeCalculationSpreadsheetTest is Test {
             uint256 expectedFarFeeE12 = vm.parseUint(cols[2]);
             uint256 expectedTargetFeeE12 = vm.parseUint(cols[3]);
 
-            // Convert price to sqrtPriceX96 using Q192 space (same approach as committed tests)
+            // Convert price to sqrtPriceX96 using Q192 space
             uint256 ammPriceX192 = uint256(REF) * uint256(REF) * priceE5 / 100_000;
             uint160 sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
             uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, REF);
 
             int256 closeFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
             uint256 farFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+            // Safe to cast: all test prices are outside the optimal range, so closeFeeE12 is always positive
             uint256 targetFeeE12 = farFeeE12 - uint256(closeFeeE12) / 2;
 
             assertApproxEqAbs(uint256(closeFeeE12), expectedCloseFeeE12, TOLERANCE_E12, "closeFee mismatch");
