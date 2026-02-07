@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 0 1070 670" width="1070" height="670">
+<style>
+  text { white-space: pre; }
+</style>
+<rect x="400" y="30" width="250" height="50" rx="12" ry="12" fill="#e2e3e5" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="50" y="150" width="220" height="70" rx="11" ry="11" fill="#fff3cd" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="310" y="150" width="220" height="70" rx="11" ry="11" fill="#fff3cd" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="570" y="150" width="220" height="70" rx="11" ry="11" fill="#fff3cd" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="830" y="150" width="220" height="70" rx="11" ry="11" fill="#fff3cd" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="50" y="280" width="220" height="50" rx="11" ry="11" fill="#cce5ff" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="310" y="280" width="220" height="50" rx="11" ry="11" fill="#cce5ff" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="570" y="280" width="220" height="50" rx="11" ry="11" fill="#cce5ff" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="830" y="280" width="220" height="50" rx="11" ry="11" fill="#cce5ff" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="300" y="420" width="450" height="80" rx="12" ry="12" fill="#d4edda" stroke="#000000" stroke-width="2" opacity="1"/>
+<rect x="780" y="550" width="280" height="90" rx="12" ry="12" fill="#f0f0f0" stroke="#868686" stroke-width="2" stroke-dasharray="8 4" opacity="1"/>
+<path d="M 460 80 L 160 150" fill="none" stroke="#000000" stroke-width="2"/><polygon points="160,150 167.29756419085354,143.1629277552177 169.56986034691772,152.90133985263566" fill="#000000"/>
+<path d="M 505 80 L 420 150" fill="none" stroke="#000000" stroke-width="2"/><polygon points="420,150 423.5065756756312,140.63496251843745 429.8636482042422,148.35426487460794" fill="#000000"/>
+<path d="M 560 80 L 680 150" fill="none" stroke="#000000" stroke-width="2"/><polygon points="680,150 670.0001001580691,149.95524342114442 675.03881041331,141.3174544121601" fill="#000000"/>
+<path d="M 600 80 L 940 150" fill="none" stroke="#000000" stroke-width="2"/><polygon points="940,150 930.5093885828891,153.15091969580357 932.5259177895939,143.35634926323704" fill="#000000"/>
+<path d="M 160 220 L 160 280" fill="none" stroke="#000000" stroke-width="2"/><polygon points="160,280 155,271.33974596215563 165,271.33974596215563" fill="#000000"/>
+<path d="M 420 220 L 420 280" fill="none" stroke="#000000" stroke-width="2"/><polygon points="420,280 415,271.33974596215563 425,271.33974596215563" fill="#000000"/>
+<path d="M 680 220 L 680 280" fill="none" stroke="#000000" stroke-width="2"/><polygon points="680,280 675,271.33974596215563 685,271.33974596215563" fill="#000000"/>
+<path d="M 940 220 L 940 280" fill="none" stroke="#000000" stroke-width="2"/><polygon points="940,280 935,271.33974596215563 945,271.33974596215563" fill="#000000"/>
+<path d="M 160 330 L 365 420" fill="none" stroke="#000000" stroke-width="2"/><polygon points="365,420 355.0603397801318,421.0968840930428 359.08024040048383,411.94044379112995" fill="#000000"/>
+<path d="M 420 330 L 475 420" fill="none" stroke="#000000" stroke-width="2"/><polygon points="475,420 466.21770128183243,415.2176126019662 474.75051961835203,410.00311250742647" fill="#000000"/>
+<path d="M 680 330 L 585 420" fill="none" stroke="#000000" stroke-width="2"/><polygon points="585,420 587.8482114225255,410.41419321639563 594.7256579016333,417.6737200554539" fill="#000000"/>
+<path d="M 940 330 L 625 420" fill="none" stroke="#000000" stroke-width="2"/><polygon points="625,420 631.9534360105537,412.8132255046414 634.7006472895274,422.4284649810497" fill="#000000"/>
+<text x="525" y="59" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="525" dy="0">Previous Swap State</tspan></text>
+<text x="125" y="136.9" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#495057" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="125" dy="0">1. Reset</tspan></text>
+<text x="395" y="136.9" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#495057" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="395" dy="0">2. Adjust Upward</tspan></text>
+<text x="665" y="136.9" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#495057" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="665" dy="0">3. Cap at Far Boundary</tspan></text>
+<text x="925" y="136.9" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#495057" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="925" dy="0">4. Pass-Through</tspan></text>
+<text x="160" y="180.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="160" dy="0">previousFee = UNDEFINED</tspan><tspan x="160" dy="16.8">OR price crossed RP</tspan></text>
+<text x="420" y="180.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="420" dy="0">Price moved further</tspan><tspan x="420" dy="16.8">from RP</tspan></text>
+<text x="680" y="180.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="680" dy="0">Price toward RP AND</tspan><tspan x="680" dy="16.8">prevFee &gt; farBoundaryFee</tspan></text>
+<text x="940" y="180.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="940" dy="0">Price toward RP AND</tspan><tspan x="940" dy="16.8">prevFee &lt;= farBoundaryFee</tspan></text>
+<text x="160" y="308.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="160" dy="0">decayStartFee = farBoundaryFee</tspan></text>
+<text x="420" y="298.09999999999997" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="420" dy="0">decayStartFee =</tspan><tspan x="420" dy="16.8">1 - movementRatio*(1-prevFee)</tspan></text>
+<text x="680" y="308.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="680" dy="0">decayStartFee = farBoundaryFee</tspan></text>
+<text x="940" y="308.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="940" dy="0">decayStartFee = previousFee</tspan></text>
+<text x="525" y="454.40000000000003" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#000000" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="525" dy="0">Exponential Decay</tspan><tspan x="525" dy="19.2">decayingFee = target + k^blocks * (decayStartFee - target)</tspan></text>
+<text x="790" y="573.3" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#000000" text-anchor="start" opacity="1" dominant-baseline="auto"><tspan x="790" dy="0">Invariants:</tspan><tspan x="790" dy="16.8">* decayStartFee &gt;= previousFee (path 2)</tspan><tspan x="790" dy="16.8">* decayStartFee &lt;= farBoundaryFee (path 3)</tspan><tspan x="790" dy="16.8">* decayingFee -&gt; targetFee as blocks-&gt;inf</tspan></text>
+</svg>

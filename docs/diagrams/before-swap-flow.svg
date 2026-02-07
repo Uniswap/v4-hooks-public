@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-90 -50 1000 1140" width="1000" height="1140">
+<style>
+  text { white-space: pre; }
+</style>
+<rect x="400" y="30" width="220" height="50" rx="11" ry="11" fill="#d4edda" stroke="#1e7e34" stroke-width="2" opacity="1"/>
+<rect x="370" y="130" width="280" height="50" rx="12" ry="12" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<polygon points="510,240 630,290 510,340 390,290" fill="#ffeeba" stroke="#856404" stroke-width="2"/>
+<polygon points="140,370 260,420 140,470 20,420" fill="#ffeeba" stroke="#856404" stroke-width="2"/>
+<rect x="-60" y="520" width="200" height="60" rx="10" ry="10" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="180" y="520" width="200" height="60" rx="10" ry="10" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="60" y="630" width="200" height="50" rx="10" ry="10" fill="#e8daef" stroke="#6f42c1" stroke-width="2" opacity="1"/>
+<rect x="580" y="380" width="260" height="50" rx="12" ry="12" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="580" y="470" width="260" height="50" rx="12" ry="12" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="580" y="560" width="260" height="50" rx="12" ry="12" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<polygon points="710,660 830,710 710,760 590,710" fill="#ffeeba" stroke="#856404" stroke-width="2"/>
+<rect x="500" y="800" width="180" height="50" rx="9" ry="9" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="740" y="800" width="140" height="50" rx="7" ry="7" fill="#cce5ff" stroke="#0056b3" stroke-width="2" opacity="1"/>
+<rect x="330" y="910" width="360" height="50" rx="12" ry="12" fill="#e8daef" stroke="#6f42c1" stroke-width="2" opacity="1"/>
+<rect x="370" y="1010" width="280" height="50" rx="12" ry="12" fill="#d4edda" stroke="#1e7e34" stroke-width="2" opacity="1"/>
+<path d="M 510 80 L 510 130" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,130 505,121.33974596215562 515,121.33974596215562" fill="#1b1b1f"/>
+<path d="M 510 180 L 510 240" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,240 505,231.3397459621556 515,231.3397459621556" fill="#1b1b1f"/>
+<path d="M 390 290 L 140 420" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="140,420 145.37675920212533,411.5684840934527 149.99028656854523,420.4406521057986" fill="#1b1b1f"/>
+<path d="M 630 290 L 710 380" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="710,380 700.509393788757,376.8490646240969 707.9834869755937,370.2054262357977" fill="#1b1b1f"/>
+<path d="M 80 470 L 40 520" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="40,520 41.50567376078944,510.11400250222215 49.314361855219744,516.3609529777664" fill="#1b1b1f"/>
+<path d="M 200 470 L 280 520" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="280,520 270.0061245636388,519.6500660598097 275.30611396367067,511.17008301975875" fill="#1b1b1f"/>
+<path d="M 40 580 L 160 630" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="160,630 150.08284242660517,631.2845176777522 153.92899627275904,622.0537484469829" fill="#1b1b1f"/>
+<path d="M 280 580 L 160 630" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="160,630 166.07100372724096,622.0537484469829 169.91715757339483,631.2845176777522" fill="#1b1b1f"/>
+<path d="M 710 430 L 710 470" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="710,470 705,461.33974596215563 715,461.33974596215563" fill="#1b1b1f"/>
+<path d="M 710 520 L 710 560" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="710,560 705,551.3397459621556 715,551.3397459621556" fill="#1b1b1f"/>
+<path d="M 710 610 L 710 660" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="710,660 705,651.3397459621556 715,651.3397459621556" fill="#1b1b1f"/>
+<path d="M 650 760 L 590 800" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="590,800 594.4322659401028,791.0359039141582 599.9792679023551,799.3564068575366" fill="#1b1b1f"/>
+<path d="M 770 760 L 810 800" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="810,800 800.3407417371093,797.4118095489748 807.4118095489748,790.3407417371093" fill="#1b1b1f"/>
+<path d="M 160 680 Q 160 860 335 885 Q 160 860 510 910" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,910 500.71967911907234,913.7250025969142 502.13389268144545,903.8255076603026" fill="#1b1b1f"/>
+<path d="M 590 850 L 510 910" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,910 513.9282032302755,900.8038475772934 519.9282032302755,908.8038475772934" fill="#1b1b1f"/>
+<path d="M 810 850 Q 810 880 660 905 Q 810 880 510 930" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,930 517.7204270252457,923.6442933872105 519.3644168982993,933.508232625532" fill="#1b1b1f"/>
+<path d="M 510 960 L 510 1010" fill="none" stroke="#1b1b1f" stroke-width="2"/><polygon points="510,1010 505,1001.3397459621556 515,1001.3397459621556" fill="#1b1b1f"/>
+<text x="510" y="59" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">beforeSwap called</tspan></text>
+<text x="510" y="150.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">Get sqrtAmmPrice, calculate</tspan><tspan x="510" dy="16.8">priceRatio &amp; closeBoundaryFee</tspan></text>
+<text x="510" y="285.09999999999997" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">closeBoundaryFee</tspan><tspan x="510" dy="16.8">&lt;= 0?</tspan></text>
+<text x="140" y="415.09999999999997" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="140" dy="0">ammPriceBelowRP</tspan><tspan x="140" dy="16.8">== userSells?</tspan></text>
+<text x="40" y="545.4499999999999" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="13" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="40" dy="0">fee = 1 -</tspan><tspan x="40" dy="15.6">(1-optFee)/priceRatio</tspan></text>
+<text x="280" y="545.4499999999999" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="13" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="280" dy="0">fee = 1 -</tspan><tspan x="280" dy="15.6">(1-optFee)*priceRatio</tspan></text>
+<text x="160" y="658.25" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="13" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="160" dy="0">decayingFee = UNDEFINED</tspan></text>
+<text x="710" y="400.09999999999997" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="710" dy="0">Calculate farBoundaryFee</tspan><tspan x="710" dy="16.8">&amp; targetFee</tspan></text>
+<text x="710" y="490.09999999999997" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="710" dy="0">Run decay state machine</tspan><tspan x="710" dy="16.8">-&gt; decayStartFee</tspan></text>
+<text x="710" y="580.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="710" dy="0">Apply exponential decay</tspan><tspan x="710" dy="16.8">-&gt; decayingFee</tspan></text>
+<text x="710" y="713.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="710" dy="0">Swap toward RP?</tspan></text>
+<text x="590" y="828.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="590" dy="0">fee = decayingFee</tspan></text>
+<text x="810" y="828.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="810" dy="0">fee = 0</tspan></text>
+<text x="510" y="930.1" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">Update feeState: decayingFee,</tspan><tspan x="510" dy="16.8">sqrtAmmPrice, blockNumber</tspan></text>
+<text x="510" y="1038.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1b1b1f" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">Return fee | OVERRIDE_FEE_FLAG</tspan></text>
+<text x="305" y="344" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#1e7e34" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="305" dy="0">Yes</tspan></text>
+<text x="671" y="332" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#c92a2a" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="671" dy="0">No</tspan></text>
+<text x="39" y="493.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1e7e34" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="39" dy="0">Yes</tspan></text>
+<text x="263" y="493.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#c92a2a" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="263" dy="0">No</tspan></text>
+<text x="613" y="779.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#1e7e34" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="613" dy="0">Yes</tspan></text>
+<text x="809" y="779.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="14" fill="#c92a2a" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="809" dy="0">No</tspan></text>
+<text x="510" y="-4.700000000000001" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="18" fill="#343a40" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="510" dy="0">StableStableHook: beforeSwap Algorithm</tspan></text>
+<text x="140" y="350.2" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="12" fill="#495057" text-anchor="middle" opacity="0.6" dominant-baseline="auto"><tspan x="140" dy="0">INSIDE OPTIMAL RANGE</tspan></text>
+<text x="715" y="360.2" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="12" fill="#495057" text-anchor="middle" opacity="0.6" dominant-baseline="auto"><tspan x="715" dy="0">OUTSIDE OPTIMAL RANGE</tspan></text>
+</svg>
