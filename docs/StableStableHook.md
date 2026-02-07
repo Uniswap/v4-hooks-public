@@ -82,7 +82,7 @@ Note: the optimal range is defined in **price** space, so the sqrt price bounds 
 | `owner`         | Can call `initializePool()` to create new pools                                                                     |
 | `configManager` | Can call `updateFeeConfig()` and `setConfigManager()`. Setting to `address(0)` permanently disables config updates. |
 
-The `_beforeInitialize` hook always reverts, ensuring pools can only be created through `initializePool()` (which sets the fee config atomically with initialization).
+The `_beforeInitialize` hook reverts unless the caller is the hook itself. Since a hook cannot call itself externally, this ensures pools can only be created through `initializePool()`, which calls `PoolManager.initialize()` internally — guaranteeing the fee config is set atomically with pool creation.
 
 ---
 
@@ -115,42 +115,7 @@ priceRatio = min(ammPrice, RP) / max(ammPrice, RP)
 
 The close boundary fee measures **how far the AMM price is from the nearer edge of the optimal range**. Its sign is the primary branching condition in `beforeSwap` — it determines whether the price is inside or outside the range.
 
-**Derivation — Case 1: ammPrice < RP** (price to the left of reference)
-
-The close boundary is the lower bound: `RP * (1 - optimalFee)`.
-
-We want the fee `f` such that the effective price after fee equals the close boundary:
-
-```
-ammPrice / (1 - f) = RP * (1 - optimalFee)
-```
-
-Solving for `f`:
-
-```
-1 - f = ammPrice / (RP * (1 - optimalFee))
-f = 1 - (ammPrice / RP) / (1 - optimalFee)
-f = 1 - priceRatio / (1 - optimalFee)
-```
-
-**Derivation — Case 2: ammPrice > RP** (price to the right of reference)
-
-The close boundary is the upper bound: `RP / (1 - optimalFee)`.
-
-We want:
-
-```
-ammPrice * (1 - f) = RP / (1 - optimalFee)
-```
-
-Solving for `f`:
-
-```
-1 - f = (RP / ammPrice) / (1 - optimalFee)
-f = 1 - priceRatio / (1 - optimalFee)
-```
-
-**Both cases produce the same formula:**
+The fee `f` is derived by setting the effective price (after fee) equal to the close boundary. Whether `ammPrice < RP` or `ammPrice > RP`, the normalized `priceRatio` collapses both cases into one formula:
 
 ```
 closeBoundaryFeeE12 = 1 - priceRatio / (1 - optimalFee)
@@ -158,7 +123,7 @@ closeBoundaryFeeE12 = 1 - priceRatio / (1 - optimalFee)
 
 **Sign convention:**
 
-- `closeBoundaryFeeE12 <= 0`: AMM price is **inside** the optimal range (past the close boundary)
+- `closeBoundaryFeeE12 <= 0`: AMM price is **inside** the optimal range
 - `closeBoundaryFeeE12 > 0`: AMM price is **outside** the optimal range
 
 ---
@@ -167,45 +132,17 @@ closeBoundaryFeeE12 = 1 - priceRatio / (1 - optimalFee)
 
 The far boundary fee measures **how far the AMM price is from the farther edge of the optimal range**. It is only used when the price is outside the optimal range, where it serves as the upper bound for the decaying fee and contributes to the target fee calculation.
 
-**Derivation — Case 1: ammPrice < RP** (price to the left)
-
-The far boundary is the upper bound: `RP / (1 - optimalFee)`.
-
-```
-ammPrice / (1 - f) = RP / (1 - optimalFee)
-f = 1 - (1 - optimalFee) * (ammPrice / RP)
-f = 1 - (1 - optimalFee) * priceRatio
-```
-
-**Derivation — Case 2: ammPrice > RP** (price to the right)
-
-The far boundary is the lower bound: `RP * (1 - optimalFee)`.
-
-```
-ammPrice * (1 - f) = RP * (1 - optimalFee)
-f = 1 - (1 - optimalFee) * (RP / ammPrice)
-f = 1 - (1 - optimalFee) * priceRatio
-```
-
-**Both cases produce the same formula:**
+Same approach as above — set the effective price equal to the far boundary. Both cases unify to:
 
 ```
 farBoundaryFeeE12 = 1 - (1 - optimalFee) * priceRatio
 ```
 
+**Key property**: `farBoundaryFee >= closeBoundaryFee` when outside the optimal range.
+
 ---
 
 ### Price-Fee Relationship
-
-![Price-Fee Curve](diagrams/price-fee-curve.svg)
-
-The diagram above plots both boundary fees (Y-axis) as functions of the AMM price (X-axis). The blue `closeBoundaryFee` curve crosses zero at the optimal range boundaries — negative inside (green region), positive outside (red regions). The orange `farBoundaryFee` curve is always above it. The green dashed `targetFee` curve (only shown outside the optimal range) sits between the two — it is the asymptote that the decaying fee converges toward. Where the curves intersect the fee=0 line defines the transition between the two fee regimes.
-
-**Inside** the optimal range: `closeBoundaryFee <= 0`, and the hook enforces consistent effective prices (all sells hit the lower bound, all buys hit the upper bound).
-
-**Outside** the optimal range: `closeBoundaryFee > 0`, and the fee decays from `farBoundaryFee` toward a target fee over time. Only swaps pushing price back toward RP are charged; swaps moving price further away are free.
-
----
 
 ## beforeSwap Algorithm
 
@@ -222,79 +159,21 @@ When the AMM price is inside the optimal range, the hook enforces **consistent e
 - **All sells** execute at effective price = `RP * (1 - optimalFee)` (lower bound)
 - **All buys** execute at effective price = `RP / (1 - optimalFee)` (upper bound)
 
-This means the fee varies depending on where within the range the AMM price sits, and which direction the swap goes.
+The fee varies depending on where within the range the AMM price sits and which direction the swap goes. The branching condition is `ammPriceBelowRP == userSellsZeroForOne`:
 
-### Derivation
-
-There are two sub-cases, determined by the combined condition `ammPriceBelowRP == userSellsZeroForOne`:
-
-#### Case A: `ammPriceBelowRP == userSellsZeroForOne`
-
-The swap pushes price toward the **closer** boundary. The effective price is set to that boundary.
-
-**When ammPrice < RP and user sells (zeroForOne = true):**
-
-The sell pushes the price further below RP, toward the lower bound. We want:
-
-```
-ammPrice * (1 - fee) = RP * (1 - optimalFee)
-```
-
-Since `priceRatio = ammPrice / RP` (price below RP):
+**Swap toward closer boundary** (`ammPriceBelowRP == userSellsZeroForOne`):
 
 ```
 fee = 1 - (1 - optimalFee) / priceRatio
 ```
 
-**When ammPrice > RP and user buys (zeroForOne = false):**
-
-The buy pushes the price further above RP, toward the upper bound. We want:
-
-```
-ammPrice / (1 - fee) = RP / (1 - optimalFee)
-```
-
-Since `priceRatio = RP / ammPrice` (price above RP):
-
-```
-fee = 1 - (1 - optimalFee) / priceRatio
-```
-
-Same formula — unifies both sub-cases.
-
-#### Case B: `ammPriceBelowRP != userSellsZeroForOne`
-
-The swap pushes price toward the **farther** boundary. The effective price is set to that boundary.
-
-**When ammPrice < RP and user buys (zeroForOne = false):**
-
-The buy pushes price up toward RP. We want the effective price at the upper bound:
-
-```
-ammPrice / (1 - fee) = RP / (1 - optimalFee)
-```
-
-Since `priceRatio = ammPrice / RP`:
+**Swap toward farther boundary** (`ammPriceBelowRP != userSellsZeroForOne`):
 
 ```
 fee = 1 - (1 - optimalFee) * priceRatio
 ```
 
-**When ammPrice > RP and user sells (zeroForOne = true):**
-
-The sell pushes price down toward RP. We want the effective price at the lower bound:
-
-```
-ammPrice * (1 - fee) = RP * (1 - optimalFee)
-```
-
-Since `priceRatio = RP / ammPrice`:
-
-```
-fee = 1 - (1 - optimalFee) * priceRatio
-```
-
-Same formula — unifies both sub-cases.
+Note the formulas mirror `closeBoundaryFee` and `farBoundaryFee` — same derivation approach (set effective price equal to the target boundary, solve for fee). At the reference price (`priceRatio = 1`), both produce exactly `optimalFee`. As the price drifts toward a boundary, fee for swaps pushing toward it decreases (approaching 0) while fee for swaps pushing away increases (approaching ~2 \* optimalFee).
 
 ---
 
@@ -407,17 +286,7 @@ where:
 - `k` < 1 (e.g., 0.99) — the per-block retention factor
 - `k^blocksPassed` -> 0 as blocks increase, so `decayingFee` -> `targetFee`
 
-#### Computation Paths
-
-| Blocks Passed | Method                | Description                                                     |
-| ------------- | --------------------- | --------------------------------------------------------------- |
-| 0             | `fastPow(k, 0) = Q24` | No decay — factor = 1.0                                         |
-| 1-4           | `fastPow(k, n)`       | Direct multiplication in assembly: `k^n` with Q24 shifts        |
-| 5+            | `exp(-logK * n)`      | Uses Solady's `expWad` for efficient large-exponent computation |
-
-The `fastPow` assembly avoids the overhead of `expWad` for the common case of consecutive-block swaps.
-
-The two paths produce equivalent results: `k^n = exp(n * ln(k)) = exp(-n * (-ln(k))) = exp(-logK_unscaled * n)`. The `logK` config parameter stores `-ln(k) >> 40` for efficient scaling.
+`k^blocksPassed` is computed via direct multiplication (`fastPow`) for 1-4 blocks, or `exp(-logK * n)` using Solady's `expWad` for 5+ blocks. Both paths are equivalent: `k^n = exp(-n * (-ln(k)))`.
 
 ---
 
