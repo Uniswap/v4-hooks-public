@@ -34,7 +34,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 1. **Consistent effective prices.** Inside a tight band around the reference price, all buys execute at one effective price and all sells at another, regardless of the AMM spot price.
 
-2. **Mean-reversion incentives.** Outside that band, fees decay over time to attract arbitrageurs who push the price back toward the reference.
+2. **Arbitrage incentives.** Outside that band, the fee charged on corrective swaps (those pushing price back toward the reference) decays over time, making it progressively cheaper for arbitrageurs to close the mispricing.
 
 3. **Zero fee for adverse movement.** Swaps that push the price further from the reference pay no fee. These swaps provide volume without extracting value from the mispricing, so penalizing them would reduce activity without benefiting LPs.
 
@@ -54,20 +54,20 @@ The hook maintains data for each pool in two data structures: **FeeConfig** (eco
 
 ### FeeConfig (per pool)
 
-| Field                   | Type      | Description                                                                                                                    |
-| ----------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `k`                     | `uint24`  | Per-block decay factor, in bips, in Q24 format. Example: `16,609,443 Q24 ≈ 0.99`, meaning the fee retains 99% of its value each block.       |
-| `logK`                  | `uint24`  | Precomputed `-ln(k) >> 40`. Used for efficient exponentiation when `blocksPassed > 4`.                                         |
+| Field                   | Type      | Description                                                                                                                                               |
+| ----------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k`                     | `uint24`  | Per-block decay factor, in bips, in Q24 format. Example: `16,609,443 Q24 ≈ 0.99`, meaning the fee retains 99% of its value each block.                    |
+| `logK`                  | `uint24`  | Precomputed `-ln(k) >> 40`. Used for efficient exponentiation when `blocksPassed > 4`.                                                                    |
 | `optimalFeeE6`          | `uint24`  | Fee rate defining the optimal range width around the reference price in **price space** in 1e6 precision. Example: `90` = 0.009%. Maximum: `10,000` (1%). |
-| `referenceSqrtPriceX96` | `uint160` | Reference center price in sqrt Q96 format — the "true" exchange rate of the stable pair.                                       |
+| `referenceSqrtPriceX96` | `uint160` | Reference center price in sqrt Q96 format — the "true" exchange rate of the stable pair.                                                                  |
 
 ### FeeState (per pool, updated every swap)
 
 | Field             | Type      | Description                                                                                                             |
 | ----------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `decayingFeeE12`  | `uint40`  | Last decaying fee in 1e12 precision, or `UNDEFINED_DECAYING_FEE_E12` if the previous swap was inside the optimal range. |
-| `sqrtAmmPriceX96` | `uint160` | AMM sqrt price at the beginning of the last swap. Used to determine price movement direction.                                            |
-| `blockNumber`     | `uint40`  | Block number when the FeeState was last updated. Drives time-based decay.                                                    |
+| `sqrtAmmPriceX96` | `uint160` | AMM sqrt price at the beginning of the last swap. Used to determine price movement direction.                           |
+| `blockNumber`     | `uint40`  | Block number when the FeeState was last updated. Drives time-based decay.                                               |
 
 ### Validation Rules
 
@@ -104,7 +104,7 @@ lowerBound = RP × (1 - optimalFee)
 upperBound = RP / (1 - optimalFee)
 ```
 
-where `RP` is the reference price (i.e., `referenceSqrtPriceX96²` expressed as a ratio).
+where `RP` is the reference price in price space (i.e., `referenceSqrtPriceX96` squared).
 
 The asymmetry is intentional. Multiplying by `(1 - f)` on the lower side and dividing by `(1 - f)` on the upper side ensures that a buy-then-sell roundtrip at the boundaries costs the same percentage in both directions.
 
@@ -198,7 +198,7 @@ The target fee is the asymptotic destination for the decaying fee:
 targetFee = farBoundaryFee - closeBoundaryFee / 2
 ```
 
-The further the price drifts outside the range (larger `closeBoundaryFee`), the more the target drops below `farBoundaryFee`. This creates progressively stronger incentive for mean-reversion: the longer the price remains outside the range, the cheaper it becomes for arbitrageurs to push it back.
+The further the price drifts outside the range (larger `closeBoundaryFee`), the more the target drops below `farBoundaryFee`. This creates a progressively stronger arbitrage incentive: the further the price drifts, the cheaper it becomes for arbitrageurs to push it back.
 
 **Properties:** `targetFee > 0` and `targetFee ≤ farBoundaryFee` when outside the optimal range. The gap between `targetFee` and `farBoundaryFee` is always exactly `closeBoundaryFee / 2`.
 
