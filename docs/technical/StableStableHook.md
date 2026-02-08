@@ -28,7 +28,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 ## Overview
 
-`StableStableHook` implements a dynamic fee mechanism for Uniswap v4 pools containing two stable assets (e.g., USDC/USDT). The hook overrides the LP fee on every swap via `beforeSwap`, computing a fee based on how far the current AMM price has drifted from a configured reference price.
+`StableStableHook` implements a dynamic fee mechanism for Uniswap v4 pools containing two stable assets (e.g., USDC/USDT). The hook overrides the LP fee on every swap via `beforeSwap`, computing a dynamic fee based on how far the current AMM price has drifted from a configured reference price.
 
 ### Design Goals
 
