@@ -50,7 +50,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 ## Configuration
 
-Each pool maintains two data structures: **FeeConfig** (economic parameters, set at pool creation) and **FeeState** (mutable state, updated on every swap).
+The hook maintains data for each pool in two data structures: **FeeConfig** (economic parameters, set at pool creation) and **FeeState** (mutable state, updated on every swap).
 
 ### FeeConfig (per pool)
 
