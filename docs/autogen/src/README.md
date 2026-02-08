@@ -6,7 +6,7 @@ Uniswap v4 hook contracts
 
 | Hook                                                | Description                                                                                | Documentation                                        |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| [StableStableHook](src/stable/StableStableHook.sol) | Dynamic fee hook for stable/stable pools with optimal range pricing and time-decaying fees | [docs/StableStableHook.md](docs/StableStableHook.md) |
+| [StableStableHook](src/stable/StableStableHook.sol) | Dynamic fee hook for stable/stable pools with optimal range pricing and time-decaying fees | [docs/technical/StableStableHook.md](docs/technical/StableStableHook.md) |
 | [WETHHook](src/WETHHook.sol)                        | Token wrapper hook for WETH                                                                | —                                                    |
 | [WstETHHook](src/WstETHHook.sol)                    | Token wrapper hook for WstETH                                                              | —                                                    |
 | [WstETHRoutingHook](src/WstETHRoutingHook.sol)      | Routing hook for WstETH                                                                    | —                                                    |
