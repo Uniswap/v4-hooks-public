@@ -44,7 +44,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 ![Architecture](../diagrams/architecture.svg)
 
-`PoolManager` calls `beforeSwap` on every swap. The hook reads the current AMM price, computes the price ratio relative to the reference, and returns a dynamic fee override.
+`PoolManager` calls `beforeSwap` on every swap. The hook reads the current AMM price, computes the swap's LP fee using the price ratio relative to the reference, and returns it as a dynamic fee override.
 
 ---
 
