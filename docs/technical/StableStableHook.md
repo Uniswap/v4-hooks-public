@@ -65,7 +65,7 @@ The hook maintains data for each pool in two data structures: **FeeConfig** (eco
 
 | Field             | Type      | Description                                                                                                             |
 | ----------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `decayingFeeE12`  | `uint40`  | Last decaying fee at 1e12 precision, or `UNDEFINED_DECAYING_FEE_E12` if the previous swap was inside the optimal range. |
+| `decayingFeeE12`  | `uint40`  | Last decaying fee in 1e12 precision, or `UNDEFINED_DECAYING_FEE_E12` if the previous swap was inside the optimal range. |
 | `sqrtAmmPriceX96` | `uint160` | AMM sqrt price at the last swap. Used to determine price movement direction.                                            |
 | `blockNumber`     | `uint40`  | Block number when the fee was last updated. Drives time-based decay.                                                    |
 
