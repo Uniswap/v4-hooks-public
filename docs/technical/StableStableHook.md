@@ -56,7 +56,7 @@ The hook maintains data for each pool in two data structures: **FeeConfig** (eco
 
 | Field                   | Type      | Description                                                                                                                    |
 | ----------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `k`                     | `uint24`  | Per-block decay factor in Q24 format. Example: `16,609,443` ≈ 0.99, meaning the fee retains 99% of its value each block.       |
+| `k`                     | `uint24`  | Per-block decay factor, in bips, in Q24 format. Example: `16,609,443 Q24 ≈ 0.99`, meaning the fee retains 99% of its value each block.       |
 | `logK`                  | `uint24`  | Precomputed `-ln(k) >> 40`. Used for efficient exponentiation when `blocksPassed > 4`.                                         |
 | `optimalFeeE6`          | `uint24`  | Fee rate defining the optimal range width in **price space** at 1e6 precision. Example: `90` = 0.009%. Maximum: `10,000` (1%). |
 | `referenceSqrtPriceX96` | `uint160` | Reference center price in sqrt Q96 format — the "true" exchange rate of the stable pair.                                       |
