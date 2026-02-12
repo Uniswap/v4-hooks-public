@@ -2,15 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {
-    ICurveStableSwapFactoryNG
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
-import {
-    ICurveStableSwapNG
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -18,14 +10,22 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {
+    ICurveStableSwapFactoryNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
+import {
+    ICurveStableSwapNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
 import {
     StableSwapNGAggregator
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
 import {
     StableSwapNGAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
 /// @title StableSwapNGFuzz
 /// @notice Fuzz tests for StableSwapNG through Uniswap V4 hooks
@@ -81,13 +81,13 @@ contract StableSwapNGFuzz is Test {
         curveFeeReceiver = makeAddr("curveFeeReceiver");
 
         // Deploy Uniswap V4 PoolManager
-        manager = new PoolManager(address(this));
+        manager = IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
 
         // Deploy hook factory
-        hookFactory = new StableSwapNGAggregatorFactory(manager);
+        hookFactory = new StableSwapNGAggregatorFactory(manager, IV4FeeAdapter(address(0)));
 
         // Deploy Curve factory from precompiled bytecode
         curveFactory = ICurveStableSwapFactoryNG(_deployFromBytecode(FACTORY_BYTECODE_PATH));
@@ -242,7 +242,7 @@ contract StableSwapNGFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(0)));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 
@@ -275,7 +275,7 @@ contract StableSwapNGFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(0)));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 

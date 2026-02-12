@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -12,6 +12,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 
 /// @title StableSwapAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Curve StableSwap pools
@@ -35,7 +36,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
 
-    constructor(IPoolManager _manager, ICurveStableSwap _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwap _pool, IV4FeeAdapter _protocolFeeAdapter)
+        BaseAggregatorHook(_manager, _protocolFeeAdapter)
+    {
         pool = _pool;
     }
 

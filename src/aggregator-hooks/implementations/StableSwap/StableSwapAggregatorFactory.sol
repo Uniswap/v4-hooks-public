@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.29;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {StableSwapAggregator} from "./StableSwapAggregator.sol";
 import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
 
@@ -13,14 +14,17 @@ import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
 /// @dev Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 contract StableSwapAggregatorFactory {
     /// @notice The Uniswap V4 PoolManager contract
-    IPoolManager public immutable POOL_MANAGER;
+    IPoolManager public immutable poolManager;
+    /// @notice The V4 protocol fee adapter for fee resolution
+    IV4FeeAdapter public immutable protocolFeeAdapter;
 
     error InsufficientTokens();
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
-    constructor(IPoolManager _poolManager) {
-        POOL_MANAGER = _poolManager;
+    constructor(IPoolManager _poolManager, IV4FeeAdapter _protocolFeeAdapter) {
+        poolManager = _poolManager;
+        protocolFeeAdapter = _protocolFeeAdapter;
     }
 
     /// @notice Creates a new StableSwapAggregator hook and initializes pools for all token pairs
@@ -41,7 +45,7 @@ contract StableSwapAggregatorFactory {
     ) external returns (address hook) {
         if (tokens.length < 2) revert InsufficientTokens();
 
-        hook = address(new StableSwapAggregator{salt: salt}(POOL_MANAGER, curvePool));
+        hook = address(new StableSwapAggregator{salt: salt}(poolManager, curvePool, protocolFeeAdapter));
 
         // Initialize one pool per token pair
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -54,7 +58,7 @@ contract StableSwapAggregatorFactory {
                     currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(hook)
                 });
 
-                POOL_MANAGER.initialize(poolKey, sqrtPriceX96);
+                poolManager.initialize(poolKey, sqrtPriceX96);
 
                 emit HookDeployed(hook, address(curvePool), poolKey);
             }
@@ -66,8 +70,11 @@ contract StableSwapAggregatorFactory {
     /// @param curvePool The Curve StableSwap pool
     /// @return computedAddress The predicted hook address
     function computeAddress(bytes32 salt, ICurveStableSwap curvePool) external view returns (address computedAddress) {
-        bytes32 bytecodeHash =
-            keccak256(abi.encodePacked(type(StableSwapAggregator).creationCode, abi.encode(POOL_MANAGER, curvePool)));
+        bytes32 bytecodeHash = keccak256(
+            abi.encodePacked(
+                type(StableSwapAggregator).creationCode, abi.encode(poolManager, curvePool, protocolFeeAdapter)
+            )
+        );
         computedAddress =
             address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
     }

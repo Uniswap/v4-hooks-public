@@ -6,7 +6,6 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ICurveFactory} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/ICurveFactory.sol";
 import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -14,12 +13,15 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {
     StableSwapAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
 /// @title StableSwapFuzz
 /// @notice Fuzz tests for StableSwap through Uniswap V4 hooks
@@ -67,6 +69,8 @@ contract StableSwapFuzz is Test {
     address public curveFeeReceiver;
 
     address public alice = makeAddr("alice");
+    address public tokenJar = makeAddr("tokenJar");
+    MockV4FeeAdapter public feeAdapter;
 
     error UnsupportedNumberOfTokens();
     error AddLiquidityFailed();
@@ -76,13 +80,14 @@ contract StableSwapFuzz is Test {
         curveFeeReceiver = makeAddr("curveFeeReceiver");
 
         // Deploy Uniswap V4 PoolManager
-        manager = new PoolManager(address(this));
+        manager = IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
 
-        // Deploy hook factory
-        hookFactory = new StableSwapAggregatorFactory(manager);
+        // Deploy fee adapter and hook factory
+        feeAdapter = new MockV4FeeAdapter(manager, tokenJar);
+        hookFactory = new StableSwapAggregatorFactory(manager, IV4FeeAdapter(address(feeAdapter)));
 
         // Deploy Curve factory from precompiled bytecode
         curveFactory = ICurveFactory(_deployFromBytecode(FACTORY_BYTECODE_PATH));
@@ -250,7 +255,8 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs =
+            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
@@ -283,7 +289,8 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs =
+            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
@@ -401,6 +408,19 @@ contract StableSwapFuzz is Test {
         currencies = _toCurrencies(tokens);
         hook = _deployHookMulti(ICurveStableSwap(curvePoolAddr), currencies);
 
+        // Derive and set protocol fee from seed
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        if (protocolFee > 0) {
+            uint24 packed = (protocolFee << 12) | protocolFee;
+            feeAdapter.setMockFee(packed);
+            for (uint256 i = 0; i < currencies.length; i++) {
+                for (uint256 j = i + 1; j < currencies.length; j++) {
+                    PoolKey memory poolKey = _buildPoolKey(currencies[i], currencies[j], IHooks(address(hook)));
+                    hook.refreshProtocolFee(poolKey);
+                }
+            }
+        }
+
         _setupAliceMulti(tokens, balances);
     }
 
@@ -410,7 +430,30 @@ contract StableSwapFuzz is Test {
         uint256 tokenOutIdx;
         uint256 amountIn;
         uint256 expectedOut;
+        uint256 expectedFeeAmount;
         bool zeroForOne;
+    }
+
+    /// @notice Derive swap context including protocol fee from seed
+    function _deriveSwapContext(
+        StableSwapAggregator hook,
+        MockERC20[] memory tokens,
+        Currency[] memory currencies,
+        uint256[] memory balances,
+        uint256 seed,
+        uint256 swapIdx,
+        bool zeroForOne
+    ) internal returns (SwapContext memory ctx, PoolKey memory poolKey) {
+        ctx.zeroForOne = zeroForOne;
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        (ctx.tokenInIdx, ctx.tokenOutIdx) = _deriveSwapPairForDirection(swapSeed, tokens.length, zeroForOne);
+        uint256 minPairBalance =
+            balances[ctx.tokenInIdx] < balances[ctx.tokenOutIdx] ? balances[ctx.tokenInIdx] : balances[ctx.tokenOutIdx];
+        ctx.amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
+        poolKey = _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
+        ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        ctx.expectedFeeAmount = (ctx.amountIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 
     /// @notice Execute an exact input swap and verify the output matches the quote
@@ -423,53 +466,39 @@ contract StableSwapFuzz is Test {
         uint256 swapIdx,
         bool zeroForOne
     ) internal {
-        SwapContext memory ctx;
-        ctx.zeroForOne = zeroForOne;
-
-        // Derive swap parameters in scoped block
-        {
-            uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-            (ctx.tokenInIdx, ctx.tokenOutIdx) = _deriveSwapPairForDirection(swapSeed, tokens.length, zeroForOne);
-
-            uint256 minPairBalance = balances[ctx.tokenInIdx] < balances[ctx.tokenOutIdx]
-                ? balances[ctx.tokenInIdx]
-                : balances[ctx.tokenOutIdx];
-            ctx.amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
-        }
-
-        PoolKey memory poolKey =
-            _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
-
-        // Get quote (negative = exact input)
-        ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
+        (SwapContext memory ctx, PoolKey memory poolKey) =
+            _deriveSwapContext(hook, tokens, currencies, balances, seed, swapIdx, zeroForOne);
         assertGt(ctx.expectedOut, 0, "Quote should be non-zero");
 
-        // Execute swap and verify in scoped block
-        {
-            uint256 tokenInBefore = tokens[ctx.tokenInIdx].balanceOf(alice);
-            uint256 tokenOutBefore = tokens[ctx.tokenOutIdx].balanceOf(alice);
+        uint256 tokenInBefore = tokens[ctx.tokenInIdx].balanceOf(alice);
+        uint256 tokenOutBefore = tokens[ctx.tokenOutIdx].balanceOf(alice);
+        uint256 tokenJarBefore = tokens[ctx.tokenOutIdx].balanceOf(tokenJar);
 
-            vm.prank(alice);
-            swapRouter.swap(
-                poolKey,
-                SwapParams({
-                    zeroForOne: ctx.zeroForOne,
-                    amountSpecified: -int256(ctx.amountIn),
-                    sqrtPriceLimitX96: ctx.zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
-                }),
-                SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-                ""
-            );
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: ctx.zeroForOne,
+                amountSpecified: -int256(ctx.amountIn),
+                sqrtPriceLimitX96: ctx.zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
 
-            assertEq(
-                tokenInBefore - tokens[ctx.tokenInIdx].balanceOf(alice), ctx.amountIn, "Should spend exact input amount"
-            );
-            assertEq(
-                tokens[ctx.tokenOutIdx].balanceOf(alice) - tokenOutBefore,
-                ctx.expectedOut,
-                "Received amount should match quote"
-            );
-        }
+        assertEq(
+            tokenInBefore - tokens[ctx.tokenInIdx].balanceOf(alice), ctx.amountIn, "Should spend exact input amount"
+        );
+        assertEq(
+            tokens[ctx.tokenOutIdx].balanceOf(alice) - tokenOutBefore,
+            ctx.expectedOut - ctx.expectedFeeAmount,
+            "Received amount should match quote minus protocol fee"
+        );
+        assertEq(
+            tokens[ctx.tokenOutIdx].balanceOf(tokenJar) - tokenJarBefore,
+            ctx.expectedFeeAmount,
+            "Token jar should receive protocol fee"
+        );
     }
 
     /// @notice Derive swap pair indices for a given direction
@@ -503,6 +532,12 @@ contract StableSwapFuzz is Test {
             balances[i] = bound(uint256(keccak256(abi.encode(seed, "balance", i))), 20_000 ether, 10_000_000 ether);
         }
         return balances;
+    }
+
+    /// @notice Derive protocol fee from seed (0 to MAX_PROTOCOL_FEE)
+    function _deriveProtocolFee(uint256 seed) internal pure returns (uint24) {
+        return
+            uint24(bound(uint256(keccak256(abi.encode(seed, "protocolFee"))), 0, ProtocolFeeLibrary.MAX_PROTOCOL_FEE));
     }
 
     receive() external payable {}

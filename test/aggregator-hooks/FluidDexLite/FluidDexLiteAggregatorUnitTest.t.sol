@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -11,7 +10,9 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
 import {MockFluidDexLiteResolver} from "./mocks/MockFluidDexLiteResolver.sol";
@@ -20,12 +21,11 @@ import {
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
-import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 
 contract FluidDexLiteAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
     MockFluidDexLite public mockDex;
     MockFluidDexLiteResolver public mockResolver;
@@ -48,7 +48,8 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     PoolId public poolId;
 
     function setUp() public {
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
         mockDex = new MockFluidDexLite();
         mockResolver = new MockFluidDexLiteResolver();
@@ -91,18 +92,20 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     function _deployHook(MockFluidDexLiteResolver _mockResolver) internal returns (FluidDexLiteAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
+        bytes memory constructorArgs =
+            abi.encode(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(0)));
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
-        return
-            new FluidDexLiteAggregator{salt: salt}(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
+        return new FluidDexLiteAggregator{salt: salt}(
+            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(0))
+        );
     }
 
     // ========== CONSTRUCTOR ==========
 
     function test_constructor_setsImmutables() public view {
-        assertEq(address(hook.FLUID_DEX_LITE()), address(mockDex));
-        assertEq(address(hook.FLUID_DEX_LITE_RESOLVER()), address(mockResolver));
+        assertEq(address(hook.fluidDexLite()), address(mockDex));
+        assertEq(address(hook.fluidDexLiteResolver()), address(mockResolver));
     }
 
     // ========== dexCallback ==========

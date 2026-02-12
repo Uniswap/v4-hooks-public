@@ -16,6 +16,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 
 /// @title BaseAggregatorHook
 /// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
@@ -26,12 +28,21 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
+    /// @notice The V4 protocol fee adapter used for fee resolution
+    IV4FeeAdapter public immutable protocolFeeAdapter;
+
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
+    /// @notice Maps pool IDs to their corresponding protocol fees
+    mapping(PoolId => uint24) public poolIdToProtocolFee;
+
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+    /// @param _protocolFeeAdapter The V4FeeAdapter contract for protocol fee resolution
+    constructor(IPoolManager _manager, IV4FeeAdapter _protocolFeeAdapter) BaseHook(_manager) {
+        protocolFeeAdapter = _protocolFeeAdapter;
+    }
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
@@ -42,6 +53,18 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+
+    /// @inheritdoc IAggregatorHook
+    function refreshProtocolFee(PoolKey calldata key) external {
+        PoolId poolId = key.toId();
+        uint24 protocolFee = protocolFeeAdapter.getFee(key);
+        uint24 oldProtocolFee = poolIdToProtocolFee[poolId];
+
+        if (protocolFee == oldProtocolFee) return;
+
+        poolIdToProtocolFee[poolId] = protocolFee;
+        emit ProtocolFeeUpdated(poolId, protocolFee);
+    }
 
     /// @inheritdoc BaseHook
     function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
@@ -79,6 +102,8 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
+        unspecifiedDelta += _applyProtocolFee(key, params);
+
         if (params.amountSpecified > 0) {
             // For exactOut, in cases where the implementation's amountOut may be off.
             // NOTE: it would be up to the router to handle this
@@ -86,6 +111,37 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         }
 
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
+    }
+
+    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params) internal returns (int128) {
+        PoolId poolId = key.toId();
+        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
+        uint24 protocolFee = params.zeroForOne
+            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
+            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+        if (protocolFee == 0) return 0;
+
+        bool isExactInput = params.amountSpecified < 0;
+
+        // Determine the unspecified currency (the side protocol fee is taken from)
+        Currency unspecifiedCurrency = params.zeroForOne == isExactInput ? key.currency1 : key.currency0;
+
+        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, params.amountSpecified);
+        poolManager.take(unspecifiedCurrency, protocolFeeAdapter.TOKEN_JAR(), protocolFeeAmount);
+
+        return int128(uint128(protocolFeeAmount));
+    }
+
+    function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, int256 amountSpecified)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (isExactInput) {
+            return (uint256(-amountSpecified) * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        } else {
+            return (uint256(amountSpecified) * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+        }
     }
 
     function _processAmounts(uint256 amountIn, uint256 amountOut, bool exactInput)

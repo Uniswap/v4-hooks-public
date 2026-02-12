@@ -30,7 +30,8 @@ contract MineAggregatorHookScript is Script {
         // When self-deploying, pass the wallet address that will deploy
         address deployer = vm.envOr("DEPLOYER", CREATE2_DEPLOYER);
 
-        // Load constructor arguments from environment variable
+        // Load constructor arguments from environment variable.
+        // CONSTRUCTOR_ARGS must be abi.encode of constructor params
         bytes memory constructorArgs = vm.envBytes("CONSTRUCTOR_ARGS");
 
         // First byte identifiers for aggregator hooks:

@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -12,10 +11,12 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {
     FluidDexLiteAggregator
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
@@ -23,7 +24,6 @@ import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/Fluid
 import {
     IFluidDexLiteResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title FluidDexLiteERC20ForkedTest
 /// @notice Tests for Fluid DEX Lite with ERC20 token pairs. Fluid Dex Lite currently has no Native currency pools
@@ -115,7 +115,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
         initialBalance0 = 100_000 * (10 ** token0Decimals);
         initialBalance1 = 100_000 * (10 ** token1Decimals);
 
-        manager = PoolManager(poolManagerAddress);
+        manager = IPoolManager(poolManagerAddress);
 
         swapRouter = new SafePoolSwapTest(manager);
 
@@ -146,12 +146,15 @@ contract FluidDexLiteERC20ForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs =
-            abi.encode(address(manager), address(fluidDexLite), address(fluidDexLiteResolver), dexSalt);
+        bytes memory constructorArgs = abi.encode(
+            address(manager), address(fluidDexLite), address(fluidDexLiteResolver), dexSalt, IV4FeeAdapter(address(0))
+        );
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexLiteAggregator{salt: salt}(manager, fluidDexLite, fluidDexLiteResolver, dexSalt);
+        hook = new FluidDexLiteAggregator{salt: salt}(
+            manager, fluidDexLite, fluidDexLiteResolver, dexSalt, IV4FeeAdapter(address(0))
+        );
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 

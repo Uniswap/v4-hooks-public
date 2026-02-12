@@ -5,31 +5,31 @@ import "forge-std/Test.sol";
 import {FluidDexLiteAdminModule} from "lib/fluid-contracts-public/contracts/protocols/dexLite/adminModule/main.sol";
 import {DexKey} from "lib/fluid-contracts-public/contracts/protocols/dexLite/other/structs.sol";
 import {InitializeParams} from "lib/fluid-contracts-public/contracts/protocols/dexLite/adminModule/structs.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {
-    FluidDexLiteAggregatorFactory
-} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol";
-import {
-    FluidDexLiteAggregator
-} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {
-    IFluidDexLiteResolver
-} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
-import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
+import {
+    FluidDexLiteAggregator
+} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
+import {
+    IFluidDexLiteResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
+import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
+import {
+    FluidDexLiteAggregatorFactory
+} from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol";
 
 /// @title FluidDexLiteNativeFuzz
 /// @notice Fuzz tests for FluidDexLite through Uniswap V4 hooks (Native ETH + ERC20 pairs)
@@ -50,7 +50,7 @@ contract FluidDexLiteNativeFuzz is Test {
 
     // V4 contracts
     FluidDexLiteAggregatorFactory public hookFactory;
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
 
     // V4 Pool configuration
@@ -121,9 +121,10 @@ contract FluidDexLiteNativeFuzz is Test {
         }
 
         // Deploy V4 infrastructure
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
-        hookFactory = new FluidDexLiteAggregatorFactory(IPoolManager(address(poolManager)), dexLite, resolver);
+        hookFactory = new FluidDexLiteAggregatorFactory(poolManager, dexLite, resolver, IV4FeeAdapter(address(0)));
     }
 
     // ========== FUZZ TESTS ==========
@@ -288,7 +289,9 @@ contract FluidDexLiteNativeFuzz is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(poolManager), address(dexLite), address(resolver), setup.salt);
+        bytes memory constructorArgs = abi.encode(
+            address(poolManager), address(dexLite), address(resolver), setup.salt, IV4FeeAdapter(address(0))
+        );
 
         (, bytes32 hookSalt) =
             HookMiner.find(address(hookFactory), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);

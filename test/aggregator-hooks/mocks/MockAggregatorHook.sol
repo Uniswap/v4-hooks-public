@@ -5,6 +5,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {BaseAggregatorHook} from "../../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {MockExternalLiqSource} from "./MockExternalLiqSource.sol";
 
@@ -18,7 +19,9 @@ contract MockAggregatorHook is BaseAggregatorHook {
     uint256 public mockPseudoTVL0;
     uint256 public mockPseudoTVL1;
 
-    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, MockExternalLiqSource _source, IV4FeeAdapter _protocolFeeAdapter)
+        BaseAggregatorHook(_manager, _protocolFeeAdapter)
+    {
         externalSource = _source;
     }
 
