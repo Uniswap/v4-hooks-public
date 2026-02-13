@@ -10,6 +10,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {ITempoExchange} from "./interfaces/ITempoExchange.sol";
+import {ITIP20} from "./interfaces/ITIP20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -80,10 +81,11 @@ contract TempoExchangeAggregator is ExternalLiqSourceHook {
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
 
-        // Validate tokens are supported by querying a small quote
-        // If tokens aren't supported, the quote will revert
-        try TEMPO_EXCHANGE.quoteSwapExactAmountIn(token0, token1, 1) {}
-        catch {
+        // Validate tokens are directly connected in the DEX tree
+        // One must be the quoteToken of the other (no multi-hop pairs)
+        bool directlyConnected =
+            ITIP20(token0).quoteToken() == token1 || ITIP20(token1).quoteToken() == token0;
+        if (!directlyConnected) {
             revert TokensNotSupported(token0, token1);
         }
 

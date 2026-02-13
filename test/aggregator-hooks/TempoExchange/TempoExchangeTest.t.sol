@@ -15,7 +15,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {MockTIP20} from "./mocks/MockTIP20.sol";
 import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
 import {
     TempoExchangeAggregator
@@ -55,8 +55,8 @@ contract TempoExchangeTest is Test {
     TempoExchangeAggregator public hook;
     MockTempoExchange public tempoExchange;
 
-    MockERC20 public alphaUSD;
-    MockERC20 public betaUSD;
+    MockTIP20 public alphaUSD;
+    MockTIP20 public betaUSD;
 
     PoolKey public poolKey;
     PoolId public poolId;
@@ -68,12 +68,16 @@ contract TempoExchangeTest is Test {
 
     function setUp() public {
         // Deploy mock tokens (simulating Tempo stablecoins)
-        alphaUSD = new MockERC20("AlphaUSD", "aUSD", DECIMALS);
-        betaUSD = new MockERC20("BetaUSD", "bUSD", DECIMALS);
+        // alphaUSD is the "root" (quoteToken = address(0)), betaUSD quotes against alphaUSD
+        alphaUSD = new MockTIP20("AlphaUSD", "aUSD", DECIMALS, address(0));
+        betaUSD = new MockTIP20("BetaUSD", "bUSD", DECIMALS, address(alphaUSD));
 
         // Ensure tokens are ordered correctly for v4 (lower address = currency0)
         if (address(alphaUSD) > address(betaUSD)) {
             (alphaUSD, betaUSD) = (betaUSD, alphaUSD);
+            // After swap, update quoteToken relationship to maintain direct connection
+            alphaUSD.setQuoteToken(address(betaUSD));
+            betaUSD.setQuoteToken(address(0));
         }
 
         currency0 = Currency.wrap(address(alphaUSD));
@@ -302,29 +306,33 @@ contract TempoExchangeTest is Test {
         hook.quote(true, int256(hugeAmount), poolId);
     }
 
-    /// @notice Test initialization with unsupported tokens reverts
+    /// @notice Test initialization with tokens not directly connected in DEX tree reverts
     function test_initializeUnsupportedTokens_reverts() public {
-        // Deploy a new mock exchange that reverts on quote
-        RevertingMockTempoExchange revertingExchange = new RevertingMockTempoExchange();
+        // Deploy tokens that are NOT directly connected (neither is quoteToken of the other)
+        // gammaUSD quotes against alphaUSD, deltaUSD quotes against betaUSD
+        // So gammaUSD and deltaUSD are siblings, not directly connected
+        MockTIP20 gammaUSD = new MockTIP20("GammaUSD", "gUSD", DECIMALS, address(alphaUSD));
+        MockTIP20 deltaUSD = new MockTIP20("DeltaUSD", "dUSD", DECIMALS, address(betaUSD));
 
-        // Deploy a new hook with the reverting exchange
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        // Order tokens correctly
+        if (address(gammaUSD) > address(deltaUSD)) {
+            (gammaUSD, deltaUSD) = (deltaUSD, gammaUSD);
+        }
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(revertingExchange));
-        (, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(TempoExchangeAggregator).creationCode, constructorArgs);
+        Currency currencyGamma = Currency.wrap(address(gammaUSD));
+        Currency currencyDelta = Currency.wrap(address(deltaUSD));
 
-        TempoExchangeAggregator revertingHook =
-            new TempoExchangeAggregator{salt: salt}(manager, ITempoExchange(address(revertingExchange)));
+        // Fund the mock exchange with new tokens
+        gammaUSD.mint(address(tempoExchange), INITIAL_BALANCE);
+        deltaUSD.mint(address(tempoExchange), INITIAL_BALANCE);
 
-        // Try to initialize a pool with the reverting hook
+        // Try to initialize a pool with non-directly-connected tokens
         PoolKey memory unsupportedPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 2000, // Different fee
+            currency0: currencyGamma,
+            currency1: currencyDelta,
+            fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(revertingHook))
+            hooks: IHooks(address(hook))
         });
 
         // PoolManager wraps hook errors in WrappedError, so we just verify it reverts
@@ -336,13 +344,15 @@ contract TempoExchangeTest is Test {
 
     /// @notice Test that the same hook can support multiple pools (singleton pattern)
     function test_singletonMultiplePools() public {
-        // Deploy additional tokens for second pool
-        MockERC20 gammaUSD = new MockERC20("GammaUSD", "gUSD", DECIMALS);
-        MockERC20 deltaUSD = new MockERC20("DeltaUSD", "dUSD", DECIMALS);
+        // Deploy additional tokens for second pool with direct quoteToken relationship
+        MockTIP20 gammaUSD = new MockTIP20("GammaUSD", "gUSD", DECIMALS, address(0));
+        MockTIP20 deltaUSD = new MockTIP20("DeltaUSD", "dUSD", DECIMALS, address(gammaUSD));
 
         // Order tokens correctly
         if (address(gammaUSD) > address(deltaUSD)) {
             (gammaUSD, deltaUSD) = (deltaUSD, gammaUSD);
+            gammaUSD.setQuoteToken(address(deltaUSD));
+            deltaUSD.setQuoteToken(address(0));
         }
 
         Currency currency2 = Currency.wrap(address(gammaUSD));
@@ -607,6 +617,126 @@ contract TempoExchangeTest is Test {
 
         assertEq(token0After - token0Before, amountOut, "Output amount mismatch");
         assertEq(token1Before - token1After, expectedIn, "Input amount mismatch");
+    }
+
+    // ========== GAS COMPARISON TESTS ==========
+
+    /// @notice Measure gas for a swap when the hook has zero token balance (cold storage)
+    function test_gasBaseline_noPreSeed() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (no pre-seed)", gasUsed);
+    }
+
+    /// @notice Measure gas for a swap after pre-seeding hook with 0.000001 tokens (warm storage)
+    function test_gasWithPreSeed() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        // Transfer 0.000001 alphaUSD (1 unit with 6 decimals) to the hook ahead of the swap
+        alphaUSD.mint(address(hook), 1);
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (with 0.000001 pre-seed)", gasUsed);
+    }
+
+    /// @notice Measure gas when only the output token (betaUSD) is pre-seeded
+    function test_gasWithPreSeed_outputTokenOnly() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        // Transfer 0.000001 betaUSD (output token for zeroForOne) to the hook
+        betaUSD.mint(address(hook), 1);
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (output token pre-seed only)", gasUsed);
+    }
+
+    /// @notice Measure gas when both tokens are pre-seeded
+    function test_gasWithPreSeed_bothTokens() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        // Transfer 0.000001 of each token to the hook
+        alphaUSD.mint(address(hook), 1);
+        betaUSD.mint(address(hook), 1);
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (both tokens pre-seed)", gasUsed);
+    }
+
+    /// @notice Measure gas with cold PoolManager (0 output token balance) and cold hook
+    function test_gasColdPoolManager_coldHook() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        // Zero out PM's betaUSD (output token for zeroForOne swap)
+        deal(address(betaUSD), address(manager), 0);
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (cold PM, cold hook)", gasUsed);
+    }
+
+    /// @notice Measure gas with seeded PoolManager (1 unit output token) and cold hook
+    function test_gasSeededPoolManager_coldHook() public {
+        uint256 amountIn = SWAP_AMOUNT;
+
+        // Set PM's betaUSD to just 1 unit (warm but minimal)
+        deal(address(betaUSD), address(manager), 1);
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas used (seeded PM, cold hook)", gasUsed);
     }
 
     /// @notice Fuzz test for quote consistency (exact in vs exact out)
