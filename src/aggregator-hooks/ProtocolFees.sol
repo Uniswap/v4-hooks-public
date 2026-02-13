@@ -17,18 +17,14 @@ contract ProtocolFees {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    IPoolManager internal immutable _poolManager;
-
-    constructor(IPoolManager _manager) {
-        _poolManager = _manager;
-    }
-
-    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params, int128 unspecifiedDelta)
-        internal
-        returns (int128)
-    {
-        uint24 protocolFee = _getProtocolFee(params.zeroForOne, key.toId());
-        address tokenJar = _getTokenJar();
+    function _applyProtocolFee(
+        IPoolManager poolManager,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        int128 unspecifiedDelta
+    ) internal returns (int128) {
+        uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
+        address tokenJar = _getTokenJar(poolManager);
 
         if (protocolFee == 0 || tokenJar == address(0)) return 0;
 
@@ -38,10 +34,10 @@ contract ProtocolFees {
         Currency unspecifiedCurrency = params.zeroForOne == isExactInput ? key.currency1 : key.currency0;
 
         uint256 absUnspecified = uint256(uint128(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta));
-        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, absUnspecified);
+        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, params.amountSpecified < 0, absUnspecified);
 
         // Send the protocol fee to the token jar
-        _poolManager.take(unspecifiedCurrency, tokenJar, protocolFeeAmount);
+        poolManager.take(unspecifiedCurrency, tokenJar, protocolFeeAmount);
 
         return int128(uint128(protocolFeeAmount));
     }
@@ -61,15 +57,19 @@ contract ProtocolFees {
         }
     }
 
-    function _getProtocolFee(bool zeroToOne, PoolId poolId) internal view returns (uint24 protocolFee) {
-        (,, uint24 protocolFeeRaw,) = _poolManager.getSlot0(poolId);
+    function _getProtocolFee(IPoolManager poolManager, bool zeroToOne, PoolId poolId)
+        internal
+        view
+        returns (uint24 protocolFee)
+    {
+        (,, uint24 protocolFeeRaw,) = poolManager.getSlot0(poolId);
         protocolFee = zeroToOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
     }
 
-    function _getTokenJar() internal view returns (address tokenJar) {
-        address protocolFeeAdapterAddress = _poolManager.protocolFeeController();
+    function _getTokenJar(IPoolManager poolManager) internal view returns (address tokenJar) {
+        address protocolFeeAdapterAddress = poolManager.protocolFeeController();
         if (protocolFeeAdapterAddress == address(0) || protocolFeeAdapterAddress.code.length == 0) return address(0);
         try IV4FeeAdapter(protocolFeeAdapterAddress).TOKEN_JAR() returns (address _tokenJar) {
             tokenJar = _tokenJar;

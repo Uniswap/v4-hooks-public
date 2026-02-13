@@ -33,7 +33,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager) BaseHook(_manager) ProtocolFees(_manager) {}
+    constructor(IPoolManager _manager) BaseHook(_manager) {}
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
@@ -46,7 +46,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     {
         amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
 
-        uint24 protocolFee = _getProtocolFee(zeroToOne, poolId);
+        uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
 
         if (protocolFee == 0) return amountUnspecified;
 
@@ -103,12 +103,13 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
+        bool isExactInput = params.amountSpecified < 0;
+        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, isExactInput);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        unspecifiedDelta += _applyProtocolFee(key, params, unspecifiedDelta);
+        unspecifiedDelta += _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
 
-        if (params.amountSpecified > 0) {
+        if (!isExactInput) {
             // For exactOut, in cases where the implementation's amountOut may be off.
             // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
@@ -153,11 +154,11 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
         if (token.balanceOf(payer) >= amount) {
-            token.transfer(address(_poolManager), amount);
+            token.transfer(address(poolManager), amount);
         } else {
             revert InsufficientLiquidity();
         }
-        _poolManager.settle();
+        poolManager.settle();
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps
