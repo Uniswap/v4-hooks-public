@@ -78,7 +78,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
-        // For Fluid, amountSpecified is negative for exactInput, and positive for exactOutput
+        // For Fluid, amountSpecified is positive for exactInput, and negative for exactOutput
         amountUnspecified = fluidDexLiteResolver.estimateSwapSingle(dexKey, fluidSwap0to1, -amountSpecified);
     }
 

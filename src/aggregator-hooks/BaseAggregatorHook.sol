@@ -55,10 +55,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     {
         amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
 
-        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
-        uint24 protocolFee = zeroToOne
-            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
-            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+        uint24 protocolFee = _getProtocolFee(zeroToOne, poolId);
 
         if (protocolFee == 0) return amountUnspecified;
 
@@ -145,11 +142,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         internal
         returns (int128)
     {
-        PoolId poolId = key.toId();
-        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
-        uint24 protocolFee = params.zeroForOne
-            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
-            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+        uint24 protocolFee = _getProtocolFee(params.zeroForOne, key.toId());
 
         if (protocolFee == 0) return 0;
 
@@ -160,6 +153,8 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
 
         uint256 absUnspecified = uint256(uint128(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta));
         uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, absUnspecified);
+
+        // Send the protocol fee to the token jar
         poolManager.take(unspecifiedCurrency, protocolFeeAdapter.TOKEN_JAR(), protocolFeeAmount);
 
         return int128(uint128(protocolFeeAmount));
@@ -178,6 +173,13 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
             // of the pre-protocol fee input.
             return (amountUnspecified * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
         }
+    }
+
+    function _getProtocolFee(bool zeroToOne, PoolId poolId) internal view returns (uint24 protocolFee) {
+        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
+        protocolFee = zeroToOne
+            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
+            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
     }
 
     function _processAmounts(uint256 amountIn, uint256 amountOut, bool exactInput)
