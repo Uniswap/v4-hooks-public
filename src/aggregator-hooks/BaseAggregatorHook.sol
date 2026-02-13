@@ -17,12 +17,12 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
-import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
+import {ProtocolFees} from "./ProtocolFees.sol";
 
 /// @title BaseAggregatorHook
 /// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
-/// @dev Implements the IAggregatorHook interface and extends the BaseHook contract
-abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver {
+/// @dev Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract
+abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook, DeltaResolver {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
@@ -33,7 +33,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+    constructor(IPoolManager _manager) BaseHook(_manager) ProtocolFees(_manager) {}
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
@@ -117,51 +117,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }
 
-    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params, int128 unspecifiedDelta)
-        internal
-        returns (int128)
-    {
-        uint24 protocolFee = _getProtocolFee(params.zeroForOne, key.toId());
-        address tokenJar = _getTokenJar();
-
-        if (protocolFee == 0 || tokenJar == address(0)) return 0;
-
-        bool isExactInput = params.amountSpecified < 0;
-
-        // Determine the unspecified currency (the side protocol fee is taken from)
-        Currency unspecifiedCurrency = params.zeroForOne == isExactInput ? key.currency1 : key.currency0;
-
-        uint256 absUnspecified = uint256(uint128(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta));
-        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, absUnspecified);
-
-        // Send the protocol fee to the token jar
-        poolManager.take(unspecifiedCurrency, tokenJar, protocolFeeAmount);
-
-        return int128(uint128(protocolFeeAmount));
-    }
-
-    function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint256 amountUnspecified)
-        internal
-        pure
-        returns (uint256)
-    {
-        if (isExactInput) {
-            return (amountUnspecified * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
-        } else {
-            // This calculation ensures the fee is the correct proportion of the total input.
-            // For a protocol fee of X%, the fee amount will be X% of the total input rather than X%
-            // of the pre-protocol fee input.
-            return (amountUnspecified * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
-        }
-    }
-
-    function _getProtocolFee(bool zeroToOne, PoolId poolId) internal view returns (uint24 protocolFee) {
-        (,, uint24 protocolFeeRaw,) = poolManager.getSlot0(poolId);
-        protocolFee = zeroToOne
-            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
-            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
-    }
-
     function _processAmounts(uint256 amountIn, uint256 amountOut, bool exactInput)
         internal
         pure
@@ -176,16 +131,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
             // Exact-Out
             unspecified = amountIn;
             unspecifiedDelta = int128(uint128(unspecified));
-        }
-    }
-
-    function _getTokenJar() internal view returns (address tokenJar) {
-        address protocolFeeAdapterAddress = poolManager.protocolFeeController();
-        if (protocolFeeAdapterAddress == address(0) || protocolFeeAdapterAddress.code.length == 0) return address(0);
-        try IV4FeeAdapter(protocolFeeAdapterAddress).TOKEN_JAR() returns (address _tokenJar) {
-            tokenJar = _tokenJar;
-        } catch {
-            // keep tokenJar as address(0)
         }
     }
 
@@ -208,11 +153,11 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
         if (token.balanceOf(payer) >= amount) {
-            token.transfer(address(poolManager), amount);
+            token.transfer(address(_poolManager), amount);
         } else {
             revert InsufficientLiquidity();
         }
-        poolManager.settle();
+        _poolManager.settle();
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps
