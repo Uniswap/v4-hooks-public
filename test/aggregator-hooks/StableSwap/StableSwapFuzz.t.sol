@@ -14,7 +14,6 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
@@ -87,7 +86,10 @@ contract StableSwapFuzz is Test {
 
         // Deploy fee adapter and hook factory
         feeAdapter = new MockV4FeeAdapter(manager, tokenJar);
-        hookFactory = new StableSwapAggregatorFactory(manager, IV4FeeAdapter(address(feeAdapter)));
+        hookFactory = new StableSwapAggregatorFactory(manager);
+
+        // Set this contract as the protocol fee controller
+        manager.setProtocolFeeController(address(feeAdapter));
 
         // Deploy Curve factory from precompiled bytecode
         curveFactory = ICurveFactory(_deployFromBytecode(FACTORY_BYTECODE_PATH));
@@ -255,8 +257,7 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs =
-            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
@@ -289,8 +290,7 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs =
-            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
@@ -414,11 +414,11 @@ contract StableSwapFuzz is Test {
         uint24 protocolFee = _deriveProtocolFee(seed);
         if (protocolFee > 0) {
             uint24 packed = (protocolFee << 12) | protocolFee;
-            feeAdapter.setMockFee(packed);
             for (uint256 i = 0; i < currencies.length; i++) {
                 for (uint256 j = i + 1; j < currencies.length; j++) {
                     PoolKey memory poolKey = _buildPoolKey(currencies[i], currencies[j], IHooks(address(hook)));
-                    hook.refreshProtocolFee(poolKey);
+                    vm.prank(address(feeAdapter));
+                    manager.setProtocolFee(poolKey, packed);
                 }
             }
         }

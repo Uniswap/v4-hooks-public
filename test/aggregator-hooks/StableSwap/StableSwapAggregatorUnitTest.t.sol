@@ -13,7 +13,6 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockCurveStableSwap} from "./mocks/MockCurveStableSwap.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
@@ -92,11 +91,10 @@ contract StableSwapAggregatorUnitTest is Test {
     function _deployHook(MockCurveStableSwap _mockPool) internal returns (StableSwapAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, IV4FeeAdapter(address(feeAdapter)));
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
-        StableSwapAggregator newHook =
-            new StableSwapAggregator{salt: salt}(poolManager, _mockPool, IV4FeeAdapter(address(feeAdapter)));
+        StableSwapAggregator newHook = new StableSwapAggregator{salt: salt}(poolManager, _mockPool);
         return newHook;
     }
 

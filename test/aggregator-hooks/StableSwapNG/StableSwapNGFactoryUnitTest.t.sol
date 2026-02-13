@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockCurveStableSwapNG} from "./mocks/MockCurveStableSwapNG.sol";
@@ -44,8 +43,7 @@ contract StableSwapNGFactoryUnitTest is Test {
     }
 
     function test_factory_createPool() public {
-        StableSwapNGAggregatorFactory factory =
-            new StableSwapNGAggregatorFactory(poolManager, IV4FeeAdapter(address(feeAdapter)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -60,7 +58,7 @@ contract StableSwapNGFactoryUnitTest is Test {
         tokens[0] = Currency.wrap(address(tkA));
         tokens[1] = Currency.wrap(address(tkB));
 
-        bytes memory args = abi.encode(address(poolManager), address(pool2), IV4FeeAdapter(address(feeAdapter)));
+        bytes memory args = abi.encode(address(poolManager), address(pool2));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -73,14 +71,13 @@ contract StableSwapNGFactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        StableSwapNGAggregatorFactory factory =
-            new StableSwapNGAggregatorFactory(poolManager, IV4FeeAdapter(address(feeAdapter)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         Currency[] memory tokens = new Currency[](2);
         tokens[0] = Currency.wrap(address(token0));
         tokens[1] = Currency.wrap(address(token1));
 
-        bytes memory args = abi.encode(address(poolManager), address(mockPool), IV4FeeAdapter(address(feeAdapter)));
+        bytes memory args = abi.encode(address(poolManager), address(mockPool));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -95,8 +92,7 @@ contract StableSwapNGFactoryUnitTest is Test {
     }
 
     function test_factory_revertsInsufficientTokens() public {
-        StableSwapNGAggregatorFactory factory =
-            new StableSwapNGAggregatorFactory(poolManager, IV4FeeAdapter(address(feeAdapter)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         Currency[] memory tokens = new Currency[](1);
         tokens[0] = Currency.wrap(address(token0));

@@ -15,7 +15,6 @@ import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {
@@ -149,19 +148,12 @@ contract FluidDexLiteERC20ForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(
-            address(manager),
-            address(fluidDexLite),
-            address(fluidDexLiteResolver),
-            dexSalt,
-            IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory constructorArgs =
+            abi.encode(address(manager), address(fluidDexLite), address(fluidDexLiteResolver), dexSalt);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexLiteAggregator{salt: salt}(
-            manager, fluidDexLite, fluidDexLiteResolver, dexSalt, IV4FeeAdapter(address(feeAdapter))
-        );
+        hook = new FluidDexLiteAggregator{salt: salt}(manager, fluidDexLite, fluidDexLiteResolver, dexSalt);
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 

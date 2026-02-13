@@ -14,7 +14,6 @@ import {IDexCallback} from "./interfaces/IDexCallback.sol";
 import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 
 /// @title FluidDexT1Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
@@ -52,9 +51,8 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         IPoolManager _manager,
         IFluidDexT1 _fluidDex,
         IFluidDexReservesResolver _fluidDexReservesResolver,
-        address _fluidLiquidity,
-        IV4FeeAdapter _protocolFeeAdapter
-    ) BaseAggregatorHook(_manager, _protocolFeeAdapter) {
+        address _fluidLiquidity
+    ) BaseAggregatorHook(_manager) {
         fluidPool = _fluidDex;
         fluidLiquidity = _fluidLiquidity;
         fluidDexReservesResolver = _fluidDexReservesResolver;

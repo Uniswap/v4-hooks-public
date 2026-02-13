@@ -20,7 +20,6 @@ import {MockV4FeeAdapter} from "./mocks/MockV4FeeAdapter.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {BaseAggregatorHook} from "../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {IAggregatorHook} from "../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 
 contract BaseAggregatorHookUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -60,11 +59,9 @@ contract BaseAggregatorHookUnitTest is Test {
 
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(poolManager, externalSource, IV4FeeAdapter(address(feeAdapter)));
+        bytes memory constructorArgs = abi.encode(poolManager, externalSource);
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(MockAggregatorHook).creationCode, constructorArgs);
-        hook = new MockAggregatorHook{salt: salt}(
-            IPoolManager(address(poolManager)), externalSource, IV4FeeAdapter(address(feeAdapter))
-        );
+        hook = new MockAggregatorHook{salt: salt}(IPoolManager(address(poolManager)), externalSource);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -75,6 +72,7 @@ contract BaseAggregatorHookUnitTest is Test {
         });
         poolId = poolKey.toId();
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
+        poolManager.setProtocolFeeController(address(feeAdapter));
 
         token0.mint(alice, INITIAL_BALANCE);
         token1.mint(alice, INITIAL_BALANCE);
@@ -96,16 +94,14 @@ contract BaseAggregatorHookUnitTest is Test {
     function test_beforeInitialize_emitsAggregatorPoolRegistered() public {
         // Already initialized in setUp; event was emitted. Verify by initializing another pool.
         MockExternalLiqSource src2 = new MockExternalLiqSource();
-        bytes memory args = abi.encode(IPoolManager(address(poolManager)), src2, IV4FeeAdapter(address(feeAdapter)));
+        bytes memory args = abi.encode(IPoolManager(address(poolManager)), src2);
         (, bytes32 salt2) = HookMiner.find(
             address(this),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
             type(MockAggregatorHook).creationCode,
             args
         );
-        MockAggregatorHook hook2 = new MockAggregatorHook{salt: salt2}(
-            IPoolManager(address(poolManager)), src2, IV4FeeAdapter(address(feeAdapter))
-        );
+        MockAggregatorHook hook2 = new MockAggregatorHook{salt: salt2}(IPoolManager(address(poolManager)), src2);
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
@@ -204,45 +200,10 @@ contract BaseAggregatorHookUnitTest is Test {
         return (fee << 12) | fee;
     }
 
-    /// @dev Sets the protocol fee on the hook for the pool via refreshProtocolFee
+    /// @dev Sets the protocol fee on the pool via poolManager.setProtocolFee
     function _setProtocolFee(uint24 fee) internal {
-        feeAdapter.setMockFee(_packFee(fee));
-        hook.refreshProtocolFee(poolKey);
-    }
-
-    function test_refreshProtocolFee_updatesStoredFee() public {
-        uint24 fee = 500; // 0.05%
-        _setProtocolFee(fee);
-        assertEq(hook.poolIdToProtocolFee(poolId), _packFee(fee));
-    }
-
-    function test_refreshProtocolFee_emitsEvent() public {
-        uint24 fee = 500;
-        feeAdapter.setMockFee(_packFee(fee));
-
-        vm.expectEmit(true, true, true, true);
-        emit IAggregatorHook.ProtocolFeeUpdated(poolId, _packFee(fee));
-        hook.refreshProtocolFee(poolKey);
-    }
-
-    function test_refreshProtocolFee_noopWhenUnchanged() public {
-        uint24 fee = 500;
-        _setProtocolFee(fee);
-
-        // Call again with the same fee — should be a no-op (no event emitted)
-        vm.recordLogs();
-        hook.refreshProtocolFee(poolKey);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(logs.length, 0, "should not emit when fee unchanged");
-    }
-
-    function test_refreshProtocolFee_updatesWhenChanged() public {
-        _setProtocolFee(500);
-        assertEq(hook.poolIdToProtocolFee(poolId), _packFee(500));
-
-        // Change the fee
-        _setProtocolFee(1000);
-        assertEq(hook.poolIdToProtocolFee(poolId), _packFee(1000));
+        vm.prank(address(feeAdapter));
+        poolManager.setProtocolFee(poolKey, _packFee(fee));
     }
 
     function test_protocolFee_exactIn_zeroForOne() public {
@@ -396,13 +357,59 @@ contract BaseAggregatorHookUnitTest is Test {
         assertEq(token1.balanceOf(tokenJar), expectedFee, "tokenJar fee balance at max");
     }
 
+    function test_protocolFee_noFeeAdapter_swapSucceeds() public {
+        // Clear the protocol fee controller so _getTokenJar() returns address(0)
+        poolManager.setProtocolFeeController(address(0));
+
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        externalSource.setReturns(amountOut, amountIn, false);
+        token1.mint(address(hook), amountOut);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        // Full output, no fee deducted
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn, "alice token0 balance");
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut, "alice token1 balance");
+        assertEq(token1.balanceOf(tokenJar), 0, "no fee should go to tokenJar");
+    }
+
+    function test_protocolFee_invalidFeeAdapter_swapSucceeds() public {
+        // Set an invalid protocol fee controller so _getTokenJar() returns address(0)
+        poolManager.setProtocolFeeController(makeAddr("invalid"));
+
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        externalSource.setReturns(amountOut, amountIn, false);
+        token1.mint(address(hook), amountOut);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        // Full output, no fee deducted
+        assertEq(token0.balanceOf(alice), INITIAL_BALANCE - amountIn, "alice token0 balance");
+        assertEq(token1.balanceOf(alice), INITIAL_BALANCE + amountOut, "alice token1 balance");
+        assertEq(token1.balanceOf(tokenJar), 0, "no fee should go to tokenJar");
+    }
+
     function test_protocolFee_asymmetricDirections() public {
         // Set different fees per direction: 500 for zeroForOne, 200 for oneForZero
         uint24 zeroForOneFee = 500;
         uint24 oneForZeroFee = 200;
         uint24 packed = (oneForZeroFee << 12) | zeroForOneFee;
-        feeAdapter.setMockFee(packed);
-        hook.refreshProtocolFee(poolKey);
+        vm.prank(address(feeAdapter));
+        poolManager.setProtocolFee(poolKey, packed);
 
         // --- zeroForOne swap ---
         {

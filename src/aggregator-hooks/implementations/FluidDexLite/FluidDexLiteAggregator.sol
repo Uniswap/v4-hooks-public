@@ -14,7 +14,6 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IFluidDexLite} from "./interfaces/IFluidDexLite.sol";
 import {IFluidDexLiteCallback} from "./interfaces/IFluidDexLiteCallback.sol";
 import {IFluidDexLiteResolver} from "./interfaces/IFluidDexLiteResolver.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 
 /// @title FluidDexLiteAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX Lite pools
@@ -49,13 +48,9 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
         bytes extraData;
     }
 
-    constructor(
-        IPoolManager _manager,
-        IFluidDexLite _dexLite,
-        IFluidDexLiteResolver _dexLiteResolver,
-        bytes32 _salt,
-        IV4FeeAdapter _protocolFeeAdapter
-    ) BaseAggregatorHook(_manager, _protocolFeeAdapter) {
+    constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver _dexLiteResolver, bytes32 _salt)
+        BaseAggregatorHook(_manager)
+    {
         fluidDexLite = _dexLite;
         fluidDexLiteResolver = _dexLiteResolver;
         salt = _salt;

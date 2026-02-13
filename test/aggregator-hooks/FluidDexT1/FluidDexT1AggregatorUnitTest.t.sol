@@ -14,7 +14,6 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockFluidDexT1.sol";
 import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
@@ -99,13 +98,10 @@ contract FluidDexT1AggregatorUnitTest is Test {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
-        bytes memory constructorArgs =
-            abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter)));
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
-        return new FluidDexT1Aggregator{salt: salt}(
-            poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter))
-        );
+        return new FluidDexT1Aggregator{salt: salt}(poolManager, _mockPool, _mockResolver, fluidLiquidity);
     }
 
     // ========== CONSTRUCTOR ==========

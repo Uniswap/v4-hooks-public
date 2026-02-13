@@ -5,7 +5,6 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {FluidDexLiteAggregator} from "./FluidDexLiteAggregator.sol";
 import {IFluidDexLite} from "./interfaces/IFluidDexLite.sol";
 import {IFluidDexLiteResolver} from "./interfaces/IFluidDexLiteResolver.sol";
@@ -20,21 +19,13 @@ contract FluidDexLiteAggregatorFactory {
     IFluidDexLite public immutable fluidDexLite;
     /// @notice The Fluid DEX Lite resolver for pool state queries
     IFluidDexLiteResolver public immutable fluidDexLiteResolver;
-    /// @notice The V4 protocol fee adapter for fee resolution
-    IV4FeeAdapter public immutable protocolFeeAdapter;
 
     event HookDeployed(address indexed hook, bytes32 indexed dexSalt, PoolKey poolKey);
 
-    constructor(
-        IPoolManager _poolManager,
-        IFluidDexLite _fluidDexLite,
-        IFluidDexLiteResolver _fluidDexLiteResolver,
-        IV4FeeAdapter _protocolFeeAdapter
-    ) {
+    constructor(IPoolManager _poolManager, IFluidDexLite _fluidDexLite, IFluidDexLiteResolver _fluidDexLiteResolver) {
         poolManager = _poolManager;
         fluidDexLite = _fluidDexLite;
         fluidDexLiteResolver = _fluidDexLiteResolver;
-        protocolFeeAdapter = _protocolFeeAdapter;
     }
 
     /// @notice Creates a new FluidDexLiteAggregator hook and initializes the pool
@@ -55,11 +46,7 @@ contract FluidDexLiteAggregatorFactory {
         int24 tickSpacing,
         uint160 sqrtPriceX96
     ) external returns (address hook) {
-        hook = address(
-            new FluidDexLiteAggregator{salt: salt}(
-                poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt, protocolFeeAdapter
-            )
-        );
+        hook = address(new FluidDexLiteAggregator{salt: salt}(poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt));
 
         PoolKey memory poolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(hook)
@@ -78,7 +65,7 @@ contract FluidDexLiteAggregatorFactory {
         bytes32 bytecodeHash = keccak256(
             abi.encodePacked(
                 type(FluidDexLiteAggregator).creationCode,
-                abi.encode(poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt, protocolFeeAdapter)
+                abi.encode(poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt)
             )
         );
         computedAddress =

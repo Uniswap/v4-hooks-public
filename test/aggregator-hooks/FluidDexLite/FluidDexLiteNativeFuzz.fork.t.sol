@@ -7,7 +7,6 @@ import {DexKey} from "lib/fluid-contracts-public/contracts/protocols/dexLite/oth
 import {InitializeParams} from "lib/fluid-contracts-public/contracts/protocols/dexLite/adminModule/structs.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -129,8 +128,10 @@ contract FluidDexLiteNativeFuzz is Test {
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
         feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
-        hookFactory =
-            new FluidDexLiteAggregatorFactory(poolManager, dexLite, resolver, IV4FeeAdapter(address(feeAdapter)));
+        hookFactory = new FluidDexLiteAggregatorFactory(poolManager, dexLite, resolver);
+
+        // Set this contract as the protocol fee controller
+        poolManager.setProtocolFeeController(address(feeAdapter));
     }
 
     // ========== FUZZ TESTS ==========
@@ -222,8 +223,8 @@ contract FluidDexLiteNativeFuzz is Test {
         uint24 protocolFee = _deriveProtocolFee(seed);
         if (protocolFee > 0) {
             uint24 packed = (protocolFee << 12) | protocolFee;
-            feeAdapter.setMockFee(packed);
-            deployment.hook.refreshProtocolFee(deployment.poolKey);
+            vm.prank(address(feeAdapter));
+            poolManager.setProtocolFee(deployment.poolKey, packed);
         }
 
         _setupAlice(setup);
@@ -304,9 +305,7 @@ contract FluidDexLiteNativeFuzz is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(
-            address(poolManager), address(dexLite), address(resolver), setup.salt, IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory constructorArgs = abi.encode(address(poolManager), address(dexLite), address(resolver), setup.salt);
 
         (, bytes32 hookSalt) =
             HookMiner.find(address(hookFactory), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);

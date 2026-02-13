@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
@@ -43,17 +42,14 @@ contract FluidDexLiteFactoryUnitTest is Test {
     }
 
     function test_factory_createPool() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver, IV4FeeAdapter(address(feeAdapter)));
+        FluidDexLiteAggregatorFactory factory = new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver);
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
         if (address(tkA) > address(tkB)) (tkA, tkB) = (tkB, tkA);
 
         bytes32 dexSalt = bytes32(uint256(42));
-        bytes memory args = abi.encode(
-            address(poolManager), address(mockDex), address(mockResolver), dexSalt, IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -74,13 +70,10 @@ contract FluidDexLiteFactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver, IV4FeeAdapter(address(feeAdapter)));
+        FluidDexLiteAggregatorFactory factory = new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver);
 
         bytes32 dexSalt = bytes32(uint256(99));
-        bytes memory args = abi.encode(
-            address(poolManager), address(mockDex), address(mockResolver), dexSalt, IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),

@@ -14,7 +14,6 @@ import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {IFluidDexFactory} from "./interfaces/IFluidDexFactory.sol";
 import {IFluidDexT1DeploymentLogic} from "./interfaces/IFluidDexT1DeploymentLogic.sol";
@@ -168,9 +167,11 @@ contract FluidDexT1NativeFuzz is Test {
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
         feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
-        hookFactory = new FluidDexT1AggregatorFactory(
-            poolManager, IFluidDexReservesResolver(dexReservesResolver), liquidity, IV4FeeAdapter(address(feeAdapter))
-        );
+        hookFactory =
+            new FluidDexT1AggregatorFactory(poolManager, IFluidDexReservesResolver(dexReservesResolver), liquidity);
+
+        // Set this contract as the protocol fee controller
+        poolManager.setProtocolFeeController(address(feeAdapter));
     }
 
     // ========== FUZZ TESTS ==========
@@ -260,8 +261,8 @@ contract FluidDexT1NativeFuzz is Test {
         uint24 protocolFee = _deriveProtocolFee(seed);
         if (protocolFee > 0) {
             uint24 packed = (protocolFee << 12) | protocolFee;
-            feeAdapter.setMockFee(packed);
-            deployment.hook.refreshProtocolFee(deployment.poolKey);
+            vm.prank(address(feeAdapter));
+            poolManager.setProtocolFee(deployment.poolKey, packed);
         }
 
         _setupAlice(setup);
@@ -502,9 +503,7 @@ contract FluidDexT1NativeFuzz is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(
-            address(poolManager), setup.fluidPool, address(resolver), liquidity, IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory constructorArgs = abi.encode(address(poolManager), setup.fluidPool, address(resolver), liquidity);
 
         (, bytes32 hookSalt) =
             HookMiner.find(address(hookFactory), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);

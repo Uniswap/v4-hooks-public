@@ -2,9 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 
 /// @title IAggregatorHook
 /// @notice Interface for the AggregatorHook contract. An implemented aggregator hook should be able to use liquidity from external sources
@@ -12,10 +9,8 @@ interface IAggregatorHook {
     error InsufficientLiquidity();
     error UnspecifiedAmountExceeded();
     error PoolDoesNotExist();
-    error InvalidProtocolFeeAdapter();
 
     event AggregatorPoolRegistered(PoolId indexed poolId);
-    event ProtocolFeeUpdated(PoolId indexed poolId, uint24 protocolFee);
 
     /// @notice Quotes amount of unspecified side for a given amount of specified side
     /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
@@ -33,8 +28,4 @@ interface IAggregatorHook {
     /// @return amount0 The amount of token0 in the aggregated pool
     /// @return amount1 The amount of token1 in the aggregated pool
     function pseudoTotalValueLocked(PoolId poolId) external view returns (uint256 amount0, uint256 amount1);
-
-    /// @notice Updates the cached protocol fee for the given pool from the V4FeeAdapter
-    /// @param key The pool key of the UniswapV4 pool
-    function refreshProtocolFee(PoolKey calldata key) external;
 }

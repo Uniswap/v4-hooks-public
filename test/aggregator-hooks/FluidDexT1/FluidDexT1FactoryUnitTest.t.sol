@@ -6,7 +6,6 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {MockFluidDexT1} from "./mocks/MockFluidDexT1.sol";
 import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
@@ -46,9 +45,7 @@ contract FluidDexT1FactoryUnitTest is Test {
     }
 
     function test_factory_createPool() public {
-        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
-            poolManager, mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter))
-        );
+        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(poolManager, mockResolver, fluidLiquidity);
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -57,13 +54,7 @@ contract FluidDexT1FactoryUnitTest is Test {
         MockFluidDexT1 pool2 = new MockFluidDexT1();
         mockResolver.setDexTokens(address(tkA), address(tkB));
 
-        bytes memory args = abi.encode(
-            address(poolManager),
-            address(pool2),
-            address(mockResolver),
-            fluidLiquidity,
-            IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -84,17 +75,9 @@ contract FluidDexT1FactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
-            poolManager, mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter))
-        );
+        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(poolManager, mockResolver, fluidLiquidity);
 
-        bytes memory args = abi.encode(
-            address(poolManager),
-            address(mockPool),
-            address(mockResolver),
-            fluidLiquidity,
-            IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockResolver), fluidLiquidity);
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),

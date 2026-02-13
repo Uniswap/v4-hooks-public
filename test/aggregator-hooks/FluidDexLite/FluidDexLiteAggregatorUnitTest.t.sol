@@ -12,7 +12,6 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
@@ -95,14 +94,11 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     function _deployHook(MockFluidDexLiteResolver _mockResolver) internal returns (FluidDexLiteAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(
-            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(feeAdapter))
-        );
+        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
-        return new FluidDexLiteAggregator{salt: salt}(
-            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(feeAdapter))
-        );
+        return
+            new FluidDexLiteAggregator{salt: salt}(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT);
     }
 
     // ========== CONSTRUCTOR ==========

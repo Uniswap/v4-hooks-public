@@ -28,22 +28,12 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
-    /// @notice The V4 protocol fee adapter used for fee resolution
-    IV4FeeAdapter public immutable protocolFeeAdapter;
-
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
-    /// @notice Maps pool IDs to their corresponding protocol fees
-    mapping(PoolId => uint24) public poolIdToProtocolFee;
-
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    /// @param _protocolFeeAdapter The V4FeeAdapter contract for protocol fee resolution
-    constructor(IPoolManager _manager, IV4FeeAdapter _protocolFeeAdapter) BaseHook(_manager) {
-        if (address(_protocolFeeAdapter) == address(0)) revert InvalidProtocolFeeAdapter();
-        protocolFeeAdapter = _protocolFeeAdapter;
-    }
+    constructor(IPoolManager _manager) BaseHook(_manager) {}
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
@@ -68,18 +58,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         } else {
             amountUnspecified += feeAmount;
         }
-    }
-
-    /// @inheritdoc IAggregatorHook
-    function refreshProtocolFee(PoolKey calldata key) external {
-        PoolId poolId = key.toId();
-        uint24 protocolFee = protocolFeeAdapter.getFee(key);
-        uint24 oldProtocolFee = poolIdToProtocolFee[poolId];
-
-        if (protocolFee == oldProtocolFee) return;
-
-        poolIdToProtocolFee[poolId] = protocolFee;
-        emit ProtocolFeeUpdated(poolId, protocolFee);
     }
 
     /// @inheritdoc BaseHook
@@ -144,8 +122,9 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         returns (int128)
     {
         uint24 protocolFee = _getProtocolFee(params.zeroForOne, key.toId());
+        address tokenJar = _getTokenJar();
 
-        if (protocolFee == 0) return 0;
+        if (protocolFee == 0 || tokenJar == address(0)) return 0;
 
         bool isExactInput = params.amountSpecified < 0;
 
@@ -156,7 +135,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, absUnspecified);
 
         // Send the protocol fee to the token jar
-        poolManager.take(unspecifiedCurrency, protocolFeeAdapter.TOKEN_JAR(), protocolFeeAmount);
+        poolManager.take(unspecifiedCurrency, tokenJar, protocolFeeAmount);
 
         return int128(uint128(protocolFeeAmount));
     }
@@ -177,7 +156,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     }
 
     function _getProtocolFee(bool zeroToOne, PoolId poolId) internal view returns (uint24 protocolFee) {
-        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
+        (,, uint24 protocolFeeRaw,) = poolManager.getSlot0(poolId);
         protocolFee = zeroToOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
@@ -197,6 +176,16 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
             // Exact-Out
             unspecified = amountIn;
             unspecifiedDelta = int128(uint128(unspecified));
+        }
+    }
+
+    function _getTokenJar() internal view returns (address tokenJar) {
+        address protocolFeeAdapterAddress = poolManager.protocolFeeController();
+        if (protocolFeeAdapterAddress == address(0) || protocolFeeAdapterAddress.code.length == 0) return address(0);
+        try IV4FeeAdapter(protocolFeeAdapterAddress).TOKEN_JAR() returns (address _tokenJar) {
+            tokenJar = _tokenJar;
+        } catch {
+            // keep tokenJar as address(0)
         }
     }
 

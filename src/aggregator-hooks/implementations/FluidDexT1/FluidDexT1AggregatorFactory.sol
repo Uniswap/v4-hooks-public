@@ -5,7 +5,6 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {FluidDexT1Aggregator} from "./FluidDexT1Aggregator.sol";
 import {IFluidDexT1} from "./interfaces/IFluidDexT1.sol";
 import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
@@ -20,8 +19,6 @@ contract FluidDexT1AggregatorFactory {
     IFluidDexReservesResolver public immutable fluidDexReservesResolver;
     /// @notice The Fluid Liquidity Layer contract address
     address public immutable fluidLiquidity;
-    /// @notice The V4 protocol fee adapter for fee resolution
-    IV4FeeAdapter public immutable protocolFeeAdapter;
 
     event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey poolKey);
 
@@ -30,13 +27,11 @@ contract FluidDexT1AggregatorFactory {
     constructor(
         IPoolManager _poolManager,
         IFluidDexReservesResolver _fluidDexReservesResolver,
-        address _fluidLiquidity,
-        IV4FeeAdapter _protocolFeeAdapter
+        address _fluidLiquidity
     ) {
         poolManager = _poolManager;
         fluidDexReservesResolver = _fluidDexReservesResolver;
         fluidLiquidity = _fluidLiquidity;
-        protocolFeeAdapter = _protocolFeeAdapter;
     }
 
     /// @notice Creates a new FluidDexT1Aggregator hook and initializes the pool
@@ -58,9 +53,7 @@ contract FluidDexT1AggregatorFactory {
         uint160 sqrtPriceX96
     ) external returns (address hook) {
         hook = address(
-            new FluidDexT1Aggregator{salt: salt}(
-                poolManager, fluidPool, fluidDexReservesResolver, fluidLiquidity, protocolFeeAdapter
-            )
+            new FluidDexT1Aggregator{salt: salt}(poolManager, fluidPool, fluidDexReservesResolver, fluidLiquidity)
         );
 
         PoolKey memory poolKey = PoolKey({
@@ -80,7 +73,7 @@ contract FluidDexT1AggregatorFactory {
         bytes32 bytecodeHash = keccak256(
             abi.encodePacked(
                 type(FluidDexT1Aggregator).creationCode,
-                abi.encode(poolManager, fluidPool, fluidDexReservesResolver, fluidLiquidity, protocolFeeAdapter)
+                abi.encode(poolManager, fluidPool, fluidDexReservesResolver, fluidLiquidity)
             )
         );
         computedAddress =
