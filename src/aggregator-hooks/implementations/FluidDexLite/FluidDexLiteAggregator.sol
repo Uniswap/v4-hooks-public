@@ -71,9 +71,8 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
         override
         returns (uint256 amountUnspecified)
     {

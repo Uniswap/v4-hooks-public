@@ -45,14 +45,32 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     }
 
     /// @inheritdoc IAggregatorHook
+    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+
+    /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         external
         payable
-        virtual
-        returns (uint256 amountUnspecified);
+        returns (uint256 amountUnspecified)
+    {
+        amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
 
-    /// @inheritdoc IAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+        uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
+        uint24 protocolFee = zeroToOne
+            ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
+            : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+
+        if (protocolFee == 0) return amountUnspecified;
+
+        bool isExactInput = amountSpecified < 0;
+        uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
+
+        if (isExactInput) {
+            amountUnspecified -= feeAmount;
+        } else {
+            amountUnspecified += feeAmount;
+        }
+    }
 
     /// @inheritdoc IAggregatorHook
     function refreshProtocolFee(PoolKey calldata key) external {
@@ -88,6 +106,16 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         virtual
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
 
+    /// @notice Returns the raw quote from the underlying liquidity source without protocol fees
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @return amountUnspecified The raw unspecified amount before protocol fee adjustment
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        virtual
+        returns (uint256 amountUnspecified);
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
         return IHooks.beforeInitialize.selector;
@@ -102,7 +130,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        unspecifiedDelta += _applyProtocolFee(key, params);
+        unspecifiedDelta += _applyProtocolFee(key, params, unspecifiedDelta);
 
         if (params.amountSpecified > 0) {
             // For exactOut, in cases where the implementation's amountOut may be off.
@@ -113,12 +141,16 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }
 
-    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params) internal returns (int128) {
+    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params, int128 unspecifiedDelta)
+        internal
+        returns (int128)
+    {
         PoolId poolId = key.toId();
         uint24 protocolFeeRaw = poolIdToProtocolFee[poolId];
         uint24 protocolFee = params.zeroForOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+
         if (protocolFee == 0) return 0;
 
         bool isExactInput = params.amountSpecified < 0;
@@ -126,21 +158,25 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         // Determine the unspecified currency (the side protocol fee is taken from)
         Currency unspecifiedCurrency = params.zeroForOne == isExactInput ? key.currency1 : key.currency0;
 
-        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, params.amountSpecified);
+        uint256 absUnspecified = uint256(uint128(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta));
+        uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, absUnspecified);
         poolManager.take(unspecifiedCurrency, protocolFeeAdapter.TOKEN_JAR(), protocolFeeAmount);
 
         return int128(uint128(protocolFeeAmount));
     }
 
-    function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, int256 amountSpecified)
+    function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint256 amountUnspecified)
         internal
         pure
         returns (uint256)
     {
         if (isExactInput) {
-            return (uint256(-amountSpecified) * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+            return (amountUnspecified * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
         } else {
-            return (uint256(amountSpecified) * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+            // This calculation ensures the fee is the correct proportion of the total input.
+            // For a protocol fee of X%, the fee amount will be X% of the total input rather than X%
+            // of the pre-protocol fee input.
+            return (amountUnspecified * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
         }
     }
 

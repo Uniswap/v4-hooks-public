@@ -43,9 +43,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        view
         override
         returns (uint256 amountUnspecified)
     {

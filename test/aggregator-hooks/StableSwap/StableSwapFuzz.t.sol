@@ -453,7 +453,7 @@ contract StableSwapFuzz is Test {
         poolKey = _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
         ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
         uint24 protocolFee = _deriveProtocolFee(seed);
-        ctx.expectedFeeAmount = (ctx.amountIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        ctx.expectedFeeAmount = (ctx.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
     /// @notice Execute an exact input swap and verify the output matches the quote
@@ -491,8 +491,8 @@ contract StableSwapFuzz is Test {
         );
         assertEq(
             tokens[ctx.tokenOutIdx].balanceOf(alice) - tokenOutBefore,
-            ctx.expectedOut - ctx.expectedFeeAmount,
-            "Received amount should match quote minus protocol fee"
+            ctx.expectedOut,
+            "Received amount should match quoted output"
         );
         assertEq(
             tokens[ctx.tokenOutIdx].balanceOf(tokenJar) - tokenJarBefore,

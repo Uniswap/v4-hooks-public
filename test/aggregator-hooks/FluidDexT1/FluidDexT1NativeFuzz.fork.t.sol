@@ -577,7 +577,7 @@ contract FluidDexT1NativeFuzz is Test {
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(true, -int256(params.amountIn), deployment.poolId);
         uint24 protocolFee = _deriveProtocolFee(seed);
-        params.expectedFee = (params.amountIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
     /// @notice Derive exact-in swap parameters for ERC20 -> Native (oneForZero)
@@ -593,7 +593,7 @@ contract FluidDexT1NativeFuzz is Test {
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(false, -int256(params.amountIn), deployment.poolId);
         uint24 protocolFee = _deriveProtocolFee(seed);
-        params.expectedFee = (params.amountIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
     /// @notice Derive exact-out swap parameters for Native out (oneForZero)
@@ -612,7 +612,7 @@ contract FluidDexT1NativeFuzz is Test {
         if (params.amountOut == 0) params.amountOut = 1 ether;
         params.expectedIn = deployment.hook.quote(false, int256(params.amountOut), deployment.poolId);
         uint24 protocolFee = _deriveProtocolFee(seed);
-        params.expectedFee = (params.amountOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+        params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 
     // ========== SWAP HELPERS ==========
@@ -645,8 +645,8 @@ contract FluidDexT1NativeFuzz is Test {
         assertApproxEqRel(ethSpent, params.amountIn, 0.001e18, "ETH spent should be close to input amount");
         assertEq(
             setup.erc20Token.balanceOf(alice) - ercBefore,
-            params.expectedOut - params.expectedFee,
-            "Received amount should match quote minus protocol fee"
+            params.expectedOut,
+            "Received amount should match quoted output"
         );
         assertEq(
             setup.erc20Token.balanceOf(tokenJar) - tokenJarBefore,
@@ -681,12 +681,7 @@ contract FluidDexT1NativeFuzz is Test {
 
         assertEq(ercBefore - setup.erc20Token.balanceOf(alice), params.amountIn, "Should spend exact input amount");
         uint256 ethReceived = alice.balance - ethBefore;
-        assertApproxEqRel(
-            ethReceived,
-            params.expectedOut - params.expectedFee,
-            0.001e18,
-            "ETH received should be close to quote minus protocol fee"
-        );
+        assertApproxEqRel(ethReceived, params.expectedOut, 0.001e18, "ETH received should be close to quoted output");
         assertEq(
             tokenJar.balance - tokenJarEthBefore, params.expectedFee, "Token jar should receive protocol fee in ETH"
         );
@@ -719,9 +714,7 @@ contract FluidDexT1NativeFuzz is Test {
         uint256 ethReceived = alice.balance - ethBefore;
         assertEq(ethReceived, params.amountOut, "ETH received should equal output amount");
         assertEq(
-            ercBefore - setup.erc20Token.balanceOf(alice),
-            params.expectedIn + params.expectedFee,
-            "ERC20 spent should be quote plus protocol fee"
+            ercBefore - setup.erc20Token.balanceOf(alice), params.expectedIn, "ERC20 spent should match quoted input"
         );
         assertEq(
             setup.erc20Token.balanceOf(tokenJar) - tokenJarBefore,

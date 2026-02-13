@@ -34,10 +34,6 @@ contract MockAggregatorHook is BaseAggregatorHook {
         mockPseudoTVL1 = amount1;
     }
 
-    function quote(bool, int256, PoolId) external payable override returns (uint256) {
-        return mockQuoteReturn;
-    }
-
     function pseudoTotalValueLocked(PoolId) external view override returns (uint256 amount0, uint256 amount1) {
         return (mockPseudoTVL0, mockPseudoTVL1);
     }
@@ -53,5 +49,9 @@ contract MockAggregatorHook is BaseAggregatorHook {
             externalSource.pullTokens(settleCurrency, takeCurrency, amountSpecifiedAbs);
         poolManager.take(takeCurrency, address(this), amountTake);
         return (amountSettle, amountTake, hasSettled);
+    }
+
+    function _rawQuote(bool, int256, PoolId) internal view override returns (uint256) {
+        return mockQuoteReturn;
     }
 }

@@ -460,7 +460,7 @@ contract FluidDexT1ERC20Fuzz is Test {
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(zeroForOne, -int256(params.amountIn), deployment.poolId);
         uint24 protocolFee = _deriveProtocolFee(seed);
-        params.expectedFee = (params.amountIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
     /// @notice Derive exact-out swap parameters including protocol fee
@@ -477,7 +477,7 @@ contract FluidDexT1ERC20Fuzz is Test {
         if (params.amountOut == 0) params.amountOut = 1 ether;
         params.expectedIn = deployment.hook.quote(zeroForOne, int256(params.amountOut), deployment.poolId);
         uint24 protocolFee = _deriveProtocolFee(seed);
-        params.expectedFee = (params.amountOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+        params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 
     // ========== SWAP HELPERS ==========
@@ -513,9 +513,7 @@ contract FluidDexT1ERC20Fuzz is Test {
 
         assertEq(tokenInBefore - tokenIn.balanceOf(alice), params.amountIn, "Should spend exact input amount");
         assertEq(
-            tokenOut.balanceOf(alice) - tokenOutBefore,
-            params.expectedOut - params.expectedFee,
-            "Received amount should match quote minus protocol fee"
+            tokenOut.balanceOf(alice) - tokenOutBefore, params.expectedOut, "Received amount should match quoted output"
         );
         assertEq(
             tokenOut.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
@@ -552,11 +550,7 @@ contract FluidDexT1ERC20Fuzz is Test {
         );
 
         assertEq(tokenOut.balanceOf(alice) - tokenOutBefore, params.amountOut, "Should receive exact output amount");
-        assertEq(
-            tokenInBefore - tokenIn.balanceOf(alice),
-            params.expectedIn + params.expectedFee,
-            "Input should be quote plus protocol fee"
-        );
+        assertEq(tokenInBefore - tokenIn.balanceOf(alice), params.expectedIn, "Input should match quoted input");
         assertEq(
             tokenIn.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
         );
