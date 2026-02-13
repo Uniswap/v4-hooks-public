@@ -524,8 +524,6 @@ contract StableSwapFuzz is Test {
         }
     }
 
-    // ========== SEED-BASED DERIVATION HELPER ==========
-
     /// @notice Derive initial balances for each token from seed
     /// @dev Minimum balance must be >= 20_000 ether so that minPairBalance / 20 >= 1000 ether (swap min)
     function _deriveBalances(uint256 seed, uint256 numTokens) internal pure returns (uint256[] memory) {
