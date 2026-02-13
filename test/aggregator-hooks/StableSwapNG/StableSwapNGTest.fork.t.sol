@@ -14,6 +14,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {
     StableSwapNGAggregator
@@ -48,6 +49,7 @@ contract StableSwapNGForkedTest is Test {
     uint256 public numTokens;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     StableSwapNGAggregator public hook;
     StableSwapNGAggregatorFactory public factory;
@@ -88,9 +90,10 @@ contract StableSwapNGForkedTest is Test {
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
         // Deploy factory
-        factory = new StableSwapNGAggregatorFactory(manager, IV4FeeAdapter(address(0)));
+        factory = new StableSwapNGAggregatorFactory(manager, IV4FeeAdapter(address(feeAdapter)));
 
         // Dynamically fetch all tokens from the Curve pool
         numTokens = curvePool.N_COINS();
@@ -126,7 +129,8 @@ contract StableSwapNGForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(0)));
+        bytes memory constructorArgs =
+            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(factory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 

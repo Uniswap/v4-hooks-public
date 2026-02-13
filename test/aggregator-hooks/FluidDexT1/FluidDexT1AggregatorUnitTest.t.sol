@@ -15,6 +15,7 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockFluidDexT1.sol";
 import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
@@ -24,6 +25,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockFluidDexT1 public mockPool;
     MockFluidDexReservesResolver public mockResolver;
@@ -51,6 +53,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
         swapRouter = new SafePoolSwapTest(poolManager);
         mockPool = new MockFluidDexT1();
         mockResolver = new MockFluidDexReservesResolver();
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -97,11 +100,11 @@ contract FluidDexT1AggregatorUnitTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
         bytes memory constructorArgs =
-            abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(0)));
+            abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter)));
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
         return new FluidDexT1Aggregator{salt: salt}(
-            poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(0))
+            poolManager, _mockPool, _mockResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter))
         );
     }
 

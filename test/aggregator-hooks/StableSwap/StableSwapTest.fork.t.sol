@@ -18,6 +18,7 @@ import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
 
@@ -51,6 +52,7 @@ contract StableSwapForkedTest is Test {
     uint256 initialBalance1;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     StableSwapAggregator public hook;
     ICurveStableSwap public curvePool;
@@ -108,6 +110,7 @@ contract StableSwapForkedTest is Test {
         manager = IPoolManager(poolManagerAddress);
 
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
         _deployHook();
 
@@ -138,11 +141,12 @@ contract StableSwapForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(0)));
+        bytes memory constructorArgs =
+            abi.encode(address(manager), address(curvePool), IV4FeeAdapter(address(feeAdapter)));
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
-        hook = new StableSwapAggregator{salt: salt}(manager, curvePool, IV4FeeAdapter(address(0)));
+        hook = new StableSwapAggregator{salt: salt}(manager, curvePool, IV4FeeAdapter(address(feeAdapter)));
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 

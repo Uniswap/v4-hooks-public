@@ -18,7 +18,9 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
+import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {
     FluidDexLiteAggregator
@@ -52,6 +54,7 @@ contract FluidDexLiteNativeFuzz is Test {
     FluidDexLiteAggregatorFactory public hookFactory;
     IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
+    MockV4FeeAdapter public feeAdapter;
 
     // V4 Pool configuration
     uint24 constant POOL_FEE = 5; // 0.0005%
@@ -82,6 +85,7 @@ contract FluidDexLiteNativeFuzz is Test {
 
     // Create alice address that doesn't have code on the forked chain (deterministic but unlikely to collide)
     address public alice = address(uint160(uint256(keccak256("fluid_dex_lite_test_alice_native_v1"))));
+    address public tokenJar = makeAddr("tokenJar");
 
     /// @dev Struct to hold pool setup parameters (reduces stack depth)
     /// @dev For native pools: token0 is always native ETH (address(0) in V4), token1 is the ERC20
@@ -124,7 +128,9 @@ contract FluidDexLiteNativeFuzz is Test {
         poolManager =
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
-        hookFactory = new FluidDexLiteAggregatorFactory(poolManager, dexLite, resolver, IV4FeeAdapter(address(0)));
+        feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
+        hookFactory =
+            new FluidDexLiteAggregatorFactory(poolManager, dexLite, resolver, IV4FeeAdapter(address(feeAdapter)));
     }
 
     // ========== FUZZ TESTS ==========
@@ -209,6 +215,15 @@ contract FluidDexLiteNativeFuzz is Test {
         // Skip fuzz runs where pool initialization fails (Fluid has strict requirements for native pools)
         vm.assume(success);
         deployment = _deployHook(setup);
+
+        // Derive and set protocol fee from seed
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        if (protocolFee > 0) {
+            uint24 packed = (protocolFee << 12) | protocolFee;
+            feeAdapter.setMockFee(packed);
+            deployment.hook.refreshProtocolFee(deployment.poolKey);
+        }
+
         _setupAlice(setup);
     }
 
@@ -290,7 +305,7 @@ contract FluidDexLiteNativeFuzz is Test {
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         bytes memory constructorArgs = abi.encode(
-            address(poolManager), address(dexLite), address(resolver), setup.salt, IV4FeeAdapter(address(0))
+            address(poolManager), address(dexLite), address(resolver), setup.salt, IV4FeeAdapter(address(feeAdapter))
         );
 
         (, bytes32 hookSalt) =
@@ -336,6 +351,69 @@ contract FluidDexLiteNativeFuzz is Test {
         setup.erc20Token.mint(address(poolManager), setup.liquidityErc20);
     }
 
+    /// @dev Bundles exact-in swap parameters to reduce stack depth
+    struct ExactInParams {
+        uint256 amountIn;
+        uint256 expectedOut;
+        uint256 expectedFee;
+    }
+
+    /// @dev Bundles exact-out swap parameters to reduce stack depth
+    struct ExactOutParams {
+        uint256 amountOut;
+        uint256 expectedIn;
+        uint256 expectedFee;
+    }
+
+    /// @notice Derive exact-in swap parameters for Native -> ERC20 (zeroForOne)
+    function _deriveExactInParams_NativeIn(
+        HookDeployment memory deployment,
+        PoolSetup memory setup,
+        uint256 seed,
+        uint256 swapIdx
+    ) internal returns (ExactInParams memory params) {
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
+        params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
+        params.expectedOut = deployment.hook.quote(true, -int256(params.amountIn), deployment.poolId);
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+    }
+
+    /// @notice Derive exact-in swap parameters for ERC20 -> Native (oneForZero)
+    function _deriveExactInParams_ErcIn(
+        HookDeployment memory deployment,
+        PoolSetup memory setup,
+        uint256 seed,
+        uint256 swapIdx
+    ) internal returns (ExactInParams memory params) {
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
+        params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
+        params.expectedOut = deployment.hook.quote(false, -int256(params.amountIn), deployment.poolId);
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+    }
+
+    /// @notice Derive exact-out swap parameters for Native out (oneForZero)
+    function _deriveExactOutParams_NativeOut(
+        HookDeployment memory deployment,
+        PoolSetup memory setup,
+        uint256 seed,
+        uint256 swapIdx
+    ) internal returns (ExactOutParams memory params) {
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        uint256 minLiquidity =
+            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
+        params.amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
+        if (params.amountOut == 0) params.amountOut = 1 ether;
+        params.expectedIn = deployment.hook.quote(false, int256(params.amountOut), deployment.poolId);
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+    }
+
     // ========== SWAP HELPERS ==========
 
     /// @notice Execute an exact input swap: Native ETH -> ERC20 (zeroForOne)
@@ -345,36 +423,35 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 seed,
         uint256 swapIdx
     ) internal {
-        // Derive swap amount
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity =
-            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
-        uint256 amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
-
-        // Get quote before swap (negative amountSpecified = exact input)
-        uint256 expectedOut = deployment.hook.quote(true, -int256(amountIn), deployment.poolId);
-        assertGt(expectedOut, 0, "Quote should be non-zero");
+        ExactInParams memory params = _deriveExactInParams_NativeIn(deployment, setup, seed, swapIdx);
+        assertGt(params.expectedOut, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
         uint256 ercBefore = setup.erc20Token.balanceOf(alice);
+        uint256 tokenJarBefore = setup.erc20Token.balanceOf(tokenJar);
 
-        // Execute exact input swap with ETH value
         vm.prank(alice);
-        swapRouter.swap{value: amountIn}(
+        swapRouter.swap{value: params.amountIn}(
             deployment.poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: true, amountSpecified: -int256(params.amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
 
-        uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
-
-        // Verify ETH was spent (approximately, small variance for native handling)
-        uint256 ethSpent = ethBefore - ethAfter;
-        assertApproxEqRel(ethSpent, amountIn, 0.001e18, "ETH spent should be close to input amount");
-        // Verify output matches quote
-        assertEq(ercAfter - ercBefore, expectedOut, "Received amount should match quote");
+        uint256 ethSpent = ethBefore - alice.balance;
+        assertApproxEqRel(ethSpent, params.amountIn, 0.001e18, "ETH spent should be close to input amount");
+        assertEq(
+            setup.erc20Token.balanceOf(alice) - ercBefore,
+            params.expectedOut,
+            "Received amount should match quoted output"
+        );
+        assertEq(
+            setup.erc20Token.balanceOf(tokenJar) - tokenJarBefore,
+            params.expectedFee,
+            "Token jar should receive protocol fee"
+        );
     }
 
     /// @notice Execute an exact input swap: ERC20 -> Native ETH (oneForZero)
@@ -384,36 +461,29 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 seed,
         uint256 swapIdx
     ) internal {
-        // Derive swap amount
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity =
-            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
-        uint256 amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
-
-        // Get quote before swap (negative amountSpecified = exact input)
-        uint256 expectedOut = deployment.hook.quote(false, -int256(amountIn), deployment.poolId);
-        assertGt(expectedOut, 0, "Quote should be non-zero");
+        ExactInParams memory params = _deriveExactInParams_ErcIn(deployment, setup, seed, swapIdx);
+        assertGt(params.expectedOut, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
         uint256 ercBefore = setup.erc20Token.balanceOf(alice);
+        uint256 tokenJarEthBefore = tokenJar.balance;
 
-        // Execute exact input swap (no ETH value needed for ERC20 input)
         vm.prank(alice);
         swapRouter.swap(
             deployment.poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: false, amountSpecified: -int256(params.amountIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
 
-        uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
-
-        // Verify ERC20 was spent
-        assertEq(ercBefore - ercAfter, amountIn, "Should spend exact input amount");
-        // Verify ETH output matches quote (approximately for native handling)
-        uint256 ethReceived = ethAfter - ethBefore;
-        assertApproxEqRel(ethReceived, expectedOut, 0.001e18, "ETH received should be close to quote");
+        assertEq(ercBefore - setup.erc20Token.balanceOf(alice), params.amountIn, "Should spend exact input amount");
+        uint256 ethReceived = alice.balance - ethBefore;
+        assertApproxEqRel(ethReceived, params.expectedOut, 0.001e18, "ETH received should be close to quoted output");
+        assertEq(
+            tokenJar.balance - tokenJarEthBefore, params.expectedFee, "Token jar should receive protocol fee in ETH"
+        );
     }
 
     /// @notice Execute an exact output swap: ERC20 -> Native ETH (oneForZero)
@@ -423,38 +493,36 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 seed,
         uint256 swapIdx
     ) internal {
-        // Derive swap amount (use smaller amounts for exact output)
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity =
-            setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
-        uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
-        if (amountOut == 0) amountOut = 1 ether;
-
-        // Get quote before swap (positive amountSpecified = exact output)
-        uint256 expectedIn = deployment.hook.quote(false, int256(amountOut), deployment.poolId);
-        assertGt(expectedIn, 0, "Quote should be non-zero");
+        ExactOutParams memory params = _deriveExactOutParams_NativeOut(deployment, setup, seed, swapIdx);
+        assertGt(params.expectedIn, 0, "Quote should be non-zero");
 
         uint256 ethBefore = alice.balance;
         uint256 ercBefore = setup.erc20Token.balanceOf(alice);
+        uint256 tokenJarBefore = setup.erc20Token.balanceOf(tokenJar);
 
-        // Execute exact output swap
         vm.prank(alice);
         swapRouter.swap(
             deployment.poolKey,
-            SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: false, amountSpecified: int256(params.amountOut), sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
 
-        uint256 ethAfter = alice.balance;
-        uint256 ercAfter = setup.erc20Token.balanceOf(alice);
-
-        // Verify ETH output (approximately for native handling)
-        uint256 ethReceived = ethAfter - ethBefore;
-        assertApproxEqRel(ethReceived, amountOut, 0.001e18, "ETH received should be close to output amount");
-        // Verify ERC20 input matches quote
-        uint256 ercSpent = ercBefore - ercAfter;
-        assertApproxEqRel(ercSpent, expectedIn, 0.001e18, "ERC20 spent should be close to quote");
+        uint256 ethReceived = alice.balance - ethBefore;
+        assertApproxEqRel(ethReceived, params.amountOut, 0.001e18, "ETH received should be close to output amount");
+        assertApproxEqRel(
+            ercBefore - setup.erc20Token.balanceOf(alice),
+            params.expectedIn,
+            0.001e18,
+            "ERC20 spent should be close to quoted input"
+        );
+        assertEq(
+            setup.erc20Token.balanceOf(tokenJar) - tokenJarBefore,
+            params.expectedFee,
+            "Token jar should receive protocol fee in ERC20"
+        );
     }
 
     // ========== SEED-BASED DERIVATION HELPERS ==========
@@ -484,6 +552,12 @@ contract FluidDexLiteNativeFuzz is Test {
         uint256 minSwap = liquidity / MIN_SWAP_DIVISOR;
         uint256 maxSwap = liquidity / MAX_SWAP_DIVISOR;
         return bound(uint256(keccak256(abi.encode(seed, "amount"))), minSwap, maxSwap);
+    }
+
+    /// @notice Derive protocol fee from seed (0 to MAX_PROTOCOL_FEE)
+    function _deriveProtocolFee(uint256 seed) internal pure returns (uint24) {
+        return
+            uint24(bound(uint256(keccak256(abi.encode(seed, "protocolFee"))), 0, ProtocolFeeLibrary.MAX_PROTOCOL_FEE));
     }
 
     receive() external payable {}

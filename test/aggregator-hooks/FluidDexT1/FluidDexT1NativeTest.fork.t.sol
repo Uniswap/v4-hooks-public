@@ -16,6 +16,7 @@ import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
@@ -58,6 +59,7 @@ contract FluidDexT1NativeForkedTest is Test {
     uint256 constant INITIAL_BALANCE = 100 ether;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     FluidDexT1Aggregator public hook;
     IFluidDexT1 public fluidPool;
@@ -115,6 +117,7 @@ contract FluidDexT1NativeForkedTest is Test {
         currency1 = Currency.wrap(erc20TokenAddress);
 
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
         _deployHook();
 
@@ -145,13 +148,17 @@ contract FluidDexT1NativeForkedTest is Test {
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         bytes memory constructorArgs = abi.encode(
-            address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity, IV4FeeAdapter(address(0))
+            address(manager),
+            address(fluidPool),
+            address(fluidResolver),
+            fluidLiquidity,
+            IV4FeeAdapter(address(feeAdapter))
         );
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
 
         hook = new FluidDexT1Aggregator{salt: salt}(
-            manager, fluidPool, fluidResolver, fluidLiquidity, IV4FeeAdapter(address(0))
+            manager, fluidPool, fluidResolver, fluidLiquidity, IV4FeeAdapter(address(feeAdapter))
         );
         require(address(hook) == hookAddress, "Hook address mismatch");
     }

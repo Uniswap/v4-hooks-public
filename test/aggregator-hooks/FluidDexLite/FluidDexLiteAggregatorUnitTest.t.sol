@@ -13,6 +13,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
 import {MockFluidDexLiteResolver} from "./mocks/MockFluidDexLiteResolver.sol";
@@ -26,6 +27,7 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockFluidDexLite public mockDex;
     MockFluidDexLiteResolver public mockResolver;
@@ -53,6 +55,7 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         swapRouter = new SafePoolSwapTest(poolManager);
         mockDex = new MockFluidDexLite();
         mockResolver = new MockFluidDexLiteResolver();
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -92,12 +95,13 @@ contract FluidDexLiteAggregatorUnitTest is Test {
     function _deployHook(MockFluidDexLiteResolver _mockResolver) internal returns (FluidDexLiteAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs =
-            abi.encode(IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(0)));
+        bytes memory constructorArgs = abi.encode(
+            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(feeAdapter))
+        );
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexLiteAggregator).creationCode, constructorArgs);
         return new FluidDexLiteAggregator{salt: salt}(
-            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(0))
+            IPoolManager(address(poolManager)), mockDex, _mockResolver, DEX_SALT, IV4FeeAdapter(address(feeAdapter))
         );
     }
 

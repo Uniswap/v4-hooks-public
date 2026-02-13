@@ -41,6 +41,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _protocolFeeAdapter The V4FeeAdapter contract for protocol fee resolution
     constructor(IPoolManager _manager, IV4FeeAdapter _protocolFeeAdapter) BaseHook(_manager) {
+        if (address(_protocolFeeAdapter) == address(0)) revert InvalidProtocolFeeAdapter();
         protocolFeeAdapter = _protocolFeeAdapter;
     }
 

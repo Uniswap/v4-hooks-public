@@ -14,6 +14,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockCurveStableSwapNG} from "../StableSwapNG/mocks/MockCurveStableSwapNG.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {
     StableSwapNGAggregator
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
@@ -24,6 +25,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockCurveStableSwapNG public mockPool;
     StableSwapNGAggregator public hook;
@@ -44,6 +46,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         poolManager =
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -89,11 +92,11 @@ contract StableSwapNGAggregatorUnitTest is Test {
     function _deployHook(MockCurveStableSwapNG _mockPool) internal returns (StableSwapNGAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, IV4FeeAdapter(address(0)));
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, IV4FeeAdapter(address(feeAdapter)));
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
         StableSwapNGAggregator newHook =
-            new StableSwapNGAggregator{salt: salt}(poolManager, _mockPool, IV4FeeAdapter(address(0)));
+            new StableSwapNGAggregator{salt: salt}(poolManager, _mockPool, IV4FeeAdapter(address(feeAdapter)));
         return newHook;
     }
 

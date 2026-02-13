@@ -12,6 +12,7 @@ interface IAggregatorHook {
     error InsufficientLiquidity();
     error UnspecifiedAmountExceeded();
     error PoolDoesNotExist();
+    error InvalidProtocolFeeAdapter();
 
     event AggregatorPoolRegistered(PoolId indexed poolId);
     event ProtocolFeeUpdated(PoolId indexed poolId, uint24 protocolFee);
