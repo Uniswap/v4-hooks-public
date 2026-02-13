@@ -402,6 +402,8 @@ contract StableSwapNGFuzz is Test {
         }
     }
 
+    // ========== HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 numTokensRaw, uint256 amplificationRaw, uint256 seed)
         internal
@@ -554,8 +556,6 @@ contract StableSwapNGFuzz is Test {
             tokenOutIdx = idx1 < idx2 ? idx1 : idx2;
         }
     }
-
-    // ========== SEED-BASED DERIVATION HELPER ==========
 
     /// @notice Derive initial balances for each token from seed
     /// @dev Minimum balance must be >= 20_000 ether so that minPairBalance / 20 >= 1000 ether (swap min)

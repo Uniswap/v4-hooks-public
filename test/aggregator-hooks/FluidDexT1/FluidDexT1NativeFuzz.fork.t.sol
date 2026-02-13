@@ -244,6 +244,8 @@ contract FluidDexT1NativeFuzz is Test {
         }
     }
 
+    // ========== HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 seed)
         internal

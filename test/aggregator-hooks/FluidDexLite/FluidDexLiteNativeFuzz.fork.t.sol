@@ -205,6 +205,8 @@ contract FluidDexLiteNativeFuzz is Test {
         }
     }
 
+    // ========== HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 seed)
         internal
@@ -226,8 +228,6 @@ contract FluidDexLiteNativeFuzz is Test {
 
         _setupAlice(setup);
     }
-
-    // ========== POOL SETUP HELPERS ==========
 
     /// @notice Derive all pool parameters from a single seed
     function _derivePoolSetup(uint256 seed) internal returns (PoolSetup memory setup) {

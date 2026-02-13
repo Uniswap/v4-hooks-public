@@ -172,6 +172,8 @@ contract FluidDexLiteERC20Fuzz is Test {
         }
     }
 
+    // ========== HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 seed)
         internal
@@ -191,8 +193,6 @@ contract FluidDexLiteERC20Fuzz is Test {
 
         _setupAlice(setup.token0, setup.token1, setup.liquidity0, setup.liquidity1);
     }
-
-    // ========== POOL SETUP HELPERS ==========
 
     /// @notice Derive all pool parameters from a single seed
     function _derivePoolSetup(uint256 seed) internal returns (PoolSetup memory setup) {

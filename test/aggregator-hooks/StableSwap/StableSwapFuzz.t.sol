@@ -385,6 +385,8 @@ contract StableSwapFuzz is Test {
     // NOTE: StableSwap (non-NG) does not support exact output swaps
     // The pool's exchange() function only supports exact-in, and there's no get_dx() for computing exact-out
 
+    // ========== HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 numTokensRaw, uint256 amplificationRaw, uint256 seed)
         internal
