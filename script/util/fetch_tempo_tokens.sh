@@ -11,13 +11,19 @@ RPC_URL="${1:?Usage: fetch_tempo_tokens.sh <RPC_URL>}"
 # TIP-20 Factory (precompile)
 TIP20_FACTORY="0x20Fc000000000000000000000000000000000000"
 
-# PathUSD genesis token — not emitted via factory events
-PATH_USD="0x20C0000000000000000000000000000000000000"
+# Genesis tokens (precompile addresses, not emitted via factory events)
+# These exist at fixed addresses on all Tempo networks
+GENESIS_TOKENS=(
+  "0x20C0000000000000000000000000000000000000"  # PathUSD (root)
+  "0x20C0000000000000000000000000000000000001"  # AlphaUSD
+  "0x20C0000000000000000000000000000000000002"  # BetaUSD
+  "0x20C0000000000000000000000000000000000003"  # ThetaUSD
+)
 
 # TokenCreated(address indexed token) event signature
 EVENT_SIG="0x$(cast keccak 'TokenCreated(address)')"
 
-# Fetch factory logs
+# Fetch factory-created tokens from logs
 LOGS=$(cast logs \
   --from-block 0 \
   --to-block latest \
@@ -26,8 +32,8 @@ LOGS=$(cast logs \
   --rpc-url "$RPC_URL" \
   --json 2>/dev/null || echo "[]")
 
-# Extract token addresses from topic[1] (indexed address, left-padded to 32 bytes)
-TOKENS=("$PATH_USD")
+# Start with genesis tokens, then add factory-created ones
+TOKENS=("${GENESIS_TOKENS[@]}")
 while IFS= read -r addr; do
   [ -z "$addr" ] && continue
   # topic is 0x000...addr (66 chars), extract last 40 hex chars
