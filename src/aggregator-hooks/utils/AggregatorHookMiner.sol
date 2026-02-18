@@ -18,7 +18,7 @@ library AggregatorHookMiner {
     /// @param deployer The address that will deploy the hook. In `forge test`, this will be the test contract `address(this)` or the pranking address
     /// In `forge script`, this should be `0x4e59b44847b379578588920cA78FbF26c0B4956C` (CREATE2 Deployer Proxy)
     /// @param flags The desired flags for the hook address. Example `uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | ...)`
-    /// @param firstByte The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, etc.)
+    /// @param firstByte The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, 0x71 for TempoExchange, etc.)
     /// @param creationCode The creation code of a hook contract. Example: `type(Counter).creationCode`
     /// @param constructorArgs The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`
     /// @return hookAddress The computed hook address

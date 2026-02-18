@@ -254,11 +254,11 @@ The hook requires three permissions, encoded in the hook address:
 
 ### Hook Address ID
 
-The hook address prefix `E1` identifies it as a TempoExchange aggregator (see the ID system in `../src/aggregator-hooks/README.md`). This is enforced during CREATE2 deployment via salt mining with `HookMiner`.
+The hook address prefix `71` identifies it as a TempoExchange aggregator (see the ID system in `../src/aggregator-hooks/README.md`). This is enforced during CREATE2 deployment via salt mining with `HookMiner`.
 
 ### Deployment
 
-The hook is deployed via CREATE2 with a mined salt that produces an address with the correct permission bits and `E1` prefix. Pool initialization is done by calling `PoolManager.initialize()` with a `PoolKey` referencing the hook address.
+The hook is deployed via CREATE2 with a mined salt that produces an address with the correct permission bits and `71` prefix. Pool initialization is done by calling `PoolManager.initialize()` with a `PoolKey` referencing the hook address.
 
 ```
 Deploy: CREATE2 → TempoExchangeAggregator (singleton)

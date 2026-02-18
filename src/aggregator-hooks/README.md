@@ -19,7 +19,7 @@ Aggregator Hook contract addresses should adhere to the following identification
 | F1 | FluidDexT1 |
 | F2 | FluidDexV2 |
 | F3 | FluidDexLite |
-| E1 | TempoExchange |
+| 71 | TempoExchange |
 
 ## Supported Protocols
 
