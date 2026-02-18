@@ -10,12 +10,27 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 
-contract ProtocolFees {
+abstract contract ProtocolFees {
     using ProtocolFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
+
+    address public tokenJar;
+
+    event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
+    event TokenJarUpdated(address indexed tokenJar);
+
+    /// @notice Queries the token jar from the pool manager and emits an event if it is updated
+    /// @param poolManager The pool manager to query
+    /// @return The token jar address
+    /// @dev This function should not need to be called externally except in the case of the tokenJar address changing
+    /// after the protocol fee has been set
+    function pollTokenJar(IPoolManager poolManager) public returns (address) {
+        tokenJar = _getTokenJar(poolManager);
+        if (tokenJar != address(0)) emit TokenJarUpdated(tokenJar);
+        return tokenJar;
+    }
 
     function _applyProtocolFee(
         IPoolManager poolManager,
@@ -24,9 +39,11 @@ contract ProtocolFees {
         int128 unspecifiedDelta
     ) internal returns (int128) {
         uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
-        address tokenJar = _getTokenJar(poolManager);
 
-        if (protocolFee == 0 || tokenJar == address(0)) return 0;
+        if (protocolFee == 0) return 0;
+        // Assumes that if a protocol fee is set, there should be a token jar.
+        if (tokenJar == address(0)) pollTokenJar(poolManager);
+        if (tokenJar == address(0)) return 0;
 
         bool isExactInput = params.amountSpecified < 0;
 
@@ -37,6 +54,7 @@ contract ProtocolFees {
         uint256 protocolFeeAmount = _calculateProtocolFeeAmount(protocolFee, params.amountSpecified < 0, absUnspecified);
 
         // Send the protocol fee to the token jar
+        emit ProtocolFeesCollected(tokenJar, unspecifiedCurrency, protocolFeeAmount);
         poolManager.take(unspecifiedCurrency, tokenJar, protocolFeeAmount);
 
         return int128(uint128(protocolFeeAmount));
@@ -68,13 +86,13 @@ contract ProtocolFees {
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
     }
 
-    function _getTokenJar(IPoolManager poolManager) internal view returns (address tokenJar) {
+    function _getTokenJar(IPoolManager poolManager) internal view returns (address currentJar) {
         address protocolFeeAdapterAddress = poolManager.protocolFeeController();
         if (protocolFeeAdapterAddress == address(0) || protocolFeeAdapterAddress.code.length == 0) return address(0);
-        try IV4FeeAdapter(protocolFeeAdapterAddress).TOKEN_JAR() returns (address _tokenJar) {
-            tokenJar = _tokenJar;
+        try IV4FeeAdapter(protocolFeeAdapterAddress).TOKEN_JAR() returns (address _currentJar) {
+            currentJar = _currentJar;
         } catch {
-            // keep tokenJar as address(0)
+            // keep currentJar as address(0)
         }
     }
 }

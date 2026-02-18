@@ -24,7 +24,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     ICurveStableSwapNG public pool;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
-    uint256 internal constant INACCURACY_SCALE = 100_000; // 1 part per million
+    uint256 internal constant INACCURACY_SCALE = 1_000_000;
 
     struct PoolInfo {
         int128 token0Index;
