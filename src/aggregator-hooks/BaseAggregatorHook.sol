@@ -159,7 +159,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         } else {
             revert InsufficientLiquidity();
         }
-        poolManager.settle();
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps

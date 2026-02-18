@@ -349,7 +349,11 @@ contract StableSwapForkedTest is Test {
         uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
 
         assertGt(expectedOut, 0, "Quote should return non-zero");
-        assertGt(expectedOut, amountIn * 95 / 100, "Quote should generally be close to 1:1 for stableswap");
+        assertGt(
+            (expectedOut * (10 ** token0Decimals)) / (10 ** token1Decimals),
+            amountIn * 95 / 100,
+            "Quote should generally be close to 1:1 for stableswap"
+        );
     }
 
     /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances
