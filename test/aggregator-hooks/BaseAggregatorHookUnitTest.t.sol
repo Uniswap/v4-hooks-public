@@ -175,6 +175,18 @@ contract BaseAggregatorHookUnitTest is Test {
         );
     }
 
+    function test_pollTokenJar_unsetFeeController() public {
+        poolManager.setProtocolFeeController(address(0));
+        hook.pollTokenJar(poolManager);
+        assertEq(hook.tokenJar(), address(0));
+    }
+
+    function test_pollTokenJar_invalidFeeController() public {
+        poolManager.setProtocolFeeController(makeAddr("invalidTokenJar"));
+        hook.pollTokenJar(poolManager);
+        assertEq(hook.tokenJar(), address(0));
+    }
+
     function test_receive_acceptsEth() public {
         uint256 sent = 1 ether;
         (bool ok,) = address(hook).call{value: sent}("");
