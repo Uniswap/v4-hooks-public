@@ -94,7 +94,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
-        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
