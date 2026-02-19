@@ -141,6 +141,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         localPoolId = key.toId();
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 

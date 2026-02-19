@@ -106,6 +106,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
         IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
