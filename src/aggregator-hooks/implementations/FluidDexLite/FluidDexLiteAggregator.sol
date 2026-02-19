@@ -49,7 +49,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver _dexLiteResolver, bytes32 _salt)
-        BaseAggregatorHook(_manager)
+        BaseAggregatorHook(_manager, "FluidDexLiteAggregator v1.0")
     {
         fluidDexLite = _dexLite;
         fluidDexLiteResolver = _dexLiteResolver;

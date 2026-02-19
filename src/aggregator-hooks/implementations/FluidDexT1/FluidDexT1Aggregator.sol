@@ -52,7 +52,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         IFluidDexT1 _fluidDex,
         IFluidDexReservesResolver _fluidDexReservesResolver,
         address _fluidLiquidity
-    ) BaseAggregatorHook(_manager) {
+    ) BaseAggregatorHook(_manager, "FluidDexT1Aggregator v1.0") {
         fluidPool = _fluidDex;
         fluidLiquidity = _fluidLiquidity;
         fluidDexReservesResolver = _fluidDexReservesResolver;

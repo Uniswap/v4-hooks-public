@@ -38,7 +38,9 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
-    constructor(IPoolManager _manager, ICurveStableSwapNG _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwapNG _pool)
+        BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
+    {
         pool = _pool;
     }
 

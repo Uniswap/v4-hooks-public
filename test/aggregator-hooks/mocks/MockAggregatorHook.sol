@@ -18,7 +18,7 @@ contract MockAggregatorHook is BaseAggregatorHook {
     uint256 public mockPseudoTVL0;
     uint256 public mockPseudoTVL1;
 
-    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager, "Mock") {
         externalSource = _source;
     }
 

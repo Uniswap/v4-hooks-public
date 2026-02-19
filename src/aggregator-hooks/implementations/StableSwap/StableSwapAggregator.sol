@@ -35,7 +35,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
 
-    constructor(IPoolManager _manager, ICurveStableSwap _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwap _pool)
+        BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
+    {
         pool = _pool;
     }
 
