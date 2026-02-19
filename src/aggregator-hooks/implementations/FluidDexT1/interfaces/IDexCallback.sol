@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.29;
 
 /// @title IDexCallback
 /// @notice Callback interface required by Fluid DEX v1 "withCallback" swaps

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -24,7 +24,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     ICurveStableSwapNG public pool;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
-    uint256 internal constant INACCURACY_SCALE = 100_000; // 1 part per million
+    uint256 internal constant INACCURACY_SCALE = 1_000_000;
 
     struct PoolInfo {
         int128 token0Index;
@@ -38,14 +38,16 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
-    constructor(IPoolManager _manager, ICurveStableSwapNG _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwapNG _pool)
+        BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
+    {
         pool = _pool;
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        view
         override
         returns (uint256 amountUnspecified)
     {
@@ -108,6 +110,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
         IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 

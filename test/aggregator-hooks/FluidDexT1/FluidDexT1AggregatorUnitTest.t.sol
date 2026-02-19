@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -15,16 +14,17 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockFluidDexT1.sol";
 import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
-import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract FluidDexT1AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockFluidDexT1 public mockPool;
     MockFluidDexReservesResolver public mockResolver;
@@ -47,10 +47,12 @@ contract FluidDexT1AggregatorUnitTest is Test {
     PoolId public poolId;
 
     function setUp() public {
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
         mockPool = new MockFluidDexT1();
         mockResolver = new MockFluidDexReservesResolver();
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -96,21 +98,18 @@ contract FluidDexT1AggregatorUnitTest is Test {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
-        bytes memory constructorArgs =
-            abi.encode(IPoolManager(address(poolManager)), _mockPool, _mockResolver, fluidLiquidity);
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
-        return new FluidDexT1Aggregator{salt: salt}(
-            IPoolManager(address(poolManager)), _mockPool, _mockResolver, fluidLiquidity
-        );
+        return new FluidDexT1Aggregator{salt: salt}(poolManager, _mockPool, _mockResolver, fluidLiquidity);
     }
 
     // ========== CONSTRUCTOR ==========
 
     function test_constructor_setsImmutables() public view {
-        assertEq(address(hook.FLUID_POOL()), address(mockPool));
-        assertEq(address(hook.FLUID_DEX_RESERVES_RESOLVER()), address(mockResolver));
-        assertEq(hook.FLUID_LIQUIDITY(), fluidLiquidity);
+        assertEq(address(hook.fluidPool()), address(mockPool));
+        assertEq(address(hook.fluidDexReservesResolver()), address(mockResolver));
+        assertEq(hook.fluidLiquidity(), fluidLiquidity);
     }
 
     // ========== dexCallback ==========
@@ -186,7 +185,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokensNotInPool.selector, address(0xdead), address(0xbeef)),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -297,7 +296,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken1),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -326,7 +325,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken0),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -457,7 +456,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken0),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -488,7 +487,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokenNotInPool.selector, wrongToken1),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -519,7 +518,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.TokensNotInPool.selector, wrongToken0, wrongToken1),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -660,7 +659,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeSwap.selector,
                 abi.encodeWithSelector(FluidDexT1Aggregator.NativeCurrencyExactOut.selector),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         swapRouter.swap{value: 100 ether}(

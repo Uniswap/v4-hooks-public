@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -23,9 +23,9 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     using SafeERC20 for IERC20;
 
     /// @notice The Fluid DEX Lite contract
-    IFluidDexLite public immutable FLUID_DEX_LITE;
+    IFluidDexLite public immutable fluidDexLite;
     /// @notice The Fluid DEX Lite resolver for pool state queries
-    IFluidDexLiteResolver public immutable FLUID_DEX_LITE_RESOLVER;
+    IFluidDexLiteResolver public immutable fluidDexLiteResolver;
     /// @notice The key identifying the Fluid DEX Lite pool
     IFluidDexLite.DexKey public dexKey;
     /// @notice The Uniswap V4 pool ID associated with this aggregator
@@ -49,39 +49,38 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver _dexLiteResolver, bytes32 _salt)
-        BaseAggregatorHook(_manager)
+        BaseAggregatorHook(_manager, "FluidDexLiteAggregator v1.0")
     {
-        FLUID_DEX_LITE = _dexLite;
-        FLUID_DEX_LITE_RESOLVER = _dexLiteResolver;
+        fluidDexLite = _dexLite;
+        fluidDexLiteResolver = _dexLiteResolver;
         salt = _salt;
     }
 
     /// @inheritdoc IFluidDexLiteCallback
     function dexCallback(address token, uint256 amount, bytes calldata) external override {
-        if (msg.sender != address(FLUID_DEX_LITE)) revert UnauthorizedCaller();
+        if (msg.sender != address(fluidDexLite)) revert UnauthorizedCaller();
         if (token == FLUID_NATIVE_CURRENCY) {
             token = address(0);
         }
-        poolManager.take(Currency.wrap(token), address(FLUID_DEX_LITE), amount);
+        poolManager.take(Currency.wrap(token), address(fluidDexLite), amount);
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
         override
         returns (uint256 amountUnspecified)
     {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
-        // For Fluid, amountSpecified is negative for exactInput, and positive for exactOutput
-        amountUnspecified = FLUID_DEX_LITE_RESOLVER.estimateSwapSingle(dexKey, fluidSwap0to1, -amountSpecified);
+        // For Fluid, amountSpecified is positive for exactInput, and negative for exactOutput
+        amountUnspecified = fluidDexLiteResolver.estimateSwapSingle(dexKey, fluidSwap0to1, -amountSpecified);
     }
 
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
-        (, IFluidDexLite.Reserves memory reserves) = FLUID_DEX_LITE_RESOLVER.getPricesAndReserves(dexKey);
+        (, IFluidDexLite.Reserves memory reserves) = fluidDexLiteResolver.getPricesAndReserves(dexKey);
         if (_isReversed) {
             return (reserves.token1RealReserves, reserves.token0RealReserves);
         }
@@ -105,13 +104,14 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
 
         dexKey = IFluidDexLite.DexKey({token0: token0, token1: token1, salt: salt});
 
-        IFluidDexLite.DexState memory dexState = FLUID_DEX_LITE_RESOLVER.getDexState(dexKey);
+        IFluidDexLite.DexState memory dexState = fluidDexLiteResolver.getDexState(dexKey);
 
         if (isEmpty(dexState)) revert PoolDoesNotExist();
 
         localPoolId = key.toId();
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
@@ -170,7 +170,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     function _swap(FluidDexLiteSwapParams memory p, uint256 value) internal returns (uint256 amountUnspecified) {
-        amountUnspecified = FLUID_DEX_LITE.swapSingle{value: value}(
+        amountUnspecified = fluidDexLite.swapSingle{value: value}(
             p.dexKey,
             p.swap0To1,
             p.amountSpecified,

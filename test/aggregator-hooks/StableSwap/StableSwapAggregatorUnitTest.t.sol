@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -14,15 +13,16 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockCurveStableSwap} from "./mocks/MockCurveStableSwap.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
-import {Hooks as HooksLib} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract StableSwapAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockCurveStableSwap public mockPool;
     StableSwapAggregator public hook;
@@ -42,8 +42,10 @@ contract StableSwapAggregatorUnitTest is Test {
     PoolId public poolId;
 
     function setUp() public {
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -89,11 +91,10 @@ contract StableSwapAggregatorUnitTest is Test {
     function _deployHook(MockCurveStableSwap _mockPool) internal returns (StableSwapAggregator) {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(IPoolManager(address(poolManager)), _mockPool);
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
-        StableSwapAggregator newHook =
-            new StableSwapAggregator{salt: salt}(IPoolManager(address(poolManager)), _mockPool);
+        StableSwapAggregator newHook = new StableSwapAggregator{salt: salt}(poolManager, _mockPool);
         return newHook;
     }
 
@@ -161,7 +162,7 @@ contract StableSwapAggregatorUnitTest is Test {
                     Currency.unwrap(key2.currency0),
                     Currency.unwrap(key2.currency1)
                 ),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -190,7 +191,7 @@ contract StableSwapAggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(StableSwapAggregator.TokenNotInPool.selector, address(token0)),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -219,7 +220,7 @@ contract StableSwapAggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(StableSwapAggregator.TokenNotInPool.selector, address(token1)),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         poolManager.initialize(key2, SQRT_PRICE_1_1);
@@ -277,7 +278,7 @@ contract StableSwapAggregatorUnitTest is Test {
                 address(hook),
                 IHooks.beforeSwap.selector,
                 abi.encodeWithSelector(StableSwapAggregator.ExactOutputNotSupported.selector),
-                abi.encodeWithSelector(HooksLib.HookCallFailed.selector)
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         swapRouter.swap(

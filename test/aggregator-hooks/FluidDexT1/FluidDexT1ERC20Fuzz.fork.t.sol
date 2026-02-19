@@ -2,27 +2,16 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {
-    FluidDexT1AggregatorFactory
-} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
-import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {
-    IFluidDexReservesResolver
-} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
-import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IFluidDexFactory} from "./interfaces/IFluidDexFactory.sol";
 import {IFluidDexT1DeploymentLogic} from "./interfaces/IFluidDexT1DeploymentLogic.sol";
@@ -31,6 +20,18 @@ import {IFluidDexT1Admin} from "./interfaces/IFluidDexT1Admin.sol";
 import {AdminModuleStructs} from "./libraries/AdminModuleStructs.sol";
 import {DexAdminStructs} from "./libraries/DexAdminStructs.sol";
 import {MockLiquiditySupplier} from "./mocks/MockLiquiditySupplier.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
+import {
+    FluidDexT1AggregatorFactory
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
+import {
+    IFluidDexReservesResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
+import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
+import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 
 /// @title FluidDexT1ERC20Fuzz
 /// @notice Fuzz tests for FluidDexT1 through Uniswap V4 hooks (ERC20 tokens only)
@@ -55,7 +56,7 @@ contract FluidDexT1ERC20Fuzz is Test {
 
     // V4 contracts
     FluidDexT1AggregatorFactory public hookFactory;
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
 
     // V4 Pool configuration
@@ -84,6 +85,8 @@ contract FluidDexT1ERC20Fuzz is Test {
     uint256 constant MAX_SWAP_DIVISOR = 100; // max swap = liquidity / 100
 
     address public alice = makeAddr("alice");
+    address public tokenJar = makeAddr("tokenJar");
+    MockV4FeeAdapter public feeAdapter;
 
     /// @dev Struct to hold pool setup parameters (to reduce stack depth)
     struct PoolSetup {
@@ -136,11 +139,15 @@ contract FluidDexT1ERC20Fuzz is Test {
         vm.stopPrank();
 
         // Deploy V4 infrastructure
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
-        hookFactory = new FluidDexT1AggregatorFactory(
-            IPoolManager(address(poolManager)), IFluidDexReservesResolver(dexReservesResolver), liquidity
-        );
+        feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
+        hookFactory =
+            new FluidDexT1AggregatorFactory(poolManager, IFluidDexReservesResolver(dexReservesResolver), liquidity);
+
+        // Set this contract as the protocol fee controller
+        poolManager.setProtocolFeeController(address(feeAdapter));
     }
 
     // ========== FUZZ TESTS ==========
@@ -189,6 +196,8 @@ contract FluidDexT1ERC20Fuzz is Test {
         }
     }
 
+    // ========== POOL SETUP HELPERS ==========
+
     /// @notice Helper to setup pool and hook (reduces code duplication)
     function _setupPoolAndHook(uint256 seed)
         internal
@@ -198,10 +207,19 @@ contract FluidDexT1ERC20Fuzz is Test {
         _configureTokensInLiquidity(setup);
         _deployAndInitializeFluidPool(setup);
         deployment = _deployHook(setup);
+
+        // Derive and set protocol fee from seed
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        if (protocolFee > 0) {
+            uint24 packed = (protocolFee << 12) | protocolFee;
+            vm.prank(address(feeAdapter));
+            poolManager.setProtocolFee(deployment.poolKey, packed);
+        }
+
         _setupAlice(setup.token0, setup.token1, setup.liquidity0, setup.liquidity1);
     }
 
-    // ========== POOL SETUP HELPERS ==========
+    // ========== HELPERS ==========
 
     /// @notice Derive all pool parameters from a single seed
     function _derivePoolSetup(uint256 seed) internal returns (PoolSetup memory setup) {
@@ -416,10 +434,55 @@ contract FluidDexT1ERC20Fuzz is Test {
         token1.transfer(address(poolManager), amount1);
     }
 
+    /// @dev Bundles exact-in swap parameters to reduce stack depth
+    struct ExactInParams {
+        uint256 amountIn;
+        uint256 expectedOut;
+        uint256 expectedFee;
+    }
+
+    /// @dev Bundles exact-out swap parameters to reduce stack depth
+    struct ExactOutParams {
+        uint256 amountOut;
+        uint256 expectedIn;
+        uint256 expectedFee;
+    }
+
+    /// @notice Derive exact-in swap parameters including protocol fee
+    function _deriveExactInParams(
+        HookDeployment memory deployment,
+        PoolSetup memory setup,
+        uint256 seed,
+        uint256 swapIdx,
+        bool zeroForOne
+    ) internal returns (ExactInParams memory params) {
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
+        params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
+        params.expectedOut = deployment.hook.quote(zeroForOne, -int256(params.amountIn), deployment.poolId);
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+    }
+
+    /// @notice Derive exact-out swap parameters including protocol fee
+    function _deriveExactOutParams(
+        HookDeployment memory deployment,
+        PoolSetup memory setup,
+        uint256 seed,
+        uint256 swapIdx,
+        bool zeroForOne
+    ) internal returns (ExactOutParams memory params) {
+        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
+        uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
+        params.amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
+        if (params.amountOut == 0) params.amountOut = 1 ether;
+        params.expectedIn = deployment.hook.quote(zeroForOne, int256(params.amountOut), deployment.poolId);
+        uint24 protocolFee = _deriveProtocolFee(seed);
+        params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+    }
+
     // ========== SWAP HELPERS ==========
 
-    /// @notice Execute an exact input swap and verify the output matches the quote
-    /// @param zeroForOne Swap direction (true = token0 -> token1, false = token1 -> token0)
     function _executeExactInSwap(
         HookDeployment memory deployment,
         PoolSetup memory setup,
@@ -427,45 +490,37 @@ contract FluidDexT1ERC20Fuzz is Test {
         uint256 swapIdx,
         bool zeroForOne
     ) internal {
-        // Derive swap amount
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
-        uint256 amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
+        ExactInParams memory params = _deriveExactInParams(deployment, setup, seed, swapIdx, zeroForOne);
+        assertGt(params.expectedOut, 0, "Quote should be non-zero");
 
         MockERC20 tokenIn = zeroForOne ? setup.token0 : setup.token1;
         MockERC20 tokenOut = zeroForOne ? setup.token1 : setup.token0;
 
-        // Get quote before swap (negative amountSpecified = exact input)
-        uint256 expectedOut = deployment.hook.quote(zeroForOne, -int256(amountIn), deployment.poolId);
-        assertGt(expectedOut, 0, "Quote should be non-zero");
-
         uint256 tokenInBefore = tokenIn.balanceOf(alice);
         uint256 tokenOutBefore = tokenOut.balanceOf(alice);
+        uint256 tokenJarBefore = tokenOut.balanceOf(tokenJar);
 
-        // Execute exact input swap
         vm.prank(alice);
         swapRouter.swap(
             deployment.poolKey,
             SwapParams({
                 zeroForOne: zeroForOne,
-                amountSpecified: -int256(amountIn),
+                amountSpecified: -int256(params.amountIn),
                 sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
 
-        uint256 tokenInAfter = tokenIn.balanceOf(alice);
-        uint256 tokenOutAfter = tokenOut.balanceOf(alice);
-
-        // Verify exact input amount was spent
-        assertEq(tokenInBefore - tokenInAfter, amountIn, "Should spend exact input amount");
-        // Verify output matches quote
-        assertEq(tokenOutAfter - tokenOutBefore, expectedOut, "Received amount should match quote");
+        assertEq(tokenInBefore - tokenIn.balanceOf(alice), params.amountIn, "Should spend exact input amount");
+        assertEq(
+            tokenOut.balanceOf(alice) - tokenOutBefore, params.expectedOut, "Received amount should match quoted output"
+        );
+        assertEq(
+            tokenOut.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
+        );
     }
 
-    /// @notice Execute an exact output swap and verify the input matches the quote
-    /// @param zeroForOne Swap direction (true = token0 -> token1, false = token1 -> token0)
     function _executeExactOutSwap(
         HookDeployment memory deployment,
         PoolSetup memory setup,
@@ -473,44 +528,33 @@ contract FluidDexT1ERC20Fuzz is Test {
         uint256 swapIdx,
         bool zeroForOne
     ) internal {
-        // Derive swap amount (use much smaller amounts for exact output to stay within pool reserves)
-        uint256 swapSeed = uint256(keccak256(abi.encode(seed, "swap", swapIdx)));
-        uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
-        // Use very small amounts for exact output (1/1000 of liquidity) to stay well within internal imaginary reserves
-        uint256 amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
-        // Ensure minimum amount
-        if (amountOut == 0) amountOut = 1 ether;
+        ExactOutParams memory params = _deriveExactOutParams(deployment, setup, seed, swapIdx, zeroForOne);
+        assertGt(params.expectedIn, 0, "Quote should be non-zero");
 
         MockERC20 tokenIn = zeroForOne ? setup.token0 : setup.token1;
         MockERC20 tokenOut = zeroForOne ? setup.token1 : setup.token0;
 
-        // Get quote before swap (positive amountSpecified = exact output)
-        uint256 expectedIn = deployment.hook.quote(zeroForOne, int256(amountOut), deployment.poolId);
-        assertGt(expectedIn, 0, "Quote should be non-zero");
-
         uint256 tokenInBefore = tokenIn.balanceOf(alice);
         uint256 tokenOutBefore = tokenOut.balanceOf(alice);
+        uint256 tokenJarBefore = tokenIn.balanceOf(tokenJar);
 
-        // Execute exact output swap
         vm.prank(alice);
         swapRouter.swap(
             deployment.poolKey,
             SwapParams({
                 zeroForOne: zeroForOne,
-                amountSpecified: int256(amountOut),
+                amountSpecified: int256(params.amountOut),
                 sqrtPriceLimitX96: zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
 
-        uint256 tokenInAfter = tokenIn.balanceOf(alice);
-        uint256 tokenOutAfter = tokenOut.balanceOf(alice);
-
-        // Verify exact output amount was received
-        assertEq(tokenOutAfter - tokenOutBefore, amountOut, "Should receive exact output amount");
-        // Verify input matches quote
-        assertEq(tokenInBefore - tokenInAfter, expectedIn, "Input amount should match quote");
+        assertEq(tokenOut.balanceOf(alice) - tokenOutBefore, params.amountOut, "Should receive exact output amount");
+        assertEq(tokenInBefore - tokenIn.balanceOf(alice), params.expectedIn, "Input should match quoted input");
+        assertEq(
+            tokenIn.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
+        );
     }
 
     // ========== SEED-BASED DERIVATION HELPERS ==========
@@ -535,6 +579,12 @@ contract FluidDexT1ERC20Fuzz is Test {
         uint256 minSwap = _liquidity / MIN_SWAP_DIVISOR;
         uint256 maxSwap = _liquidity / MAX_SWAP_DIVISOR;
         return bound(uint256(keccak256(abi.encode(seed, "amount"))), minSwap, maxSwap);
+    }
+
+    /// @notice Derive protocol fee from seed (0 to MAX_PROTOCOL_FEE)
+    function _deriveProtocolFee(uint256 seed) internal pure returns (uint24) {
+        return
+            uint24(bound(uint256(keccak256(abi.encode(seed, "protocolFee"))), 0, ProtocolFeeLibrary.MAX_PROTOCOL_FEE));
     }
 
     receive() external payable {}

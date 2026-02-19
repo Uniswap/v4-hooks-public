@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -12,16 +11,17 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
 import {
     IFluidDexReservesResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title FluidDexT1NativeForkedTest
 /// @notice Tests for Fluid DEX T1 with native ETH token pairs
@@ -58,6 +58,7 @@ contract FluidDexT1NativeForkedTest is Test {
     uint256 constant INITIAL_BALANCE = 100 ether;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     FluidDexT1Aggregator public hook;
     IFluidDexT1 public fluidPool;
@@ -96,7 +97,7 @@ contract FluidDexT1NativeForkedTest is Test {
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
         fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
-        manager = PoolManager(poolManagerAddress);
+        manager = IPoolManager(poolManagerAddress);
 
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
@@ -115,6 +116,7 @@ contract FluidDexT1NativeForkedTest is Test {
         currency1 = Currency.wrap(erc20TokenAddress);
 
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
         _deployHook();
 

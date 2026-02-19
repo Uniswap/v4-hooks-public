@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -23,11 +23,11 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     using SafeERC20 for IERC20;
 
     /// @notice The Fluid DEX T1 pool
-    IFluidDexT1 public immutable FLUID_POOL;
+    IFluidDexT1 public immutable fluidPool;
     /// @notice Liquidity Layer contract (tokens are transferred here in the callback)
-    address public immutable FLUID_LIQUIDITY;
+    address public immutable fluidLiquidity;
     /// @notice The Fluid DEX reserves resolver for pool state queries
-    IFluidDexReservesResolver public immutable FLUID_DEX_RESERVES_RESOLVER;
+    IFluidDexReservesResolver public immutable fluidDexReservesResolver;
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
@@ -52,41 +52,40 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         IFluidDexT1 _fluidDex,
         IFluidDexReservesResolver _fluidDexReservesResolver,
         address _fluidLiquidity
-    ) BaseAggregatorHook(_manager) {
-        FLUID_POOL = _fluidDex;
-        FLUID_LIQUIDITY = _fluidLiquidity;
-        FLUID_DEX_RESERVES_RESOLVER = _fluidDexReservesResolver;
+    ) BaseAggregatorHook(_manager, "FluidDexT1Aggregator v1.0") {
+        fluidPool = _fluidDex;
+        fluidLiquidity = _fluidLiquidity;
+        fluidDexReservesResolver = _fluidDexReservesResolver;
     }
 
     /// @inheritdoc IDexCallback
     /// @dev Per Fluid docs, tokens should be transferred to the Liquidity Layer.
     function dexCallback(address token, uint256 amount) external override {
         if (!_getTransientInflight()) revert ProhibitedEntry();
-        if (msg.sender != address(FLUID_POOL)) revert UnauthorizedCaller();
+        if (msg.sender != address(fluidPool)) revert UnauthorizedCaller();
         if (token == FLUID_NATIVE_CURRENCY) {
             token = address(0);
         }
-        poolManager.take(Currency.wrap(token), FLUID_LIQUIDITY, amount);
+        poolManager.take(Currency.wrap(token), fluidLiquidity, amount);
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
         override
         returns (uint256 amountUnspecified)
     {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
         if (amountSpecified < 0) {
-            amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapIn(
-                address(FLUID_POOL), fluidSwap0to1, uint256(-amountSpecified), 0
+            amountUnspecified = fluidDexReservesResolver.estimateSwapIn(
+                address(fluidPool), fluidSwap0to1, uint256(-amountSpecified), 0
             );
         } else {
             uint256 amount = uint256(amountSpecified);
-            amountUnspecified = FLUID_DEX_RESERVES_RESOLVER.estimateSwapOut(
+            amountUnspecified = fluidDexReservesResolver.estimateSwapOut(
                 // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
-                address(FLUID_POOL),
+                address(fluidPool),
                 fluidSwap0to1,
                 amount + _getBuffer(amount),
                 type(uint256).max
@@ -97,9 +96,9 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
-        (bool success, bytes memory data) = address(FLUID_DEX_RESERVES_RESOLVER)
+        (bool success, bytes memory data) = address(fluidDexReservesResolver)
             .staticcall(
-                abi.encodeWithSelector(IFluidDexReservesResolver.getPoolWithReserves.selector, address(FLUID_POOL))
+                abi.encodeWithSelector(IFluidDexReservesResolver.getPoolWithReserves.selector, address(fluidPool))
             );
         if (success && data.length > 0) {
             IFluidDexReservesResolver.PoolWithReserves memory poolData =
@@ -113,7 +112,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        (address token0, address token1) = FLUID_DEX_RESERVES_RESOLVER.getDexTokens(address(FLUID_POOL));
+        (address token0, address token1) = fluidDexReservesResolver.getDexTokens(address(fluidPool));
         if (token0 == FLUID_NATIVE_CURRENCY) {
             token0 = address(0);
         }
@@ -142,6 +141,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         localPoolId = key.toId();
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
@@ -200,10 +200,10 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         if (inputIsNative) {
             poolManager.take(takeCurrency, address(this), amountIn);
             // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = FLUID_POOL.swapIn{value: amountIn}(fluidSwap0to1, amountIn, 0, recipient);
+            amountOut = fluidPool.swapIn{value: amountIn}(fluidSwap0to1, amountIn, 0, recipient);
         } else {
             // MinAmoountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = FLUID_POOL.swapInWithCallback(fluidSwap0to1, amountIn, 0, recipient);
+            amountOut = fluidPool.swapInWithCallback(fluidSwap0to1, amountIn, 0, recipient);
         }
     }
 
@@ -219,7 +219,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
             revert NativeCurrencyExactOut();
         } else {
             // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
-            amountIn = FLUID_POOL.swapOutWithCallback(
+            amountIn = fluidPool.swapOutWithCallback(
                 fluidSwap0to1, amountOut + _getBuffer(amountOut), type(uint256).max, recipient
             );
             if (!outputIsNative) {

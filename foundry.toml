@@ -1,6 +1,6 @@
 [profile.default]
 out = 'foundry-out'
-solc_version = '0.8.26'
+auto_detect_solc = true
 optimizer_runs = 44444444
 ffi = true
 fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }]

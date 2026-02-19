@@ -2,10 +2,10 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockCurveStableSwapNG} from "./mocks/MockCurveStableSwapNG.sol";
 import {
@@ -17,7 +17,8 @@ import {
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
 contract StableSwapNGFactoryUnitTest is Test {
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     MockCurveStableSwapNG public mockPool;
     MockERC20 public token0;
     MockERC20 public token1;
@@ -27,7 +28,8 @@ contract StableSwapNGFactoryUnitTest is Test {
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     function setUp() public {
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -37,10 +39,11 @@ contract StableSwapNGFactoryUnitTest is Test {
         coins[0] = address(token0);
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwapNG(coins);
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
     }
 
     function test_factory_createPool() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -68,7 +71,7 @@ contract StableSwapNGFactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         Currency[] memory tokens = new Currency[](2);
         tokens[0] = Currency.wrap(address(token0));
@@ -89,7 +92,7 @@ contract StableSwapNGFactoryUnitTest is Test {
     }
 
     function test_factory_revertsInsufficientTokens() public {
-        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(IPoolManager(address(poolManager)));
+        StableSwapNGAggregatorFactory factory = new StableSwapNGAggregatorFactory(poolManager);
 
         Currency[] memory tokens = new Currency[](1);
         tokens[0] = Currency.wrap(address(token0));

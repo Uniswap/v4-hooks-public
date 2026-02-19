@@ -2,10 +2,10 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
 import {MockFluidDexLiteResolver} from "./mocks/MockFluidDexLiteResolver.sol";
@@ -18,7 +18,8 @@ import {
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
 contract FluidDexLiteFactoryUnitTest is Test {
-    PoolManager public poolManager;
+    IPoolManager public poolManager;
+    MockV4FeeAdapter public feeAdapter;
     MockFluidDexLite public mockDex;
     MockFluidDexLiteResolver public mockResolver;
     MockERC20 public token0;
@@ -29,9 +30,11 @@ contract FluidDexLiteFactoryUnitTest is Test {
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
 
     function setUp() public {
-        poolManager = new PoolManager(address(this));
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         mockDex = new MockFluidDexLite();
         mockResolver = new MockFluidDexLiteResolver();
+        feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -39,8 +42,7 @@ contract FluidDexLiteFactoryUnitTest is Test {
     }
 
     function test_factory_createPool() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(IPoolManager(address(poolManager)), mockDex, mockResolver);
+        FluidDexLiteAggregatorFactory factory = new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver);
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -68,8 +70,7 @@ contract FluidDexLiteFactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        FluidDexLiteAggregatorFactory factory =
-            new FluidDexLiteAggregatorFactory(IPoolManager(address(poolManager)), mockDex, mockResolver);
+        FluidDexLiteAggregatorFactory factory = new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver);
 
         bytes32 dexSalt = bytes32(uint256(99));
         bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);

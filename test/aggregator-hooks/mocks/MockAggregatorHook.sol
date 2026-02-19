@@ -18,7 +18,7 @@ contract MockAggregatorHook is BaseAggregatorHook {
     uint256 public mockPseudoTVL0;
     uint256 public mockPseudoTVL1;
 
-    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, MockExternalLiqSource _source) BaseAggregatorHook(_manager, "Mock") {
         externalSource = _source;
     }
 
@@ -29,10 +29,6 @@ contract MockAggregatorHook is BaseAggregatorHook {
     function setMockPseudoTVL(uint256 amount0, uint256 amount1) external {
         mockPseudoTVL0 = amount0;
         mockPseudoTVL1 = amount1;
-    }
-
-    function quote(bool, int256, PoolId) external payable override returns (uint256) {
-        return mockQuoteReturn;
     }
 
     function pseudoTotalValueLocked(PoolId) external view override returns (uint256 amount0, uint256 amount1) {
@@ -50,5 +46,9 @@ contract MockAggregatorHook is BaseAggregatorHook {
             externalSource.pullTokens(settleCurrency, takeCurrency, amountSpecifiedAbs);
         poolManager.take(takeCurrency, address(this), amountTake);
         return (amountSettle, amountTake, hasSettled);
+    }
+
+    function _rawQuote(bool, int256, PoolId) internal view override returns (uint256) {
+        return mockQuoteReturn;
     }
 }

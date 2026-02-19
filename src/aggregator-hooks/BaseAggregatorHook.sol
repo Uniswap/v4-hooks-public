@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.29;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -16,32 +16,55 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {ProtocolFees} from "./ProtocolFees.sol";
 
 /// @title BaseAggregatorHook
 /// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
-/// @dev Implements the IAggregatorHook interface and extends the BaseHook contract
-abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver {
+/// @dev Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract
+abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook, DeltaResolver {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
+
+    /// @notice The publicly displayed version of the aggregator hook.
+    /// @dev Although this should never change after construction, strings cannot be labelled immutable.
+    string public aggregatorHookVersion;
 
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+    constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) {
+        aggregatorHookVersion = _aggregatorHookVersion;
+    }
+
+    /// @inheritdoc IAggregatorHook
+    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         external
         payable
-        virtual
-        returns (uint256 amountUnspecified);
+        returns (uint256 amountUnspecified)
+    {
+        amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
 
-    /// @inheritdoc IAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+        uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
+
+        if (protocolFee == 0) return amountUnspecified;
+
+        bool isExactInput = amountSpecified < 0;
+        uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
+
+        if (isExactInput) {
+            amountUnspecified -= feeAmount;
+        } else {
+            amountUnspecified += feeAmount;
+        }
+    }
 
     /// @inheritdoc BaseHook
     function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
@@ -65,8 +88,20 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         virtual
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
 
+    /// @notice Returns the raw quote from the underlying liquidity source without protocol fees
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @return amountUnspecified The raw unspecified amount before protocol fee adjustment
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        virtual
+        returns (uint256 amountUnspecified);
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
+        // NOTE: Token jar will be grabbed in first protocol fee payment if not done here.
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
@@ -76,10 +111,13 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
+        bool isExactInput = params.amountSpecified < 0;
+        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, isExactInput);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        if (params.amountSpecified > 0) {
+        unspecifiedDelta += _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
+
+        if (!isExactInput) {
             // For exactOut, in cases where the implementation's amountOut may be off.
             // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
@@ -128,7 +166,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, BaseHook, DeltaResolver
         } else {
             revert InsufficientLiquidity();
         }
-        poolManager.settle();
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps
