@@ -525,7 +525,10 @@ contract FluidDexT1ERC20Fuzz is Test {
             tokenOut.balanceOf(alice) - tokenOutBefore, params.expectedOut, "Received amount should match quoted output"
         );
         assertApproxEqAbs(
-            tokenOut.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, 1, "Token jar should receive protocol fee"
+            tokenOut.balanceOf(tokenJar) - tokenJarBefore,
+            params.expectedFee,
+            1,
+            "Token jar should receive protocol fee"
         );
     }
 

@@ -175,10 +175,10 @@ contract FeeCalculationTest is Test {
     // (price movement further from reference can only increase the fee)
     // =============================================================================
 
-    function test_fuzz_adjustPreviousFeeForPriceMovement_succeeds(uint256 priceRatioX96, uint256 previousDecayingFeeE12)
-        public
-        pure
-    {
+    function test_fuzz_adjustPreviousFeeForPriceMovement_succeeds(
+        uint256 priceRatioX96,
+        uint256 previousDecayingFeeE12
+    ) public pure {
         priceRatioX96 = bound(priceRatioX96, 0, FixedPoint96.Q96); // price impact
         previousDecayingFeeE12 = bound(previousDecayingFeeE12, 0, FeeCalculation.ONE_E12);
         uint256 adjustedFeeE12 = FeeCalculation.adjustPreviousFeeForPriceMovement(priceRatioX96, previousDecayingFeeE12);
