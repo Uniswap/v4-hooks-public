@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -16,7 +15,7 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {MockTIP20} from "./mocks/MockTIP20.sol";
-import {ExternalLiqSourceHook} from "../../../src/aggregator-hooks/ExternalLiqSourceHook.sol";
+import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {
     TempoExchangeAggregator
 } from "../../../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
@@ -91,7 +90,7 @@ contract TempoExchangeTest is Test {
         betaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
 
         // Deploy PoolManager
-        manager = new PoolManager(address(0));
+        manager = IPoolManager(deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(0))));
 
         // Mint tokens to PoolManager so it has liquidity for swaps
         alphaUSD.mint(address(manager), INITIAL_BALANCE * 10);
@@ -127,7 +126,7 @@ contract TempoExchangeTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by ExternalLiqSourceHook
+        // Hook flags required by BaseAggregatorHook
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
@@ -269,7 +268,7 @@ contract TempoExchangeTest is Test {
         });
         PoolId fakePoolId = fakePoolKey.toId();
 
-        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        vm.expectRevert(IAggregatorHook.PoolDoesNotExist.selector);
         hook.quote(true, -int256(SWAP_AMOUNT), fakePoolId);
     }
 
@@ -285,7 +284,7 @@ contract TempoExchangeTest is Test {
         });
         PoolId fakePoolId = fakePoolKey.toId();
 
-        vm.expectRevert(ExternalLiqSourceHook.PoolDoesNotExist.selector);
+        vm.expectRevert(IAggregatorHook.PoolDoesNotExist.selector);
         hook.pseudoTotalValueLocked(fakePoolId);
     }
 
@@ -444,12 +443,29 @@ contract TempoExchangeTest is Test {
     /// @notice Verify quote function returns reasonable values
     function test_quote() public {
         uint256 amountIn = SWAP_AMOUNT;
+        uint256 amountOut = SWAP_AMOUNT;
 
-        uint256 expectedOut = hook.quote(true, -int256(amountIn), poolId);
+        // --- Exact-in (negative amountSpecified) ---
+        // Token0 -> Token1 (zeroForOne = true)
+        uint256 expectedOut0to1 = hook.quote(true, -int256(amountIn), poolId);
+        assertGt(expectedOut0to1, 0, "Quote 0->1 exact-in should return non-zero");
+        assertGt(expectedOut0to1, amountIn * 99 / 100, "Quote 0->1 exact-in should be close to input for stablecoins");
 
-        assertGt(expectedOut, 0, "Quote should return non-zero");
-        // With 0.1% fee, output should be close to input for stablecoins
-        assertGt(expectedOut, amountIn * 99 / 100, "Quote should be close to input for stablecoins");
+        // Token1 -> Token0 (zeroForOne = false)
+        uint256 expectedOut1to0 = hook.quote(false, -int256(amountIn), poolId);
+        assertGt(expectedOut1to0, 0, "Quote 1->0 exact-in should return non-zero");
+        assertGt(expectedOut1to0, amountIn * 99 / 100, "Quote 1->0 exact-in should be close to input for stablecoins");
+
+        // --- Exact-out (positive amountSpecified) ---
+        // Token0 -> Token1: want amountOut of token1, quote returns required token0 in
+        uint256 requiredIn0to1 = hook.quote(true, int256(amountOut), poolId);
+        assertGt(requiredIn0to1, 0, "Quote 0->1 exact-out should return non-zero");
+        assertGe(requiredIn0to1, amountOut, "Quote 0->1 exact-out: required in should be >= desired out");
+
+        // Token1 -> Token0: want amountOut of token0, quote returns required token1 in
+        uint256 requiredIn1to0 = hook.quote(false, int256(amountOut), poolId);
+        assertGt(requiredIn1to0, 0, "Quote 1->0 exact-out should return non-zero");
+        assertGe(requiredIn1to0, amountOut, "Quote 1->0 exact-out: required in should be >= desired out");
     }
 
     /// @notice Test pseudoTotalValueLocked returns non-zero values

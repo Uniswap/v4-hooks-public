@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -109,7 +108,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
         initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
 
-        manager = PoolManager(poolManagerAddress);
+        manager = IPoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
@@ -141,7 +140,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by ExternalLiqSourceHook:
+        // Hook flags required by BaseAggregatorHook:
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 

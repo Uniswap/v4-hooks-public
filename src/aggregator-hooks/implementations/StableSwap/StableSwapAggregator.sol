@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.29;
 
-import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -16,7 +16,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// @title StableSwapAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Curve StableSwap pools
 /// @dev Supports exact-input swaps only due to StableSwap pool limitations
-contract StableSwapAggregator is ExternalLiqSourceHook {
+contract StableSwapAggregator is BaseAggregatorHook {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
@@ -35,14 +35,14 @@ contract StableSwapAggregator is ExternalLiqSourceHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
 
-    constructor(IPoolManager _manager, ICurveStableSwap _pool) ExternalLiqSourceHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwap _pool) BaseAggregatorHook(_manager) {
         pool = _pool;
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    /// @inheritdoc BaseAggregatorHook
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        view
         override
         returns (uint256 amountUnspecified)
     {
@@ -55,7 +55,7 @@ contract StableSwapAggregator is ExternalLiqSourceHook {
         }
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));

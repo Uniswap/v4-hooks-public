@@ -1,6 +1,6 @@
 [profile.default]
 out = 'foundry-out'
-solc_version = '0.8.26'
+auto_detect_solc = true
 optimizer_runs = 44444444
 via_ir = true
 ffi = true
@@ -16,6 +16,13 @@ optimizer_runs = 200
 [profile.gas]
 gas_limit=30_000_000
 
+[profile.aggregator_hooks]
+via_ir = false
+optimizer_runs = 200
+
+[fuzz]
+runs = 10
+
 [rpc_endpoints]
 sepolia = "https://rpc.sepolia.org"
 unichain_sepolia = "https://sepolia.unichain.org"
@@ -23,3 +30,4 @@ base_sepolia = "https://sepolia.base.org"
 arbitrum_sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
 mainnet = "https://mainnet.infura.io/v3/${INFURA_API_KEY}"
 tempo_testnet = "https://rpc.moderato.tempo.xyz"
+tempo_mainnet = "https://rpc.tempo.xyz"

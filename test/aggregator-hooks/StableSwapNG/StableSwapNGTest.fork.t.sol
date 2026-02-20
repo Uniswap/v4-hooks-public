@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -94,7 +93,7 @@ contract StableSwapNGForkedTest is Test {
         initialBalance = 1_000_000 * (10 ** tokenDecimals);
 
         // Use deployed PoolManager
-        manager = PoolManager(poolManagerAddress);
+        manager = IPoolManager(poolManagerAddress);
 
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
@@ -125,7 +124,7 @@ contract StableSwapNGForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by ExternalLiqSourceHook:
+        // Hook flags required by BaseAggregatorHook:
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 

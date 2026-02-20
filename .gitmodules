@@ -20,3 +20,7 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/protocol-fees"]
+	path = lib/protocol-fees
+	url = https://github.com/Uniswap/protocol-fees
+	branch = v4-fee-adapter

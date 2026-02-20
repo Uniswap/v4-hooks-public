@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.29;
 
-import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -17,7 +17,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @title FluidDexV2Aggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX V2 pools
 /// @dev Implements the IFluidDexV2Callback interface for swap callbacks
-contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
+contract FluidDexV2Aggregator is BaseAggregatorHook, IFluidDexV2Callback {
     using StateLibrary for IPoolManager;
 
     enum SwapKind {
@@ -70,7 +70,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         IFluidDexV2Resolver _dexV2Resolver,
         address _controller,
         uint256 _dexType
-    ) ExternalLiqSourceHook(_manager) {
+    ) BaseAggregatorHook(_manager) {
         FLUID_DEX_V2 = _dexV2;
         FLUID_DEX_V2_RESOLVER = _dexV2Resolver;
         controller = _controller;
@@ -133,8 +133,8 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         return swapResult;
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external payable override returns (uint256) {
+    /// @inheritdoc BaseAggregatorHook
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId) internal override returns (uint256) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
         FluidDexV2SwapParams memory fluidParams = FluidDexV2SwapParams({
@@ -168,7 +168,7 @@ contract FluidDexV2Aggregator is ExternalLiqSourceHook, IFluidDexV2Callback {
         revert UnexpectedError();
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         address token0 = dexKey.token0 == FLUID_NATIVE_CURRENCY ? address(0) : dexKey.token0;

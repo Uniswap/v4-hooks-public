@@ -85,4 +85,4 @@ implementations/
         └── I{Protocol}.sol                       # Protocol-specific interfaces
 ```
 
-All aggregators extend `ExternalLiqSourceHook`, which provides the base hook functionality for routing swaps through external liquidity sources.
+All aggregators extend `BaseAggregatorHook`, which provides the base hook functionality for routing swaps through external liquidity sources.

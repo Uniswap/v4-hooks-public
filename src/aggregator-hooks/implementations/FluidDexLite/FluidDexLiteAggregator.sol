@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.29;
 
-import {ExternalLiqSourceHook} from "../../ExternalLiqSourceHook.sol";
+import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -18,7 +18,7 @@ import {IFluidDexLiteResolver} from "./interfaces/IFluidDexLiteResolver.sol";
 /// @title FluidDexLiteAggregator
 /// @notice Uniswap V4 hook that aggregates liquidity from Fluid DEX Lite pools
 /// @dev Implements the IFluidDexLiteCallback interface for swap callbacks
-contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback {
+contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
@@ -49,7 +49,7 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
     }
 
     constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver _dexLiteResolver, bytes32 _salt)
-        ExternalLiqSourceHook(_manager)
+        BaseAggregatorHook(_manager)
     {
         FLUID_DEX_LITE = _dexLite;
         FLUID_DEX_LITE_RESOLVER = _dexLiteResolver;
@@ -65,10 +65,9 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
         poolManager.take(Currency.wrap(token), address(FLUID_DEX_LITE), amount);
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    /// @inheritdoc BaseAggregatorHook
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
         override
         returns (uint256 amountUnspecified)
     {
@@ -77,7 +76,7 @@ contract FluidDexLiteAggregator is ExternalLiqSourceHook, IFluidDexLiteCallback 
         amountUnspecified = FLUID_DEX_LITE_RESOLVER.estimateSwapSingle(dexKey, fluidSwap0to1, -amountSpecified);
     }
 
-    /// @inheritdoc ExternalLiqSourceHook
+    /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         (, IFluidDexLite.Reserves memory reserves) = FLUID_DEX_LITE_RESOLVER.getPricesAndReserves(dexKey);

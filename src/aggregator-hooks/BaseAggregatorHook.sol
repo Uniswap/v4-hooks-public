@@ -15,8 +15,14 @@ import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
+import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
+import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {ProtocolFees} from "./ProtocolFees.sol";
 
-abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
+/// @title BaseAggregatorHook
+/// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
+/// @dev Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract
+abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook, DeltaResolver {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
@@ -25,65 +31,88 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
-    error InsufficientLiquidity();
-    error UnspecifiedAmountExceeded();
-    error PoolDoesNotExist();
-
-    event AggregatorPoolRegistered(PoolId indexed poolId);
-
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
-    /// @notice Returns the permissions this hook requires
-    /// @dev Enables beforeSwap, beforeSwapReturnDelta, and beforeInitialize
-    /// @return permissions The hook permissions struct indicating which hooks are enabled
+    /// @inheritdoc IAggregatorHook
+    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+
+    /// @inheritdoc IAggregatorHook
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        external
+        payable
+        returns (uint256 amountUnspecified)
+    {
+        amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
+
+        uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
+
+        if (protocolFee == 0) return amountUnspecified;
+
+        bool isExactInput = amountSpecified < 0;
+        uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
+
+        if (isExactInput) {
+            amountUnspecified -= feeAmount;
+        } else {
+            amountUnspecified += feeAmount;
+        }
+    }
+
+    /// @inheritdoc BaseHook
     function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
         permissions.beforeSwap = true;
         permissions.beforeSwapReturnDelta = true;
         permissions.beforeInitialize = true;
     }
 
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
-        emit AggregatorPoolRegistered(key.toId());
-        return IHooks.beforeInitialize.selector;
-    }
+    /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
+    /// @param settleCurrency The currency to be settled on the V4 PoolManager (swapper's output currency)
+    /// @param takeCurrency The currency to be taken from the V4 PoolManager (swapper's input currency)
+    /// @param params The swap parameters
+    /// @param poolId The V4 Pool ID
+    /// @return amountSettle The amount of the currency being settled (swapper's output amount)
+    /// @return amountTake The amount of the currency being taken (swapper's input amount)
+    /// @return hasSettled Whether the swap has been settled inside of the _conductSwap function
+    /// @dev To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+    ///      settle' pattern and set hasSettled to true
+    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+        internal
+        virtual
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
 
-    /// @notice Quotes amount of unspecified side for a given amount of specified side
-    /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
-    /// @param amountSpecified The amount of tokens in or out (negative for exact-in, positive for exact-out)
-    /// @return amountUnspecified amount of unspecified side (always positive)
-    /// @dev This function is meant to be called as a view function even though it is not one. This is because the swap
-    /// might be simulated but not finalized
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
+    /// @notice Returns the raw quote from the underlying liquidity source without protocol fees
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @return amountUnspecified The raw unspecified amount before protocol fee adjustment
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
         virtual
         returns (uint256 amountUnspecified);
 
-    /// @notice Returns the pseudo TVL: the amount of the UniswapV4 pool's tokens locked in the aggregated pool
-    /// @param poolId The pool ID of the UniswapV4 pool
-    /// @return amount0 The amount of token0 in the aggregated pool
-    /// @return amount1 The amount of token1 in the aggregated pool
-    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+    function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
+        emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
+        return IHooks.beforeInitialize.selector;
+    }
 
-    /// @notice Hook called before each swap
-    /// @dev Validates signatures, calculates custom pricing, and settles deltas
-    /// @param key The pool key
-    /// @param params The swap parameters
-    /// @return Function selector, delta to apply, and LP fee
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
+        bool isExactInput = params.amountSpecified < 0;
+        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, isExactInput);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        if (params.amountSpecified > 0) {
-            // For exactOut, external liquidity sources can be off by a few wei.
-            // NOTE: it is up to the router to handle this
+        unspecifiedDelta += _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
+
+        if (!isExactInput) {
+            // For exactOut, in cases where the implementation's amountOut may be off.
+            // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
         }
 
@@ -105,10 +134,6 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
             unspecified = amountIn;
             unspecifiedDelta = int128(uint128(unspecified));
         }
-        // Check if an overflow happened when casting to int128
-        if (uint256(int256(unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta)) < unspecified) {
-            revert UnspecifiedAmountExceeded();
-        }
     }
 
     function _internalSettle(PoolKey calldata key, SwapParams calldata params)
@@ -128,18 +153,12 @@ abstract contract ExternalLiqSourceHook is BaseHook, DeltaResolver {
         return (amountTake, amountSettle);
     }
 
-    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
-        internal
-        virtual
-        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
-
     function _pay(Currency token, address payer, uint256 amount) internal override {
         if (token.balanceOf(payer) >= amount) {
             token.transfer(address(poolManager), amount);
         } else {
             revert InsufficientLiquidity();
         }
-        poolManager.settle();
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps

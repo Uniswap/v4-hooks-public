@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.29;
 
 import "forge-std/Script.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -19,6 +19,9 @@ import {SafePoolSwapTest} from "../test/aggregator-hooks/shared/SafePoolSwapTest
 /// @title InitializeTempoPools
 /// @notice Discovers TIP-20 tokens via FFI, initializes V4 pools for each (token, quoteToken) pair,
 ///         seeds the hook for gas optimization, and executes a test swap per pool.
+/// @dev Use env vars to target testnet vs prod:
+///      - TEMPO_RPC_KEY: key in foundry.toml [rpc_endpoints] for token discovery (default "tempo_testnet"; use "tempo_mainnet" for prod)
+///      - POOL_MANAGER, TEMPO_EXCHANGE, PATH_USD: contract addresses (testnet defaults below; set for prod)
 contract InitializeTempoPools is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -26,8 +29,7 @@ contract InitializeTempoPools is Script {
     // Default testnet addresses (Tempo Moderato, chain 42431)
     address constant DEFAULT_POOL_MANAGER = 0x72B37Ad2798c6C2B51C7873Ed2E291a88bB909a2;
     address constant DEFAULT_TEMPO_EXCHANGE = 0xDEc0000000000000000000000000000000000000;
-    // address constant PATH_USD = 0x20C0000000000000000000000000000000000000;
-    address constant PATH_USD = 0x20C0000000000000000000000000000000000001;
+    address constant DEFAULT_PATH_USD = 0x20C0000000000000000000000000000000000001;
 
     uint24 constant POOL_FEE = 500;
     int24 constant TICK_SPACING = 10;
@@ -54,7 +56,11 @@ contract InitializeTempoPools is Script {
         address routerAddr = vm.envAddress("ROUTER_ADDRESS");
         address poolManager = vm.envOr("POOL_MANAGER", DEFAULT_POOL_MANAGER);
         address tempoExchange = vm.envOr("TEMPO_EXCHANGE", DEFAULT_TEMPO_EXCHANGE);
+        address pathUsd = vm.envOr("PATH_USD", DEFAULT_PATH_USD);
         uint256 minLiquidity = vm.envOr("MIN_LIQUIDITY", DEFAULT_MIN_LIQUIDITY);
+        string memory defaultRpcKey = "tempo_testnet";
+        string memory rpcKey = vm.envOr("TEMPO_RPC_KEY", defaultRpcKey);
+        string memory rpcUrl = vm.rpcUrl(rpcKey);
 
         IPoolManager pm = IPoolManager(poolManager);
         ITempoExchange exchange = ITempoExchange(tempoExchange);
@@ -64,13 +70,14 @@ contract InitializeTempoPools is Script {
         console.log("Deployer:", deployer);
         console.log("Hook:", hookAddr);
         console.log("Router:", routerAddr);
+        console.log("RPC key:", rpcKey);
         console.log("Min liquidity:", minLiquidity);
 
         // --- Step 1: Discover tokens via FFI ---
         string[] memory cmd = new string[](3);
         cmd[0] = "bash";
         cmd[1] = "script/util/fetch_tempo_tokens.sh";
-        cmd[2] = vm.rpcUrl("tempo_testnet");
+        cmd[2] = rpcUrl;
         bytes memory result = vm.ffi(cmd);
         address[] memory tokens = abi.decode(result, (address[]));
 
@@ -127,8 +134,8 @@ contract InitializeTempoPools is Script {
             // 4b. Seed hook with 1 unit of each token for gas optimization
             // For non-PathUSD tokens: buy 1 unit via the exchange, then transfer to hook
             // For PathUSD: transfer directly (deployer has PathUSD)
-            _seedToken(token0, hookAddr, deployer, exchange);
-            _seedToken(token1, hookAddr, deployer, exchange);
+            _seedToken(token0, hookAddr, deployer, exchange, pathUsd);
+            _seedToken(token1, hookAddr, deployer, exchange, pathUsd);
             console.log("  Seeded hook with 1 unit of each token");
 
             // 4c. Test swap (100 tokens exact-input, token0 → token1)
@@ -202,19 +209,19 @@ contract InitializeTempoPools is Script {
         console.log("Results written to docs/TempoPools.md");
     }
 
-    /// @dev Seeds the hook with 1 unit of a token. For PathUSD, transfers directly.
+    /// @dev Seeds the hook with 1 unit of a token. For PathUSD (quote token), transfers directly.
     ///      For other tokens, buys 1 unit from the exchange using PathUSD, then transfers.
-    function _seedToken(address token, address hook, address, ITempoExchange exchange) internal {
+    function _seedToken(address token, address hook, address, ITempoExchange exchange, address pathUsd) internal {
         uint256 hookBalance = IERC20(token).balanceOf(hook);
         if (hookBalance > 0) return; // already seeded
 
-        if (token == PATH_USD) {
+        if (token == pathUsd) {
             // PathUSD: transfer 1 unit directly from deployer
-            IERC20(PATH_USD).transfer(hook, 1);
+            IERC20(pathUsd).transfer(hook, 1);
         } else {
             // Buy 1 unit of token via exchange, then transfer to hook
-            IERC20(PATH_USD).approve(address(exchange), type(uint256).max);
-            exchange.swapExactAmountOut(PATH_USD, token, 1, type(uint128).max);
+            IERC20(pathUsd).approve(address(exchange), type(uint256).max);
+            exchange.swapExactAmountOut(pathUsd, token, 1, type(uint128).max);
             IERC20(token).transfer(hook, 1);
         }
     }
