@@ -4,8 +4,8 @@
 # bypassing Foundry's local EVM (which can't handle Tempo precompiles).
 #
 # Usage:
-#   ./script/test_tempo_aggregator.sh                  # run all tests
-#   ./script/test_tempo_aggregator.sh test_quote        # run a single test
+#   ./test/aggregator-hooks/TempoExchange/test_tempo_aggregator.sh                  # run all tests
+#   ./test/aggregator-hooks/TempoExchange/test_tempo_aggregator.sh test_quote        # run a single test
 #
 # Required env vars (or source .env):
 #   PRIVATE_KEY, HOOK_ADDRESS, ROUTER_ADDRESS, TEMPO_TOKEN_0, TEMPO_TOKEN_1
@@ -17,8 +17,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/../.env" ]]; then
-  set -a; source "$SCRIPT_DIR/../.env"; set +a
+REPO_ROOT="$SCRIPT_DIR/../../.."
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
 # ──────── Configuration ────────
