@@ -343,67 +343,41 @@ contract TempoExchangeTest is Test {
 
     /// @notice Test that the same hook can support multiple pools (singleton pattern)
     function test_singletonMultiplePools() public {
-        // Deploy additional tokens for second pool with direct quoteToken relationship
+        (PoolId poolId2, address token0Addr, address token1Addr) = _deployAndInitSecondPool();
+
+        _assertBothPoolsQuotable(poolId, poolId2);
+        _assertBothPoolsTVL(poolId, poolId2);
+        _assertPoolTokens(poolId, address(alphaUSD), address(betaUSD));
+        _assertPoolTokens(poolId2, token0Addr, token1Addr);
+    }
+
+    function _deployAndInitSecondPool() internal returns (PoolId poolId2, address token0Addr, address token1Addr) {
         MockTIP20 gammaUSD = new MockTIP20("GammaUSD", "gUSD", DECIMALS, address(0));
         MockTIP20 deltaUSD = new MockTIP20("DeltaUSD", "dUSD", DECIMALS, address(gammaUSD));
 
-        // Order tokens correctly
         if (address(gammaUSD) > address(deltaUSD)) {
             (gammaUSD, deltaUSD) = (deltaUSD, gammaUSD);
             gammaUSD.setQuoteToken(address(deltaUSD));
             deltaUSD.setQuoteToken(address(0));
         }
 
-        Currency currency2 = Currency.wrap(address(gammaUSD));
-        Currency currency3 = Currency.wrap(address(deltaUSD));
+        token0Addr = address(gammaUSD);
+        token1Addr = address(deltaUSD);
 
-        // Fund the mock exchange with new tokens
         gammaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
         deltaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
-
-        // Fund PoolManager
         gammaUSD.mint(address(manager), INITIAL_BALANCE * 10);
         deltaUSD.mint(address(manager), INITIAL_BALANCE * 10);
 
-        // Initialize a second pool with the SAME hook
         PoolKey memory poolKey2 = PoolKey({
-            currency0: currency2,
-            currency1: currency3,
+            currency0: Currency.wrap(token0Addr),
+            currency1: Currency.wrap(token1Addr),
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(hook)) // Same hook!
+            hooks: IHooks(address(hook))
         });
-        PoolId poolId2 = poolKey2.toId();
-
+        poolId2 = poolKey2.toId();
         manager.initialize(poolKey2, SQRT_PRICE_1_1);
-
-        // Verify both pools work independently
-
-        // Test quote on first pool
-        uint256 quote1 = hook.quote(true, -int256(SWAP_AMOUNT), poolId);
-        assertGt(quote1, 0, "First pool quote should work");
-
-        // Test quote on second pool
-        uint256 quote2 = hook.quote(true, -int256(SWAP_AMOUNT), poolId2);
-        assertGt(quote2, 0, "Second pool quote should work");
-
-        // Test TVL on both pools
-        (uint256 tvl1_0, uint256 tvl1_1) = hook.pseudoTotalValueLocked(poolId);
-        (uint256 tvl2_0, uint256 tvl2_1) = hook.pseudoTotalValueLocked(poolId2);
-
-        assertGt(tvl1_0, 0, "First pool TVL token0");
-        assertGt(tvl1_1, 0, "First pool TVL token1");
-        assertGt(tvl2_0, 0, "Second pool TVL token0");
-        assertGt(tvl2_1, 0, "Second pool TVL token1");
-
-        // Verify poolIdToTokens mapping stores correct addresses
-        (address stored0, address stored1) = hook.poolIdToTokens(poolId);
-        assertEq(stored0, address(alphaUSD), "First pool token0 mismatch");
-        assertEq(stored1, address(betaUSD), "First pool token1 mismatch");
-
-        (address stored2, address stored3) = hook.poolIdToTokens(poolId2);
-        assertEq(stored2, address(gammaUSD), "Second pool token0 mismatch");
-        assertEq(stored3, address(deltaUSD), "Second pool token1 mismatch");
     }
 
     // ========== ADDITIONAL TESTS ==========
@@ -530,9 +504,7 @@ contract TempoExchangeTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: -int256(uint256(amountIn)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: -int256(uint256(amountIn)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
@@ -560,9 +532,7 @@ contract TempoExchangeTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: false,
-                amountSpecified: -int256(uint256(amountIn)),
-                sqrtPriceLimitX96: MAX_PRICE_LIMIT
+                zeroForOne: false, amountSpecified: -int256(uint256(amountIn)), sqrtPriceLimitX96: MAX_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
@@ -590,9 +560,7 @@ contract TempoExchangeTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: int256(uint256(amountOut)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
@@ -620,9 +588,7 @@ contract TempoExchangeTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: false,
-                amountSpecified: int256(uint256(amountOut)),
-                sqrtPriceLimitX96: MAX_PRICE_LIMIT
+                zeroForOne: false, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MAX_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
@@ -768,6 +734,27 @@ contract TempoExchangeTest is Test {
 
         // Due to fee calculation rounding, input should be <= original amount
         assertLe(inputForExactOut, amount, "Round-trip should not exceed original");
+    }
+
+    /// ========== Avoid Stack-Too-Deep Errors ==========
+    function _assertBothPoolsQuotable(PoolId id1, PoolId id2) internal {
+        assertGt(hook.quote(true, -int256(SWAP_AMOUNT), id1), 0, "First pool quote should work");
+        assertGt(hook.quote(true, -int256(SWAP_AMOUNT), id2), 0, "Second pool quote should work");
+    }
+
+    function _assertBothPoolsTVL(PoolId id1, PoolId id2) internal view {
+        (uint256 tvl1_0, uint256 tvl1_1) = hook.pseudoTotalValueLocked(id1);
+        (uint256 tvl2_0, uint256 tvl2_1) = hook.pseudoTotalValueLocked(id2);
+        assertGt(tvl1_0, 0, "First pool TVL token0");
+        assertGt(tvl1_1, 0, "First pool TVL token1");
+        assertGt(tvl2_0, 0, "Second pool TVL token0");
+        assertGt(tvl2_1, 0, "Second pool TVL token1");
+    }
+
+    function _assertPoolTokens(PoolId id, address expected0, address expected1) internal view {
+        (address stored0, address stored1) = hook.poolIdToTokens(id);
+        assertEq(stored0, expected0, "token0 mismatch");
+        assertEq(stored1, expected1, "token1 mismatch");
     }
 
     receive() external payable {}
