@@ -11,8 +11,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ITempoExchange} from
-    "../src/aggregator-hooks/implementations/TempoExchange/interfaces/ITempoExchange.sol";
+import {ITempoExchange} from "../src/aggregator-hooks/implementations/TempoExchange/interfaces/ITempoExchange.sol";
 import {ITIP20} from "../src/aggregator-hooks/implementations/TempoExchange/interfaces/ITIP20.sol";
 import {SafePoolSwapTest} from "../test/aggregator-hooks/shared/SafePoolSwapTest.sol";
 
@@ -146,9 +145,7 @@ contract InitializeTempoPools is Script {
             router.swap(
                 poolKey,
                 SwapParams({
-                    zeroForOne: true,
-                    amountSpecified: -int256(swapAmount),
-                    sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                    zeroForOne: true, amountSpecified: -int256(swapAmount), sqrtPriceLimitX96: MIN_PRICE_LIMIT
                 }),
                 SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
                 ""

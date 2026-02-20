@@ -84,8 +84,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
 
         // Validate tokens are directly connected in the DEX tree
         // One must be the quoteToken of the other (no multi-hop pairs)
-        bool directlyConnected =
-            ITIP20(token0).quoteToken() == token1 || ITIP20(token1).quoteToken() == token0;
+        bool directlyConnected = ITIP20(token0).quoteToken() == token1 || ITIP20(token1).quoteToken() == token0;
         if (!directlyConnected) {
             revert TokensNotSupported(token0, token1);
         }
