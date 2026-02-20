@@ -168,20 +168,20 @@ Pre-seeding the aggregator hook with 1 unit (0.000001) of each token it will han
 
 ERC20 `balanceOf` storage slots use the following gas costs for `SSTORE`:
 
-| Transition | Gas cost |
-| --- | --- |
-| Zero → non-zero (cold `SSTORE`) | **20,000** |
-| Non-zero → non-zero (warm `SSTORE`) | **5,000** |
+| Transition                          | Gas cost   |
+| ----------------------------------- | ---------- |
+| Zero → non-zero (cold `SSTORE`)     | **20,000** |
+| Non-zero → non-zero (warm `SSTORE`) | **5,000**  |
 
 When the hook receives tokens via `poolManager.take()` during `beforeSwap`, an unseeded hook pays 20k gas per token (zero → non-zero balance). A seeded hook pays only 5k (non-zero → non-zero), saving ~15k per token transfer. Combined with the output token transfer back to PoolManager, the savings compound.
 
 ### Measured savings
 
-| Scenario | Gas saved | % reduction |
-| --- | --- | --- |
-| Input token seeded only | **24,403** | ~14% |
-| Output token seeded only | **24,403** | ~14% |
-| Both tokens seeded | **48,803** | ~28% |
+| Scenario                 | Gas saved  | % reduction |
+| ------------------------ | ---------- | ----------- |
+| Input token seeded only  | **24,403** | ~14%        |
+| Output token seeded only | **24,403** | ~14%        |
+| Both tokens seeded       | **48,803** | ~28%        |
 
 ## Swap Flow
 
@@ -277,6 +277,7 @@ Register pairs: PoolManager.initialize(poolKey) for each supported pair
 ### Moderato Testnet (chain 42431)
 
 **Deployed addresses:**
+
 - Hook: `0x480517265Fb617Bb98b95745C5599acE71b92088`
 - Router: `0x82bbA04181082fB860D3B1D08543C383f5FE7a8b`
 - PoolManager: `0x72B37Ad2798c6C2B51C7873Ed2E291a88bB909a2`
@@ -284,6 +285,7 @@ Register pairs: PoolManager.initialize(poolKey) for each supported pair
 ### Deploying
 
 1. **Fund wallet** — Tempo uses PathUSD for gas. Fund via RPC:
+
    ```bash
    curl -X POST https://rpc.moderato.tempo.xyz \
      -H "Content-Type: application/json" \
@@ -291,11 +293,13 @@ Register pairs: PoolManager.initialize(poolKey) for each supported pair
    ```
 
 2. **Mine salt** (if deploying fresh):
+
    ```bash
    forge script script/DeployTempoAggregator.s.sol --sig "mineSalt()" --rpc-url tempo_testnet
    ```
 
 3. **Deploy**:
+
    ```bash
    HOOK_SALT=<salt> forge script script/DeployTempoAggregator.s.sol \
      --rpc-url https://rpc.moderato.tempo.xyz --broadcast --skip-simulation

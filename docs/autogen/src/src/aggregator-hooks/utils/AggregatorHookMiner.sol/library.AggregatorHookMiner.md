@@ -1,5 +1,5 @@
 # AggregatorHookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/utils/AggregatorHookMiner.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/44f569c0f2c8bf659eb1f2f462038e29b30030c3/src/aggregator-hooks/utils/AggregatorHookMiner.sol)
 
 **Title:**
 AggregatorHookMiner
@@ -46,7 +46,7 @@ function find(
 |----|----|-----------|
 |`deployer`|`address`|The address that will deploy the hook. In `forge test`, this will be the test contract `address(this)` or the pranking address In `forge script`, this should be `0x4e59b44847b379578588920cA78FbF26c0B4956C` (CREATE2 Deployer Proxy)|
 |`flags`|`uint160`|The desired flags for the hook address. Example `uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | ...)`|
-|`firstByte`|`uint8`|The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, etc.)|
+|`firstByte`|`uint8`|The desired first byte of the hook address (e.g., 0xC1 for StableSwap, 0xC2 for StableSwap-NG, 0xF1 for FluidDexT1, 0x71 for TempoExchange, etc.)|
 |`creationCode`|`bytes`|The creation code of a hook contract. Example: `type(Counter).creationCode`|
 |`constructorArgs`|`bytes`|The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`|
 |`saltOffset`|`uint256`|The starting salt value for the search. Increment by MAX_LOOP for subsequent attempts.|

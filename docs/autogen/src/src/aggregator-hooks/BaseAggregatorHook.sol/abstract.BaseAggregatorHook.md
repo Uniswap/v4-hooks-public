@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/44f569c0f2c8bf659eb1f2f462038e29b30030c3/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -21,15 +21,6 @@ Although this should never change after construction, strings cannot be labelled
 
 ```solidity
 string public aggregatorHookVersion
-```
-
-
-### poolIdToAggregatedPool
-Maps pool IDs to their corresponding aggregated pool addresses
-
-
-```solidity
-mapping(PoolId => address) public poolIdToAggregatedPool
 ```
 
 

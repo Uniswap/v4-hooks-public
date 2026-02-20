@@ -67,8 +67,8 @@ Fluid interfaces, matching Fluid's ABI, are defined inside the project. This is 
 
 Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton hook supports multiple token pairs.
 
-| Pool Type | Implementation | Description |
-|-----------|----------------|-------------|
+| Pool Type         | Implementation            | Description                                             |
+| ----------------- | ------------------------- | ------------------------------------------------------- |
 | **TempoExchange** | `TempoExchangeAggregator` | Tempo's enshrined stablecoin DEX (precompiled contract) |
 
 #### Key Details
