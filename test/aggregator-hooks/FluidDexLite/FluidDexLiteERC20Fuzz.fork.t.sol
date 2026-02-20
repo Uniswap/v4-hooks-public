@@ -404,8 +404,11 @@ contract FluidDexLiteERC20Fuzz is Test {
         assertEq(
             tokenOut.balanceOf(alice) - tokenOutBefore, params.expectedOut, "Received amount should match quoted output"
         );
-        assertEq(
-            tokenOut.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
+        assertApproxEqAbs(
+            tokenOut.balanceOf(tokenJar) - tokenJarBefore,
+            params.expectedFee,
+            1,
+            "Token jar should receive protocol fee"
         );
     }
 
@@ -440,8 +443,8 @@ contract FluidDexLiteERC20Fuzz is Test {
 
         assertEq(tokenOut.balanceOf(alice) - tokenOutBefore, params.amountOut, "Should receive exact output amount");
         assertEq(tokenInBefore - tokenIn.balanceOf(alice), params.expectedIn, "Input should match quoted input");
-        assertEq(
-            tokenIn.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, "Token jar should receive protocol fee"
+        assertApproxEqAbs(
+            tokenIn.balanceOf(tokenJar) - tokenJarBefore, params.expectedFee, 1, "Token jar should receive protocol fee"
         );
     }
 

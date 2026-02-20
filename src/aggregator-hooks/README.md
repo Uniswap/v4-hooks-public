@@ -30,6 +30,7 @@ First-byte ID table:
 | F1  | FluidDexT1         |
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
+| 71  | TempoExchange      |
 
 ## Supported Protocols
 
@@ -61,6 +62,26 @@ One hook is deployed per Fluid pool.
 #### Defined interfaces
 
 Fluid interfaces, matching Fluid's ABI, are defined inside the project. This is because the official [`fluid-contracts-public`](https://github.com/Instadapp/fluid-contracts-public) library uses **exact Solidity version pragmas** (`pragma solidity 0.8.21;` and `0.8.29;`) that are incompatible with Uniswap V4's requirement of `^0.8.24`. Since these version constraints don't overlap, we maintain our own interface definitions.
+
+### Tempo
+
+Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton hook supports multiple token pairs.
+
+| Pool Type | Implementation | Description |
+|-----------|----------------|-------------|
+| **TempoExchange** | `TempoExchangeAggregator` | Tempo's enshrined stablecoin DEX (precompiled contract) |
+
+#### Key Details
+
+- **Chain**: Tempo is a separate EVM-compatible chain, not Ethereum mainnet
+- **Exchange Address**: `0xDEc0000000000000000000000000000000000000` (precompiled)
+- **Amount Precision**: Uses `uint128` for amounts (not `uint256`)
+- **Decimals**: All stablecoins use 6 decimals
+- **Features**: Supports both exact-input and exact-output swaps with view quote functions
+
+#### Defined interfaces
+
+The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
 
 ## Architecture
 
