@@ -55,7 +55,7 @@ During pool initialization, the hook validates that Tempo actually supports the 
 
 ```solidity
 // _beforeInitialize validates by attempting a quote
-try TEMPO_EXCHANGE.quoteSwapExactAmountIn(token0, token1, 1) {}
+try tempoExchange.quoteSwapExactAmountIn(token0, token1, 1) {}
 catch {
     revert TokensNotSupported(token0, token1);
 }
@@ -89,8 +89,8 @@ function pseudoTotalValueLocked(PoolId poolId)
     returns (uint256 amount0, uint256 amount1)
 {
     PoolTokens storage tokens = poolIdToTokens[poolId];
-    amount0 = IERC20(tokens.token0).balanceOf(address(TEMPO_EXCHANGE));
-    amount1 = IERC20(tokens.token1).balanceOf(address(TEMPO_EXCHANGE));
+    amount0 = IERC20(tokens.token0).balanceOf(address(tempoExchange));
+    amount1 = IERC20(tokens.token1).balanceOf(address(tempoExchange));
 }
 ```
 
@@ -216,9 +216,9 @@ User → Router → PoolManager.swap(key, params)
 
 Same flow, but:
 
-1. Queries `TEMPO_EXCHANGE.quoteSwapExactAmountOut` first to determine required input.
+1. Queries `tempoExchange.quoteSwapExactAmountOut` first to determine required input.
 2. Takes the quoted input amount from the PoolManager.
-3. Executes `TEMPO_EXCHANGE.swapExactAmountOut` on Tempo.
+3. Executes `tempoExchange.swapExactAmountOut` on Tempo.
 
 ### Delta Mechanics
 

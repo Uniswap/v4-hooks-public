@@ -23,7 +23,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
     using SafeERC20 for IERC20;
 
     /// @notice The Tempo stablecoin exchange (precompiled contract)
-    ITempoExchange public immutable TEMPO_EXCHANGE;
+    ITempoExchange public immutable tempoExchange;
 
     /// @notice Token pair info for each registered pool
     struct PoolTokens {
@@ -40,7 +40,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _tempoExchange The Tempo stablecoin exchange address
     constructor(IPoolManager _manager, ITempoExchange _tempoExchange) BaseAggregatorHook(_manager) {
-        TEMPO_EXCHANGE = _tempoExchange;
+        tempoExchange = _tempoExchange;
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -59,11 +59,11 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         if (amountSpecified < 0) {
             // Exact-In: get expected output
             uint128 amountIn = _safeToUint128(uint256(-amountSpecified));
-            amountUnspecified = uint256(TEMPO_EXCHANGE.quoteSwapExactAmountIn(tokenIn, tokenOut, amountIn));
+            amountUnspecified = uint256(tempoExchange.quoteSwapExactAmountIn(tokenIn, tokenOut, amountIn));
         } else {
             // Exact-Out: get required input
             uint128 amountOut = _safeToUint128(uint256(amountSpecified));
-            amountUnspecified = uint256(TEMPO_EXCHANGE.quoteSwapExactAmountOut(tokenIn, tokenOut, amountOut));
+            amountUnspecified = uint256(tempoExchange.quoteSwapExactAmountOut(tokenIn, tokenOut, amountOut));
         }
     }
 
@@ -72,8 +72,8 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         PoolTokens storage tokens = poolIdToTokens[poolId];
         if (tokens.token0 == address(0)) revert PoolDoesNotExist();
         // Tempo exchange is a precompiled contract, query token balances directly
-        amount0 = IERC20(tokens.token0).balanceOf(address(TEMPO_EXCHANGE));
-        amount1 = IERC20(tokens.token1).balanceOf(address(TEMPO_EXCHANGE));
+        amount0 = IERC20(tokens.token0).balanceOf(address(tempoExchange));
+        amount1 = IERC20(tokens.token1).balanceOf(address(tempoExchange));
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
@@ -92,8 +92,8 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         poolIdToTokens[key.toId()] = PoolTokens({token0: token0, token1: token1});
 
         // Approve Tempo exchange to spend tokens (forceApprove handles repeated approvals safely)
-        IERC20(token0).forceApprove(address(TEMPO_EXCHANGE), type(uint256).max);
-        IERC20(token1).forceApprove(address(TEMPO_EXCHANGE), type(uint256).max);
+        IERC20(token0).forceApprove(address(tempoExchange), type(uint256).max);
+        IERC20(token1).forceApprove(address(tempoExchange), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
         pollTokenJar(poolManager);
@@ -117,7 +117,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
             poolManager.take(takeCurrency, address(this), amountTake);
 
             // Execute swap on Tempo (output comes to hook)
-            uint128 amountOut = TEMPO_EXCHANGE.swapExactAmountIn(tokenIn, tokenOut, amountIn, 0);
+            uint128 amountOut = tempoExchange.swapExactAmountIn(tokenIn, tokenOut, amountIn, 0);
             amountSettle = uint256(amountOut);
 
             // Sync output currency and transfer to PoolManager
@@ -131,14 +131,14 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
             uint128 amountOut = _safeToUint128(amountSettle);
 
             // Get the required input amount
-            uint128 requiredIn = TEMPO_EXCHANGE.quoteSwapExactAmountOut(tokenIn, tokenOut, amountOut);
+            uint128 requiredIn = tempoExchange.quoteSwapExactAmountOut(tokenIn, tokenOut, amountOut);
             amountTake = uint256(requiredIn);
 
             // Take input tokens from PoolManager to hook
             poolManager.take(takeCurrency, address(this), amountTake);
 
             // Execute swap on Tempo (output comes to hook)
-            TEMPO_EXCHANGE.swapExactAmountOut(tokenIn, tokenOut, amountOut, type(uint128).max);
+            tempoExchange.swapExactAmountOut(tokenIn, tokenOut, amountOut, type(uint128).max);
 
             // Sync output currency and transfer to PoolManager
             poolManager.sync(settleCurrency);
