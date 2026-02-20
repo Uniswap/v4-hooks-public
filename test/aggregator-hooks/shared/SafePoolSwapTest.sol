@@ -43,12 +43,11 @@ contract SafePoolSwapTest is IUnlockCallback {
         bool settleUsingBurn;
     }
 
-    function swap(
-        PoolKey memory key,
-        SwapParams memory params,
-        TestSettings memory testSettings,
-        bytes memory hookData
-    ) external payable returns (BalanceDelta delta) {
+    function swap(PoolKey memory key, SwapParams memory params, TestSettings memory testSettings, bytes memory hookData)
+        external
+        payable
+        returns (BalanceDelta delta)
+    {
         delta = abi.decode(
             manager.unlock(abi.encode(CallbackData(msg.sender, testSettings, key, params, hookData))), (BalanceDelta)
         );
