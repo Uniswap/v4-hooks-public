@@ -9,7 +9,7 @@ When adding support for a new protocol, you must follow these guidelines:
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
 - Update the MineAggregatorHook script to handle mining hooks for new protocol
-- For testing requirements, see test/aggreagtor-hooks/README.md 
+- For testing requirements, see test/aggreagtor-hooks/README.md
 
 ## ID System
 
@@ -19,9 +19,9 @@ Aggregator Hook contract addresses should adhere to the following identification
 
 - The first character should be the same as first character of the protocol ("c" for Curve, "f" for Fluid, "b" for Balancer, etc)
 - The second character should represent the contract type/version.
- This can be done with the modified HookMiner contract.
+  This can be done with the modified HookMiner contract.
 
- First-byte ID table:
+First-byte ID table:
 
 | ID | Protocol/Pool Type |
 |----|-------------------|
@@ -36,28 +36,28 @@ Aggregator Hook contract addresses should adhere to the following identification
 
 ### Curve Finance
 
-One hook is deployed per curve pool, despite one curve pool resulting in ((n * (n-1)) / 2) Uniswap V4 pools. This means that for a Curve pool with 8 tokens, all 28 UniswapV4 pools associated with that pool use the same hook.
+One hook is deployed per curve pool, despite one curve pool resulting in ((n \* (n-1)) / 2) Uniswap V4 pools. This means that for a Curve pool with 8 tokens, all 28 UniswapV4 pools associated with that pool use the same hook.
 
 This design allows routing to know when they are interacting with the same Curve pool by checking for duplicate hook addresses, which is important since swaps in one direction will affect all other directions including one of the touched tokens.
 
-| Pool Type | Implementation | Description |
-|-----------|----------------|-------------|
-| **StableSwap** | `StableSwapAggregator` | Classic Curve stableswap pools (e.g., 3pool, stETH/ETH) |
-| **StableSwapNG** | `StableSwapNGAggregator` | Next-generation Curve pools with improved features |
+| Pool Type        | Implementation           | Description                                             |
+| ---------------- | ------------------------ | ------------------------------------------------------- |
+| **StableSwap**   | `StableSwapAggregator`   | Classic Curve stableswap pools (e.g., 3pool, stETH/ETH) |
+| **StableSwapNG** | `StableSwapNGAggregator` | Next-generation Curve pools with improved features      |
 
 #### Defined interfaces
 
-Curve interfaces, matching Curve's ABIs are defined inside the project. This is because Curve contracts are written in **Vyper**, so there are no Solidity interfaces to import.  
+Curve interfaces, matching Curve's ABIs are defined inside the project. This is because Curve contracts are written in **Vyper**, so there are no Solidity interfaces to import.
 
 ### Fluid (Instadapp)
 
 One hook is deployed per Fluid pool.
 
-| Pool Type | Implementation | Description |
-|-----------|----------------|-------------|
-| **FluidDexT1** | `FluidDexT1Aggregator` | Fluid DEX v1 pools with collateral and debt reserves |
-| **FluidDexLite** | `FluidDexLiteAggregator` | Lightweight Fluid DEX pools |
-| **FluidDexV2** | `FluidDexV2Aggregator` | Fluid DEX v2 concentrated liquidity pools (Mainnet launch TBD) |
+| Pool Type        | Implementation           | Description                                                    |
+| ---------------- | ------------------------ | -------------------------------------------------------------- |
+| **FluidDexT1**   | `FluidDexT1Aggregator`   | Fluid DEX v1 pools with collateral and debt reserves           |
+| **FluidDexLite** | `FluidDexLiteAggregator` | Lightweight Fluid DEX pools                                    |
+| **FluidDexV2**   | `FluidDexV2Aggregator`   | Fluid DEX v2 concentrated liquidity pools (Mainnet launch TBD) |
 
 #### Defined interfaces
 
