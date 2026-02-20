@@ -4,7 +4,7 @@ auto_detect_solc = true
 optimizer_runs = 44444444
 via_ir = true
 ffi = true
-fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read-write", path = "docs/" }]
+fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read-write", path = "docs/" }, { access = "read", path = "test/stable/data/" }]
 evm_version = "cancun"
 gas_limit = "3000000000"
 bytecode_hash = "none"
@@ -31,3 +31,6 @@ arbitrum_sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
 mainnet = "https://mainnet.infura.io/v3/${INFURA_API_KEY}"
 tempo_testnet = "https://rpc.moderato.tempo.xyz"
 tempo_mainnet = "https://rpc.tempo.xyz"
+
+[lint]
+lint_on_build=false

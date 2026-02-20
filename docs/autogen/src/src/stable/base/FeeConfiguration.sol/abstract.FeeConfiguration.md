@@ -1,8 +1,8 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/d85a4c0f234196b046ed00df089e0e78e98074ef/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
-[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md)
+[IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
 
 **Title:**
 FeeConfiguration
@@ -11,21 +11,21 @@ Abstract contract that implements the IFeeConfiguration interface
 
 
 ## State Variables
-### ONE
-Fixed point constant: 1e12 represents 100%
+### MAX_OPTIMAL_FEE_E6
+The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
 
 
 ```solidity
-uint256 internal constant ONE = 1e12
+uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4
 ```
 
 
-### UNDEFINED_FLEXIBLE_FEE
-Sentinel value indicating no flexible fee (inside optimal rate)
+### Q24
+The scale used to preserve precision in decay factor math.
 
 
 ```solidity
-uint256 internal constant UNDEFINED_FLEXIBLE_FEE = ONE + 1
+uint256 internal constant Q24 = 2 ** 24
 ```
 
 
@@ -140,34 +140,40 @@ function _validateKAndLogK(uint256 _k, uint256 _logK) internal pure;
 |`_logK`|`uint256`|The logK value to validate|
 
 
-### _validateOptimalFeeRate
+### _validateOptimalFeeE6
 
-Validate the optimal fee rate
+Validate the optimal fee
 
 
 ```solidity
-function _validateOptimalFeeRate(uint256 _optimalFeeRate) internal pure;
+function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_optimalFeeRate`|`uint256`|The optimal fee rate to validate|
+|`_optimalFeeE6`|`uint256`|The optimal fee to validate|
 
 
 ### _validateReferenceSqrtPriceX96
 
 Validate the reference sqrt price
 
+The optimal range is defined in terms of PRICE (not sqrt price):
+[referencePrice * (1 - maxOptimalFee), referencePrice / (1 - maxOptimalFee)]
+Since price = sqrtPrice², the sqrt price bounds are:
+[referenceSqrtPrice * sqrt(1 - maxOptimalFee), referenceSqrtPrice / sqrt(1 - maxOptimalFee)]
+Note: MIN_SQRT_PRICE is valid (inclusive) but MAX_SQRT_PRICE is invalid (exclusive) in v4.
+
 
 ```solidity
-function _validateReferenceSqrtPriceX96(uint160 _referenceSqrtPriceX96) internal pure;
+function _validateReferenceSqrtPriceX96(uint256 _referenceSqrtPriceX96) internal pure;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_referenceSqrtPriceX96`|`uint160`|The reference sqrt price to validate|
+|`_referenceSqrtPriceX96`|`uint256`|The reference sqrt price to validate|
 
 
 ### _resetFeeState

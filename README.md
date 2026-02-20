@@ -1,11 +1,15 @@
-## Template Repo (Foundry)
+## v4-hooks-internal
 
-[![CI Status](../../actions/workflows/test.yaml/badge.svg)](../../actions)
+Uniswap v4 hook contracts
 
-This template repo is a quick and easy way to get started with a new Solidity project. It comes with a number of features that are useful for developing and deploying smart contracts. Such as:
+### Hooks
 
-- Pre-commit hooks for formatting, auto generated documentation, and more
-- Various libraries with useful contracts (OpenZeppelin, Solady) and libraries (Deployment log generation, storage checks, deployer templates)
+| Hook                                                | Description                                                                                | Documentation                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| [StableStableHook](src/stable/StableStableHook.sol) | Dynamic fee hook for stable/stable pools with optimal range pricing and time-decaying fees | [docs/technical/StableStableHook.md](docs/technical/StableStableHook.md) |
+| [WETHHook](src/WETHHook.sol)                        | Token wrapper hook for WETH                                                                | —                                                                        |
+| [WstETHHook](src/WstETHHook.sol)                    | Token wrapper hook for WstETH                                                              | —                                                                        |
+| [WstETHRoutingHook](src/WstETHRoutingHook.sol)      | Routing hook for WstETH                                                                    | —                                                                        |
 
 #### Table of Contents
 

@@ -1,21 +1,20 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 struct FeeConfig {
-    // TODO: natspec
-    uint256 k;
-    uint256 logK;
-    uint24 optimalFeeRate;
-    uint160 referenceSqrtPriceX96;
+    uint24 k; // Decay factor per block in Q24 format (e.g., 0.99 in Q24 means fee retains 99% of its value each block)
+    uint24 logK; // Precomputed -ln(k) >> 40; used for > 4 blocks decay: k^n = exp(-logK * n)
+    uint24 optimalFeeE6; // Fee rate defining optimal range width in PRICE space (not sqrt price), 1e6 precision
+    uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
 }
 
+// The state of various aspects of a swap
 struct FeeState {
-    // TODO: natspec
-    uint256 previousFee;
-    uint160 previousSqrtAmmPriceX96;
-    uint256 blockNumber;
+    uint40 decayingFeeE12; // Decaying fee in 1e12 precision, or UNDEFINED_DECAYING_FEE_E12 if inside optimal range
+    uint160 sqrtAmmPriceX96; // AMM sqrt price; used to detect price movement direction
+    uint40 blockNumber; // Block when the swap occurred; used to determine decay based on blocks elapsed
 }
 
 /// @notice Interface for the FeeConfiguration
@@ -29,13 +28,13 @@ interface IFeeConfiguration {
     /// @param logK The invalid logK value
     error InvalidKAndLogK(uint256 k, uint256 logK);
 
-    /// @notice Error thrown when optimal fee rate is invalid
-    /// @param optimalFeeRate The invalid optimal fee rate
-    error InvalidOptimalFeeRate(uint256 optimalFeeRate);
+    /// @notice Error thrown when optimal fee is invalid
+    /// @param optimalFeeE6 The invalid optimal fee
+    error InvalidOptimalFeeE6(uint256 optimalFeeE6);
 
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
-    error InvalidReferenceSqrtPriceX96(uint160 invalidSqrtPrice);
+    error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 
     /// @notice Event emitted when the config manager is updated
     /// @param configManager The new config manager
