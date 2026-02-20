@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 20 452 330" width="452" height="330">
+<style>
+  text { white-space: pre; }
+</style>
+<rect x="300" y="50" width="240" height="70" rx="12" ry="12" fill="#d4edda" stroke="#1e7e34" stroke-width="2" opacity="1"/>
+<rect x="300" y="250" width="240" height="70" rx="12" ry="12" fill="#cce5ff" stroke="#004085" stroke-width="2" opacity="1"/>
+<path d="M 370 122 L 370 248" fill="none" stroke="#1e7e34" stroke-width="2"/><polygon points="370,248 365,239.3397459621556 375,239.3397459621556" fill="#1e7e34"/>
+<path d="M 470 248 L 470 122" fill="none" stroke="#004085" stroke-width="2"/><polygon points="470,122 475,130.6602540378444 465,130.6602540378444" fill="#004085"/>
+<text x="420" y="90.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="22" fill="#1e7e34" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="420" dy="0">PoolManager</tspan></text>
+<text x="420" y="290.5" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="22" fill="#004085" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="420" dy="0">StableStableHook</tspan></text>
+<text x="305" y="188" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#1e7e34" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="305" dy="0">beforeSwap()</tspan></text>
+<text x="562" y="188" font-family="'Cascadia Code', 'Fira Code', 'Source Code Pro', monospace" font-size="16" fill="#004085" text-anchor="middle" opacity="1" dominant-baseline="auto"><tspan x="562" dy="0">returns dynamic fee</tspan></text>
+</svg>

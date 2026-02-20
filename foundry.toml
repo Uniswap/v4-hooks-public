@@ -2,8 +2,9 @@
 out = 'foundry-out'
 auto_detect_solc = true
 optimizer_runs = 44444444
+via_ir = false
 ffi = true
-fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }]
+fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read", path = "test/stable/data/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }]
 evm_version = "cancun"
 gas_limit = "3000000000"
 bytecode_hash = "none"
@@ -24,3 +25,6 @@ unichain_sepolia = "https://sepolia.unichain.org"
 base_sepolia = "https://sepolia.base.org"
 arbitrum_sepolia = "https://sepolia-rollup.arbitrum.io/rpc"
 mainnet = "https://mainnet.infura.io/v3/${INFURA_API_KEY}"
+
+[lint]
+lint_on_build=false

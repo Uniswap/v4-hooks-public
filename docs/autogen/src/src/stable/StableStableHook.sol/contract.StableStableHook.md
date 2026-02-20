@@ -1,5 +1,5 @@
 # StableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/58181e56494eabfc96d955de05f464c5d584b662/src/stable/StableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/aa75b6e1ce013ea16a3b1ceccd1fa927adc9723e/src/stable/StableStableHook.sol)
 
 **Inherits:**
 [FeeConfiguration](/src/stable/base/FeeConfiguration.sol/abstract.FeeConfiguration.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable, [IStableStableHook](/src/stable/interfaces/IStableStableHook.sol/interface.IStableStableHook.md)
@@ -9,15 +9,8 @@ StableStableHook
 
 Dynamic fee hook for stable/stable pools
 
-
-## State Variables
-### TO_UNISWAP_FEE
-Divide by this to convert fees from the internal 1e12 precision format to the Uniswap 1e6 precision format
-
-
-```solidity
-uint256 private constant TO_UNISWAP_FEE = 1e6
-```
+**Note:**
+security-contact: security@uniswap.org
 
 
 ## Functions
@@ -76,12 +69,24 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 ### _beforeInitialize
 
+Reject initialization of the pool by another address
+
 
 ```solidity
 function _beforeInitialize(address sender, PoolKey calldata, uint160) internal pure override returns (bytes4);
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`sender`|`address`|The address that attempted to initialize the pool (not address(this))|
+|`<none>`|`PoolKey`||
+|`<none>`|`uint160`||
+
 
 ### _beforeSwap
+
+Calculate and apply dynamic fee before each swap
 
 
 ```solidity
@@ -90,11 +95,56 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
     override
     returns (bytes4, BeforeSwapDelta, uint24);
 ```
+**Parameters**
 
-### _getSqrtPriceX96
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`address`||
+|`key`|`PoolKey`|The PoolKey of the pool|
+|`params`|`SwapParams`|The SwapParams of the swap|
+|`<none>`|`bytes`||
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bytes4`|selector The function selector for IHooks.beforeSwap|
+|`<none>`|`BeforeSwapDelta`|delta BeforeSwapDelta (always zero for this hook)|
+|`<none>`|`uint24`|lpFeeOverride The calculated dynamic fee with override flag|
+
+
+### _calculateDecayingFee
+
+Calculate decaying fee when price is outside optimal range
 
 
 ```solidity
-function _getSqrtPriceX96(PoolId _poolId) internal view returns (uint256);
+function _calculateDecayingFee(
+    FeeConfig storage poolFeeConfig,
+    FeeState storage poolFeeState,
+    uint256 sqrtAmmPriceX96,
+    uint256 sqrtReferencePriceX96,
+    uint256 closeBoundaryFeeE12,
+    uint256 farBoundaryFeeE12,
+    bool ammPriceBelowRP
+) private view returns (uint256 decayingFeeE12);
 ```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolFeeConfig`|`FeeConfig`|The FeeConfig of the pool|
+|`poolFeeState`|`FeeState`|The FeeState of the pool|
+|`sqrtAmmPriceX96`|`uint256`|The current AMM sqrt price|
+|`sqrtReferencePriceX96`|`uint256`|The reference sqrt price|
+|`closeBoundaryFeeE12`|`uint256`|The fee to reach the close boundary of the optimal range (negative = already inside)|
+|`farBoundaryFeeE12`|`uint256`|The fee to reach the far boundary of the optimal range|
+|`ammPriceBelowRP`|`bool`|True if current AMM price < reference price|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`decayingFeeE12`|`uint256`|The calculated decaying fee in 1e12 precision|
+
 

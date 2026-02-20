@@ -19,6 +19,9 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/blocknumberish"]
+	path = lib/blocknumberish
+	url = https://github.com/Uniswap/blocknumberish
 [submodule "lib/stableswap-ng"]
 	path = lib/stableswap-ng
 	url = https://github.com/curvefi/stableswap-ng
