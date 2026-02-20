@@ -67,8 +67,17 @@ contract StableSwapNGForkedTest is Test {
     address public alice = makeAddr("alice");
 
     function setUp() public {
+        bool forked;
+        string memory rpcUrl;
         // Forking requires an RPC URL env var and an optional block number
-        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        try vm.envString("FORK_RPC_URL") returns (string memory _rpcUrl) {
+            rpcUrl = _rpcUrl;
+            forked = true;
+        } catch {
+            console.log("Not forking skipping tests");
+            vm.skip(true);
+        }
+        
         uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
