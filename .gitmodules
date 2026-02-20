@@ -10,7 +10,6 @@
 [submodule "lib/v4-periphery"]
 	path = lib/v4-periphery
 	url = https://github.com/Uniswap/v4-periphery
-
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/Vectorized/solady
@@ -27,3 +26,13 @@
 [submodule "lib/blocknumberish"]
 	path = lib/blocknumberish
 	url = https://github.com/Uniswap/blocknumberish
+[submodule "lib/stableswap-ng"]
+	path = lib/stableswap-ng
+	url = https://github.com/curvefi/stableswap-ng
+[submodule "lib/fluid-contracts-public"]
+	path = lib/fluid-contracts-public
+	url = https://github.com/Instadapp/fluid-contracts-public
+[submodule "lib/protocol-fees"]
+	path = lib/protocol-fees
+	url = https://github.com/Uniswap/protocol-fees
+	branch = v4-fee-adapter

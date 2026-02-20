@@ -11,16 +11,17 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
 import {
     IFluidDexReservesResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title FluidDexT1ERC20ForkedTest
 /// @notice Tests for Fluid DEX T1 with ERC20 token pairs
@@ -30,14 +31,14 @@ contract FluidDexT1ERC20ForkedTest is Test {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
-    // Fluid infrastructure addresses (mainnet)
-    address constant FLUID_LIQUIDITY = 0x52Aa899454998Be5b000Ad077a46Bbe360F4e497;
-    address constant FLUID_DEX_RESERVES_RESOLVER = 0x11D80CfF056Cef4F9E6d23da8672fE9873e5cC07;
+    // Fluid infrastructure addresses (loaded from env vars)
+    address fluidLiquidity;
+    address fluidDexReservesResolver;
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
-    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
@@ -57,6 +58,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
     uint256 initialBalance1;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     FluidDexT1Aggregator public hook;
     IFluidDexT1 public fluidPool;
@@ -71,22 +73,31 @@ contract FluidDexT1ERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
+        // Forking requires an RPC URL env var and an optional block number
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
+        // Load Fluid infrastructure addresses from env vars
         fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_ERC");
+        fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_test_alice_erc_v1"))));
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
-        fluidResolver = IFluidDexReservesResolver(FLUID_DEX_RESERVES_RESOLVER);
+        fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
 
         // Dynamically fetch tokens from the pool via resolver
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
 
-        // Order tokens correctly for v4 (lower address = currency0)
         if (fluidToken0 < fluidToken1) {
             token0Address = fluidToken0;
             token1Address = fluidToken1;
@@ -98,22 +109,19 @@ contract FluidDexT1ERC20ForkedTest is Test {
         currency0 = Currency.wrap(token0Address);
         currency1 = Currency.wrap(token1Address);
 
-        // Get token decimals and set appropriate test amounts for each token
         token0Decimals = IERC20Metadata(token0Address).decimals();
         token1Decimals = IERC20Metadata(token1Address).decimals();
 
-        // Use token-specific amounts to handle different decimal tokens (e.g., GHO 18 decimals, USDC 6 decimals)
-        swapAmount0 = 1000 * (10 ** token0Decimals); // 1000 tokens in token0 decimals
-        swapAmount1 = 1000 * (10 ** token1Decimals); // 1000 tokens in token1 decimals
-        initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
-        initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
+        swapAmount0 = 1000 * (10 ** token0Decimals);
+        swapAmount1 = 1000 * (10 ** token1Decimals);
+        initialBalance0 = 100_000 * (10 ** token0Decimals);
+        initialBalance1 = 100_000 * (10 ** token1Decimals);
 
         manager = IPoolManager(poolManagerAddress);
 
-        // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
-        // Deploy hook with correct address flags
         _deployHook();
 
         // Initialize the pool
@@ -128,7 +136,6 @@ contract FluidDexT1ERC20ForkedTest is Test {
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        // Deal tokens to alice for testing
         deal(token0Address, alice, initialBalance0);
         deal(token1Address, alice, initialBalance1);
 
@@ -140,16 +147,15 @@ contract FluidDexT1ERC20ForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by BaseAggregatorHook:
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
         bytes memory constructorArgs =
-            abi.encode(address(manager), address(fluidPool), address(fluidResolver), FLUID_LIQUIDITY);
+            abi.encode(address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, FLUID_LIQUIDITY);
+        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, fluidLiquidity);
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 
@@ -234,8 +240,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
         uint256 token1Received = token1After - token1Before;
-        // Fluid's exactOut can be off by 1 wei
-        assertApproxEqAbs(token1Received, amountOut, 1, "Token1 received should match exact output amount");
+        assertEq(token1Received, amountOut, "Token1 received should match exact output amount");
 
         uint256 token0Spent = token0Before - token0After;
         assertEq(token0Spent, expectedIn, "Token0 spent should match quote");
@@ -264,8 +269,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         uint256 token1After = IERC20(token1Address).balanceOf(alice);
 
         uint256 token0Received = token0After - token0Before;
-        // Fluid's exactOut can be off by 1 wei
-        assertApproxEqAbs(token0Received, amountOut, 1, "Token0 received should match exact output amount");
+        assertEq(token0Received, amountOut, "Token0 received should match exact output amount");
 
         uint256 token1Spent = token1Before - token1After;
         assertEq(token1Spent, expectedIn, "Token1 spent should match quote");

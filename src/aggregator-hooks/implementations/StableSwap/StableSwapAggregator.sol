@@ -35,7 +35,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
 
-    constructor(IPoolManager _manager, ICurveStableSwap _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwap _pool)
+        BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
+    {
         pool = _pool;
     }
 
@@ -101,13 +103,16 @@ contract StableSwapAggregator is BaseAggregatorHook {
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 
-        IERC20(Currency.unwrap(key.currency0)).safeIncreaseAllowance(address(pool), type(uint256).max);
-        IERC20(Currency.unwrap(key.currency1)).safeIncreaseAllowance(address(pool), type(uint256).max);
+        // Use forceApprove to set allowance (safe to call multiple times for multi-token pools)
+        IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
+    /// @inheritdoc BaseAggregatorHook
     function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
         internal
         override
@@ -134,6 +139,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
 
         poolManager.take(takeCurrency, address(this), amountTake);
 
+        // MinAmountOut is 0 to avoid slippage check because it is checked in the router
         amountSettle = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0);
 
         hasSettled = false;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.29;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -13,14 +13,14 @@ import {ICurveStableSwapNG} from "./interfaces/IStableSwapNG.sol";
 /// @dev Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 contract StableSwapNGAggregatorFactory {
     /// @notice The Uniswap V4 PoolManager contract
-    IPoolManager public immutable POOL_MANAGER;
+    IPoolManager public immutable poolManager;
 
     error InsufficientTokens();
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
     constructor(IPoolManager _poolManager) {
-        POOL_MANAGER = _poolManager;
+        poolManager = _poolManager;
     }
 
     /// @notice Creates a new StableSwapNGAggregator hook and initializes pools for all token pairs
@@ -41,7 +41,7 @@ contract StableSwapNGAggregatorFactory {
     ) external returns (address hook) {
         if (tokens.length < 2) revert InsufficientTokens();
 
-        hook = address(new StableSwapNGAggregator{salt: salt}(POOL_MANAGER, curvePool));
+        hook = address(new StableSwapNGAggregator{salt: salt}(poolManager, curvePool));
 
         // Initialize one pool per token pair
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -54,7 +54,7 @@ contract StableSwapNGAggregatorFactory {
                     currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: IHooks(hook)
                 });
 
-                POOL_MANAGER.initialize(poolKey, sqrtPriceX96);
+                poolManager.initialize(poolKey, sqrtPriceX96);
 
                 emit HookDeployed(hook, address(curvePool), poolKey);
             }
@@ -71,7 +71,7 @@ contract StableSwapNGAggregatorFactory {
         returns (address computedAddress)
     {
         bytes32 bytecodeHash = keccak256(
-            abi.encodePacked(type(StableSwapNGAggregator).creationCode, abi.encode(POOL_MANAGER, curvePool))
+            abi.encodePacked(type(StableSwapNGAggregator).creationCode, abi.encode(poolManager, curvePool))
         );
         computedAddress =
             address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));

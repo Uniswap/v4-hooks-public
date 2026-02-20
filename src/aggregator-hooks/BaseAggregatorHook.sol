@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.29;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -28,12 +28,18 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
+    /// @notice The publicly displayed version of the aggregator hook.
+    /// @dev Although this should never change after construction, strings cannot be labelled immutable.
+    string public aggregatorHookVersion;
+
     /// @notice Maps pool IDs to their corresponding aggregated pool addresses
     mapping(PoolId => address) public poolIdToAggregatedPool;
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+    constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) {
+        aggregatorHookVersion = _aggregatorHookVersion;
+    }
 
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
@@ -94,6 +100,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
+        // NOTE: Token jar will be grabbed in first protocol fee payment if not done here.
         pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }

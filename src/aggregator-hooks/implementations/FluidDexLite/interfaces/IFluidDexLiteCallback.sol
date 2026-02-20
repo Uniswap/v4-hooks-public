@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.29;
 
 /// @title IFluidDexLiteCallback
 /// @notice Callback interface required by Fluid DEX Lite swaps when isCallback is true

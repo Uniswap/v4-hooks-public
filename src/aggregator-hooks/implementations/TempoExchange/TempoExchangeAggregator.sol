@@ -39,7 +39,9 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _tempoExchange The Tempo stablecoin exchange address
-    constructor(IPoolManager _manager, ITempoExchange _tempoExchange) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ITempoExchange _tempoExchange)
+        BaseAggregatorHook(_manager, "TempoExchangeAggregator v1.0")
+    {
         tempoExchange = _tempoExchange;
     }
 

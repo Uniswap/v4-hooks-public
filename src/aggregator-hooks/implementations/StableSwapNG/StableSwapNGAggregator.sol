@@ -23,6 +23,9 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     /// @notice The Curve StableSwap NG pool
     ICurveStableSwapNG public pool;
 
+    uint256 internal constant INACCURACY_BUFFER = 20;
+    uint256 internal constant INACCURACY_SCALE = 1_000_000;
+
     struct PoolInfo {
         int128 token0Index;
         int128 token1Index;
@@ -31,10 +34,13 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     /// @notice Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
     mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 
+    error AmountOutExceeded();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
-    constructor(IPoolManager _manager, ICurveStableSwapNG _pool) BaseAggregatorHook(_manager) {
+    constructor(IPoolManager _manager, ICurveStableSwapNG _pool)
+        BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
+    {
         pool = _pool;
     }
 
@@ -53,10 +59,12 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
                 amountUnspecified = pool.get_dy(poolInfo.token1Index, poolInfo.token0Index, uint256(-amountSpecified));
             }
         } else {
+            uint256 amount = uint256(amountSpecified);
+            uint256 _amountSpecified = amount + _getBuffer(amount);
             if (zeroToOne) {
-                amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token0Index, poolInfo.token1Index, _amountSpecified);
             } else {
-                amountUnspecified = pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, uint256(amountSpecified));
+                amountUnspecified = pool.get_dx(poolInfo.token1Index, poolInfo.token0Index, _amountSpecified);
             }
         }
     }
@@ -98,13 +106,15 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 
-        IERC20(Currency.unwrap(key.currency0)).safeIncreaseAllowance(address(pool), type(uint256).max);
-        IERC20(Currency.unwrap(key.currency1)).safeIncreaseAllowance(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
+        IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
+        pollTokenJar(poolManager);
         return IHooks.beforeInitialize.selector;
     }
 
+    /// @inheritdoc BaseAggregatorHook
     function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
         internal
         override
@@ -125,24 +135,42 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
             // Exact-In
             amountTake = uint256(-params.amountSpecified);
         } else {
-            // Exact-Out: find out how much in
-            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, uint256(params.amountSpecified));
+            // Exact-Out: find out how much in (add buffer to cover precision loss)
+            uint256 amount = uint256(params.amountSpecified);
+            amountTake = pool.get_dx(tokenInIndex, tokenOutIndex, amount + _getBuffer(amount));
         }
 
         poolManager.take(takeCurrency, address(this), amountTake);
 
-        amountSettle = _handleSwap(amountTake, tokenInIndex, tokenOutIndex, settleCurrency);
+        amountSettle = _handleSwap(amountTake, tokenInIndex, tokenOutIndex, settleCurrency, params);
         hasSettled = true;
 
         return (amountSettle, amountTake, hasSettled);
     }
 
-    function _handleSwap(uint256 amountTake, int128 tokenInIndex, int128 tokenOutIndex, Currency settleCurrency)
-        internal
-        returns (uint256 amountOut)
-    {
+    function _handleSwap(
+        uint256 amountTake,
+        int128 tokenInIndex,
+        int128 tokenOutIndex,
+        Currency settleCurrency,
+        SwapParams calldata params
+    ) internal returns (uint256 amountOut) {
         poolManager.sync(settleCurrency);
-        amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
+        // Is exactOut has accuracy issues on Curve, so we do the gas inefficient way of transferring here first to ensure exact amount
+        if (params.amountSpecified > 0) {
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
+            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
+            amountOut = uint256(params.amountSpecified);
+            settleCurrency.transfer(address(poolManager), uint256(params.amountSpecified));
+        } else {
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
+            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
+        }
         poolManager.settle();
+    }
+
+    function _getBuffer(uint256 amount) internal pure returns (uint256) {
+        uint256 scaled = amount / INACCURACY_SCALE;
+        return scaled > INACCURACY_BUFFER ? scaled : INACCURACY_BUFFER;
     }
 }

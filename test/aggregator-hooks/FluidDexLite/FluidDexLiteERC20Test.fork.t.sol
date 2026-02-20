@@ -11,10 +11,12 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {
     FluidDexLiteAggregator
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
@@ -22,7 +24,6 @@ import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/Fluid
 import {
     IFluidDexLiteResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title FluidDexLiteERC20ForkedTest
 /// @notice Tests for Fluid DEX Lite with ERC20 token pairs. Fluid Dex Lite currently has no Native currency pools
@@ -34,14 +35,15 @@ contract FluidDexLiteERC20ForkedTest is Test {
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
-    int24 constant TICK_SPACING = 10;
-    uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336; // 1:1 price
+    int24 constant TICK_SPACING = 10; // Default tick spacing for a 0.05% fee pool
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
 
     // Price limits for swaps
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
 
     // Loaded from .env
+    address poolManagerAddress;
     address fluidDexLiteAddress;
     address fluidDexLiteResolverAddress;
     bytes32 dexSalt;
@@ -57,6 +59,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
     uint256 initialBalance1;
 
     IPoolManager public manager;
+    MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     FluidDexLiteAggregator public hook;
     IFluidDexLite public fluidDexLite;
@@ -71,15 +74,23 @@ contract FluidDexLiteERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        // Forking requires an RPC URL env var and an optional block number
+        string memory rpcUrl = vm.envString("FORK_RPC_URL");
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
+        // Load Fluid infrastructure addresses from env vars
         fluidDexLiteAddress = vm.envAddress("FLUID_DEX_LITE");
         fluidDexLiteResolverAddress = vm.envAddress("FLUID_DEX_LITE_RESOLVER");
-        dexSalt = vm.envBytes32("FLUID_DEX_LITE_SALT_ERC");
-        token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC");
-        token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC");
+        dexSalt = vm.envBytes32("FLUID_DEX_LITE_SALT_ERC20");
+        token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC20");
+        token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC20");
+        // Load V4 infrastructure address from env vars
+        poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
-        vm.createSelectFork(rpcUrl);
+        if (forkBlockNumber > 0) {
+            vm.createSelectFork(rpcUrl, forkBlockNumber);
+        } else {
+            vm.createSelectFork(rpcUrl);
+        }
 
         // Create alice address that doesn't have code on mainnet
         alice = address(uint160(uint256(keccak256("fluid_lite_test_alice_erc_v1"))));
@@ -95,25 +106,23 @@ contract FluidDexLiteERC20ForkedTest is Test {
         currency0 = Currency.wrap(token0Address);
         currency1 = Currency.wrap(token1Address);
 
-        // Get token decimals and set appropriate test amounts for each token
         token0Decimals = IERC20Metadata(token0Address).decimals();
         token1Decimals = IERC20Metadata(token1Address).decimals();
 
-        // Use token-specific amounts to handle different decimal tokens
-        swapAmount0 = 10 * (10 ** token0Decimals); // 1000 tokens in token0 decimals
-        swapAmount1 = 10 * (10 ** token1Decimals); // 1000 tokens in token1 decimals
-        initialBalance0 = 100_000 * (10 ** token0Decimals); // 100k tokens in token0 decimals
-        initialBalance1 = 100_000 * (10 ** token1Decimals); // 100k tokens in token1 decimals
+        // Fluid Dex Lite swap amounts must not be greater than half of the internal imaginary reserves
+        // These amounts are known to be small enough to not cause issues with such a constraint
+        swapAmount0 = 1 * (10 ** token0Decimals);
+        swapAmount1 = 1 * (10 ** token1Decimals);
+        initialBalance0 = 100_000 * (10 ** token0Decimals);
+        initialBalance1 = 100_000 * (10 ** token1Decimals);
 
         manager = IPoolManager(poolManagerAddress);
 
-        // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
+        feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
-        // Deploy hook with correct address flags
         _deployHook();
 
-        // Initialize the pool
         poolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -125,7 +134,6 @@ contract FluidDexLiteERC20ForkedTest is Test {
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        // Deal tokens to alice for testing
         deal(token0Address, alice, initialBalance0);
         deal(token1Address, alice, initialBalance1);
 
@@ -137,7 +145,6 @@ contract FluidDexLiteERC20ForkedTest is Test {
     }
 
     function _deployHook() internal {
-        // Hook flags required by BaseAggregatorHook:
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
@@ -292,7 +299,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
             ""
         );
 
-        // Third swap: exact output (receive token1)
+        // Third swap: Token0 -> Token1 (exact output)
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
@@ -314,7 +321,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
     }
 
     /// @notice Test pseudoTotalValueLocked returns non-zero values
-    function test_pseudoTotalValueLocked() public {
+    function test_pseudoTotalValueLocked() public view {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
 
         assertGt(amount0, 0, "amount0 should be non-zero");

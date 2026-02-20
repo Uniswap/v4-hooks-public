@@ -8,6 +8,9 @@
   "lib/briefcase": {
     "rev": "2b00819e5694c075a5437a9a0cde109fac0e6578"
   },
+  "lib/fluid-contracts-public": {
+    "rev": "1576c7e02f76dd71c3fe02fb6d63bf3f9792c771"
+  },
   "lib/forge-chronicles": {
     "rev": "d1fb566915f23a01f08747264c56f8925f15751a"
   },
@@ -25,6 +28,9 @@
   },
   "lib/v4-core": {
     "rev": "d153b048868a60c2403a3ef5b2301bb247884d46"
+  },
+  "lib/protocol-fees": {
+    "rev": "ad2652055170010d875a991acc88ba037fce8c65"
   },
   "lib/v4-periphery": {
     "rev": "3779387e5d296f39df543d23524b050f89a62917"
