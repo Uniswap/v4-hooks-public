@@ -107,7 +107,7 @@ contract FluidDexT1ERC20Fuzz is Test {
     }
 
     function setUp() public {
-       bool forked;
+        bool forked;
         string memory rpcUrl;
         // Forking requires an RPC URL env var and an optional block number
         try vm.envString("FORK_RPC_URL") returns (string memory _rpcUrl) {

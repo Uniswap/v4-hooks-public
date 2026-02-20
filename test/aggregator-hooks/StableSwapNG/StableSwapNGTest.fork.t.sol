@@ -77,7 +77,7 @@ contract StableSwapNGForkedTest is Test {
             console.log("Not forking skipping tests");
             vm.skip(true);
         }
-        
+
         uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
