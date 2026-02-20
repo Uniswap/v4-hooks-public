@@ -34,10 +34,18 @@ contract InitializeTempoPools is Script {
     int24 constant TICK_SPACING = 10;
     uint160 constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336;
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
-    uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
 
     // Default min liquidity: 1000 tokens at 6 decimals
     uint256 constant DEFAULT_MIN_LIQUIDITY = 1_000_000_000;
+
+    struct Config {
+        IPoolManager pm;
+        ITempoExchange exchange;
+        SafePoolSwapTest router;
+        address hookAddr;
+        address pathUsd;
+        uint256 minLiquidity;
+    }
 
     struct PoolRecord {
         PoolKey key;
@@ -50,126 +58,142 @@ contract InitializeTempoPools is Script {
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
-        address hookAddr = vm.envAddress("HOOK_ADDRESS");
-        address routerAddr = vm.envAddress("ROUTER_ADDRESS");
-        address poolManager = vm.envOr("POOL_MANAGER", DEFAULT_POOL_MANAGER);
-        address tempoExchange = vm.envOr("TEMPO_EXCHANGE", DEFAULT_TEMPO_EXCHANGE);
-        address pathUsd = vm.envOr("PATH_USD", DEFAULT_PATH_USD);
-        uint256 minLiquidity = vm.envOr("MIN_LIQUIDITY", DEFAULT_MIN_LIQUIDITY);
-        string memory defaultRpcKey = "tempo_testnet";
-        string memory rpcKey = vm.envOr("TEMPO_RPC_KEY", defaultRpcKey);
-        string memory rpcUrl = vm.rpcUrl(rpcKey);
-
-        IPoolManager pm = IPoolManager(poolManager);
-        ITempoExchange exchange = ITempoExchange(tempoExchange);
-        SafePoolSwapTest router = SafePoolSwapTest(payable(routerAddr));
+        Config memory cfg = _loadConfig();
 
         console.log("=== TEMPO POOL INITIALIZATION ===");
-        console.log("Deployer:", deployer);
-        console.log("Hook:", hookAddr);
-        console.log("Router:", routerAddr);
-        console.log("RPC key:", rpcKey);
-        console.log("Min liquidity:", minLiquidity);
+        console.log("Deployer:", vm.addr(deployerKey));
+        console.log("Hook:", cfg.hookAddr);
+        console.log("Router:", address(cfg.router));
+        console.log("Min liquidity:", cfg.minLiquidity);
 
-        // --- Step 1: Discover tokens via FFI ---
-        string[] memory cmd = new string[](3);
-        cmd[0] = "bash";
-        cmd[1] = "script/util/fetch_tempo_tokens.sh";
-        cmd[2] = rpcUrl;
-        bytes memory result = vm.ffi(cmd);
-        address[] memory tokens = abi.decode(result, (address[]));
-
+        address[] memory tokens = _discoverTokens();
         console.log("Discovered tokens:", tokens.length);
 
-        // --- Step 2: Build qualifying pairs and initialize pools ---
         PoolRecord[] memory records = new PoolRecord[](tokens.length);
         uint256 poolCount = 0;
 
         vm.startBroadcast(deployerKey);
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            address token = tokens[i];
-
-            // Skip root token (PathUSD has no parent pair)
-            address parent = ITIP20(token).quoteToken();
-            if (parent == address(0)) {
-                console.log("Skipping root token:", ITIP20(token).symbol());
-                continue;
+            (bool initialized, PoolRecord memory record) = _processToken(tokens[i], cfg);
+            if (initialized) {
+                records[poolCount++] = record;
             }
-
-            // Check liquidity
-            uint256 balance = IERC20(token).balanceOf(tempoExchange);
-            if (balance < minLiquidity) {
-                console.log("Skipping low-liquidity token:", ITIP20(token).symbol(), "balance:", balance);
-                continue;
-            }
-
-            // Order tokens (lower address = currency0)
-            address token0 = token < parent ? token : parent;
-            address token1 = token < parent ? parent : token;
-
-            PoolKey memory poolKey = PoolKey({
-                currency0: Currency.wrap(token0),
-                currency1: Currency.wrap(token1),
-                fee: POOL_FEE,
-                tickSpacing: TICK_SPACING,
-                hooks: IHooks(hookAddr)
-            });
-            PoolId poolId = poolKey.toId();
-
-            // 4a. Initialize pool (skip if already initialized)
-            (uint160 sqrtPriceX96,,,) = pm.getSlot0(poolId);
-            if (sqrtPriceX96 != 0) {
-                console.log("");
-                console.log("Skipping already initialized pool:", ITIP20(token0).symbol(), "/", ITIP20(token1).symbol());
-                continue;
-            }
-
-            pm.initialize(poolKey, SQRT_PRICE_1_1);
-            console.log("");
-            console.log("Initialized pool:", ITIP20(token0).symbol(), "/", ITIP20(token1).symbol());
-
-            // 4b. Seed hook with 1 unit of each token for gas optimization
-            // For non-PathUSD tokens: buy 1 unit via the exchange, then transfer to hook
-            // For PathUSD: transfer directly (deployer has PathUSD)
-            _seedToken(token0, hookAddr, deployer, exchange, pathUsd);
-            _seedToken(token1, hookAddr, deployer, exchange, pathUsd);
-            console.log("  Seeded hook with 1 unit of each token");
-
-            // 4c. Test swap (100 tokens exact-input, token0 → token1)
-            uint256 swapAmount = 100 * 1e6;
-            IERC20(token0).approve(routerAddr, type(uint256).max);
-            IERC20(token1).approve(routerAddr, type(uint256).max);
-
-            router.swap(
-                poolKey,
-                SwapParams({
-                    zeroForOne: true, amountSpecified: -int256(swapAmount), sqrtPriceLimitX96: MIN_PRICE_LIMIT
-                }),
-                SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-                ""
-            );
-            console.log("  Test swap OK (100 tokens)");
-
-            // 4d. Record results
-            uint256 tvl0 = IERC20(token0).balanceOf(tempoExchange);
-            uint256 tvl1 = IERC20(token1).balanceOf(tempoExchange);
-
-            records[poolCount] = PoolRecord({
-                key: poolKey,
-                id: poolId,
-                symbol0: ITIP20(token0).symbol(),
-                symbol1: ITIP20(token1).symbol(),
-                tvl0: tvl0,
-                tvl1: tvl1
-            });
-            poolCount++;
         }
 
         vm.stopBroadcast();
 
-        // --- Step 3: Write results to docs/TempoPools.md ---
+        _writeResults(records, poolCount);
+    }
+
+    function _loadConfig() internal view returns (Config memory) {
+        return Config({
+            pm: IPoolManager(vm.envOr("POOL_MANAGER", DEFAULT_POOL_MANAGER)),
+            exchange: ITempoExchange(vm.envOr("TEMPO_EXCHANGE", DEFAULT_TEMPO_EXCHANGE)),
+            router: SafePoolSwapTest(payable(vm.envAddress("ROUTER_ADDRESS"))),
+            hookAddr: vm.envAddress("HOOK_ADDRESS"),
+            pathUsd: vm.envOr("PATH_USD", DEFAULT_PATH_USD),
+            minLiquidity: vm.envOr("MIN_LIQUIDITY", DEFAULT_MIN_LIQUIDITY)
+        });
+    }
+
+    function _discoverTokens() internal returns (address[] memory) {
+        string memory defaultRpcKey = "tempo_testnet";
+        string memory rpcUrl = vm.rpcUrl(vm.envOr("TEMPO_RPC_KEY", defaultRpcKey));
+
+        string[] memory cmd = new string[](3);
+        cmd[0] = "bash";
+        cmd[1] = "script/util/fetch_tempo_tokens.sh";
+        cmd[2] = rpcUrl;
+        return abi.decode(vm.ffi(cmd), (address[]));
+    }
+
+    function _processToken(address token, Config memory cfg)
+        internal
+        returns (bool initialized, PoolRecord memory record)
+    {
+        // Skip root token (PathUSD has no parent pair)
+        address parent = ITIP20(token).quoteToken();
+        if (parent == address(0)) {
+            console.log("Skipping root token:", ITIP20(token).symbol());
+            return (false, record);
+        }
+
+        // Check liquidity
+        if (IERC20(token).balanceOf(address(cfg.exchange)) < cfg.minLiquidity) {
+            console.log("Skipping low-liquidity token:", ITIP20(token).symbol());
+            return (false, record);
+        }
+
+        // Order tokens (lower address = currency0)
+        address token0 = token < parent ? token : parent;
+        address token1 = token < parent ? parent : token;
+
+        PoolKey memory poolKey = PoolKey({
+            currency0: Currency.wrap(token0),
+            currency1: Currency.wrap(token1),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(cfg.hookAddr)
+        });
+        PoolId poolId = poolKey.toId();
+
+        // Skip if already initialized
+        (uint160 sqrtPriceX96,,,) = cfg.pm.getSlot0(poolId);
+        if (sqrtPriceX96 != 0) {
+            console.log("Skipping already initialized pool:", ITIP20(token0).symbol(), "/", ITIP20(token1).symbol());
+            return (false, record);
+        }
+
+        cfg.pm.initialize(poolKey, SQRT_PRICE_1_1);
+        console.log("Initialized pool:", ITIP20(token0).symbol(), "/", ITIP20(token1).symbol());
+
+        // Seed hook with 1 unit of each token for gas optimization
+        _seedToken(token0, cfg.hookAddr, cfg.exchange, cfg.pathUsd);
+        _seedToken(token1, cfg.hookAddr, cfg.exchange, cfg.pathUsd);
+        console.log("  Seeded hook with 1 unit of each token");
+
+        // Test swap (100 tokens exact-input, token0 -> token1)
+        _testSwap(cfg.router, poolKey, token0, token1);
+        console.log("  Test swap OK (100 tokens)");
+
+        record = PoolRecord({
+            key: poolKey,
+            id: poolId,
+            symbol0: ITIP20(token0).symbol(),
+            symbol1: ITIP20(token1).symbol(),
+            tvl0: IERC20(token0).balanceOf(address(cfg.exchange)),
+            tvl1: IERC20(token1).balanceOf(address(cfg.exchange))
+        });
+        return (true, record);
+    }
+
+    function _testSwap(SafePoolSwapTest router, PoolKey memory poolKey, address token0, address token1) internal {
+        uint256 swapAmount = 100 * 1e6;
+        IERC20(token0).approve(address(router), type(uint256).max);
+        IERC20(token1).approve(address(router), type(uint256).max);
+
+        router.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(swapAmount), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    function _seedToken(address token, address hook, ITempoExchange exchange, address pathUsd) internal {
+        if (IERC20(token).balanceOf(hook) > 0) return; // already seeded
+
+        if (token == pathUsd) {
+            IERC20(pathUsd).transfer(hook, 1);
+        } else {
+            IERC20(pathUsd).approve(address(exchange), type(uint256).max);
+            exchange.swapExactAmountOut(pathUsd, token, 1, type(uint128).max);
+            IERC20(token).transfer(hook, 1);
+        }
+    }
+
+    function _writeResults(PoolRecord[] memory records, uint256 poolCount) internal {
         string memory md = "# Tempo Pools\n\n";
         md = string.concat(md, "Auto-generated by `InitializeTempoPools` script.\n\n");
         md = string.concat(md, "| Pool | Token0 | Token1 | TVL0 | TVL1 | Pool ID |\n");
@@ -204,22 +228,5 @@ contract InitializeTempoPools is Script {
         console.log("=== COMPLETE ===");
         console.log("Pools initialized:", poolCount);
         console.log("Results written to docs/TempoPools.md");
-    }
-
-    /// @dev Seeds the hook with 1 unit of a token. For PathUSD (quote token), transfers directly.
-    ///      For other tokens, buys 1 unit from the exchange using PathUSD, then transfers.
-    function _seedToken(address token, address hook, address, ITempoExchange exchange, address pathUsd) internal {
-        uint256 hookBalance = IERC20(token).balanceOf(hook);
-        if (hookBalance > 0) return; // already seeded
-
-        if (token == pathUsd) {
-            // PathUSD: transfer 1 unit directly from deployer
-            IERC20(pathUsd).transfer(hook, 1);
-        } else {
-            // Buy 1 unit of token via exchange, then transfer to hook
-            IERC20(pathUsd).approve(address(exchange), type(uint256).max);
-            exchange.swapExactAmountOut(pathUsd, token, 1, type(uint128).max);
-            IERC20(token).transfer(hook, 1);
-        }
     }
 }

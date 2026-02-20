@@ -385,6 +385,16 @@ contract StableSwapFuzz is Test {
     // NOTE: StableSwap (non-NG) does not support exact output swaps
     // The pool's exchange() function only supports exact-in, and there's no get_dx() for computing exact-out
 
+    /// @notice Regression test: protocol fee rounding (1-wei difference from integer division truncation)
+    /// @dev Counterexample from fuzz run: testFuzz_exactIn_oneForZero(53, 102089634039300134962802909115238314461027419237443557584673670268305811701761, 4339)
+    function test_repro_protocolFeeRounding() public {
+        testFuzz_exactIn_oneForZero(
+            53,
+            102089634039300134962802909115238314461027419237443557584673670268305811701761,
+            4339
+        );
+    }
+
     // ========== HELPERS ==========
 
     /// @notice Helper to setup pool and hook (reduces code duplication)
@@ -496,9 +506,13 @@ contract StableSwapFuzz is Test {
             ctx.expectedOut,
             "Received amount should match quoted output"
         );
-        assertEq(
+        // Allow 1-wei tolerance: the test reverse-computes fee from post-fee output
+        // (expectedOut * fee / (PIPS - fee)), but the contract computes fee from raw output
+        // (rawOutput * fee / PIPS). Integer division truncation causes up to 1-wei difference.
+        assertApproxEqAbs(
             tokens[ctx.tokenOutIdx].balanceOf(tokenJar) - tokenJarBefore,
             ctx.expectedFeeAmount,
+            1,
             "Token jar should receive protocol fee"
         );
     }
