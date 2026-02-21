@@ -36,6 +36,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
 
     error AmountExceedsUint128();
     error TokensNotSupported(address token0, address token1);
+    error ExchangeDoesNotSupportPair(address token0, address token1);
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _tempoExchange The Tempo stablecoin exchange address
@@ -87,6 +88,15 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         bool directlyConnected = ITIP20(token0).quoteToken() == token1 || ITIP20(token1).quoteToken() == token0;
         if (!directlyConnected) {
             revert TokensNotSupported(token0, token1);
+        }
+
+        // Verify the pair is actually supported by the Tempo exchange precompile.
+        // The quoteToken() check above only trusts the tokens' self-reported interface;
+        // a malicious ERC20 could implement quoteToken() to spoof adjacency.
+        // This call confirms the exchange can actually trade this pair.
+        try tempoExchange.quoteSwapExactAmountIn(token0, token1, 1) {}
+        catch {
+            revert ExchangeDoesNotSupportPair(token0, token1);
         }
 
         // Store token addresses for this pool
