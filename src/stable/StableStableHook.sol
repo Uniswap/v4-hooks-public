@@ -91,7 +91,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeConfig storage poolFeeConfig = feeConfig[poolId];
         FeeState storage poolFeeState = feeState[poolId];
 
-        (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
+        (uint256 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
         uint256 sqrtReferencePriceX96 = poolFeeConfig.referenceSqrtPriceX96;
         uint256 optimalFeeE6 = poolFeeConfig.optimalFeeE6;
 
