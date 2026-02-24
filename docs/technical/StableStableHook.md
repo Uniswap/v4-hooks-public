@@ -8,7 +8,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 - [Architecture](#architecture)
 - [Configuration](#configuration)
   - [FeeConfig](#feeconfig-per-pool)
-  - [FeeState](#feestate-per-pool-updated-every-swap)
+  - [FeeState](#feestate-per-pool-updated-once-per-block)
   - [Validation Rules](#validation-rules)
   - [Access Control](#access-control)
 - [The Optimal Range](#the-optimal-range)
@@ -28,7 +28,7 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 ## Overview
 
-`StableStableHook` implements a dynamic fee mechanism for Uniswap v4 pools containing two stable assets (e.g., USDC/USDT). The hook overrides the LP fee on every swap via `beforeSwap`, computing a dynamic fee based on how far the current AMM price has drifted from a configured reference price.
+`StableStableHook` implements a dynamic fee mechanism for Uniswap v4 pools containing two stable assets (e.g., USDC/USDT). The hook overrides the LP fee on every swap via `beforeSwap`, computing a dynamic fee based on how far the AMM price has drifted from a configured reference price. To prevent swap splitting from reducing aggregate fees, the hook caches the AMM price on the first swap of each block and uses that cached price for all subsequent swaps in the same block.
 
 ### Design Goals
 
@@ -44,13 +44,13 @@ Technical specification for a dynamic fee hook targeting stable/stable pools on 
 
 ![Architecture](../diagrams/architecture.svg)
 
-`PoolManager` calls `beforeSwap` on every swap. The hook reads the current AMM price, computes the swap's LP fee using the price ratio relative to the reference, and returns it as a dynamic fee override.
+`PoolManager` calls `beforeSwap` on every swap. On the first swap of a new block, the hook reads the current AMM price and caches it in `FeeState`. On subsequent swaps in the same block, the hook uses the cached start-of-block price. The fee is computed using the price ratio relative to the reference and returned as a dynamic fee override.
 
 ---
 
 ## Configuration
 
-The hook maintains data for each pool in two data structures: **FeeConfig** (economic parameters, set at pool creation) and **FeeState** (mutable state, updated on every swap).
+The hook maintains data for each pool in two data structures: **FeeConfig** (economic parameters, set at pool creation) and **FeeState** (mutable state, updated once per block on the first swap).
 
 ### FeeConfig (per pool)
 
@@ -61,13 +61,13 @@ The hook maintains data for each pool in two data structures: **FeeConfig** (eco
 | `optimalFeeE6`          | `uint24`  | Fee rate defining the optimal range width around the reference price in **price space** in 1e6 precision. Example: `90` = 0.009%. Maximum: `10,000` (1%). |
 | `referenceSqrtPriceX96` | `uint160` | Reference center price in sqrt Q96 format — the "true" exchange rate of the stable pair.                                                                  |
 
-### FeeState (per pool, updated every swap)
+### FeeState (per pool, updated once per block)
 
-| Field             | Type      | Description                                                                                                             |
-| ----------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `decayingFeeE12`  | `uint40`  | Last decaying fee in 1e12 precision, or `UNDEFINED_DECAYING_FEE_E12` if the previous swap was inside the optimal range. |
-| `sqrtAmmPriceX96` | `uint160` | AMM sqrt price at the beginning of the last swap. Used to determine price movement direction.                           |
-| `blockNumber`     | `uint40`  | Block number when the FeeState was last updated. Drives time-based decay.                                               |
+| Field             | Type      | Description                                                                                                                                                                  |
+| ----------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decayingFeeE12`  | `uint40`  | Decaying fee in 1e12 precision from the last feeState update this block, or `UNDEFINED_DECAYING_FEE_E12` if that swap was inside the optimal range.                          |
+| `sqrtAmmPriceX96` | `uint160` | AMM sqrt price at the start of the current block (before the first swap). Used as the cached price for all swaps in that block and for cross-block price movement detection. |
+| `blockNumber`     | `uint40`  | Block number of the first swap. Used to detect same-block swaps (skip state updates) and to compute elapsed blocks for decay.                                                |
 
 ### Validation Rules
 
@@ -151,7 +151,9 @@ farBoundaryFeeE12 = 1 - (1 - optimalFee) × priceRatio
 
 ![beforeSwap Flow](../diagrams/before-swap-flow.svg)
 
-`beforeSwap` is the entry point for all fee logic. It reads the current AMM price, computes the price ratio relative to the reference, derives the close boundary fee, and branches accordingly.
+`beforeSwap` is the entry point for all fee logic. On the first swap of a new block, it reads the current AMM price and caches it in `FeeState`. On subsequent swaps in the same block, it uses the cached price. The fee is computed from the price ratio relative to the reference.
+
+**Per-block caching consequence:** All swaps within the same block see the same cached price. This means fees do not change within a block — even if swaps push the price further from reference, the corrective fee stays constant. Fee adjustments (Phase 1 of the decay mechanism) only occur across block boundaries.
 
 ### Inside Optimal Range
 
@@ -204,19 +206,19 @@ The further the price drifts outside the range (larger `closeBoundaryFee`), the 
 
 #### Decaying Fee
 
-The fee charged to swaps pushing price toward RP is a **decaying fee** that starts high and exponentially converges toward the target fee. The fee resets to `farBoundaryFee` when the price first leaves the optimal range, decays between swaps based on elapsed blocks, and is adjusted for price movement. The full algorithm is described in the next section.
+The fee charged to swaps pushing price toward RP is a **decaying fee** that starts high and exponentially converges toward the target fee. The fee resets to `farBoundaryFee` when the price first leaves the optimal range, decays between blocks based on elapsed time, and is adjusted for price movement. The full algorithm is described in the next section.
 
 ---
 
 ## Decay Mechanism
 
-The decay mechanism operates in two phases: (1) adjust the previous fee based on price movement since the last swap, then (2) apply exponential decay toward the target fee.
+The decay mechanism operates in two phases: (1) adjust the previous fee based on price movement since the previous block's first swap, then (2) apply exponential decay toward the target fee.
 
 ### Phase 1: Fee Adjustment (State Machine)
 
 ![Decay State Machine](../diagrams/decay-state-machine.svg)
 
-The previous swap's state determines which of four adjustment paths applies before exponential decay.
+The previous block's first swap state determines which of four adjustment paths applies before exponential decay.
 
 #### Case 1: Reset
 
@@ -282,3 +284,4 @@ The following properties hold for all valid inputs (any valid price, swap direct
 | 4   | No revert                                                              | `beforeSwap` never reverts.                                                                                                                                     |
 | 5   | Equal start and target → no decay                                      | If `decayStartFeeE12 == targetFeeE12`, then `decayingFeeE12 == targetFeeE12`, regardless of `k` or `blocksPassed`                                               |
 | 6   | `decayStartFee ≥ previousDecayingFeeE12` (price moves further from RP) | Price worsening can only increase the fee.                                                                                                                      |
+| 7   | No splitting advantage                                                 | Splitting a swap toward the reference price within a block provides no fee advantage. Same-direction swaps toward reference pay the same fee.                   |

@@ -1,4 +1,5 @@
 {
-  "beforeSwap_insideOptimalRange": "47540",
-  "beforeSwap_outsideOptimalRange": "49199"
+  "beforeSwap_insideOptimalRange": "47893",
+  "beforeSwap_outsideOptimalRange": "49427",
+  "beforeSwap_sameBlock_cached": "44669"
 }

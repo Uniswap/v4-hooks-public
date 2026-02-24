@@ -10,11 +10,11 @@ struct FeeConfig {
     uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
 }
 
-// The state of various aspects of a swap
+// Per-block fee state, updated only on the first swap of each block
 struct FeeState {
     uint40 decayingFeeE12; // Decaying fee in 1e12 precision, or UNDEFINED_DECAYING_FEE_E12 if inside optimal range
-    uint160 sqrtAmmPriceX96; // AMM sqrt price; used to detect price movement direction
-    uint40 blockNumber; // Block when the swap occurred; used to determine decay based on blocks elapsed
+    uint160 sqrtAmmPriceX96; // AMM sqrt price at the start of the current block; used as cached price for same-block swaps and cross-block price movement detection
+    uint40 blockNumber; // used to detect same-block swaps and compute elapsed blocks for decay
 }
 
 /// @notice Interface for the FeeConfiguration
