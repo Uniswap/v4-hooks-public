@@ -85,6 +85,9 @@ contract TempoExchangeTest is Test {
         // Deploy mock Tempo exchange
         tempoExchange = new MockTempoExchange();
 
+        // Register the token pair as supported by the exchange
+        tempoExchange.addSupportedPair(address(alphaUSD), address(betaUSD));
+
         // Fund the mock exchange with liquidity
         alphaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
         betaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
@@ -339,6 +342,40 @@ contract TempoExchangeTest is Test {
         manager.initialize(unsupportedPoolKey, SQRT_PRICE_1_1);
     }
 
+    /// @notice Test that a fake token spoofing quoteToken() is rejected by exchange validation
+    function test_initializeFakeToken_reverts() public {
+        // Deploy a fake token that claims to be connected to alphaUSD via quoteToken()
+        // but is NOT registered as a supported pair on the exchange
+        MockTIP20 fakeToken = new MockTIP20("FakeUSD", "fUSD", DECIMALS, address(alphaUSD));
+
+        // Order tokens correctly
+        address token0Addr;
+        address token1Addr;
+        if (address(fakeToken) < address(alphaUSD)) {
+            token0Addr = address(fakeToken);
+            token1Addr = address(alphaUSD);
+        } else {
+            token0Addr = address(alphaUSD);
+            token1Addr = address(fakeToken);
+        }
+
+        // Fund the mock exchange (but do NOT register the pair as supported)
+        fakeToken.mint(address(tempoExchange), INITIAL_BALANCE);
+
+        PoolKey memory fakePoolKey = PoolKey({
+            currency0: Currency.wrap(token0Addr),
+            currency1: Currency.wrap(token1Addr),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+
+        // Should revert because the exchange doesn't support this pair,
+        // even though fakeToken.quoteToken() returns alphaUSD
+        vm.expectRevert();
+        manager.initialize(fakePoolKey, SQRT_PRICE_1_1);
+    }
+
     // ========== SINGLETON PATTERN TESTS ==========
 
     /// @notice Test that the same hook can support multiple pools (singleton pattern)
@@ -364,6 +401,7 @@ contract TempoExchangeTest is Test {
         token0Addr = address(gammaUSD);
         token1Addr = address(deltaUSD);
 
+        tempoExchange.addSupportedPair(token0Addr, token1Addr);
         gammaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
         deltaUSD.mint(address(tempoExchange), INITIAL_BALANCE * 10);
         gammaUSD.mint(address(manager), INITIAL_BALANCE * 10);

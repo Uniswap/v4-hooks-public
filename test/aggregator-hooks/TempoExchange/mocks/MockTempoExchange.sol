@@ -9,7 +9,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /// @title MockTempoExchange
 /// @notice Mock implementation of Tempo's stablecoin exchange for testing
-/// @dev Simulates 1:1 exchange rate between stablecoins with a small fee
+/// @dev Simulates 1:1 exchange rate between stablecoins with a small fee.
+///      Tracks supported pairs to mimic the real precompile's pair validation.
 contract MockTempoExchange is ITempoExchange {
     using SafeERC20 for IERC20;
 
@@ -18,12 +19,23 @@ contract MockTempoExchange is ITempoExchange {
 
     error InsufficientOutput();
     error ExcessiveInput();
+    error UnsupportedPair(address tokenA, address tokenB);
+
+    /// @notice Tracks which token pairs the exchange supports (order-independent)
+    mapping(address => mapping(address => bool)) public supportedPairs;
+
+    /// @notice Register a token pair as supported by this exchange
+    function addSupportedPair(address tokenA, address tokenB) external {
+        supportedPairs[tokenA][tokenB] = true;
+        supportedPairs[tokenB][tokenA] = true;
+    }
 
     function swapExactAmountIn(address tokenIn, address tokenOut, uint128 amountIn, uint128 minAmountOut)
         external
         override
         returns (uint128 amountOut)
     {
+        _requireSupportedPair(tokenIn, tokenOut);
         amountOut = _calculateOutputFromInput(amountIn);
         if (amountOut < minAmountOut) revert InsufficientOutput();
 
@@ -36,6 +48,7 @@ contract MockTempoExchange is ITempoExchange {
         override
         returns (uint128 amountIn)
     {
+        _requireSupportedPair(tokenIn, tokenOut);
         amountIn = _calculateInputFromOutput(amountOut);
         if (amountIn > maxAmountIn) revert ExcessiveInput();
 
@@ -43,22 +56,28 @@ contract MockTempoExchange is ITempoExchange {
         IERC20(tokenOut).safeTransfer(msg.sender, amountOut);
     }
 
-    function quoteSwapExactAmountIn(address, address, uint128 amountIn)
+    function quoteSwapExactAmountIn(address tokenIn, address tokenOut, uint128 amountIn)
         external
-        pure
+        view
         override
         returns (uint128 amountOut)
     {
+        _requireSupportedPair(tokenIn, tokenOut);
         return _calculateOutputFromInput(amountIn);
     }
 
-    function quoteSwapExactAmountOut(address, address, uint128 amountOut)
+    function quoteSwapExactAmountOut(address tokenIn, address tokenOut, uint128 amountOut)
         external
-        pure
+        view
         override
         returns (uint128 amountIn)
     {
+        _requireSupportedPair(tokenIn, tokenOut);
         return _calculateInputFromOutput(amountOut);
+    }
+
+    function _requireSupportedPair(address tokenA, address tokenB) internal view {
+        if (!supportedPairs[tokenA][tokenB]) revert UnsupportedPair(tokenA, tokenB);
     }
 
     function _calculateOutputFromInput(uint128 amountIn) internal pure returns (uint128) {
