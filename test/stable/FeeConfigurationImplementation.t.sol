@@ -218,7 +218,7 @@ contract FeeConfigurationImplementationTest is Test {
             feeConfigurationImplementation.feeState(testPoolKey.toId());
         assertEq(decayingFeeE12, 1e12 + 1);
         assertEq(sqrtAmmPriceX96, 0);
-        assertEq(blockNumber, block.number);
+        assertEq(blockNumber, 0);
     }
 
     function test_updateFeeConfig_resetsFeeStateWithExistingSwapHistory() public {
@@ -253,7 +253,7 @@ contract FeeConfigurationImplementationTest is Test {
         assertEq(decayingFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
         // sqrtAmmPriceX96 is intentionally NOT reset (see _resetFeeState comment)
         assertEq(sqrtAmmPriceX96, uint160(2 ** 96 + 1000));
-        assertEq(blockNumber, block.number);
+        assertEq(blockNumber, 0);
     }
 
     function test_updateFeeConfig_gas() public {

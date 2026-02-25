@@ -151,7 +151,7 @@ contract StableStableHookTest is Test, Deployers {
             hook.feeState(testPoolKey.toId());
         assertEq(previousDecayingFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
         assertEq(previousSqrtAmmPriceX96, 0);
-        assertEq(blockNumber, block.number);
+        assertEq(blockNumber, 0);
     }
 
     function test_initializePool_gas() public {
