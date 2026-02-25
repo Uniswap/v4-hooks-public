@@ -123,7 +123,6 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].decayingFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
         feeState[_poolId].blockNumber = 0;
-        // sqrtAmmPriceX96 is intentionally not reset: the UNDEFINED_DECAYING_FEE_E12 sentinel
-        // causes _calculateDecayingFee to ignore the stale value and start fresh from farBoundaryFee.
+        feeState[_poolId].sqrtAmmPriceX96 = 0;
     }
 }
