@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/9d55d934108997d23c71cbea024ed3fecf2b9d95/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/f8565fc81da8b1c3268bd1879afff1a802eed712/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -72,7 +72,7 @@ function calculatePriceRatioX96(uint256 sqrtPrice1X96, uint256 sqrtPrice2X96)
 
 ### calculateCloseBoundaryFee
 
-Calculate close boundary fee - measures the fee to reach the close boundary of the optimal range.
+Calculate close boundary fee - measures the fee that places the pre-impact price at the close boundary of the optimal range.
 
 
 ```solidity
@@ -97,7 +97,7 @@ function calculateCloseBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
 
 ### calculateInsideOptimalRangeFee
 
-Calculate fee when price is inside optimal range
+Calculate fee when price is inside optimal range. Sets fee such that the pre-impact price equals the boundary.
 
 
 ```solidity
@@ -126,7 +126,7 @@ function calculateInsideOptimalRangeFee(
 
 ### calculateFarBoundaryFee
 
-Calculate far boundary fee - the fee that would place the effective price exactly at the "far" boundary.
+Calculate far boundary fee - the fee that places the pre-impact price at the "far" boundary.
 The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
 
 
@@ -152,7 +152,7 @@ function calculateFarBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
 
 ### adjustPreviousFeeForPriceMovement
 
-Adjust previous fee to preserve the same effective price when AMM price moves further from reference
+Adjust previous fee to preserve the same pre-impact price when AMM price moves further from reference
 
 
 ```solidity

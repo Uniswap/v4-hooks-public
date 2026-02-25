@@ -122,12 +122,12 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 lpFeeE12; // the lp fee for this swap in 1e12 precision
         uint256 decayingFeeE12;
 
-        // closeBoundaryFee is the fee that would place the effective price at the close boundary.
+        // closeBoundaryFee is the fee that would place the pre-impact price at the close boundary.
         // A negative value means the AMM price is already inside the optimal range (past the close boundary).
         if (closeBoundaryFeeE12 <= 0) {
-            // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
-            //   - All buys happen at the lower bound
-            //   - All sells happen at the upper bound
+            // Inside optimal range: The fee is set such that all swappers have consistent pre-impact prices:
+            //   - Sells: ammPrice * (1 - fee) = RP * (1 - optimalFee) (lower bound)
+            //   - Buys: ammPrice / (1 - fee) = RP / (1 - optimalFee) (upper bound)
             lpFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
                 priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
             );
@@ -201,7 +201,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             decayStartFeeE12 = farBoundaryFeeE12;
         } else if (ammPriceBelowRP == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
-            // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
+            // Adjust fee upward to preserve the same pre-impact price, then decay starts from this adjusted fee
             uint256 priceMovementRatioX96 =
                 FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
             decayStartFeeE12 =

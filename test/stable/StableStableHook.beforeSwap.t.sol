@@ -200,9 +200,9 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
 
-        // Calculate effective prices after fees
-        // Sell: effectivePrice = ammPrice * (1 - fee)
-        // Buy: effectivePrice = ammPrice / (1 - fee)
+        // Calculate pre-impact prices
+        // Sell: ammPrice * (1 - fee)
+        // Buy: ammPrice / (1 - fee)
         uint256 effectiveSellPrice = (ammPriceX192 * (1_000_000 - sellFee)) / 1_000_000;
         uint256 effectiveBuyPrice = (ammPriceX192 * 1_000_000) / (1_000_000 - buyFee);
 
@@ -214,14 +214,14 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         uint256 targetBuyPrice =
             (uint256(REFERENCE_SQRT_PRICE_X96) * REFERENCE_SQRT_PRICE_X96 * 1_000_000) / (1_000_000 - OPTIMAL_FEE_E6);
 
-        // Effective prices should be close to target prices within 0.0001% tolerance
+        // Pre-impact prices should be close to boundary prices within 0.0001% tolerance
         assertApproxEqRel(effectiveSellPrice, targetSellPrice, 0.000001e18);
         assertApproxEqRel(effectiveBuyPrice, targetBuyPrice, 0.000001e18);
     }
 
     /// @notice Tests fee adjustment when price moves further from reference
     /// @dev When price moves further from reference, previousFee is adjusted upward via
-    /// adjustPreviousFeeForPriceMovement() to maintain the same effective price. The adjusted
+    /// adjustPreviousFeeForPriceMovement() to preserve the same pre-impact price. The adjusted
     /// fee then decays toward targetFee over time.
     ///
     /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
@@ -244,7 +244,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // With 1 block passed: fee is adjusted upward to maintain effective price, negligible decay
+        // With 1 block passed: fee is adjusted upward to preserve pre-impact price, negligible decay
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, negligible decay)
 
@@ -257,7 +257,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
 
     /// @notice Tests fee adjustment when price moves further from reference (price below reference)
     /// @dev When price moves further from reference, previousFee is adjusted upward via
-    /// adjustPreviousFeeForPriceMovement() to maintain the same effective price. The adjusted
+    /// adjustPreviousFeeForPriceMovement() to preserve the same pre-impact price. The adjusted
     /// fee then decays toward targetFee over time.
     ///
     /// NOTE: Do not set previousSqrtAmmPriceX96 = sqrtAmmPriceX96 (equal prices). In reality,
@@ -280,7 +280,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // With 1 block passed: fee is adjusted upward to maintain effective price, negligible decay
+        // With 1 block passed: fee is adjusted upward to preserve pre-impact price, negligible decay
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
         assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, negligible decay)
 
