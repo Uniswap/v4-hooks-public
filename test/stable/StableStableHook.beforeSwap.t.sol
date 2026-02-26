@@ -237,13 +237,16 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
         assertEq(fee, 0);
 
+        // Advance block so the price change is seen as a new block's AMM price
+        vm.roll(block.number + 1);
+
         // Move price further right (from 1.00013 to 1.00014)
         ammPrice = uint160(1_000_140 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // With 0 blocks passed: fee is adjusted upward to preserve pre-impact price, no decay yet
+        // With 1 block passed: fee is adjusted upward to preserve pre-impact price, negligible decay
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
-        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, no decay)
+        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, negligible decay)
 
         // With 750 blocks passed: adjusted fee decays toward targetFee
         vm.roll(block.number + 750);
@@ -270,13 +273,16 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         fee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         assertEq(fee, 0);
 
+        // Advance block so the price change is seen as a new block's AMM price
+        vm.roll(block.number + 1);
+
         // Move price further left (from 0.99987 to 0.99986)
         ammPrice = uint160(999_860 * 2 ** 96) / 1_000_000;
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
 
-        // With 0 blocks passed: fee is adjusted upward to preserve pre-impact price, no decay yet
+        // With 1 block passed: fee is adjusted upward to preserve pre-impact price, negligible decay
         fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
-        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, no decay)
+        assertEq(fee, 209); // 90 (optimal) + 119 (adjusted decaying fee, negligible decay)
 
         // With 750 blocks passed: adjusted fee decays toward targetFee
         vm.roll(block.number + 750);
@@ -302,6 +308,88 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
         vm.snapshotGasLastCall("beforeSwap_outsideOptimalRange");
+    }
+
+    // FEE CACHING: same-block swaps use the start-of-block price for fee calculation
+
+    /// @notice Same-block swaps use the cached start-of-block price, not the live AMM price.
+    /// Changing the AMM price between swaps in the same block should not change the fee.
+    function test_beforeSwap_sameBlock_feeIsCached() public {
+        // Set price slightly below reference (inside optimal range)
+        uint256 ammPriceX192 =
+            (uint256(REFERENCE_SQRT_PRICE_X96) * uint256(REFERENCE_SQRT_PRICE_X96) * 999_950) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        vm.roll(block.number + 1);
+
+        // First swap of block: fee is computed from current AMM price
+        uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Simulate price impact: AMM price moves to reference
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
+
+        // Second swap of same block: fee should be identical (uses cached price)
+        uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        assertEq(fee1, fee2); // same-block swaps should have identical fees
+    }
+
+    /// @notice A new block reads the fresh AMM price, not the previous block's cached price.
+    function test_beforeSwap_newBlock_usesFreshPrice() public {
+        uint256 ammPriceX192 =
+            (uint256(REFERENCE_SQRT_PRICE_X96) * uint256(REFERENCE_SQRT_PRICE_X96) * 999_950) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        vm.roll(block.number + 1);
+        uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Move price to reference and advance to new block
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
+        vm.roll(block.number + 1);
+
+        uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Fees should differ because each block uses its own fresh price
+        assertTrue(fee1 != fee2); // new block should use fresh price
+    }
+
+    /// @notice feeState should only be written on the first swap of a new block.
+    function test_beforeSwap_sameBlock_feeStateNotUpdated() public {
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
+        vm.roll(block.number + 1);
+
+        // First swap sets feeState
+        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Record feeState after first swap
+        PoolId poolId = testPoolKey.toId();
+        (uint40 decayingFee1, uint160 storedPrice1, uint40 blockNum1) = hook.feeState(poolId);
+
+        // Change AMM price and do second swap in same block
+        uint256 ammPriceX192 =
+            (uint256(REFERENCE_SQRT_PRICE_X96) * uint256(REFERENCE_SQRT_PRICE_X96) * 999_950) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // feeState should be unchanged
+        (uint40 decayingFee2, uint160 storedPrice2, uint40 blockNum2) = hook.feeState(poolId);
+        assertEq(decayingFee1, decayingFee2);
+        assertEq(storedPrice1, storedPrice2);
+        assertEq(blockNum1, blockNum2);
+    }
+
+    function test_beforeSwap_sameBlock_gas() public {
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
+        vm.roll(block.number + 1);
+
+        // First swap (new block, writes feeState)
+        SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+
+        // Second swap (same block, skips feeState writes)
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+        vm.snapshotGasLastCall("beforeSwap_sameBlock_cached");
     }
 
     // =============================================================================
