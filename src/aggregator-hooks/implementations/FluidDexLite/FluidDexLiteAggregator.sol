@@ -37,6 +37,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
 
     error UnauthorizedCaller();
     error NativeCurrencyExactOut();
+    error HookAlreadyInitialized(PoolId poolId);
 
     struct FluidDexLiteSwapParams {
         IFluidDexLite.DexKey dexKey;
@@ -88,6 +89,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        if (PoolId.unwrap(localPoolId) != bytes32(0)) revert HookAlreadyInitialized(localPoolId);
         // Convert address(0) (Uniswap v4 native currency) to Fluid's native currency representation
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);

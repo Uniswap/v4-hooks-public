@@ -44,6 +44,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     error Reentrancy();
     error ProhibitedEntry();
     error NativeCurrencyExactOut();
+    error HookAlreadyInitialized(PoolId poolId);
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
@@ -112,6 +113,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        if (PoolId.unwrap(localPoolId) != bytes32(0)) revert HookAlreadyInitialized(localPoolId);
         (address token0, address token1) = fluidDexReservesResolver.getDexTokens(address(fluidPool));
         if (token0 == FLUID_NATIVE_CURRENCY) {
             token0 = address(0);
