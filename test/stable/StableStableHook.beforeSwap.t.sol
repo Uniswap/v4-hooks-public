@@ -392,6 +392,33 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         vm.snapshotGasLastCall("beforeSwap_sameBlock_cached");
     }
 
+    /// @notice After a fee config reset, the first swap reads the fresh AMM price, not a stale cached price.
+    /// Regression: if _resetFeeState didn't zero sqrtAmmPriceX96, same-block swaps after reset
+    /// would use the pre-reset cached price with potentially different fee config parameters.
+    function test_beforeSwap_feeConfigReset_usesFreshPrice() public {
+        // First swap caches the reference price in feeState
+        sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
+        uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        assertEq(fee1, OPTIMAL_FEE_E6);
+
+        // Reset fee config in the same block
+        vm.prank(configManager);
+        hook.updateFeeConfig(testPoolKey.toId(), feeConfig);
+
+        // Move AMM price away from reference
+        uint256 ammPriceX192 =
+            (uint256(REFERENCE_SQRT_PRICE_X96) * uint256(REFERENCE_SQRT_PRICE_X96) * 999_950) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(ammPriceX192));
+
+        // Swap after reset: should use the new price, not the stale cached reference price
+        uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // At the new price (below reference), selling token0 pushes further from reference → fee < optimalFee.
+        // If using stale cached reference price, fee would be exactly optimalFee.
+        assertLt(fee2, OPTIMAL_FEE_E6);
+    }
+
     // =============================================================================
     // INVARIANT: beforeSwap never reverts for any valid price, direction, and block gap
     // Exercises all state transitions in _calculateDecayingFee:
