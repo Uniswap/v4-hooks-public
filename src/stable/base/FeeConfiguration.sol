@@ -122,7 +122,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @param _poolId The pool ID to reset fee state for
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].decayingFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
-        feeState[_poolId].blockNumber = 0;
-        feeState[_poolId].sqrtAmmPriceX96 = 0;
+        feeState[_poolId].blockNumber = uint40(_getBlockNumberish());
+        feeState[_poolId].sqrtAmmPriceX96 = 0; // Force the next swap to read a fresh price from the pool, not the cached start-of-block price
     }
 }

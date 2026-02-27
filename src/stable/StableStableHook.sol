@@ -92,8 +92,9 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeState storage poolFeeState = feeState[poolId];
 
         uint256 sqrtAmmPriceX96;
-        // Use start of block price for fee calculation to prevent swap splitting advantage or read fresh price if first swap after pool initialization/reset
-        bool isNewBlock = _getBlockNumberish() != poolFeeState.blockNumber;
+        // Use start of block price for fee calculation to prevent swap splitting advantage, or read fresh price if first swap after pool init/reset.
+        // Tradeoff: cached price becomes stale within a block, but impact is minimal for stable pools.
+        bool isNewBlock = (_getBlockNumberish() != poolFeeState.blockNumber) || poolFeeState.sqrtAmmPriceX96 == 0;
         if (isNewBlock) {
             (sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
         } else {

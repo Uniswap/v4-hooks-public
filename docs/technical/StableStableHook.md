@@ -157,6 +157,8 @@ farBoundaryFeeE12 = 1 - (1 - optimalFee) × priceRatio
 
 **Per-block caching consequence:** All swaps within the same block see the same cached price. This means fees do not change within a block — even if swaps push the price further from reference, the corrective fee stays constant. Fee adjustments (Phase 1 of the decay mechanism) only occur across block boundaries.
 
+**Intra-block staleness tradeoff:** The cached price becomes stale as swaps move the AMM price during the block. Later swaps in the same block may see a fee that doesn't reflect the current AMM price. For stable pools this impact is minimal — price movements between pegged assets are small, and staleness is bounded to a single block.
+
 ### Inside Optimal Range
 
 When `closeBoundaryFeeE12 ≤ 0`, the AMM price is within the optimal range. The hook enforces **consistent pre-impact prices** for all swappers regardless of where the spot price sits within the band:
