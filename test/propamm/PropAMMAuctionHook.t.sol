@@ -299,7 +299,9 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         });
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
         bytes memory hookData =
-            abi.encode(AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0)}));
+            abi.encode(
+                AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0), strict: false})
+            );
 
         // A's 5% bidFee simulation ≈ 0.95, +5bps attestation → ~0.9505
         // B's 1% bidFee simulation ≈ 0.99, no discount → 0.99
@@ -324,7 +326,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
     // ════════════════════════════════════════════
 
     function _buildTargetedHookData(TargetedQuoter[] memory targets) internal pure returns (bytes memory) {
-        return abi.encode(AuctionHookData({attestationData: "", targets: targets}));
+        return abi.encode(AuctionHookData({attestationData: "", targets: targets, strict: false}));
     }
 
     function _buildTargetedHookDataWithAttestation(bytes memory attestationData, TargetedQuoter[] memory targets)
@@ -332,7 +334,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         pure
         returns (bytes memory)
     {
-        return abi.encode(AuctionHookData({attestationData: attestationData, targets: targets}));
+        return abi.encode(AuctionHookData({attestationData: attestationData, targets: targets, strict: false}));
     }
 
     function test_targeted_selectsBetterQuoter() public {
@@ -543,5 +545,41 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         vm.expectEmit(true, false, false, false);
         emit PropAMMAuctionHook.AuctionExecuted(address(quoterB), true, -1e18, 0);
         swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+    }
+
+    // ════════════════════════════════════════════
+    //  Strict Mode
+    // ════════════════════════════════════════════
+
+    function _buildStrictHookData(TargetedQuoter[] memory targets) internal pure returns (bytes memory) {
+        return abi.encode(AuctionHookData({attestationData: "", targets: targets, strict: true}));
+    }
+
+    function test_strict_passesWhenQuoteMatchesExecution() public {
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+
+        // Strict mode should pass — spread quoter's indicative matches execution exactly
+        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookData(targets));
+        assertEq(delta.amount0(), -1e18);
+        assertTrue(delta.amount1() > 0);
+    }
+
+    function test_strict_passesDiscoveryWithEmptyHookData() public {
+        // Discovery mode with strict — no hookData means strict=false (default), should work
+        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, "");
+        assertEq(delta.amount0(), -1e18);
+        assertTrue(delta.amount1() > 0);
+    }
+
+    function test_strict_exactOutput() public {
+        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+
+        // Exact output with strict mode
+        BalanceDelta delta = swap(auctionPoolKey, true, 0.5e18, _buildStrictHookData(targets));
+        assertEq(delta.amount1(), int128(0.5e18));
+        assertTrue(delta.amount0() < 0);
     }
 }

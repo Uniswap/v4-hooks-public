@@ -34,6 +34,7 @@ contract PropAMMAuctionHook is BaseHook {
 
     error NoValidQuotes();
     error LiquidityNotAllowed();
+    error QuoteDeviation(uint256 indicative, uint256 executed);
 
     event AuctionExecuted(address indexed winner, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
 
@@ -93,7 +94,13 @@ contract PropAMMAuctionHook is BaseHook {
             winnerHookData
         );
 
-        // 3. Convert BalanceDelta → BeforeSwapDelta (negate to offset hook's nested delta)
+        // 3. Enforce strict mode: indicative quote must match execution
+        if (hookData.length > 0 && abi.decode(hookData, (AuctionHookData)).strict) {
+            uint256 executed = _extractOutput(nestedDelta, params);
+            if (executed != bestQuote) revert QuoteDeviation(bestQuote, executed);
+        }
+
+        // 4. Convert BalanceDelta → BeforeSwapDelta (negate to offset hook's nested delta)
         BeforeSwapDelta bsd = _toBeforeSwapDelta(nestedDelta, params);
 
         emit AuctionExecuted(winner, params.zeroForOne, params.amountSpecified, bestQuote);
@@ -227,6 +234,24 @@ contract PropAMMAuctionHook is BaseHook {
     function _buildAttestationHookData(bytes memory attestationData) internal pure returns (bytes memory) {
         if (attestationData.length == 0) return "";
         return abi.encode(QuoterHookData({attestationData: attestationData, curveUpdateData: ""}));
+    }
+
+    /// @dev Extract the output amount from the nested swap delta to compare against the indicative quote.
+    function _extractOutput(BalanceDelta nestedDelta, SwapParams calldata params)
+        internal
+        pure
+        returns (uint256)
+    {
+        bool isExactInput = params.amountSpecified < 0;
+        if (isExactInput) {
+            // Output is the positive (received) token
+            int128 out = params.zeroForOne ? nestedDelta.amount1() : nestedDelta.amount0();
+            return uint256(int256(out));
+        } else {
+            // "Output" per IQuoterHook is the required input (abs of negative delta)
+            int128 inp = params.zeroForOne ? nestedDelta.amount0() : nestedDelta.amount1();
+            return uint256(int256(-inp));
+        }
     }
 
     /// @dev Negate the nested swap's BalanceDelta into a BeforeSwapDelta that offsets it.
