@@ -298,10 +298,9 @@ contract PropAMMAuctionHookTest is Test, Deployers {
             swapHash: keccak256("test")
         });
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-        bytes memory hookData =
-            abi.encode(
-                AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0), strict: false})
-            );
+        bytes memory hookData = abi.encode(
+            AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0), strict: false})
+        );
 
         // A's 5% bidFee simulation ≈ 0.95, +5bps attestation → ~0.9505
         // B's 1% bidFee simulation ≈ 0.99, no discount → 0.99
@@ -581,5 +580,82 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         BalanceDelta delta = swap(auctionPoolKey, true, 0.5e18, _buildStrictHookData(targets));
         assertEq(delta.amount1(), int128(0.5e18));
         assertTrue(delta.amount0() < 0);
+    }
+
+    // ════════════════════════════════════════════
+    //  Offchain Quote View
+    // ════════════════════════════════════════════
+
+    function test_quote_discovery_selectsBestQuoter_zeroForOne() public view {
+        // B has lower bidFee (1% vs 5%) → B wins
+        (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote,) =
+            auctionHook.quote(currency0, currency1, true, -1e18, "");
+
+        assertEq(winner, address(quoterB));
+        assertEq(address(winnerPoolKey.hooks), address(quoterB));
+        assertTrue(bestQuote > 0);
+    }
+
+    function test_quote_discovery_selectsBestQuoter_oneForZero() public view {
+        // A has lower askFee (1% vs 5%) → A wins
+        (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote,) =
+            auctionHook.quote(currency0, currency1, false, -1e18, "");
+
+        assertEq(winner, address(quoterA));
+        assertEq(address(winnerPoolKey.hooks), address(quoterA));
+        assertTrue(bestQuote > 0);
+    }
+
+    function test_quote_targeted_selectsBestQuoter() public view {
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+
+        (, address winner, uint256 bestQuote,) =
+            auctionHook.quote(currency0, currency1, true, -1e18, _buildTargetedHookData(targets));
+
+        assertEq(winner, address(quoterB));
+        assertTrue(bestQuote > 0);
+    }
+
+    function test_quote_matchesSwapExecution() public {
+        // Get the quote first
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(currency0, currency1, true, -1e18, "");
+
+        // Execute the actual swap
+        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, "");
+
+        // Quote winner should match the quoter that executed
+        assertEq(winner, address(quoterB));
+        // Quote amount should match actual output
+        uint256 actualOutput = uint256(int256(delta.amount1()));
+        assertEq(bestQuote, actualOutput);
+    }
+
+    function test_quote_revertsWhenNoLiveQuoters() public {
+        vm.prank(ownerA);
+        quoterA.setPoolLive(quoterAPoolKey, false);
+        vm.prank(ownerB);
+        quoterB.setPoolLive(quoterBPoolKey, false);
+
+        vm.expectRevert(PropAMMAuctionHook.NoValidQuotes.selector);
+        auctionHook.quote(currency0, currency1, true, -1e18, "");
+    }
+
+    function test_quote_skipsUnliveQuoter() public {
+        vm.prank(ownerB);
+        quoterB.setPoolLive(quoterBPoolKey, false);
+
+        (, address winner,,) = auctionHook.quote(currency0, currency1, true, -1e18, "");
+        assertEq(winner, address(quoterA));
+    }
+
+    function test_quote_exactOutput() public view {
+        // Exact output: picks quoter requiring least input
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(currency0, currency1, true, 0.5e18, "");
+
+        // B has lower bidFee → requires less input → wins
+        assertEq(winner, address(quoterB));
+        assertTrue(bestQuote > 0);
     }
 }

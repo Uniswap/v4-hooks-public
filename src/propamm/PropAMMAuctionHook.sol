@@ -63,6 +63,26 @@ contract PropAMMAuctionHook is BaseHook {
         });
     }
 
+    // ──── View: Offchain Quote ────
+
+    /// @notice Query the auction without executing a swap. Returns the winning quoter,
+    ///         their pool key, best indicative quote, and the hookData to pass on execution.
+    /// @dev Intended for offchain routers to pre-identify the winner and then use targeted
+    ///      mode with a single quoter at execution time, saving re-discovery gas.
+    function quote(
+        Currency currency0,
+        Currency currency1,
+        bool zeroForOne,
+        int256 amountSpecified,
+        bytes calldata hookData
+    )
+        external
+        view
+        returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
+    {
+        return _auction(currency0, currency1, zeroForOne, amountSpecified, hookData);
+    }
+
     // ──── Lifecycle ────
 
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
@@ -81,7 +101,7 @@ contract PropAMMAuctionHook is BaseHook {
     {
         // 1. Run auction and get winner + their specific hookData
         (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData) =
-            _auction(key.currency0, key.currency1, params, hookData);
+            _auction(key.currency0, key.currency1, params.zeroForOne, params.amountSpecified, hookData);
 
         // 2. Execute nested swap on winner's pool with their hookData
         BalanceDelta nestedDelta = poolManager.swap(
@@ -111,13 +131,19 @@ contract PropAMMAuctionHook is BaseHook {
     // ──── Internal: Auction Router ────
 
     /// @dev Decode AuctionHookData and dispatch to the appropriate auction path.
-    function _auction(Currency currency0, Currency currency1, SwapParams calldata params, bytes calldata hookData)
+    function _auction(
+        Currency currency0,
+        Currency currency1,
+        bool zeroForOne,
+        int256 amountSpecified,
+        bytes calldata hookData
+    )
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
     {
         if (hookData.length == 0) {
-            (winnerPoolKey, winner, bestQuote) = _runDiscovery(currency0, currency1, params, "");
+            (winnerPoolKey, winner, bestQuote) = _runDiscovery(currency0, currency1, zeroForOne, amountSpecified, "");
             return (winnerPoolKey, winner, bestQuote, "");
         }
 
@@ -126,11 +152,13 @@ contract PropAMMAuctionHook is BaseHook {
         if (ahd.targets.length == 0) {
             // Discovery: query all registered quoters with attestation only
             bytes memory quoteHookData = _buildAttestationHookData(ahd.attestationData);
-            (winnerPoolKey, winner, bestQuote) = _runDiscovery(currency0, currency1, params, quoteHookData);
+            (winnerPoolKey, winner, bestQuote) =
+                _runDiscovery(currency0, currency1, zeroForOne, amountSpecified, quoteHookData);
             winnerHookData = quoteHookData;
         } else {
             // Targeted: query specified quoters with per-quoter curve data
-            (winnerPoolKey, winner, bestQuote, winnerHookData) = _runTargeted(params, ahd.attestationData, ahd.targets);
+            (winnerPoolKey, winner, bestQuote, winnerHookData) =
+                _runTargeted(zeroForOne, amountSpecified, ahd.attestationData, ahd.targets);
         }
     }
 
@@ -140,27 +168,28 @@ contract PropAMMAuctionHook is BaseHook {
     function _runDiscovery(
         Currency currency0,
         Currency currency1,
-        SwapParams calldata params,
+        bool zeroForOne,
+        int256 amountSpecified,
         bytes memory quoteHookData
     ) internal view returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote) {
         QuoterEntry[] memory quoters = index.getQuoters(currency0, currency1);
-        bool isExactInput = params.amountSpecified < 0;
+        bool isExactInput = amountSpecified < 0;
         bool foundValid;
 
         for (uint256 i = 0; i < quoters.length; i++) {
             if (!quoters[i].isLive) continue;
 
             try IQuoterHook(quoters[i].hook).getIndicativeQuote{gas: quoters[i].maxGas}(
-                quoters[i].poolKey, params.zeroForOne, params.amountSpecified, quoteHookData
+                quoters[i].poolKey, zeroForOne, amountSpecified, quoteHookData
             ) returns (
-                uint256 quote
+                uint256 q
             ) {
-                if (quote == 0) continue;
+                if (q == 0) continue;
 
-                bool isBetter = !foundValid || (isExactInput ? quote > bestQuote : quote < bestQuote);
+                bool isBetter = !foundValid || (isExactInput ? q > bestQuote : q < bestQuote);
 
                 if (isBetter) {
-                    bestQuote = quote;
+                    bestQuote = q;
                     winnerPoolKey = quoters[i].poolKey;
                     winner = quoters[i].hook;
                     foundValid = true;
@@ -174,24 +203,29 @@ contract PropAMMAuctionHook is BaseHook {
     // ──── Internal: Targeted Path ────
 
     /// @dev Query specific quoters with per-quoter curve data, return the best one.
-    function _runTargeted(SwapParams calldata params, bytes memory attestationData, TargetedQuoter[] memory targets)
+    function _runTargeted(
+        bool zeroForOne,
+        int256 amountSpecified,
+        bytes memory attestationData,
+        TargetedQuoter[] memory targets
+    )
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
     {
-        bool isExactInput = params.amountSpecified < 0;
+        bool isExactInput = amountSpecified < 0;
         bool foundValid;
 
         for (uint256 i = 0; i < targets.length; i++) {
-            (uint256 quote, bytes memory quoterHookData) =
-                _queryTarget(targets[i], attestationData, params.zeroForOne, params.amountSpecified);
+            (uint256 q, bytes memory quoterHookData) =
+                _queryTarget(targets[i], attestationData, zeroForOne, amountSpecified);
 
-            if (quote == 0) continue;
+            if (q == 0) continue;
 
-            bool isBetter = !foundValid || (isExactInput ? quote > bestQuote : quote < bestQuote);
+            bool isBetter = !foundValid || (isExactInput ? q > bestQuote : q < bestQuote);
 
             if (isBetter) {
-                bestQuote = quote;
+                bestQuote = q;
                 winnerPoolKey = targets[i].poolKey;
                 winner = address(targets[i].poolKey.hooks);
                 winnerHookData = quoterHookData;
@@ -209,7 +243,7 @@ contract PropAMMAuctionHook is BaseHook {
         bytes memory attestationData,
         bool zeroForOne,
         int256 amountSpecified
-    ) internal view returns (uint256 quote, bytes memory quoterHookData) {
+    ) internal view returns (uint256 q, bytes memory quoterHookData) {
         address hook = address(target.poolKey.hooks);
 
         try index.getQuoter(hook, target.poolKey) returns (QuoterEntry memory entry) {
@@ -221,9 +255,9 @@ contract PropAMMAuctionHook is BaseHook {
             try IQuoterHook(hook).getIndicativeQuote{gas: entry.maxGas}(
                 target.poolKey, zeroForOne, amountSpecified, quoterHookData
             ) returns (
-                uint256 q
+                uint256 indicative
             ) {
-                quote = q;
+                q = indicative;
             } catch {}
         } catch {}
     }
@@ -237,11 +271,7 @@ contract PropAMMAuctionHook is BaseHook {
     }
 
     /// @dev Extract the output amount from the nested swap delta to compare against the indicative quote.
-    function _extractOutput(BalanceDelta nestedDelta, SwapParams calldata params)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _extractOutput(BalanceDelta nestedDelta, SwapParams calldata params) internal pure returns (uint256) {
         bool isExactInput = params.amountSpecified < 0;
         if (isExactInput) {
             // Output is the positive (received) token
