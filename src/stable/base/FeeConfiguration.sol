@@ -13,8 +13,6 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @notice The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
     uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4;
-    /// @notice The scale used to preserve precision in decay factor math.
-    uint256 internal constant Q24 = 2 ** 24; // 16,777,216
 
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
@@ -125,7 +123,6 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].decayingFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
         feeState[_poolId].blockNumber = uint40(_getBlockNumberish());
-        // sqrtAmmPriceX96 is intentionally not reset: the UNDEFINED_DECAYING_FEE_E12 sentinel
-        // causes _calculateDecayingFee to ignore the stale value and start fresh from farBoundaryFee.
+        feeState[_poolId].sqrtAmmPriceX96 = 0; // Force the next swap to read a fresh price from the pool, not the cached start-of-block price
     }
 }

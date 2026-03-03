@@ -251,8 +251,7 @@ contract FeeConfigurationImplementationTest is Test {
         // Verify feeState was reset
         (decayingFeeE12, sqrtAmmPriceX96, blockNumber) = feeConfigurationImplementation.feeState(testPoolKey.toId());
         assertEq(decayingFeeE12, 1e12 + 1); // UNDEFINED_DECAYING_FEE_E12
-        // sqrtAmmPriceX96 is intentionally NOT reset (see _resetFeeState comment)
-        assertEq(sqrtAmmPriceX96, uint160(2 ** 96 + 1000));
+        assertEq(sqrtAmmPriceX96, 0);
         assertEq(blockNumber, block.number);
     }
 

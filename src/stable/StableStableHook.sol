@@ -91,11 +91,20 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         FeeConfig storage poolFeeConfig = feeConfig[poolId];
         FeeState storage poolFeeState = feeState[poolId];
 
-        (uint160 sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
+        uint256 sqrtAmmPriceX96;
+        // Use start of block price for fee calculation to prevent swap splitting advantage, or read fresh price if first swap after pool init/reset.
+        // Tradeoff: cached price becomes stale within a block, but impact is minimal for stable pools.
+        bool isNewBlock = (_getBlockNumberish() != poolFeeState.blockNumber) || poolFeeState.sqrtAmmPriceX96 == 0;
+        if (isNewBlock) {
+            (sqrtAmmPriceX96,,,) = poolManager.getSlot0(poolId); // grab the current sqrt price of the pool
+        } else {
+            sqrtAmmPriceX96 = poolFeeState.sqrtAmmPriceX96;
+        }
+
         uint256 sqrtReferencePriceX96 = poolFeeConfig.referenceSqrtPriceX96;
         uint256 optimalFeeE6 = poolFeeConfig.optimalFeeE6;
 
-        // Calculate the price ratio in x96 format between the current sqrt price and the reference sqrt price, always <= 2^96
+        // Calculate the price ratio using the (potentially cached) price
         uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
 
         // The optimalFee defines a price range (the "optimal spread") in PRICE space (not sqrt price space).
@@ -114,12 +123,12 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
         uint256 lpFeeE12; // the lp fee for this swap in 1e12 precision
         uint256 decayingFeeE12;
 
-        // closeBoundaryFee is the fee that would place the effective price at the close boundary.
+        // closeBoundaryFee is the fee that would place the pre-impact price at the close boundary.
         // A negative value means the AMM price is already inside the optimal range (past the close boundary).
         if (closeBoundaryFeeE12 <= 0) {
-            // Inside optimal range: The fee is calculated such that all swappers face consistent buy/sell prices:
-            //   - All buys happen at the lower bound
-            //   - All sells happen at the upper bound
+            // Inside optimal range: The fee is set such that all swappers have consistent pre-impact prices:
+            //   - Sells: ammPrice * (1 - fee) = RP * (1 - optimalFee) (lower bound)
+            //   - Buys: ammPrice / (1 - fee) = RP / (1 - optimalFee) (upper bound)
             lpFeeE12 = FeeCalculation.calculateInsideOptimalRangeFee(
                 priceRatioX96, optimalFeeE6, ammPriceBelowRP, userSellsZeroForOne
             );
@@ -145,10 +154,12 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             lpFeeE12 = (ammPriceBelowRP == userSellsZeroForOne) ? 0 : decayingFeeE12;
         }
 
-        // Update stored swap data for use in next swap's calculations
-        poolFeeState.decayingFeeE12 = uint40(decayingFeeE12);
-        poolFeeState.sqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
-        poolFeeState.blockNumber = uint40(_getBlockNumberish());
+        // Only update feeState on the first swap of a new block
+        if (isNewBlock) {
+            poolFeeState.decayingFeeE12 = uint40(decayingFeeE12);
+            poolFeeState.sqrtAmmPriceX96 = uint160(sqrtAmmPriceX96);
+            poolFeeState.blockNumber = uint40(_getBlockNumberish());
+        }
 
         // Uniswap v4 handles fees in E6 not E12
         return (
@@ -191,7 +202,7 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             decayStartFeeE12 = farBoundaryFeeE12;
         } else if (ammPriceBelowRP == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
             // Price moved further from reference (left of ref and moved more left, OR right of ref and moved more right)
-            // Adjust fee upward to preserve the same effective price, then decay starts from this adjusted fee
+            // Adjust fee upward to preserve the same pre-impact price, then decay starts from this adjusted fee
             uint256 priceMovementRatioX96 =
                 FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
             decayStartFeeE12 =
