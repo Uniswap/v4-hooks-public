@@ -14,6 +14,9 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @notice The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
     uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4;
 
+    /// @notice The maximum target multiplier (100 = 100%, full closeBoundaryFee subtraction)
+    uint256 public constant MAX_TARGET_MULTIPLIER = 100;
+
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
     address public configManager;
@@ -53,6 +56,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
         _validateOptimalFeeE6(_feeConfig.optimalFeeE6);
+        _validateTargetMultiplier(_feeConfig.targetMultiplier);
         _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
@@ -87,6 +91,12 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
         if (_optimalFeeE6 > MAX_OPTIMAL_FEE_E6) {
             revert InvalidOptimalFeeE6(_optimalFeeE6);
         }
+    }
+
+    /// @notice Validate the target multiplier (0-100, representing 0%-100%)
+    /// @param _targetMultiplier The target multiplier to validate
+    function _validateTargetMultiplier(uint256 _targetMultiplier) internal pure {
+        if (_targetMultiplier > MAX_TARGET_MULTIPLIER) revert InvalidTargetMultiplier(_targetMultiplier);
     }
 
     /// @notice Validate the reference sqrt price

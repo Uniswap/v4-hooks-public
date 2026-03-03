@@ -45,6 +45,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         k: K,
         logK: LOG_K,
         optimalFeeE6: OPTIMAL_FEE_E6, // 0.9 bps
+        targetMultiplier: 50,
         referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
     });
 
@@ -87,17 +88,28 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         internal
         returns (uint24)
     {
-        (uint256 beforeK, uint256 beforeLogK, uint24 beforeOptimalFeeE6, uint160 beforeReferenceSqrtPriceX96) =
-            hook.feeConfig(testPoolKey.toId());
+        (
+            uint256 beforeK,
+            uint256 beforeLogK,
+            uint24 beforeOptimalFeeE6,
+            uint8 beforeTargetMultiplier,
+            uint160 beforeReferenceSqrtPriceX96
+        ) = hook.feeConfig(testPoolKey.toId());
         SwapParams memory swapParams = SwapParams(zeroForOne, amountSpecified, sqrtPriceLimitX96);
         (bytes4 selector, BeforeSwapDelta delta, uint24 fee) =
             hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
-        (uint256 afterK, uint256 afterLogK, uint24 afterOptimalFeeE6, uint160 afterReferenceSqrtPriceX96) =
-            hook.feeConfig(testPoolKey.toId());
+        (
+            uint256 afterK,
+            uint256 afterLogK,
+            uint24 afterOptimalFeeE6,
+            uint8 afterTargetMultiplier,
+            uint160 afterReferenceSqrtPriceX96
+        ) = hook.feeConfig(testPoolKey.toId());
 
         assertEq(beforeK, afterK);
         assertEq(beforeLogK, afterLogK);
         assertEq(beforeOptimalFeeE6, afterOptimalFeeE6);
+        assertEq(beforeTargetMultiplier, afterTargetMultiplier);
         assertEq(beforeReferenceSqrtPriceX96, afterReferenceSqrtPriceX96);
 
         assertEq(selector, IHooks.beforeSwap.selector);
@@ -454,8 +466,13 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         fuzzedRefSqrtPrice = uint160(bound(fuzzedRefSqrtPrice, minRef, maxRef - 1));
 
         // Update fee config with fuzzed reference price
-        FeeConfig memory newFeeConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: fuzzedRefSqrtPrice});
+        FeeConfig memory newFeeConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: fuzzedRefSqrtPrice
+        });
         vm.prank(configManager);
         hook.updateFeeConfig(testPoolKey.toId(), newFeeConfig);
 
@@ -487,5 +504,55 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
             uint24 fee = callBeforeSwap(zeroForOne[i], 1000 * 1e18, limit);
             assertLe(fee, 1_000_000, "fee must be <= 100%");
         }
+    }
+
+    /// @notice When targetMultiplier=100 (full subtraction) and k is very small, the spread closes quickly after a price shock.
+    /// Setup: optimalFee=0.1bps, move AMM price 10bps from reference, wait 2 blocks.
+    /// Then make two tiny swaps in opposite directions and verify the spread is tight (~2*optimalFee).
+    function test_beforeSwap_spreadClosesQuickly_withFullTargetMultiplier() public {
+        // Use a very small k (0.01 in Q24 ≈ 1% retention per block → 99% decay per block)
+        uint24 testK = 167_772; // floor(0.01 * 2^24)
+        uint256 kWad = (uint256(testK) * 1e18) >> 24;
+        uint24 testLogK = uint24(uint256(-FixedPointMathLib.lnWad(int256(kWad))) >> 40);
+        uint24 testOptimalFeeE6 = 10; // 0.1 bps
+
+        FeeConfig memory newConfig = FeeConfig({
+            k: testK,
+            logK: testLogK,
+            optimalFeeE6: testOptimalFeeE6,
+            targetMultiplier: 100,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+        vm.prank(configManager);
+        hook.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+        // Move AMM price 10bps above reference: price = 1.001
+        uint160 ammPrice10bps = uint160(uint256(1_000_100) * 2 ** 96 / 1_000_000);
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice10bps) * 2 ** 96));
+
+        // First swap at this price: establishes fee state (first time outside optimal range)
+        vm.roll(block.number + 1);
+        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Slightly adjust price so it's not exactly equal to previous (avoid equal-price edge case)
+        ammPrice10bps = uint160(uint256(1_000_099) * 2 ** 96 / 1_000_000);
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice10bps) * 2 ** 96));
+
+        // Advance 2 blocks: with k=0.01, decay factor = 0.01^2 = 0.0001 → fee ≈ target
+        vm.roll(block.number + 3);
+
+        // Two tiny swaps in opposite directions to measure the spread
+        // Sell token0 (toward reference when price > ref): charged the decaying fee
+        uint24 sellFee = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        // Buy token0 (away from reference when price > ref): 0 fee
+        uint24 buyFee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
+
+        // Buy fee should be 0 (pushing further from reference)
+        assertEq(buyFee, 0);
+
+        // With targetMultiplier=100: targetFee = farBoundaryFee - closeBoundaryFee ≈ 2 * optimalFee
+        // After 2 blocks with k=0.01: fee ≈ target ≈ 2 * optimalFee = 0.2bps = 20 in E6
+        assertLe(sellFee, 21);
+        assertEq(sellFee, 19);
     }
 }

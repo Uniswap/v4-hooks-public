@@ -7,6 +7,7 @@ struct FeeConfig {
     uint24 k; // Decay factor per block in Q24 format (e.g., 0.99 in Q24 means fee retains 99% of its value each block)
     uint24 logK; // Precomputed -ln(k) >> 40; used for > 4 blocks decay: k^n = exp(-logK * n)
     uint24 optimalFeeE6; // Fee rate defining optimal range width in PRICE space (not sqrt price), 1e6 precision
+    uint8 targetMultiplier; // Multiplier for target fee: targetFee = farBoundaryFee - closeBoundaryFee * targetMultiplier / 100. Must be 0-100.
     uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
 }
 
@@ -35,6 +36,10 @@ interface IFeeConfiguration {
     /// @notice Error thrown when reference sqrt price is invalid
     /// @param invalidSqrtPrice The invalid reference sqrt price
     error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
+
+    /// @notice Error thrown when target multiplier is invalid (must be 0-100)
+    /// @param targetMultiplier The invalid target multiplier
+    error InvalidTargetMultiplier(uint256 targetMultiplier);
 
     /// @notice Event emitted when the config manager is updated
     /// @param configManager The new config manager

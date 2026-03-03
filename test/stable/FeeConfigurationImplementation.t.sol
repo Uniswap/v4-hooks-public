@@ -49,7 +49,11 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithNotConfigManager() public {
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
 
         vm.prank(address(this));
@@ -59,7 +63,11 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithInvalidReferenceSqrtPriceX96_belowMin() public {
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE - 1
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE - 1
         });
 
         vm.prank(poolFeeController);
@@ -74,7 +82,11 @@ contract FeeConfigurationImplementationTest is Test {
         // minBoundedRef = MIN_SQRT_PRICE * 1e6 / sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6)
         // = MIN_SQRT_PRICE * 1e6 / sqrt(990000 * 1e6) > MIN_SQRT_PRICE
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: TickMath.MIN_SQRT_PRICE
         });
 
         vm.prank(poolFeeController);
@@ -89,7 +101,11 @@ contract FeeConfigurationImplementationTest is Test {
         // maxBoundedRef = MAX_SQRT_PRICE * sqrt((1e6 - MAX_OPTIMAL_FEE_E6) * 1e6) / 1e6
         // = MAX_SQRT_PRICE * sqrt(990000 * 1e6) / 1e6 < MAX_SQRT_PRICE
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: TickMath.MAX_SQRT_PRICE - 1
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: TickMath.MAX_SQRT_PRICE - 1
         });
 
         vm.prank(poolFeeController);
@@ -109,15 +125,24 @@ contract FeeConfigurationImplementationTest is Test {
         uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
 
         // Test minimum bounded reference price (inclusive - MIN_SQRT_PRICE is valid in v4)
-        FeeConfig memory minConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(minBoundedRef)});
+        FeeConfig memory minConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: uint160(minBoundedRef)
+        });
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), minConfig);
 
         // Test maximum bounded reference price - 1 (exclusive - MAX_SQRT_PRICE is invalid in v4)
         // maxBoundedRef itself is invalid, so we use maxBoundedRef - 1
         FeeConfig memory maxConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(maxBoundedRef - 1)
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: uint160(maxBoundedRef - 1)
         });
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), maxConfig);
@@ -139,17 +164,41 @@ contract FeeConfigurationImplementationTest is Test {
         uint256 sqrtOneMinusMaxFeeE6 = FixedPointMathLib.sqrt(oneMinusMaxFee * FeeCalculation.ONE_E6);
         uint256 maxBoundedRef = uint256(TickMath.MAX_SQRT_PRICE) * sqrtOneMinusMaxFeeE6 / FeeCalculation.ONE_E6;
 
-        FeeConfig memory newConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: uint160(maxBoundedRef)});
+        FeeConfig memory newConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: uint160(maxBoundedRef)
+        });
 
         vm.prank(poolFeeController);
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidReferenceSqrtPriceX96.selector, maxBoundedRef));
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
     }
 
+    function test_updateFeeConfig_revertsWithInvalidTargetMultiplier_above100() public {
+        FeeConfig memory newConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 101,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+
+        vm.prank(poolFeeController);
+        vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidTargetMultiplier.selector, 101));
+        feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
+    }
+
     function test_updateFeeConfig_revertsWithInvalidOptimalFeeE6() public {
-        FeeConfig memory newConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 1e4 + 1, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+        FeeConfig memory newConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: 1e4 + 1,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
 
         vm.prank(poolFeeController);
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidOptimalFeeE6.selector, 1e4 + 1));
@@ -157,8 +206,13 @@ contract FeeConfigurationImplementationTest is Test {
     }
 
     function test_updateFeeConfig_revertsWithInvalidKAndLogK_bothZero() public {
-        FeeConfig memory newConfig =
-            FeeConfig({k: 0, logK: 0, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+        FeeConfig memory newConfig = FeeConfig({
+            k: 0,
+            logK: 0,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
 
         vm.prank(poolFeeController);
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.InvalidKAndLogK.selector, 0, 0));
@@ -167,7 +221,11 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_revertsWithInvalidKAndLogK_mismatchedLogK() public {
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K + 1, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K + 1,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
 
         vm.prank(poolFeeController);
@@ -181,7 +239,11 @@ contract FeeConfigurationImplementationTest is Test {
         // so no valid logK exists for this k.
         uint24 maxK = type(uint24).max;
         FeeConfig memory newConfig = FeeConfig({
-            k: maxK, logK: 1, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: maxK,
+            logK: 1,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
 
         vm.prank(poolFeeController);
@@ -190,15 +252,20 @@ contract FeeConfigurationImplementationTest is Test {
     }
 
     function test_updateFeeConfig_succeeds() public {
-        (uint256 k, uint256 logK, uint24 optimalFeeE6, uint160 referenceSqrtPriceX96) =
+        (uint256 k, uint256 logK, uint24 optimalFeeE6, uint8 targetMultiplier, uint160 referenceSqrtPriceX96) =
             feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(k, 0);
         assertEq(logK, 0);
         assertEq(optimalFeeE6, 0);
+        assertEq(targetMultiplier, 0);
         assertEq(referenceSqrtPriceX96, 0);
 
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
 
         vm.expectEmit(true, false, false, true);
@@ -207,10 +274,12 @@ contract FeeConfigurationImplementationTest is Test {
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
 
         // Verify FeeConfig was updated
-        (k, logK, optimalFeeE6, referenceSqrtPriceX96) = feeConfigurationImplementation.feeConfig(testPoolKey.toId());
+        (k, logK, optimalFeeE6, targetMultiplier, referenceSqrtPriceX96) =
+            feeConfigurationImplementation.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optimalFeeE6, OPTIMAL_FEE_E6);
+        assertEq(targetMultiplier, 50);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
 
         // Verify FeeState was reset
@@ -224,7 +293,11 @@ contract FeeConfigurationImplementationTest is Test {
     function test_updateFeeConfig_resetsFeeStateWithExistingSwapHistory() public {
         // Set up valid fee config
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newConfig);
@@ -257,7 +330,11 @@ contract FeeConfigurationImplementationTest is Test {
 
     function test_updateFeeConfig_gas() public {
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
 
         vm.prank(poolFeeController);
@@ -288,7 +365,11 @@ contract FeeConfigurationImplementationTest is Test {
 
         // updateFeeConfig should revert
         FeeConfig memory newConfig = FeeConfig({
-            k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 50,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
         });
         vm.prank(poolFeeController);
         vm.expectRevert(abi.encodeWithSelector(IFeeConfiguration.NotConfigManager.selector, poolFeeController));
