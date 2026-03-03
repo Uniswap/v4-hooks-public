@@ -28,12 +28,10 @@ interface IQuoterHook {
     /// @return outputAmount The indicative number of output tokens.
     ///         For exact input swaps, this is the expected output.
     ///         For exact output swaps, this is the required input.
-    function getIndicativeQuote(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    ) external view returns (uint256 outputAmount);
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        view
+        returns (uint256 outputAmount);
 
     /// @notice Whether this quoter is currently live and accepting swaps.
     /// @dev Quoters SHOULD return true if the current curve is not stale.

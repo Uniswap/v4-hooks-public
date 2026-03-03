@@ -63,12 +63,7 @@ contract MockQuoterHook is BasePropAMMHook {
         live = _live;
     }
 
-    function _price(PoolKey calldata, bool, int256, bool isAttested, address)
-        internal
-        view
-        override
-        returns (uint256)
-    {
+    function _price(PoolKey calldata, bool, int256, bool isAttested, address) internal view override returns (uint256) {
         return isAttested ? attestedPriceReturn : priceReturn;
     }
 

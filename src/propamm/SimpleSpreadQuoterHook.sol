@@ -28,12 +28,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
         IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
-    )
-        SpreadQuoterBase(
-            _poolManager, _index, _attestationRegistry, maxGas_, owner_,
-            "SimpleSpreadQuoterHook"
-        )
-    {}
+    ) SpreadQuoterBase(_poolManager, _index, _attestationRegistry, maxGas_, owner_, "SimpleSpreadQuoterHook") {}
 
     // ──── Hook Permissions ────
 
@@ -69,12 +64,12 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
         return IHooks.beforeAddLiquidity.selector;
     }
 
-    function _beforeRemoveLiquidity(
-        address sender,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
-        bytes calldata
-    ) internal view override returns (bytes4) {
+    function _beforeRemoveLiquidity(address sender, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        view
+        override
+        returns (bytes4)
+    {
         if (!authorizedLPs[sender]) revert UnauthorizedLP();
         return IHooks.beforeRemoveLiquidity.selector;
     }

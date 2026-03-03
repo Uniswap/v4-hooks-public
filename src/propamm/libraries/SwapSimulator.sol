@@ -53,9 +53,7 @@ library SwapSimulator {
 
         if (state.sqrtPriceX96 == 0 || amountSpecified == 0) return 0;
 
-        uint160 sqrtPriceLimitX96 = zeroForOne
-            ? TickMath.MIN_SQRT_PRICE + 1
-            : TickMath.MAX_SQRT_PRICE - 1;
+        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
 
         state.amountSpecifiedRemaining = amountSpecified;
 
@@ -121,20 +119,18 @@ library SwapSimulator {
     }
 
     /// @dev Find the next initialized tick using external bitmap reads.
-    function _nextInitializedTick(
-        IPoolManager manager,
-        PoolId poolId,
-        int24 tick,
-        int24 tickSpacing,
-        bool lte
-    ) private view returns (int24 next, bool initialized) {
+    function _nextInitializedTick(IPoolManager manager, PoolId poolId, int24 tick, int24 tickSpacing, bool lte)
+        private
+        view
+        returns (int24 next, bool initialized)
+    {
         unchecked {
             int24 compressed = TickBitmap.compress(tick, tickSpacing);
 
             if (lte) {
                 (int16 wordPos, uint8 bitPos) = TickBitmap.position(compressed);
-                uint256 masked = manager.getTickBitmap(poolId, wordPos)
-                    & (type(uint256).max >> (uint256(type(uint8).max) - bitPos));
+                uint256 masked =
+                    manager.getTickBitmap(poolId, wordPos) & (type(uint256).max >> (uint256(type(uint8).max) - bitPos));
 
                 initialized = masked != 0;
                 next = initialized
@@ -143,8 +139,7 @@ library SwapSimulator {
             } else {
                 ++compressed;
                 (int16 wordPos, uint8 bitPos) = TickBitmap.position(compressed);
-                uint256 masked = manager.getTickBitmap(poolId, wordPos)
-                    & ~((1 << bitPos) - 1);
+                uint256 masked = manager.getTickBitmap(poolId, wordPos) & ~((1 << bitPos) - 1);
 
                 initialized = masked != 0;
                 next = initialized

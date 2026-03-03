@@ -58,14 +58,8 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         attestationRegistry.addAttester(attester);
 
         // Deploy hook — no BEFORE_REMOVE_LIQUIDITY (anyone can remove freely)
-        uint160 flags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG
-                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_SWAP_FLAG
-        );
-        hook = OpenLPQuoterHook(
-            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
-        );
+        uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG);
+        hook = OpenLPQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "OpenLPQuoterHook",
             abi.encode(manager, address(index), address(attestationRegistry), uint32(50_000), owner),
@@ -91,10 +85,7 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         hook.updatePricingState(
             testPoolKey,
             SpreadQuoterBase.PricingState({
-                bidFeePips: BID_FEE_PIPS,
-                askFeePips: ASK_FEE_PIPS,
-                attestedDiscountBps: 5,
-                live: true
+                bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 5, live: true
             })
         );
     }
@@ -114,10 +105,7 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(
             key_,
             ModifyLiquidityParams({
-                tickLower: activeTick,
-                tickUpper: activeTick + key_.tickSpacing,
-                liquidityDelta: int128(liq),
-                salt: 0
+                tickLower: activeTick, tickUpper: activeTick + key_.tickSpacing, liquidityDelta: int128(liq), salt: 0
             }),
             ""
         );
@@ -153,10 +141,7 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(
             testPoolKey,
             ModifyLiquidityParams({
-                tickLower: activeTick,
-                tickUpper: activeTick + testPoolKey.tickSpacing,
-                liquidityDelta: 1e18,
-                salt: 0
+                tickLower: activeTick, tickUpper: activeTick + testPoolKey.tickSpacing, liquidityDelta: 1e18, salt: 0
             }),
             ""
         );
@@ -170,10 +155,7 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(
             testPoolKey,
             ModifyLiquidityParams({
-                tickLower: activeTick,
-                tickUpper: activeTick + testPoolKey.tickSpacing,
-                liquidityDelta: -1e18,
-                salt: 0
+                tickLower: activeTick, tickUpper: activeTick + testPoolKey.tickSpacing, liquidityDelta: -1e18, salt: 0
             }),
             ""
         );
@@ -355,7 +337,15 @@ contract OpenLPQuoterHookTest is Test, Deployers {
             "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,uint16 attestedDiscountBps,bool live,bytes32 poolId,uint256 deadline)"
         );
         bytes32 structHash = keccak256(
-            abi.encode(TYPEHASH, state.bidFeePips, state.askFeePips, state.attestedDiscountBps, state.live, PoolId.unwrap(poolId), deadline)
+            abi.encode(
+                TYPEHASH,
+                state.bidFeePips,
+                state.askFeePips,
+                state.attestedDiscountBps,
+                state.live,
+                PoolId.unwrap(poolId),
+                deadline
+            )
         );
         bytes32 domainSeparator = keccak256(
             abi.encode(
@@ -386,13 +376,11 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000,
-            askFeePips: ASK_FEE_PIPS,
-            attestedDiscountBps: 5,
-            live: true
+            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 5, live: true
         });
 
-        bytes memory hookData = _buildCurveUpdateHookData(newState, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
+        bytes memory hookData =
+            _buildCurveUpdateHookData(newState, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
         BalanceDelta delta = swap(testPoolKey, true, -1e18, hookData);
 
         assertEq(delta.amount0(), -1e18);
@@ -405,21 +393,17 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory state1 = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000,
-            askFeePips: ASK_FEE_PIPS,
-            attestedDiscountBps: 5,
-            live: true
+            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 5, live: true
         });
-        bytes memory hookData1 = _buildCurveUpdateHookData(state1, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
+        bytes memory hookData1 =
+            _buildCurveUpdateHookData(state1, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
         swap(testPoolKey, true, -1e18, hookData1);
 
         SpreadQuoterBase.PricingState memory state2 = SpreadQuoterBase.PricingState({
-            bidFeePips: 30_000,
-            askFeePips: ASK_FEE_PIPS,
-            attestedDiscountBps: 5,
-            live: true
+            bidFeePips: 30_000, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 5, live: true
         });
-        bytes memory hookData2 = _buildCurveUpdateHookData(state2, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
+        bytes memory hookData2 =
+            _buildCurveUpdateHookData(state2, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
 
         vm.expectRevert();
         swap(testPoolKey, true, -1e18, hookData2);

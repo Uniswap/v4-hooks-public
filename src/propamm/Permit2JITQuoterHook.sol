@@ -101,21 +101,16 @@ contract Permit2JITQuoterHook is BasePropAMMHook, Ownable2Step {
 
     // ──── Hook Lifecycle ────
 
-    function _afterInitialize(address, PoolKey calldata key, uint160, int24)
-        internal
-        override
-        returns (bytes4)
-    {
+    function _afterInitialize(address, PoolKey calldata key, uint160, int24) internal override returns (bytes4) {
         _registerInIndex(key, QuoterType.STORAGE, "");
         return IHooks.afterInitialize.selector;
     }
 
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         PoolId poolId = key.toId();
         JITConfig memory config = jitConfig[poolId];
 
@@ -128,9 +123,8 @@ contract Permit2JITQuoterHook is BasePropAMMHook, Ownable2Step {
         //    If not, refuse to provide JIT LP — the maker must never receive claims.
         {
             Currency inputCurrency = params.zeroForOne ? key.currency0 : key.currency1;
-            uint256 swapSize = params.amountSpecified < 0
-                ? uint256(-params.amountSpecified)
-                : uint256(params.amountSpecified);
+            uint256 swapSize =
+                params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified);
             if (_pmBalance(inputCurrency) < swapSize) {
                 return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
             }
@@ -172,13 +166,11 @@ contract Permit2JITQuoterHook is BasePropAMMHook, Ownable2Step {
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeOverride);
     }
 
-    function _afterSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata,
-        BalanceDelta,
-        bytes calldata
-    ) internal override returns (bytes4, int128) {
+    function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
+        internal
+        override
+        returns (bytes4, int128)
+    {
         // 1. Load JIT position from transient storage
         uint128 liquidity = uint128(_tload(_TSTORE_LIQUIDITY));
         if (liquidity == 0) return (IHooks.afterSwap.selector, 0);
@@ -192,10 +184,7 @@ contract Permit2JITQuoterHook is BasePropAMMHook, Ownable2Step {
         (BalanceDelta lpDelta,) = poolManager.modifyLiquidity(
             key,
             ModifyLiquidityParams({
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidityDelta: -int256(uint256(liquidity)),
-                salt: JIT_SALT
+                tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: -int256(uint256(liquidity)), salt: JIT_SALT
             }),
             ""
         );
@@ -218,13 +207,12 @@ contract Permit2JITQuoterHook is BasePropAMMHook, Ownable2Step {
 
     // ──── Pricing (non-binding indicative quotes) ────
 
-    function _price(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool isAttested,
-        address
-    ) internal view override returns (uint256 outputAmount) {
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address)
+        internal
+        view
+        override
+        returns (uint256 outputAmount)
+    {
         JITConfig memory config = jitConfig[key.toId()];
         if (!config.live) return 0;
 

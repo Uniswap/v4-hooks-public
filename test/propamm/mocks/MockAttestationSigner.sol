@@ -13,9 +13,8 @@ library MockAttestationSigner {
     /// @notice Build the EIP-712 digest for an attestation
     function buildDigest(Attestation memory att, address registry) internal view returns (bytes32) {
         bytes32 domainSeparator = _domainSeparator(registry);
-        bytes32 structHash = keccak256(
-            abi.encode(ATTESTATION_TYPEHASH, att.attester, att.swapper, att.deadline, att.swapHash)
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(ATTESTATION_TYPEHASH, att.attester, att.swapper, att.deadline, att.swapHash));
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
@@ -32,9 +31,8 @@ library MockAttestationSigner {
     }
 
     function _domainSeparator(address registry) private view returns (bytes32) {
-        bytes32 typeHash = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-        return keccak256(
-            abi.encode(typeHash, keccak256("Attestation"), keccak256("1"), block.chainid, registry)
-        );
+        bytes32 typeHash =
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+        return keccak256(abi.encode(typeHash, keccak256("Attestation"), keccak256("1"), block.chainid, registry));
     }
 }

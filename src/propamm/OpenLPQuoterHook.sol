@@ -22,12 +22,7 @@ contract OpenLPQuoterHook is SpreadQuoterBase {
         IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
-    )
-        SpreadQuoterBase(
-            _poolManager, _index, _attestationRegistry, maxGas_, owner_,
-            "OpenLPQuoterHook"
-        )
-    {}
+    ) SpreadQuoterBase(_poolManager, _index, _attestationRegistry, maxGas_, owner_, "OpenLPQuoterHook") {}
 
     // ──── Hook Permissions ────
 
@@ -52,12 +47,12 @@ contract OpenLPQuoterHook is SpreadQuoterBase {
 
     // ──── LP Tick Enforcement ────
 
-    function _beforeAddLiquidity(
-        address,
-        PoolKey calldata key,
-        ModifyLiquidityParams calldata params,
-        bytes calldata
-    ) internal view override returns (bytes4) {
+    function _beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata params, bytes calldata)
+        internal
+        view
+        override
+        returns (bytes4)
+    {
         _enforceActiveTick(key, params);
         return IHooks.beforeAddLiquidity.selector;
     }

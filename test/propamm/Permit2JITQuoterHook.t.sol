@@ -56,12 +56,8 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
         attestationRegistry = new AttestationRegistry(owner);
 
         // Deploy hook at flag-mined address
-        uint160 flags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
-        );
-        hook = Permit2JITQuoterHook(
-            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
-        );
+        uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
+        hook = Permit2JITQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "Permit2JITQuoterHook",
             abi.encode(manager, address(index), address(attestationRegistry), address(permit2), uint32(50_000), owner),

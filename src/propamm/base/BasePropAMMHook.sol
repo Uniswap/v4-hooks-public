@@ -39,12 +39,13 @@ abstract contract BasePropAMMHook is BaseHook, DeltaResolver, IQuoterHook {
     }
 
     /// @inheritdoc IQuoterHook
-    function getIndicativeQuote(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    ) external view virtual override returns (uint256 outputAmount) {
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        view
+        virtual
+        override
+        returns (uint256 outputAmount)
+    {
         bytes memory attestationData;
         if (hookData.length > 0) {
             QuoterHookData memory hd = abi.decode(hookData, (QuoterHookData));
@@ -98,13 +99,11 @@ abstract contract BasePropAMMHook is BaseHook, DeltaResolver, IQuoterHook {
     /// @param isAttested Whether the swap has a valid attestation.
     /// @param attester The attester address (zero if not attested).
     /// @return outputAmount The quoted output.
-    function _price(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool isAttested,
-        address attester
-    ) internal view virtual returns (uint256 outputAmount);
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
+        internal
+        view
+        virtual
+        returns (uint256 outputAmount);
 
     // ──── DeltaResolver: _pay ────
 

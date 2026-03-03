@@ -35,12 +35,7 @@ contract PropAMMAuctionHook is BaseHook {
     error NoValidQuotes();
     error LiquidityNotAllowed();
 
-    event AuctionExecuted(
-        address indexed winner,
-        bool zeroForOne,
-        int256 amountSpecified,
-        uint256 bestQuote
-    );
+    event AuctionExecuted(address indexed winner, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
 
     constructor(IPoolManager _poolManager, IPropAMMIndex _index) BaseHook(_poolManager) {
         index = _index;
@@ -78,12 +73,11 @@ contract PropAMMAuctionHook is BaseHook {
         revert LiquidityNotAllowed();
     }
 
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         // 1. Run auction and get winner + their specific hookData
         (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData) =
             _auction(key.currency0, key.currency1, params, hookData);
@@ -94,9 +88,7 @@ contract PropAMMAuctionHook is BaseHook {
             SwapParams({
                 zeroForOne: params.zeroForOne,
                 amountSpecified: params.amountSpecified,
-                sqrtPriceLimitX96: params.zeroForOne
-                    ? TickMath.MIN_SQRT_PRICE + 1
-                    : TickMath.MAX_SQRT_PRICE - 1
+                sqrtPriceLimitX96: params.zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
             }),
             winnerHookData
         );
@@ -112,12 +104,7 @@ contract PropAMMAuctionHook is BaseHook {
     // ──── Internal: Auction Router ────
 
     /// @dev Decode AuctionHookData and dispatch to the appropriate auction path.
-    function _auction(
-        Currency currency0,
-        Currency currency1,
-        SwapParams calldata params,
-        bytes calldata hookData
-    )
+    function _auction(Currency currency0, Currency currency1, SwapParams calldata params, bytes calldata hookData)
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
@@ -136,8 +123,7 @@ contract PropAMMAuctionHook is BaseHook {
             winnerHookData = quoteHookData;
         } else {
             // Targeted: query specified quoters with per-quoter curve data
-            (winnerPoolKey, winner, bestQuote, winnerHookData) =
-                _runTargeted(params, ahd.attestationData, ahd.targets);
+            (winnerPoolKey, winner, bestQuote, winnerHookData) = _runTargeted(params, ahd.attestationData, ahd.targets);
         }
     }
 
@@ -159,11 +145,12 @@ contract PropAMMAuctionHook is BaseHook {
 
             try IQuoterHook(quoters[i].hook).getIndicativeQuote{gas: quoters[i].maxGas}(
                 quoters[i].poolKey, params.zeroForOne, params.amountSpecified, quoteHookData
-            ) returns (uint256 quote) {
+            ) returns (
+                uint256 quote
+            ) {
                 if (quote == 0) continue;
 
-                bool isBetter = !foundValid
-                    || (isExactInput ? quote > bestQuote : quote < bestQuote);
+                bool isBetter = !foundValid || (isExactInput ? quote > bestQuote : quote < bestQuote);
 
                 if (isBetter) {
                     bestQuote = quote;
@@ -180,11 +167,7 @@ contract PropAMMAuctionHook is BaseHook {
     // ──── Internal: Targeted Path ────
 
     /// @dev Query specific quoters with per-quoter curve data, return the best one.
-    function _runTargeted(
-        SwapParams calldata params,
-        bytes memory attestationData,
-        TargetedQuoter[] memory targets
-    )
+    function _runTargeted(SwapParams calldata params, bytes memory attestationData, TargetedQuoter[] memory targets)
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
@@ -198,8 +181,7 @@ contract PropAMMAuctionHook is BaseHook {
 
             if (quote == 0) continue;
 
-            bool isBetter = !foundValid
-                || (isExactInput ? quote > bestQuote : quote < bestQuote);
+            bool isBetter = !foundValid || (isExactInput ? quote > bestQuote : quote < bestQuote);
 
             if (isBetter) {
                 bestQuote = quote;
@@ -226,16 +208,14 @@ contract PropAMMAuctionHook is BaseHook {
         try index.getQuoter(hook, target.poolKey) returns (QuoterEntry memory entry) {
             if (!entry.isLive) return (0, "");
 
-            quoterHookData = abi.encode(
-                QuoterHookData({
-                    attestationData: attestationData,
-                    curveUpdateData: target.curveUpdateData
-                })
-            );
+            quoterHookData =
+                abi.encode(QuoterHookData({attestationData: attestationData, curveUpdateData: target.curveUpdateData}));
 
             try IQuoterHook(hook).getIndicativeQuote{gas: entry.maxGas}(
                 target.poolKey, zeroForOne, amountSpecified, quoterHookData
-            ) returns (uint256 q) {
+            ) returns (
+                uint256 q
+            ) {
                 quote = q;
             } catch {}
         } catch {}
@@ -244,11 +224,7 @@ contract PropAMMAuctionHook is BaseHook {
     // ──── Internal: Helpers ────
 
     /// @dev Build attestation-only QuoterHookData, or empty bytes if no attestation.
-    function _buildAttestationHookData(bytes memory attestationData)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function _buildAttestationHookData(bytes memory attestationData) internal pure returns (bytes memory) {
         if (attestationData.length == 0) return "";
         return abi.encode(QuoterHookData({attestationData: attestationData, curveUpdateData: ""}));
     }

@@ -57,9 +57,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
             Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        hook = FlatLevelQuoterHook(
-            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
-        );
+        hook = FlatLevelQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "FlatLevelQuoterHook",
             abi.encode(manager, address(index), address(attestationRegistry), uint32(50_000), owner),
@@ -67,13 +65,8 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         );
 
         // Create pool key (no dynamic fee needed — hook uses delta override, not fee override)
-        testPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 0,
-            tickSpacing: 1,
-            hooks: IHooks(address(hook))
-        });
+        testPoolKey =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(hook))});
 
         // Initialize pool (triggers afterInitialize → registers in index)
         manager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
@@ -83,10 +76,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         hook.updateFlatPricingState(
             testPoolKey,
             FlatLevelQuoterHook.FlatPricingState({
-                bidCoefficient: BID_COEFFICIENT,
-                askCoefficient: ASK_COEFFICIENT,
-                attestedDiscountBps: 5,
-                live: true
+                bidCoefficient: BID_COEFFICIENT, askCoefficient: ASK_COEFFICIENT, attestedDiscountBps: 5, live: true
             })
         );
 
@@ -128,9 +118,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
             )
         );
         modifyLiquidityRouter.modifyLiquidity(
-            testPoolKey,
-            ModifyLiquidityParams({tickLower: -1, tickUpper: 1, liquidityDelta: 1e18, salt: 0}),
-            ""
+            testPoolKey, ModifyLiquidityParams({tickLower: -1, tickUpper: 1, liquidityDelta: 1e18, salt: 0}), ""
         );
     }
 
@@ -255,10 +243,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         hook.updateFlatPricingState(
             testPoolKey,
             FlatLevelQuoterHook.FlatPricingState({
-                bidCoefficient: 1e18,
-                askCoefficient: 1e18,
-                attestedDiscountBps: 0,
-                live: true
+                bidCoefficient: 1e18, askCoefficient: 1e18, attestedDiscountBps: 0, live: true
             })
         );
     }

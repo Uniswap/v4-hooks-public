@@ -17,8 +17,8 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 ///         with each quoter's curve update. The winner's nested swap receives its
 ///         specific curve update for on-chain application.
 struct AuctionHookData {
-    bytes attestationData;       // Shared attestation payload (optional)
-    TargetedQuoter[] targets;    // Empty = discovery mode; non-empty = targeted mode
+    bytes attestationData; // Shared attestation payload (optional)
+    TargetedQuoter[] targets; // Empty = discovery mode; non-empty = targeted mode
 }
 
 /// @notice A specific quoter to query in targeted auction mode.
@@ -26,6 +26,6 @@ struct AuctionHookData {
 ///      FlatPricingState for FlatLevel). The auction hook does not interpret it — it
 ///      passes it through to the target quoter via QuoterHookData.curveUpdateData.
 struct TargetedQuoter {
-    PoolKey poolKey;             // The quoter's pool key (hook address embedded in poolKey.hooks)
-    bytes curveUpdateData;       // Quoter-specific signed curve update, or empty
+    PoolKey poolKey; // The quoter's pool key (hook address embedded in poolKey.hooks)
+    bytes curveUpdateData; // Quoter-specific signed curve update, or empty
 }

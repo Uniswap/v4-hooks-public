@@ -53,8 +53,7 @@ interface IPropAMMIndex {
     /// @dev MUST revert if msg.sender != address(poolKey.hooks) (self-gating).
     /// @dev MUST revert if a registration already exists for this (hook, poolKey).
     /// @dev MUST emit QuoterRegistered.
-    function register(PoolKey calldata poolKey, QuoterType quoterType, uint32 maxGas, bytes calldata metadata)
-        external;
+    function register(PoolKey calldata poolKey, QuoterType quoterType, uint32 maxGas, bytes calldata metadata) external;
 
     /// @notice Update liveness and/or metadata for an existing registration.
     /// @dev MUST revert if msg.sender != address(poolKey.hooks).

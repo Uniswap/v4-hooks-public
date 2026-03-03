@@ -61,11 +61,7 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
         uint32 maxGas_,
         address owner_,
         string memory eip712Name
-    )
-        BasePropAMMHook(_poolManager, _index, _attestationRegistry, maxGas_)
-        EIP712(eip712Name, "1")
-        Ownable(owner_)
-    {}
+    ) BasePropAMMHook(_poolManager, _index, _attestationRegistry, maxGas_) EIP712(eip712Name, "1") Ownable(owner_) {}
 
     // ──── IQuoterHook ────
 
@@ -76,12 +72,12 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
     /// @notice Indicative quote with hookData-aware pricing.
     /// @dev If hookData contains a curve update, the new pricing is used for the simulation
     ///      without modifying storage (view function).
-    function getIndicativeQuote(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    ) external view override returns (uint256 outputAmount) {
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        view
+        override
+        returns (uint256 outputAmount)
+    {
         PricingState memory state = pricingState[key.toId()];
         bool isAttested;
         address attester;
@@ -107,11 +103,7 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
 
     // ──── Hook Lifecycle ────
 
-    function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick)
-        internal
-        override
-        returns (bytes4)
-    {
+    function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick) internal override returns (bytes4) {
         _registerInIndex(key, QuoterType.HOOKDATA, "");
 
         // Auto-set active tick aligned to tickSpacing (floor division)
@@ -122,12 +114,11 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
         return IHooks.afterInitialize.selector;
     }
 
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         if (hookData.length > 0) {
             QuoterHookData memory hd = abi.decode(hookData, (QuoterHookData));
             if (hd.curveUpdateData.length > 0) {
@@ -148,13 +139,12 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
 
     // ──── Pricing ────
 
-    function _price(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool isAttested,
-        address attester
-    ) internal view override returns (uint256 outputAmount) {
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
+        internal
+        view
+        override
+        returns (uint256 outputAmount)
+    {
         return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, pricingState[key.toId()]);
     }
 
@@ -169,9 +159,8 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
         if (!state.live) return 0;
 
         uint24 feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
-        outputAmount = SwapSimulator.simulateSwap(
-            poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing
-        );
+        outputAmount =
+            SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing);
 
         if (isAttested && state.attestedDiscountBps > 0) {
             outputAmount = (outputAmount * (10_000 + state.attestedDiscountBps)) / 10_000;
@@ -201,12 +190,10 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
         // else: same update, no-op
     }
 
-    function _verifySignature(
-        PricingState memory state,
-        PoolId poolId,
-        uint256 deadline,
-        bytes memory sig
-    ) internal view {
+    function _verifySignature(PricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)
+        internal
+        view
+    {
         bytes32 structHash = keccak256(
             abi.encode(
                 PRICING_UPDATE_TYPEHASH,

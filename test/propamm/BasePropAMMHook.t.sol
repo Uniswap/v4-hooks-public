@@ -40,12 +40,9 @@ contract BasePropAMMHookTest is Test, Deployers {
         attestationRegistry.addAttester(attester);
 
         // Deploy MockQuoterHook at a flag-mined address
-        uint160 flags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        );
-        hook = MockQuoterHook(
-            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
-        );
+        uint160 flags =
+            uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
+        hook = MockQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "MockQuoterHook",
             abi.encode(manager, address(index), address(attestationRegistry), uint32(50_000)),
@@ -54,13 +51,8 @@ contract BasePropAMMHookTest is Test, Deployers {
 
         tokenA = Currency.wrap(address(0xA));
         tokenB = Currency.wrap(address(0xB));
-        testPoolKey = PoolKey({
-            currency0: tokenA,
-            currency1: tokenB,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
-        });
+        testPoolKey =
+            PoolKey({currency0: tokenA, currency1: tokenB, fee: 3000, tickSpacing: 60, hooks: IHooks(address(hook))});
 
         // Set default prices
         hook.setPrice(1000e18, 1001e18);
@@ -75,8 +67,7 @@ contract BasePropAMMHookTest is Test, Deployers {
     // ──── getIndicativeQuote ────
 
     function test_getIndicativeQuote_unattested() public view {
-        uint256 output =
-            hook.getIndicativeQuote(testPoolKey, true, -1e18, "");
+        uint256 output = hook.getIndicativeQuote(testPoolKey, true, -1e18, "");
         assertEq(output, 1000e18);
     }
 
@@ -90,8 +81,7 @@ contract BasePropAMMHookTest is Test, Deployers {
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
         bytes memory hookData = abi.encode(QuoterHookData({attestationData: attestationData, curveUpdateData: ""}));
 
-        uint256 output =
-            hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
+        uint256 output = hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
         assertEq(output, 1001e18);
     }
 
@@ -99,8 +89,7 @@ contract BasePropAMMHookTest is Test, Deployers {
         // Bad attestation data wrapped in valid QuoterHookData struct
         bytes memory hookData = abi.encode(QuoterHookData({attestationData: hex"deadbeef0000", curveUpdateData: ""}));
 
-        uint256 output =
-            hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
+        uint256 output = hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
         assertEq(output, 1000e18);
     }
 

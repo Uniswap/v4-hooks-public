@@ -26,10 +26,7 @@ contract AttestationRegistryTest is Test {
 
     function _makeAttestation(uint256 deadline) internal view returns (Attestation memory) {
         return Attestation({
-            attester: attester,
-            swapper: swapper,
-            deadline: deadline,
-            swapHash: keccak256(abi.encode("test-swap"))
+            attester: attester, swapper: swapper, deadline: deadline, swapHash: keccak256(abi.encode("test-swap"))
         });
     }
 

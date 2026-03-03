@@ -9,7 +9,11 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {
+    BeforeSwapDelta,
+    BeforeSwapDeltaLibrary,
+    toBeforeSwapDelta
+} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -97,12 +101,12 @@ contract FlatLevelQuoterHook is BasePropAMMHook, EIP712, Ownable2Step {
     }
 
     /// @notice Indicative quote with hookData-aware pricing.
-    function getIndicativeQuote(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    ) external view override returns (uint256 outputAmount) {
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        view
+        override
+        returns (uint256 outputAmount)
+    {
         FlatPricingState memory state = flatPricingState[key.toId()];
         bool isAttested;
         address attester;
@@ -128,11 +132,7 @@ contract FlatLevelQuoterHook is BasePropAMMHook, EIP712, Ownable2Step {
 
     // ──── Hook Lifecycle ────
 
-    function _afterInitialize(address, PoolKey calldata key, uint160, int24)
-        internal
-        override
-        returns (bytes4)
-    {
+    function _afterInitialize(address, PoolKey calldata key, uint160, int24) internal override returns (bytes4) {
         _registerInIndex(key, QuoterType.HOOKDATA, "");
         return IHooks.afterInitialize.selector;
     }
@@ -146,12 +146,11 @@ contract FlatLevelQuoterHook is BasePropAMMHook, EIP712, Ownable2Step {
         revert LiquidityNotAllowed();
     }
 
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         // Apply hookData curve update if present
         if (hookData.length > 0) {
             QuoterHookData memory hd = abi.decode(hookData, (QuoterHookData));
@@ -216,17 +215,19 @@ contract FlatLevelQuoterHook is BasePropAMMHook, EIP712, Ownable2Step {
 
     // ──── Pricing ────
 
-    function _price(
-        PoolKey calldata,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool isAttested,
-        address attester
-    ) internal view override returns (uint256 outputAmount) {
+    function _price(PoolKey calldata, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
+        internal
+        view
+        override
+        returns (uint256 outputAmount)
+    {
         // This is called by the default getIndicativeQuote in BasePropAMMHook
         // (which won't be reached since we override getIndicativeQuote above)
         // but we implement it for completeness
-        return _priceWithState(zeroForOne, amountSpecified, isAttested, attester, flatPricingState[PoolId.wrap(bytes32(0))]);
+        return
+            _priceWithState(
+                zeroForOne, amountSpecified, isAttested, attester, flatPricingState[PoolId.wrap(bytes32(0))]
+            );
     }
 
     function _priceWithState(
@@ -269,12 +270,10 @@ contract FlatLevelQuoterHook is BasePropAMMHook, EIP712, Ownable2Step {
         }
     }
 
-    function _verifySignature(
-        FlatPricingState memory state,
-        PoolId poolId,
-        uint256 deadline,
-        bytes memory sig
-    ) internal view {
+    function _verifySignature(FlatPricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)
+        internal
+        view
+    {
         bytes32 structHash = keccak256(
             abi.encode(
                 FLAT_PRICING_UPDATE_TYPEHASH,

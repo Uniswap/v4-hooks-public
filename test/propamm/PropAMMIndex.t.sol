@@ -27,13 +27,7 @@ contract PropAMMIndexTest is Test {
     }
 
     function _poolKey(address hook, Currency c0, Currency c1) internal pure returns (PoolKey memory) {
-        return PoolKey({
-            currency0: c0,
-            currency1: c1,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(hook)
-        });
+        return PoolKey({currency0: c0, currency1: c1, fee: 3000, tickSpacing: 60, hooks: IHooks(hook)});
     }
 
     // ──── register ────

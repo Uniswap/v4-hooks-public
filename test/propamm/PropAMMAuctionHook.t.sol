@@ -62,23 +62,16 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         attestationRegistry.addAttester(attester);
 
         // ── Deploy auction hook ──
-        uint160 auctionFlags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        );
+        uint160 auctionFlags =
+            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
         auctionHook = PropAMMAuctionHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags))
         );
-        deployCodeTo(
-            "PropAMMAuctionHook",
-            abi.encode(manager, address(index)),
-            address(auctionHook)
-        );
+        deployCodeTo("PropAMMAuctionHook", abi.encode(manager, address(index)), address(auctionHook));
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG
-                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+            Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG
         );
         quoterA = SimpleSpreadQuoterHook(
@@ -117,11 +110,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         });
 
         auctionPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 0,
-            tickSpacing: 1,
-            hooks: IHooks(address(auctionHook))
+            currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(auctionHook))
         });
 
         // ── Initialize pools (quoters at tick 30 → inside LP range [0,60)) ──
@@ -165,12 +154,9 @@ contract PropAMMAuctionHookTest is Test, Deployers {
 
     // ──── Helpers ────
 
-    function _seedAtActiveTick(
-        PoolKey memory key_,
-        SpreadQuoterBase quoter,
-        uint256 amount0,
-        uint256 amount1
-    ) internal {
+    function _seedAtActiveTick(PoolKey memory key_, SpreadQuoterBase quoter, uint256 amount0, uint256 amount1)
+        internal
+    {
         int24 activeTick = quoter.activeLowerTick(key_.toId());
         (uint160 sqrtPriceX96,,,) = manager.getSlot0(key_.toId());
         uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
@@ -183,10 +169,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(
             key_,
             ModifyLiquidityParams({
-                tickLower: activeTick,
-                tickUpper: activeTick + key_.tickSpacing,
-                liquidityDelta: int128(liq),
-                salt: 0
+                tickLower: activeTick, tickUpper: activeTick + key_.tickSpacing, liquidityDelta: int128(liq), salt: 0
             }),
             ""
         );
@@ -301,9 +284,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
             )
         );
         modifyLiquidityRouter.modifyLiquidity(
-            auctionPoolKey,
-            ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}),
-            ""
+            auctionPoolKey, ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}), ""
         );
     }
 
@@ -317,7 +298,8 @@ contract PropAMMAuctionHookTest is Test, Deployers {
             swapHash: keccak256("test")
         });
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-        bytes memory hookData = abi.encode(AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0)}));
+        bytes memory hookData =
+            abi.encode(AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0)}));
 
         // A's 5% bidFee simulation ≈ 0.95, +5bps attestation → ~0.9505
         // B's 1% bidFee simulation ≈ 0.99, no discount → 0.99
@@ -345,10 +327,11 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         return abi.encode(AuctionHookData({attestationData: "", targets: targets}));
     }
 
-    function _buildTargetedHookDataWithAttestation(
-        bytes memory attestationData,
-        TargetedQuoter[] memory targets
-    ) internal pure returns (bytes memory) {
+    function _buildTargetedHookDataWithAttestation(bytes memory attestationData, TargetedQuoter[] memory targets)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encode(AuctionHookData({attestationData: attestationData, targets: targets}));
     }
 
@@ -436,7 +419,8 @@ contract PropAMMAuctionHookTest is Test, Deployers {
 
         // A: 5% bidFee ≈ 0.95 + 5bps → ~0.9505; B: 1% bidFee ≈ 0.99, no discount → 0.99
         // B still wins → nested swap through B at 1%
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookDataWithAttestation(attestationData, targets));
+        BalanceDelta delta =
+            swap(auctionPoolKey, true, -1e18, _buildTargetedHookDataWithAttestation(attestationData, targets));
 
         assertEq(delta.amount0(), -1e18);
         assertApproxEqRel(uint256(int256(delta.amount1())), 0.99e18, 0.01e18);
