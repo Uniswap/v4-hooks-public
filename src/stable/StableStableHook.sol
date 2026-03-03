@@ -135,19 +135,24 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
             decayingFeeE12 = FeeCalculation.UNDEFINED_DECAYING_FEE_E12; // No decaying fee inside optimal range
         } else {
             // Outside optimal range: The fee is calculated such that the fee decays exponentially toward a target fee
-            // farBoundaryFeeE12 represents the fee to reach whichever boundary is farther from the current AMM price.
-            uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, optimalFeeE6);
+            if (isNewBlock) {
+                // farBoundaryFeeE12 represents the fee to reach whichever boundary is farther from the current AMM price.
+                uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, optimalFeeE6);
 
-            // closeBoundaryFeeE12 is positive since we are outside the optimal range
-            decayingFeeE12 = _calculateDecayingFee(
-                poolFeeConfig,
-                poolFeeState,
-                sqrtAmmPriceX96,
-                sqrtReferencePriceX96,
-                uint256(closeBoundaryFeeE12),
-                farBoundaryFeeE12,
-                ammPriceBelowRP
-            );
+                // closeBoundaryFeeE12 is positive since we are outside the optimal range
+                decayingFeeE12 = _calculateDecayingFee(
+                    poolFeeConfig,
+                    poolFeeState,
+                    sqrtAmmPriceX96,
+                    sqrtReferencePriceX96,
+                    uint256(closeBoundaryFeeE12),
+                    farBoundaryFeeE12,
+                    ammPriceBelowRP
+                );
+            } else {
+                // Same block: reuse the decaying fee calculated on the first swap
+                decayingFeeE12 = poolFeeState.decayingFeeE12;
+            }
 
             // Select which fee to charge based on swap direction
             // Price is moving further from reference: charge 0 fee. Otherwise, charge the decaying fee.
