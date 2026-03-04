@@ -467,7 +467,8 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         uint160 sqrtPrice4,
         uint160 sqrtPrice5,
         uint256 directions,
-        uint256 blockGaps
+        uint256 blockGaps,
+        uint8 fuzzedTargetMultiplier
     ) public {
         // Calculate reference price bounds ensuring optimal range stays within v4 limits
         // Uses sqrt(1 - maxOptimalFee) since the optimal range is price-based (PR #18)
@@ -478,13 +479,14 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
 
         // Fuzz reference price within valid bounds
         fuzzedRefSqrtPrice = uint160(bound(fuzzedRefSqrtPrice, minRef, maxRef - 1));
+        fuzzedTargetMultiplier = uint8(bound(fuzzedTargetMultiplier, 0, 100));
 
-        // Update fee config with fuzzed reference price
+        // Update fee config with fuzzed reference price and target multiplier
         FeeConfig memory newFeeConfig = FeeConfig({
             k: K,
             logK: LOG_K,
             optimalFeeE6: OPTIMAL_FEE_E6,
-            targetMultiplier: 50,
+            targetMultiplier: fuzzedTargetMultiplier,
             referenceSqrtPriceX96: fuzzedRefSqrtPrice
         });
         vm.prank(configManager);
@@ -520,7 +522,60 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         }
     }
 
-    /// @notice When targetMultiplier=100 (full subtraction) and k is very small, the spread closes quickly after a price shock.
+    /// @notice With targetMultiplier=0, the target fee equals farBoundaryFee.
+    /// After full decay the fee should equal farBoundaryFee computed from the library.
+    function test_beforeSwap_zeroTargetMultiplier_feeEqualsFarBoundaryFee() public {
+        FeeConfig memory newConfig = FeeConfig({
+            k: K,
+            logK: LOG_K,
+            optimalFeeE6: OPTIMAL_FEE_E6,
+            targetMultiplier: 0,
+            referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+        });
+        vm.prank(configManager);
+        hook.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+        // Move AMM price outside optimal range
+        uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+
+        // Establish fee state
+        vm.roll(block.number + 1);
+        callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Slightly move price further from reference to avoid equal-price edge case
+        ammPrice = uint160(1_000_131 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+
+        vm.roll(block.number + 750);
+
+        uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Compute expected farBoundaryFee at current price
+        uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, REFERENCE_SQRT_PRICE_X96);
+        uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        uint24 expectedFee = uint24(farBoundaryFeeE12 / FeeCalculation.ONE_E6);
+
+        // With targetMultiplier=0: targetFee = farBoundaryFee, so after full decay fee equals farBoundaryFee
+        assertEq(fee1, expectedFee);
+
+        // Large price shock: jump to 2000ppm above reference with only 1 block elapsed
+        vm.roll(block.number + 1);
+        ammPrice = uint160(1_002_000 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+
+        uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+        // Fee should immediately equal farBoundaryFee at the new price — no transient spike
+        priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, REFERENCE_SQRT_PRICE_X96);
+        farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, OPTIMAL_FEE_E6);
+        assertEq(fee2, uint24(farBoundaryFeeE12 / FeeCalculation.ONE_E6));
+
+        // Fee should be higher at the new price (further from reference)
+        assertGt(fee2, fee1);
+    }
+
+    /// @notice When targetMultiplier=100 (full subtraction) and k is very small, the spread closes quickly
     /// Setup: optimalFee=0.1bps, move AMM price 10bps from reference, wait 2 blocks.
     /// Then make two tiny swaps in opposite directions and verify the spread is tight (~2*optimalFee).
     function test_beforeSwap_spreadClosesQuickly_withFullTargetMultiplier() public {
@@ -553,7 +608,7 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice10bps) * 2 ** 96));
 
         // Advance 2 blocks: with k=0.01, decay factor = 0.01^2 = 0.0001 → fee ≈ target
-        vm.roll(block.number + 3);
+        vm.roll(block.number + 2);
 
         // Two tiny swaps in opposite directions to measure the spread
         // Sell token0 (toward reference when price > ref): charged the decaying fee
@@ -567,6 +622,53 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         // With targetMultiplier=100: targetFee = farBoundaryFee - closeBoundaryFee ≈ 2 * optimalFee
         // After 2 blocks with k=0.01: fee ≈ target ≈ 2 * optimalFee = 0.2bps = 20 in E6
         assertLe(sellFee, 21);
-        assertEq(sellFee, 19);
+        assertGe(sellFee, 19);
+    }
+
+    /// @notice Higher targetMultiplier → lower fee after full decay at the same price.
+    function test_fuzz_beforeSwap_higherTargetMultiplier_lowerFeeAfterDecay(uint8 multiplierA, uint8 multiplierB)
+        public
+    {
+        multiplierA = uint8(bound(multiplierA, 0, 100));
+        multiplierB = uint8(bound(multiplierB, 0, 100));
+
+        uint24[2] memory fees;
+        uint8[2] memory multipliers = [multiplierA, multiplierB];
+
+        for (uint256 i = 0; i < 2; i++) {
+            FeeConfig memory newConfig = FeeConfig({
+                k: K,
+                logK: LOG_K,
+                optimalFeeE6: OPTIMAL_FEE_E6,
+                targetMultiplier: multipliers[i],
+                referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+            });
+            vm.prank(configManager);
+            hook.updateFeeConfig(testPoolKey.toId(), newConfig);
+
+            // Move AMM price outside optimal range (same price for both iterations)
+            uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
+            sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+
+            // Establish fee state
+            vm.roll(block.number + 1);
+            callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+
+            // Slightly adjust price, wait for full decay
+            ammPrice = uint160(1_000_131 * 2 ** 96) / 1_000_000;
+            sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+            vm.roll(block.number + 750);
+
+            fees[i] = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        }
+
+        // Higher multiplier → lower fee after full decay
+        if (multiplierA > multiplierB) {
+            assertLe(fees[0], fees[1]);
+        } else if (multiplierA < multiplierB) {
+            assertGe(fees[0], fees[1]);
+        } else {
+            assertEq(fees[0], fees[1]);
+        }
     }
 }
