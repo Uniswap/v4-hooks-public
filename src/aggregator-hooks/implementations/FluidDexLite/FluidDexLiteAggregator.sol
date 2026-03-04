@@ -113,7 +113,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
         localPoolId = key.toId();
 
         emit AggregatorPoolRegistered(key.toId());
-        pollTokenJar(poolManager);
+        pollTokenJar();
         return IHooks.beforeInitialize.selector;
     }
 

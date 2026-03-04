@@ -22,15 +22,10 @@ abstract contract ProtocolFees {
     event TokenJarUpdated(address indexed tokenJar);
 
     /// @notice Queries the token jar from the pool manager and emits an event if it is updated
-    /// @param poolManager The pool manager to query
     /// @return The token jar address
     /// @dev This function should not need to be called externally except in the case of the tokenJar address changing
     /// after the protocol fee has been set
-    function pollTokenJar(IPoolManager poolManager) public returns (address) {
-        tokenJar = _getTokenJar(poolManager);
-        if (tokenJar != address(0)) emit TokenJarUpdated(tokenJar);
-        return tokenJar;
-    }
+    function pollTokenJar() public virtual returns (address);
 
     function _applyProtocolFee(
         IPoolManager poolManager,
@@ -42,7 +37,7 @@ abstract contract ProtocolFees {
 
         if (protocolFee == 0) return 0;
         // Assumes that if a protocol fee is set, there should be a token jar.
-        if (tokenJar == address(0)) pollTokenJar(poolManager);
+        if (tokenJar == address(0)) pollTokenJar();
         if (tokenJar == address(0)) return 0;
 
         bool isExactInput = params.amountSpecified < 0;

@@ -38,6 +38,13 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         aggregatorHookVersion = _aggregatorHookVersion;
     }
 
+    /// @inheritdoc ProtocolFees
+    function pollTokenJar() public virtual override returns (address) {
+        tokenJar = _getTokenJar(poolManager);
+        if (tokenJar != address(0)) emit TokenJarUpdated(tokenJar);
+        return tokenJar;
+    }
+
     /// @inheritdoc IAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
 
@@ -98,7 +105,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         emit AggregatorPoolRegistered(key.toId());
         // NOTE: Token jar will be grabbed in first protocol fee payment if not done here.
-        pollTokenJar(poolManager);
+        pollTokenJar();
         return IHooks.beforeInitialize.selector;
     }
 

@@ -107,7 +107,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         IERC20(token1).forceApprove(address(tempoExchange), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
-        pollTokenJar(poolManager);
+        pollTokenJar();
         return IHooks.beforeInitialize.selector;
     }
 

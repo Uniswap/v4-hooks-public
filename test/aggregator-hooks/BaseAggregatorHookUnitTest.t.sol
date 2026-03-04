@@ -177,13 +177,13 @@ contract BaseAggregatorHookUnitTest is Test {
 
     function test_pollTokenJar_unsetFeeController() public {
         poolManager.setProtocolFeeController(address(0));
-        hook.pollTokenJar(poolManager);
+        hook.pollTokenJar();
         assertEq(hook.tokenJar(), address(0));
     }
 
     function test_pollTokenJar_invalidFeeController() public {
         poolManager.setProtocolFeeController(makeAddr("invalidTokenJar"));
-        hook.pollTokenJar(poolManager);
+        hook.pollTokenJar();
         assertEq(hook.tokenJar(), address(0));
     }
 
