@@ -279,43 +279,24 @@ contract StableStableQuoterHook is BasePropAMMHook, FeeConfiguration, EIP712, Ow
         }
     }
 
-    // ──── Dynamic Fee Calculation (storage refs, used by _beforeSwap and _price) ────
+    // ──── Dynamic Fee Calculation ────
 
+    /// @dev Storage-ref convenience wrapper: loads to memory and delegates.
     function _computeDynamicFee(
         FeeConfig storage config,
         FeeState storage state,
         uint160 sqrtAmmPriceX96,
         bool zeroForOne
     ) internal view returns (uint256 lpFeeE12, uint256 decayingFeeE12) {
-        uint256 sqrtReferencePriceX96 = config.referenceSqrtPriceX96;
-        uint256 optimalFeeE6 = config.optimalFeeE6;
-        uint256 priceRatioX96 = FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, sqrtReferencePriceX96);
-        int256 closeBoundaryFeeE12 = FeeCalculation.calculateCloseBoundaryFee(priceRatioX96, optimalFeeE6);
-
-        bool ammPriceBelowRP = sqrtAmmPriceX96 < sqrtReferencePriceX96;
-
-        if (closeBoundaryFeeE12 <= 0) {
-            lpFeeE12 =
-                FeeCalculation.calculateInsideOptimalRangeFee(priceRatioX96, optimalFeeE6, ammPriceBelowRP, zeroForOne);
-            decayingFeeE12 = FeeCalculation.UNDEFINED_DECAYING_FEE_E12;
-        } else {
-            uint256 farBoundaryFeeE12 = FeeCalculation.calculateFarBoundaryFee(priceRatioX96, optimalFeeE6);
-
-            decayingFeeE12 = _calculateDecayingFee(
-                config,
-                state,
-                sqrtAmmPriceX96,
-                sqrtReferencePriceX96,
-                uint256(closeBoundaryFeeE12),
-                farBoundaryFeeE12,
-                ammPriceBelowRP
-            );
-
-            lpFeeE12 = (ammPriceBelowRP == zeroForOne) ? 0 : decayingFeeE12;
-        }
+        return _computeDynamicFeeFromMemory(
+            FeeConfig(config.k, config.logK, config.optimalFeeE6, config.referenceSqrtPriceX96),
+            FeeState(state.decayingFeeE12, state.sqrtAmmPriceX96, state.blockNumber),
+            sqrtAmmPriceX96,
+            zeroForOne
+        );
     }
 
-    /// @dev Memory-parameter variant for getIndicativeQuote with curve update overrides.
+    /// @dev Core fee calculation operating on memory params.
     function _computeDynamicFeeFromMemory(
         FeeConfig memory config,
         FeeState memory state,
@@ -350,48 +331,8 @@ contract StableStableQuoterHook is BasePropAMMHook, FeeConfiguration, EIP712, Ow
         }
     }
 
-    // ──── Decaying Fee (storage refs) ────
+    // ──── Decaying Fee ────
 
-    function _calculateDecayingFee(
-        FeeConfig storage poolFeeConfig,
-        FeeState storage poolFeeState,
-        uint256 sqrtAmmPriceX96,
-        uint256 sqrtReferencePriceX96,
-        uint256 closeBoundaryFeeE12,
-        uint256 farBoundaryFeeE12,
-        bool ammPriceBelowRP
-    ) private view returns (uint256 decayingFeeE12) {
-        uint256 previousSqrtAmmPriceX96 = poolFeeState.sqrtAmmPriceX96;
-        uint256 previousDecayingFeeE12 = poolFeeState.decayingFeeE12;
-        uint256 previousBlockNumber = poolFeeState.blockNumber;
-
-        uint256 decayStartFeeE12;
-        if (
-            previousDecayingFeeE12 == FeeCalculation.UNDEFINED_DECAYING_FEE_E12
-                || (previousSqrtAmmPriceX96 < sqrtReferencePriceX96) != ammPriceBelowRP
-        ) {
-            decayStartFeeE12 = farBoundaryFeeE12;
-        } else if (ammPriceBelowRP == (sqrtAmmPriceX96 < previousSqrtAmmPriceX96)) {
-            uint256 priceMovementRatioX96 =
-                FeeCalculation.calculatePriceRatioX96(sqrtAmmPriceX96, previousSqrtAmmPriceX96);
-            decayStartFeeE12 =
-                FeeCalculation.adjustPreviousFeeForPriceMovement(priceMovementRatioX96, previousDecayingFeeE12);
-        } else if (previousDecayingFeeE12 > farBoundaryFeeE12) {
-            decayStartFeeE12 = farBoundaryFeeE12;
-        } else {
-            decayStartFeeE12 = previousDecayingFeeE12;
-        }
-
-        decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            farBoundaryFeeE12 - closeBoundaryFeeE12 / 2,
-            decayStartFeeE12,
-            poolFeeConfig.k,
-            poolFeeConfig.logK,
-            _getBlockNumberish() - previousBlockNumber
-        );
-    }
-
-    /// @dev Memory-parameter variant for getIndicativeQuote with curve update overrides.
     function _calculateDecayingFeeFromMemory(
         FeeConfig memory poolFeeConfig,
         FeeState memory poolFeeState,
