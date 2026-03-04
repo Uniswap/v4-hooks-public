@@ -222,9 +222,10 @@ contract StableStableHook is FeeConfiguration, BaseHook, Ownable, IStableStableH
 
         // Apply exponential decay toward target
         decayingFeeE12 = FeeCalculation.calculateDecayingFee(
-            // Calculate target fee. Subtracting half the closeBoundaryFee is a design choice that controls how
-            // aggressively the target fee drops below farBoundaryFee as price moves further from optimal range.
-            farBoundaryFeeE12 - closeBoundaryFeeE12 / 2,
+            // Calculate target fee. targetMultiplier (0-100) controls how aggressively the target fee
+            // drops below farBoundaryFee as price moves further from optimal range.
+            // 100 = full subtraction (tightest spread), 50 = half, 0 = no reduction.
+            farBoundaryFeeE12 - closeBoundaryFeeE12 * poolFeeConfig.targetMultiplier / MAX_TARGET_MULTIPLIER,
             decayStartFeeE12,
             poolFeeConfig.k,
             poolFeeConfig.logK,
