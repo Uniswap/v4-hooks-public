@@ -310,6 +310,20 @@ contract StableStableHookBeforeSwapTest is Test, Deployers {
         vm.snapshotGasLastCall("beforeSwap_outsideOptimalRange");
     }
 
+    function test_beforeSwap_sameBlock_outsideOptimalRange_gas() public {
+        uint160 ammPrice = uint160(1_000_130 * 2 ** 96) / 1_000_000;
+        sqrtAmmPriceX96 = uint160(FixedPointMathLib.sqrt(uint256(ammPrice) * 2 ** 96));
+        vm.roll(block.number + 750);
+
+        // First swap (new block, full calculation)
+        SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+
+        // Second swap (same block, should short-circuit _calculateDecayingFee)
+        hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
+        vm.snapshotGasLastCall("beforeSwap_sameBlock_outsideOptimalRange");
+    }
+
     // FEE CACHING: same-block swaps use the start-of-block price for fee calculation
 
     /// @notice Same-block swaps use the cached start-of-block price, not the live AMM price.
