@@ -13,6 +13,8 @@ permissions: {}
 
 jobs:
   forge-test:
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
 
