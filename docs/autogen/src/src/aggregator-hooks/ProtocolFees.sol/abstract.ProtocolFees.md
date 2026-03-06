@@ -1,5 +1,5 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/f644191534a9ca929e0635426bf2d1584785274f/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
@@ -73,11 +73,5 @@ function _getTokenJar(IPoolManager poolManager) internal view returns (address c
 
 ```solidity
 event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
-```
-
-### TokenJarUpdated
-
-```solidity
-event TokenJarUpdated(address indexed tokenJar);
 ```
 
