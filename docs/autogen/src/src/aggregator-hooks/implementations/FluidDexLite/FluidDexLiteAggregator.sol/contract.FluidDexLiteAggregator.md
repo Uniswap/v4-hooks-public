@@ -1,5 +1,5 @@
 # FluidDexLiteAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IFluidDexLiteCallback](/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol/interface.IFluidDexLiteCallback.md)
@@ -195,6 +195,12 @@ error UnauthorizedCaller();
 
 ```solidity
 error NativeCurrencyExactOut();
+```
+
+### HookAlreadyInitialized
+
+```solidity
+error HookAlreadyInitialized(PoolId poolId);
 ```
 
 ## Structs

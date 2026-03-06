@@ -1,5 +1,5 @@
 # TempoExchangeAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/44f569c0f2c8bf659eb1f2f462038e29b30030c3/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -132,6 +132,12 @@ error AmountExceedsUint128();
 
 ```solidity
 error TokensNotSupported(address token0, address token1);
+```
+
+### ExchangeDoesNotSupportPair
+
+```solidity
+error ExchangeDoesNotSupportPair(address token0, address token1);
 ```
 
 ## Structs

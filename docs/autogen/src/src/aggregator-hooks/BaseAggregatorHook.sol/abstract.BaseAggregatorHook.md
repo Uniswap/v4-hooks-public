@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/44f569c0f2c8bf659eb1f2f462038e29b30030c3/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -39,6 +39,24 @@ constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHoo
 |----|----|-----------|
 |`_manager`|`IPoolManager`|The Uniswap V4 PoolManager contract|
 |`_aggregatorHookVersion`|`string`||
+
+
+### pollTokenJar
+
+Queries the token jar from the pool manager and emits an event if it is updated
+
+This function should not need to be called externally except in the case of the tokenJar address changing
+after the protocol fee has been set
+
+
+```solidity
+function pollTokenJar() public virtual override returns (address);
+```
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`address`|The token jar address|
 
 
 ### pseudoTotalValueLocked

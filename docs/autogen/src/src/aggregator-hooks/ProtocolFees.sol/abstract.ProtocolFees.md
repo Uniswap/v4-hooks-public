@@ -1,5 +1,5 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
@@ -20,14 +20,8 @@ after the protocol fee has been set
 
 
 ```solidity
-function pollTokenJar(IPoolManager poolManager) public returns (address);
+function pollTokenJar() public virtual returns (address);
 ```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolManager`|`IPoolManager`|The pool manager to query|
-
 **Returns**
 
 |Name|Type|Description|
