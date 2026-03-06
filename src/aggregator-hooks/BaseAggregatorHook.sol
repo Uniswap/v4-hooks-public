@@ -32,6 +32,8 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     /// @dev Although this should never change after construction, strings cannot be labelled immutable.
     string public aggregatorHookVersion;
 
+    event TokenJarUpdated(address indexed tokenJar);
+
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
     constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) {

@@ -19,7 +19,6 @@ abstract contract ProtocolFees {
     address public tokenJar;
 
     event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
-    event TokenJarUpdated(address indexed tokenJar);
 
     /// @notice Queries the token jar from the pool manager and emits an event if it is updated
     /// @return The token jar address
