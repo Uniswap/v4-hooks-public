@@ -19,7 +19,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 struct AuctionHookData {
     bytes attestationData; // Shared attestation payload (optional)
     TargetedQuoter[] targets; // Empty = discovery mode; non-empty = targeted mode
-    bool strict; // If true, revert when executed output deviates from indicative quote
+    uint24 strictTolerancePips; // 0 = no check; >0 = max relative deviation (ppm) before revert
 }
 
 /// @notice A specific quoter to query in targeted auction mode.

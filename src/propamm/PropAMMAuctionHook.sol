@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
@@ -29,17 +30,31 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///
 ///         2. Targeted (targets non-empty): Queries only the specified quoters,
 ///            each receiving its own curve update alongside the shared attestation.
-contract PropAMMAuctionHook is BaseHook {
+contract PropAMMAuctionHook is BaseHook, IUnlockCallback {
+    using CurrencyLibrary for Currency;
+
+    uint256 internal constant MAX_PIPS = 1_000_000;
+
     IPropAMMIndex public immutable index;
+    uint24 public immutable protocolFeePips; // 1000 = 0.1%, 10_000 = 1%
+    address public owner;
+    address public feeRecipient;
 
     error NoValidQuotes();
     error LiquidityNotAllowed();
     error QuoteDeviation(uint256 indicative, uint256 executed);
+    error Unauthorized();
 
     event AuctionExecuted(address indexed winner, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
+    event ProtocolFeesCollected(Currency indexed currency, address indexed recipient, uint256 amount);
 
-    constructor(IPoolManager _poolManager, IPropAMMIndex _index) BaseHook(_poolManager) {
+    constructor(IPoolManager _poolManager, IPropAMMIndex _index, uint24 _protocolFeePips, address _owner)
+        BaseHook(_poolManager)
+    {
         index = _index;
+        protocolFeePips = _protocolFeePips;
+        owner = _owner;
+        feeRecipient = _owner;
     }
 
     // ──── Hook Permissions ────
@@ -99,36 +114,69 @@ contract PropAMMAuctionHook is BaseHook {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // 1. Run auction and get winner + their specific hookData
-        (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData) =
-            _auction(key.currency0, key.currency1, params.zeroForOne, params.amountSpecified, hookData);
+        uint256 feeAmount;
+        int256 swapAmount = params.amountSpecified;
 
-        // 2. Execute nested swap on winner's pool with their hookData
-        BalanceDelta nestedDelta = poolManager.swap(
-            winnerPoolKey,
-            SwapParams({
-                zeroForOne: params.zeroForOne,
-                amountSpecified: params.amountSpecified,
-                sqrtPriceLimitX96: params.zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            winnerHookData
-        );
-
-        // 3. Enforce strict mode: indicative quote must match execution
-        if (hookData.length > 0 && abi.decode(hookData, (AuctionHookData)).strict) {
-            uint256 executed = _extractOutput(nestedDelta, params);
-            if (executed != bestQuote) revert QuoteDeviation(bestQuote, executed);
+        // 1. Exact input: compute fee upfront, reduce input to nested swap
+        if (params.amountSpecified < 0 && protocolFeePips > 0) {
+            feeAmount = uint256(-params.amountSpecified) * protocolFeePips / MAX_PIPS;
+            swapAmount = params.amountSpecified + int256(feeAmount); // less negative
         }
 
-        // 4. Convert BalanceDelta → BeforeSwapDelta (negate to offset hook's nested delta)
-        BeforeSwapDelta bsd = _toBeforeSwapDelta(nestedDelta, params);
+        // 2. Run auction + execute nested swap on winner's pool
+        (BalanceDelta nestedDelta, address winner, uint256 bestQuote) =
+            _auctionAndSwap(key, params.zeroForOne, swapAmount, hookData);
+
+        // 3. Exact output: compute fee from realized input
+        if (params.amountSpecified >= 0 && protocolFeePips > 0) {
+            int128 realizedInput = params.zeroForOne ? nestedDelta.amount0() : nestedDelta.amount1();
+            feeAmount = uint256(int256(-realizedInput)) * protocolFeePips / MAX_PIPS;
+        }
+
+        // 4. Mint ERC-6909 claims for protocol fee
+        if (feeAmount > 0) {
+            poolManager.mint(address(this), (params.zeroForOne ? key.currency0 : key.currency1).toId(), feeAmount);
+        }
+
+        // 5. Enforce strict mode: revert if execution deviates beyond tolerance
+        if (hookData.length > 0) {
+            uint24 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
+            if (tol > 0) {
+                uint256 executed = _extractOutput(nestedDelta, params);
+                uint256 dev = executed > bestQuote ? executed - bestQuote : bestQuote - executed;
+                if (dev * MAX_PIPS > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+            }
+        }
 
         emit AuctionExecuted(winner, params.zeroForOne, params.amountSpecified, bestQuote);
 
-        return (IHooks.beforeSwap.selector, bsd, 0);
+        // 6. Convert BalanceDelta → BeforeSwapDelta (negate + fee adjustment)
+        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(nestedDelta, params, feeAmount), 0);
     }
 
     // ──── Internal: Auction Router ────
+
+    /// @dev Run auction, then execute nested swap on winner's pool. Returns the
+    ///      nested swap delta, winner address, and best indicative quote.
+    function _auctionAndSwap(PoolKey calldata key, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+        internal
+        returns (BalanceDelta nestedDelta, address winner, uint256 bestQuote)
+    {
+        PoolKey memory winnerPoolKey;
+        bytes memory winnerHookData;
+        (winnerPoolKey, winner, bestQuote, winnerHookData) =
+            _auction(key.currency0, key.currency1, zeroForOne, swapAmount, hookData);
+
+        nestedDelta = poolManager.swap(
+            winnerPoolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: swapAmount,
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            winnerHookData
+        );
+    }
 
     /// @dev Decode AuctionHookData and dispatch to the appropriate auction path.
     function _auction(
@@ -284,8 +332,9 @@ contract PropAMMAuctionHook is BaseHook {
         }
     }
 
-    /// @dev Negate the nested swap's BalanceDelta into a BeforeSwapDelta that offsets it.
-    function _toBeforeSwapDelta(BalanceDelta nestedDelta, SwapParams calldata params)
+    /// @dev Negate the nested swap's BalanceDelta into a BeforeSwapDelta that offsets it,
+    ///      adding the protocol fee to the appropriate delta component.
+    function _toBeforeSwapDelta(BalanceDelta nestedDelta, SwapParams calldata params, uint256 feeAmount)
         internal
         pure
         returns (BeforeSwapDelta)
@@ -302,6 +351,48 @@ contract PropAMMAuctionHook is BaseHook {
             unspecified = -nestedDelta.amount0();
         }
 
+        // Fee goes to specified (exact input) or unspecified (exact output)
+        if (feeAmount > 0) {
+            if (isExactInput) {
+                specified += int128(uint128(feeAmount));
+            } else {
+                unspecified += int128(uint128(feeAmount));
+            }
+        }
+
         return toBeforeSwapDelta(specified, unspecified);
+    }
+
+    // ──── Fee Collection ────
+
+    /// @notice Collect accumulated protocol fees for a currency.
+    function collectProtocolFees(Currency currency) external {
+        uint256 claims = poolManager.balanceOf(address(this), currency.toId());
+        if (claims == 0) return;
+        poolManager.unlock(abi.encode(currency, claims, feeRecipient));
+    }
+
+    /// @inheritdoc IUnlockCallback
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        require(msg.sender == address(poolManager));
+        (Currency currency, uint256 amount, address recipient) = abi.decode(data, (Currency, uint256, address));
+        poolManager.burn(address(this), currency.toId(), amount);
+        poolManager.take(currency, recipient, amount);
+        emit ProtocolFeesCollected(currency, recipient, amount);
+        return "";
+    }
+
+    // ──── Governance ────
+
+    /// @notice Set the fee recipient address.
+    function setFeeRecipient(address _feeRecipient) external {
+        if (msg.sender != owner) revert Unauthorized();
+        feeRecipient = _feeRecipient;
+    }
+
+    /// @notice Transfer ownership.
+    function transferOwnership(address newOwner) external {
+        if (msg.sender != owner) revert Unauthorized();
+        owner = newOwner;
     }
 }
