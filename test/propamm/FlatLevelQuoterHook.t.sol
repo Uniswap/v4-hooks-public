@@ -16,6 +16,7 @@ import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {FlatLevelQuoterHook} from "../../src/propamm/FlatLevelQuoterHook.sol";
+import {FlatQuoterBase} from "../../src/propamm/base/FlatQuoterBase.sol";
 import {PropAMMIndex} from "../../src/propamm/PropAMMIndex.sol";
 import {AttestationRegistry} from "../../src/propamm/AttestationRegistry.sol";
 import {IPropAMMIndex, QuoterType, QuoterEntry} from "../../src/propamm/interfaces/IPropAMMIndex.sol";
@@ -75,7 +76,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         vm.prank(owner);
         hook.updateFlatPricingState(
             testPoolKey,
-            FlatLevelQuoterHook.FlatPricingState({
+            FlatQuoterBase.FlatPricingState({
                 bidCoefficient: BID_COEFFICIENT, askCoefficient: ASK_COEFFICIENT, attestedDiscountBps: 5, live: true
             })
         );
@@ -113,7 +114,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(hook),
                 IHooks.beforeAddLiquidity.selector,
-                abi.encodeWithSelector(FlatLevelQuoterHook.LiquidityNotAllowed.selector),
+                abi.encodeWithSelector(FlatQuoterBase.LiquidityNotAllowed.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -242,7 +243,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.updateFlatPricingState(
             testPoolKey,
-            FlatLevelQuoterHook.FlatPricingState({
+            FlatQuoterBase.FlatPricingState({
                 bidCoefficient: 1e18, askCoefficient: 1e18, attestedDiscountBps: 0, live: true
             })
         );
