@@ -209,7 +209,8 @@ library SwapSimulator {
             }
 
             if (CHECK_NEXT_TICK_PARITY) {
-                (int24 refNext, bool refInitialized) = _nextInitializedTickReference(manager, poolId, tick, tickSpacing, lte);
+                (int24 refNext, bool refInitialized) =
+                    _nextInitializedTickReference(manager, poolId, tick, tickSpacing, lte);
                 if (refNext != next || refInitialized != initialized) revert NextTickParityMismatch();
             }
         }

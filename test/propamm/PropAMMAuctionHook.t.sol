@@ -301,7 +301,9 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         });
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
         bytes memory hookData = abi.encode(
-            AuctionHookData({attestationData: attestationData, targets: new TargetedQuoter[](0), strictTolerancePips: 0})
+            AuctionHookData({
+                attestationData: attestationData, targets: new TargetedQuoter[](0), strictTolerancePips: 0
+            })
         );
 
         // A's 5% bidFee simulation ≈ 0.95, +5bps attestation → ~0.9505
@@ -598,8 +600,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
 
-        BalanceDelta delta =
-            swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
+        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -609,8 +610,7 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
 
-        BalanceDelta delta =
-            swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
+        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -706,16 +706,10 @@ contract PropAMMAuctionHookTest is Test, Deployers {
             address(uint160((uint256(type(uint160).max) - (3 << 14)) & clearAllHookPermissionsMask | auctionFlags))
         );
         deployCodeTo(
-            "PropAMMAuctionHook",
-            abi.encode(manager, address(index), feePips, address(this)),
-            address(feeAuctionHook)
+            "PropAMMAuctionHook", abi.encode(manager, address(index), feePips, address(this)), address(feeAuctionHook)
         );
         feeAuctionPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 0,
-            tickSpacing: 1,
-            hooks: IHooks(address(feeAuctionHook))
+            currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(feeAuctionHook))
         });
         manager.initialize(feeAuctionPoolKey, Constants.SQRT_PRICE_1_1);
     }
@@ -825,7 +819,8 @@ contract PropAMMAuctionHookTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
 
         // Strict mode with fee: indicative quote uses fee-adjusted amount, execution matches
-        bytes memory hookData = abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: 1}));
+        bytes memory hookData =
+            abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: 1}));
         BalanceDelta delta = swap(feeAuctionPoolKey, true, -1e18, hookData);
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
