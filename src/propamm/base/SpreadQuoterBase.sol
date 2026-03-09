@@ -240,7 +240,7 @@ abstract contract SpreadQuoterBase is BasePropAMMHook, EIP712, Ownable2Step {
     }
 
     /// @notice Set the active lower tick for LP concentration.
-    function setActiveTick(PoolKey calldata key, int24 newActiveLowerTick) external onlyOwner {
+    function setActiveTick(PoolKey calldata key, int24 newActiveLowerTick) external virtual onlyOwner {
         if (newActiveLowerTick % key.tickSpacing != 0) revert InvalidTickRange();
         activeLowerTick[key.toId()] = newActiveLowerTick;
         emit ActiveTickUpdated(key.toId(), newActiveLowerTick);
