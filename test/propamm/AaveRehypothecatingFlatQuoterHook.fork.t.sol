@@ -276,22 +276,29 @@ contract AaveRehypothecatingFlatQuoterHookForkTest is Test, Deployers {
 
     // ──── Test: Gas profiling at 100% utilization ────
 
-    function test_fork_gasProfile_jitSwap() public onlyForked {
-        // Push USDC to Aave
-        swap(testPoolKey, false, -1000e6, "");
+    function test_fork_gasProfile_jitWithdraw() public onlyForked {
+        // Setup: push both currencies to Aave (warms all storage slots)
+        swap(testPoolKey, false, -1000e6, ""); // USDC → Aave
+        swap(testPoolKey, true, -1000e18, ""); // DAI → Aave
 
-        // JIT swap: must withdraw from Aave
+        // Measured swap: JIT withdraw from Aave for output + rebalance input
         uint256 gasBefore = gasleft();
         swap(testPoolKey, true, -100e18, "");
         uint256 gasUsed = gasBefore - gasleft();
-        console2.log("Gas used for JIT swap (100% util):", gasUsed);
+        console2.log("Gas (warm, JIT withdraw from Aave):", gasUsed);
     }
 
-    function test_fork_gasProfile_noAaveNeeded() public onlyForked {
+    function test_fork_gasProfile_claimsOnly() public onlyForked {
+        // Setup: push DAI to Aave + generate USDC claims (warms all storage slots)
+        swap(testPoolKey, false, -1000e6, ""); // USDC → Aave, gives 1000 USDC claims
+        swap(testPoolKey, true, -1000e18, ""); // DAI → Aave
+
+        // Measured swap: output settled from claims, no Aave withdraw needed
+        swap(testPoolKey, true, -100e18, ""); // generates 99.9 USDC output, burns from claims
         uint256 gasBefore = gasleft();
-        swap(testPoolKey, true, -100e18, "");
+        swap(testPoolKey, false, -100e6, ""); // 99.8 DAI output from claims (5000-998-99.9>99.8)
         uint256 gasUsed = gasBefore - gasleft();
-        console2.log("Gas used for swap (no Aave needed):", gasUsed);
+        console2.log("Gas (warm, output from claims):", gasUsed);
     }
 
     // ──── Test: aToken + claims + ERC-20 inventory accounting ────
