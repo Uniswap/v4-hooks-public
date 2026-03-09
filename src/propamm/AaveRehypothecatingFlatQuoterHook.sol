@@ -113,7 +113,7 @@ contract AaveRehypothecatingFlatQuoterHook is FlatQuoterBase {
             }
         }
 
-        outputAmount = _priceWithState(zeroForOne, amountSpecified, isAttested, attester, state);
+        outputAmount = _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, state);
         if (outputAmount == 0) return 0;
 
         // Cap at total inventory for the output currency
@@ -146,24 +146,14 @@ contract AaveRehypothecatingFlatQuoterHook is FlatQuoterBase {
         }
 
         // 2. Load pricing state, compute amounts
-        FlatPricingState memory state = flatPricingState[key.toId()];
+        PoolId poolId = key.toId();
+        FlatPricingState memory state = flatPricingState[poolId];
         if (!state.live) {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
 
-        bool isExactInput = params.amountSpecified < 0;
-        uint256 absAmount = isExactInput ? uint256(-params.amountSpecified) : uint256(params.amountSpecified);
-        uint128 coefficient = params.zeroForOne ? state.bidCoefficient : state.askCoefficient;
-
-        uint256 inputAmount;
-        uint256 outputAmount;
-        if (isExactInput) {
-            inputAmount = absAmount;
-            outputAmount = (absAmount * coefficient) / 1e18;
-        } else {
-            outputAmount = absAmount;
-            inputAmount = (absAmount * 1e18 + coefficient - 1) / coefficient;
-        }
+        (uint256 inputAmount, uint256 outputAmount) =
+            _computeAmounts(poolId, params.zeroForOne, params.amountSpecified, state);
 
         Currency outputCurrency = params.zeroForOne ? key.currency1 : key.currency0;
         Currency inputCurrency = params.zeroForOne ? key.currency0 : key.currency1;
@@ -241,6 +231,25 @@ contract AaveRehypothecatingFlatQuoterHook is FlatQuoterBase {
     }
 
     // ──── Internal: Helpers ────
+
+    /// @dev Compute input and output amounts for a swap.
+    function _computeAmounts(PoolId poolId, bool zeroForOne, int256 amountSpecified, FlatPricingState memory state)
+        internal
+        view
+        returns (uint256 inputAmount, uint256 outputAmount)
+    {
+        bool isExactInput = amountSpecified < 0;
+        uint256 absAmount = isExactInput ? uint256(-amountSpecified) : uint256(amountSpecified);
+        uint128 coefficient = zeroForOne ? state.bidCoefficient : state.askCoefficient;
+
+        if (isExactInput) {
+            inputAmount = absAmount;
+            outputAmount = _computeOutput(poolId, zeroForOne, absAmount, coefficient);
+        } else {
+            outputAmount = absAmount;
+            inputAmount = _computeInput(poolId, zeroForOne, absAmount, coefficient);
+        }
+    }
 
     function _totalInventory(Currency currency) internal view returns (uint256) {
         address underlying = Currency.unwrap(currency);

@@ -49,6 +49,10 @@ abstract contract FlatQuoterBase is BasePropAMMHook, EIP712, Ownable2Step, IUnlo
     mapping(PoolId => mapping(uint256 => bytes32)) internal blockUpdateHash;
     address public priceSigner;
 
+    /// @dev Token decimals per pool, set during afterInitialize.
+    mapping(PoolId => uint8) internal poolDecimals0;
+    mapping(PoolId => uint8) internal poolDecimals1;
+
     // ──── Events ────
 
     event FlatPricingStateUpdated(PoolId indexed poolId, FlatPricingState state);
@@ -113,13 +117,16 @@ abstract contract FlatQuoterBase is BasePropAMMHook, EIP712, Ownable2Step, IUnlo
             }
         }
 
-        return _priceWithState(zeroForOne, amountSpecified, isAttested, attester, state);
+        return _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, state);
     }
 
     // ──── Hook Lifecycle ────
 
     function _afterInitialize(address, PoolKey calldata key, uint160, int24) internal override returns (bytes4) {
         _registerInIndex(key, QuoterType.HOOKDATA, "");
+        PoolId poolId = key.toId();
+        poolDecimals0[poolId] = _tokenDecimals(key.currency0);
+        poolDecimals1[poolId] = _tokenDecimals(key.currency1);
         return IHooks.afterInitialize.selector;
     }
 
@@ -134,34 +141,69 @@ abstract contract FlatQuoterBase is BasePropAMMHook, EIP712, Ownable2Step, IUnlo
 
     // ──── Internal: Pricing ────
 
-    function _price(PoolKey calldata, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
         internal
         view
         override
         returns (uint256)
     {
-        return
-            _priceWithState(
-                zeroForOne, amountSpecified, isAttested, attester, flatPricingState[PoolId.wrap(bytes32(0))]
-            );
+        return _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, flatPricingState[key.toId()]);
     }
 
     function _priceWithState(
+        PoolId poolId,
         bool zeroForOne,
         int256 amountSpecified,
         bool isAttested,
         address,
         FlatPricingState memory state
-    ) internal pure returns (uint256 outputAmount) {
+    ) internal view returns (uint256 outputAmount) {
         if (!state.live) return 0;
 
         uint256 amount = amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified);
         uint128 coefficient = zeroForOne ? state.bidCoefficient : state.askCoefficient;
-        outputAmount = (amount * coefficient) / 1e18;
+        outputAmount = _computeOutput(poolId, zeroForOne, amount, coefficient);
 
         if (isAttested && state.attestedDiscountBps > 0) {
             outputAmount = (outputAmount * (10_000 + state.attestedDiscountBps)) / 10_000;
         }
+    }
+
+    // ──── Internal: Decimal-Aware Pricing Helpers ────
+
+    /// @dev Compute output amount with decimal normalization.
+    ///      Coefficient is a pure 1e18-scaled exchange rate (e.g. 0.999e18 = 99.9%).
+    ///      Decimal conversion between tokens is handled automatically.
+    function _computeOutput(PoolId poolId, bool zeroForOne, uint256 amount, uint128 coefficient)
+        internal
+        view
+        returns (uint256)
+    {
+        uint8 inDec = zeroForOne ? poolDecimals0[poolId] : poolDecimals1[poolId];
+        uint8 outDec = zeroForOne ? poolDecimals1[poolId] : poolDecimals0[poolId];
+        return (amount * uint256(coefficient) * (10 ** outDec)) / ((10 ** inDec) * 1e18);
+    }
+
+    /// @dev Compute input amount from desired output with decimal normalization (rounds up).
+    function _computeInput(PoolId poolId, bool zeroForOne, uint256 outputAmount, uint128 coefficient)
+        internal
+        view
+        returns (uint256)
+    {
+        uint8 inDec = zeroForOne ? poolDecimals0[poolId] : poolDecimals1[poolId];
+        uint8 outDec = zeroForOne ? poolDecimals1[poolId] : poolDecimals0[poolId];
+        uint256 numerator = outputAmount * (10 ** inDec) * 1e18;
+        uint256 denominator = uint256(coefficient) * (10 ** outDec);
+        return (numerator + denominator - 1) / denominator;
+    }
+
+    /// @dev Query token decimals with fallback to 18 for native ETH or non-standard tokens.
+    function _tokenDecimals(Currency currency) internal view returns (uint8) {
+        if (Currency.unwrap(currency) == address(0)) return 18;
+        (bool success, bytes memory data) =
+            Currency.unwrap(currency).staticcall(abi.encodeWithSignature("decimals()"));
+        if (success && data.length >= 32) return abi.decode(data, (uint8));
+        return 18;
     }
 
     // ──── Internal: Curve Updates ────

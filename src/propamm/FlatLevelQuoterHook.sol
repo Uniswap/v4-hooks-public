@@ -73,6 +73,7 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
 
+        PoolId poolId = key.toId();
         bool isExactInput = params.amountSpecified < 0;
         uint256 absAmount = isExactInput ? uint256(-params.amountSpecified) : uint256(params.amountSpecified);
         uint128 coefficient = params.zeroForOne ? state.bidCoefficient : state.askCoefficient;
@@ -81,10 +82,10 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
         uint256 outputAmount;
         if (isExactInput) {
             inputAmount = absAmount;
-            outputAmount = (absAmount * coefficient) / 1e18;
+            outputAmount = _computeOutput(poolId, params.zeroForOne, absAmount, coefficient);
         } else {
             outputAmount = absAmount;
-            inputAmount = (absAmount * 1e18 + coefficient - 1) / coefficient;
+            inputAmount = _computeInput(poolId, params.zeroForOne, absAmount, coefficient);
         }
 
         Currency outputCurrency = params.zeroForOne ? key.currency1 : key.currency0;
