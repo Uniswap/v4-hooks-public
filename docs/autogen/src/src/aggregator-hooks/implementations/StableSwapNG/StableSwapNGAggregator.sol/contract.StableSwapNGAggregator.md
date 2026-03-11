@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
