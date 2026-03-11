@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -19,6 +19,15 @@ The Curve StableSwap NG pool
 
 ```solidity
 ICurveStableSwapNG public pool
+```
+
+
+### curveFactory
+The Curve StableSwap NG factory for checking meta pool status
+
+
+```solidity
+ICurveStableSwapFactoryNG public curveFactory
 ```
 
 
@@ -50,7 +59,7 @@ mapping(PoolId => PoolInfo) public poolIdToTokenInfo
 
 
 ```solidity
-constructor(IPoolManager _manager, ICurveStableSwapNG _pool)
+constructor(IPoolManager _manager, ICurveStableSwapNG _pool, ICurveStableSwapFactoryNG _curveFactory)
     BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0");
 ```
 
@@ -164,6 +173,12 @@ error TokenNotInPool(address token);
 
 ```solidity
 error TokensNotInPool(address token0, address token1);
+```
+
+### PoolIsMetaPool
+
+```solidity
+error PoolIsMetaPool();
 ```
 
 ## Structs

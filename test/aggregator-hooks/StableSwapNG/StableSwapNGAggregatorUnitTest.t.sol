@@ -13,7 +13,11 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockCurveStableSwapNG} from "../StableSwapNG/mocks/MockCurveStableSwapNG.sol";
+import {MockCurveStableSwapFactoryNG} from "../StableSwapNG/mocks/MockCurveStableSwapFactoryNG.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {
+    ICurveStableSwapFactoryNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
 import {
     StableSwapNGAggregator
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
@@ -27,6 +31,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
     MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockCurveStableSwapNG public mockPool;
+    MockCurveStableSwapFactoryNG public mockFactory;
     StableSwapNGAggregator public hook;
     MockERC20 public token0;
     MockERC20 public token1;
@@ -57,8 +62,11 @@ contract StableSwapNGAggregatorUnitTest is Test {
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwapNG(coins);
 
+        // Create mock factory (defaults to false for all pools)
+        mockFactory = new MockCurveStableSwapFactoryNG();
+
         // Deploy hook with valid address
-        hook = _deployHook(mockPool);
+        hook = _deployHook(mockPool, mockFactory);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -88,13 +96,19 @@ contract StableSwapNGAggregatorUnitTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(MockCurveStableSwapNG _mockPool) internal returns (StableSwapNGAggregator) {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(poolManager, _mockPool);
+    function _deployHook(MockCurveStableSwapNG _mockPool, MockCurveStableSwapFactoryNG _mockFactory)
+        internal
+        returns (StableSwapNGAggregator)
+    {
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+        );
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockFactory);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
-        StableSwapNGAggregator newHook = new StableSwapNGAggregator{salt: salt}(poolManager, _mockPool);
+        StableSwapNGAggregator newHook = new StableSwapNGAggregator{salt: salt}(
+            poolManager, _mockPool, ICurveStableSwapFactoryNG(address(_mockFactory))
+        );
         return newHook;
     }
 
@@ -149,7 +163,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         wrongCoins[1] = address(0xbeef);
         MockCurveStableSwapNG wrongPool = new MockCurveStableSwapNG(wrongCoins);
 
-        StableSwapNGAggregator hook2 = _deployHook(wrongPool);
+        StableSwapNGAggregator hook2 = _deployHook(wrongPool, mockFactory);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -182,7 +196,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[1] = address(token1); // correct token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
 
-        StableSwapNGAggregator hook2 = _deployHook(partialPool);
+        StableSwapNGAggregator hook2 = _deployHook(partialPool, mockFactory);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -211,7 +225,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[1] = address(0xbeef); // wrong token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
 
-        StableSwapNGAggregator hook2 = _deployHook(partialPool);
+        StableSwapNGAggregator hook2 = _deployHook(partialPool, mockFactory);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -227,6 +241,32 @@ contract StableSwapNGAggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(StableSwapNGAggregator.TokenNotInPool.selector, address(token1)),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_revertsPoolIsMetaPool() public {
+        MockCurveStableSwapFactoryNG metaFactory = new MockCurveStableSwapFactoryNG();
+        metaFactory.setIsMeta(address(mockPool), true);
+
+        StableSwapNGAggregator hook2 = _deployHook(mockPool, metaFactory);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 4,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapNGAggregator.PoolIsMetaPool.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );

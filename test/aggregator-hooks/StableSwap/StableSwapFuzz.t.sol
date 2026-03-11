@@ -21,6 +21,8 @@ import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementation
 import {
     StableSwapAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol";
+import {MockMetaRegistry} from "./mocks/MockMetaRegistry.sol";
+import {IMetaRegistry} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
 
 /// @title StableSwapFuzz
 /// @notice Fuzz tests for StableSwap through Uniswap V4 hooks
@@ -70,6 +72,7 @@ contract StableSwapFuzz is Test {
     address public alice = makeAddr("alice");
     address public tokenJar = makeAddr("tokenJar");
     MockV4FeeAdapter public feeAdapter;
+    MockMetaRegistry public mockMetaRegistry;
 
     error UnsupportedNumberOfTokens();
     error AddLiquidityFailed();
@@ -84,9 +87,10 @@ contract StableSwapFuzz is Test {
         // Deploy swap router
         swapRouter = new SafePoolSwapTest(manager);
 
-        // Deploy fee adapter and hook factory
+        // Deploy fee adapter, mock meta registry, and hook factory
         feeAdapter = new MockV4FeeAdapter(manager, tokenJar);
-        hookFactory = new StableSwapAggregatorFactory(manager);
+        mockMetaRegistry = new MockMetaRegistry();
+        hookFactory = new StableSwapAggregatorFactory(manager, IMetaRegistry(address(mockMetaRegistry)));
 
         // Set this contract as the protocol fee controller
         manager.setProtocolFeeController(address(feeAdapter));
@@ -257,7 +261,7 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(mockMetaRegistry));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
@@ -290,7 +294,7 @@ contract StableSwapFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(mockMetaRegistry));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 

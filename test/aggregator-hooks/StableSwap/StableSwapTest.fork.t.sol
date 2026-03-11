@@ -20,6 +20,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {ICurveStableSwap} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
+import {IMetaRegistry} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
 
 contract StableSwapForkedTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -40,6 +41,7 @@ contract StableSwapForkedTest is Test {
     address curvePoolAddress;
     address token0Address;
     address token1Address;
+    address metaRegistry;
 
     uint8 token0Decimals;
     uint8 token1Decimals;
@@ -78,6 +80,8 @@ contract StableSwapForkedTest is Test {
         uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_POOL");
+        // Load meta registry address from env vars
+        metaRegistry = vm.envAddress("META_REGISTRY");
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
@@ -148,11 +152,11 @@ contract StableSwapForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), metaRegistry);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
 
-        hook = new StableSwapAggregator{salt: salt}(manager, curvePool);
+        hook = new StableSwapAggregator{salt: salt}(manager, curvePool, IMetaRegistry(metaRegistry));
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 

@@ -1,5 +1,5 @@
 # StableSwapNGAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
 
 **Title:**
 StableSwapNGAggregatorFactory
@@ -19,12 +19,21 @@ IPoolManager public immutable poolManager
 ```
 
 
+### curveFactory
+The Curve StableSwap NG factory for checking meta pool status
+
+
+```solidity
+ICurveStableSwapFactoryNG public immutable curveFactory
+```
+
+
 ## Functions
 ### constructor
 
 
 ```solidity
-constructor(IPoolManager _poolManager) ;
+constructor(IPoolManager _poolManager, ICurveStableSwapFactoryNG _curveFactory) ;
 ```
 
 ### createPool

@@ -74,4 +74,9 @@ interface ICurveStableSwapFactoryNG {
 
     /// @notice Returns the pool address at the given index
     function pool_list(uint256 index) external view returns (address);
+
+    /// @notice Check if a pool is a metapool
+    /// @param _pool Address of the pool
+    /// @return True if the pool is a metapool
+    function is_meta(address _pool) external view returns (bool);
 }

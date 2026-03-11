@@ -7,6 +7,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {StableSwapAggregator} from "./StableSwapAggregator.sol";
 import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
+import {IMetaRegistry} from "./interfaces/IMetaRegistry.sol";
 
 /// @title StableSwapAggregatorFactory
 /// @notice Factory for creating StableSwapAggregator hooks via CREATE2 and initializing Uniswap V4 pools
@@ -15,12 +16,16 @@ contract StableSwapAggregatorFactory {
     /// @notice The Uniswap V4 PoolManager contract
     IPoolManager public immutable poolManager;
 
+    /// @notice The Curve MetaRegistry for checking meta pool status
+    IMetaRegistry public immutable metaRegistry;
+
     error InsufficientTokens();
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
-    constructor(IPoolManager _poolManager) {
+    constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) {
         poolManager = _poolManager;
+        metaRegistry = _metaRegistry;
     }
 
     /// @notice Creates a new StableSwapAggregator hook and initializes pools for all token pairs
@@ -41,7 +46,7 @@ contract StableSwapAggregatorFactory {
     ) external returns (address hook) {
         if (tokens.length < 2) revert InsufficientTokens();
 
-        hook = address(new StableSwapAggregator{salt: salt}(poolManager, curvePool));
+        hook = address(new StableSwapAggregator{salt: salt}(poolManager, curvePool, metaRegistry));
 
         // Initialize one pool per token pair
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -66,8 +71,9 @@ contract StableSwapAggregatorFactory {
     /// @param curvePool The Curve StableSwap pool
     /// @return computedAddress The predicted hook address
     function computeAddress(bytes32 salt, ICurveStableSwap curvePool) external view returns (address computedAddress) {
-        bytes32 bytecodeHash =
-            keccak256(abi.encodePacked(type(StableSwapAggregator).creationCode, abi.encode(poolManager, curvePool)));
+        bytes32 bytecodeHash = keccak256(
+            abi.encodePacked(type(StableSwapAggregator).creationCode, abi.encode(poolManager, curvePool, metaRegistry))
+        );
         computedAddress =
             address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, bytecodeHash)))));
     }

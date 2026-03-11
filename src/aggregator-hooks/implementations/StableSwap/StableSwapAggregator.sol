@@ -2,6 +2,8 @@
 pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
+import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
+import {IMetaRegistry} from "./interfaces/IMetaRegistry.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -9,7 +11,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {ICurveStableSwap} from "./interfaces/IStableSwap.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -23,6 +24,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     /// @notice The Curve StableSwap pool
     ICurveStableSwap public pool;
 
+    /// @notice The Curve MetaRegistry for checking meta pool status
+    IMetaRegistry public metaRegistry;
+
     struct PoolInfo {
         int128 token0Index;
         int128 token1Index;
@@ -34,11 +38,13 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
+    error PoolIsMetaPool();
 
-    constructor(IPoolManager _manager, ICurveStableSwap _pool)
+    constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
         BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
     {
         pool = _pool;
+        metaRegistry = _metaRegistry;
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -65,6 +71,8 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        if (metaRegistry.is_meta(address(pool), 0)) revert PoolIsMetaPool();
+
         // Find token indices by iterating through pool coins (max 8 coins in Curve pools)
         bool token0Found = false;
         bool token1Found = false;

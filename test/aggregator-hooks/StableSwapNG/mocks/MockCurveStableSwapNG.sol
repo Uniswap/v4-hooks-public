@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {
     ICurveStableSwapNG
-} from "../../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
+} from "../../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapNG.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MockCurveStableSwapNG

@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -19,12 +19,21 @@ IPoolManager public immutable poolManager
 ```
 
 
+### metaRegistry
+The Curve MetaRegistry for checking meta pool status
+
+
+```solidity
+IMetaRegistry public immutable metaRegistry
+```
+
+
 ## Functions
 ### constructor
 
 
 ```solidity
-constructor(IPoolManager _poolManager) ;
+constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) ;
 ```
 
 ### createPool

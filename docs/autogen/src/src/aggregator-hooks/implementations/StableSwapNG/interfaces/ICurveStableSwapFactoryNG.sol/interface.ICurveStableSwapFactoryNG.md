@@ -1,5 +1,5 @@
 # ICurveStableSwapFactoryNG
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
 
 **Title:**
 ICurveStableSwapFactoryNG
@@ -192,4 +192,25 @@ Returns the pool address at the given index
 ```solidity
 function pool_list(uint256 index) external view returns (address);
 ```
+
+### is_meta
+
+Check if a pool is a metapool
+
+
+```solidity
+function is_meta(address _pool) external view returns (bool);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_pool`|`address`|Address of the pool|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bool`|True if the pool is a metapool|
+
 

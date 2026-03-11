@@ -13,6 +13,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockCurveStableSwap} from "./mocks/MockCurveStableSwap.sol";
+import {MockMetaRegistry} from "./mocks/MockMetaRegistry.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
@@ -25,6 +26,7 @@ contract StableSwapAggregatorUnitTest is Test {
     MockV4FeeAdapter public feeAdapter;
     SafePoolSwapTest public swapRouter;
     MockCurveStableSwap public mockPool;
+    MockMetaRegistry public mockMetaRegistry;
     StableSwapAggregator public hook;
     MockERC20 public token0;
     MockERC20 public token1;
@@ -57,8 +59,11 @@ contract StableSwapAggregatorUnitTest is Test {
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwap(coins);
 
+        // Create mock meta registry (defaults to false for all pools)
+        mockMetaRegistry = new MockMetaRegistry();
+
         // Deploy hook with valid address
-        hook = _deployHook(mockPool);
+        hook = _deployHook(mockPool, mockMetaRegistry);
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -88,13 +93,17 @@ contract StableSwapAggregatorUnitTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(MockCurveStableSwap _mockPool) internal returns (StableSwapAggregator) {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
-        bytes memory constructorArgs = abi.encode(poolManager, _mockPool);
+    function _deployHook(MockCurveStableSwap _mockPool, MockMetaRegistry _mockMetaRegistry)
+        internal
+        returns (StableSwapAggregator)
+    {
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+        );
+        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockMetaRegistry);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
-        StableSwapAggregator newHook = new StableSwapAggregator{salt: salt}(poolManager, _mockPool);
+        StableSwapAggregator newHook = new StableSwapAggregator{salt: salt}(poolManager, _mockPool, _mockMetaRegistry);
         return newHook;
     }
 
@@ -142,7 +151,7 @@ contract StableSwapAggregatorUnitTest is Test {
         wrongCoins[1] = address(0xbeef);
         MockCurveStableSwap wrongPool = new MockCurveStableSwap(wrongCoins);
 
-        StableSwapAggregator hook2 = _deployHook(wrongPool);
+        StableSwapAggregator hook2 = _deployHook(wrongPool, mockMetaRegistry);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -175,7 +184,7 @@ contract StableSwapAggregatorUnitTest is Test {
         partialCoins[1] = address(token1); // correct token1
         MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
 
-        StableSwapAggregator hook2 = _deployHook(partialPool);
+        StableSwapAggregator hook2 = _deployHook(partialPool, mockMetaRegistry);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -204,7 +213,7 @@ contract StableSwapAggregatorUnitTest is Test {
         partialCoins[1] = address(0xbeef); // wrong token1
         MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
 
-        StableSwapAggregator hook2 = _deployHook(partialPool);
+        StableSwapAggregator hook2 = _deployHook(partialPool, mockMetaRegistry);
 
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
@@ -220,6 +229,33 @@ contract StableSwapAggregatorUnitTest is Test {
                 address(hook2),
                 IHooks.beforeInitialize.selector,
                 abi.encodeWithSelector(StableSwapAggregator.TokenNotInPool.selector, address(token1)),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_revertsPoolIsMetaPool() public {
+        // Create a meta registry that reports the pool as a meta pool
+        MockMetaRegistry metaPoolRegistry = new MockMetaRegistry();
+        metaPoolRegistry.setIsMeta(address(mockPool), true);
+
+        StableSwapAggregator hook2 = _deployHook(mockPool, metaPoolRegistry);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 4,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapAggregator.PoolIsMetaPool.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );

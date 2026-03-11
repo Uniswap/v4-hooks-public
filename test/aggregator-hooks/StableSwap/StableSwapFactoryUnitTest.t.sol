@@ -7,7 +7,9 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockCurveStableSwap} from "./mocks/MockCurveStableSwap.sol";
+import {MockMetaRegistry} from "./mocks/MockMetaRegistry.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
+import {IMetaRegistry} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
 import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {
     StableSwapAggregatorFactory
@@ -18,6 +20,7 @@ contract StableSwapFactoryUnitTest is Test {
     IPoolManager public poolManager;
     MockV4FeeAdapter public feeAdapter;
     MockCurveStableSwap public mockPool;
+    MockMetaRegistry public mockMetaRegistry;
     MockERC20 public token0;
     MockERC20 public token1;
 
@@ -37,11 +40,13 @@ contract StableSwapFactoryUnitTest is Test {
         coins[0] = address(token0);
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwap(coins);
+        mockMetaRegistry = new MockMetaRegistry();
         feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
     }
 
     function test_factory_createPool() public {
-        StableSwapAggregatorFactory factory = new StableSwapAggregatorFactory(poolManager);
+        StableSwapAggregatorFactory factory =
+            new StableSwapAggregatorFactory(poolManager, IMetaRegistry(address(mockMetaRegistry)));
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -56,7 +61,7 @@ contract StableSwapFactoryUnitTest is Test {
         tokens[0] = Currency.wrap(address(tkA));
         tokens[1] = Currency.wrap(address(tkB));
 
-        bytes memory args = abi.encode(address(poolManager), address(pool2));
+        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockMetaRegistry));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -69,13 +74,14 @@ contract StableSwapFactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        StableSwapAggregatorFactory factory = new StableSwapAggregatorFactory(poolManager);
+        StableSwapAggregatorFactory factory =
+            new StableSwapAggregatorFactory(poolManager, IMetaRegistry(address(mockMetaRegistry)));
 
         Currency[] memory tokens = new Currency[](2);
         tokens[0] = Currency.wrap(address(token0));
         tokens[1] = Currency.wrap(address(token1));
 
-        bytes memory args = abi.encode(address(poolManager), address(mockPool));
+        bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockMetaRegistry));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
@@ -90,7 +96,8 @@ contract StableSwapFactoryUnitTest is Test {
     }
 
     function test_factory_revertsInsufficientTokens() public {
-        StableSwapAggregatorFactory factory = new StableSwapAggregatorFactory(poolManager);
+        StableSwapAggregatorFactory factory =
+            new StableSwapAggregatorFactory(poolManager, IMetaRegistry(address(mockMetaRegistry)));
 
         Currency[] memory tokens = new Currency[](1);
         tokens[0] = Currency.wrap(address(token0));

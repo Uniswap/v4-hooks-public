@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -22,6 +22,15 @@ ICurveStableSwap public pool
 ```
 
 
+### metaRegistry
+The Curve MetaRegistry for checking meta pool status
+
+
+```solidity
+IMetaRegistry public metaRegistry
+```
+
+
 ### poolIdToTokenInfo
 Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
@@ -36,7 +45,7 @@ mapping(PoolId => PoolInfo) public poolIdToTokenInfo
 
 
 ```solidity
-constructor(IPoolManager _manager, ICurveStableSwap _pool)
+constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
     BaseAggregatorHook(_manager, "StableSwapAggregator v1.0");
 ```
 
@@ -130,6 +139,12 @@ error TokensNotInPool(address token0, address token1);
 
 ```solidity
 error ExactOutputNotSupported();
+```
+
+### PoolIsMetaPool
+
+```solidity
+error PoolIsMetaPool();
 ```
 
 ## Structs

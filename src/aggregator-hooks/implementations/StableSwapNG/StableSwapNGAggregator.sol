@@ -2,6 +2,8 @@
 pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
+import {ICurveStableSwapNG} from "./interfaces/ICurveStableSwapNG.sol";
+import {ICurveStableSwapFactoryNG} from "./interfaces/ICurveStableSwapFactoryNG.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -9,7 +11,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {ICurveStableSwapNG} from "./interfaces/IStableSwapNG.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -22,6 +23,9 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
 
     /// @notice The Curve StableSwap NG pool
     ICurveStableSwapNG public pool;
+
+    /// @notice The Curve StableSwap NG factory for checking meta pool status
+    ICurveStableSwapFactoryNG public curveFactory;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
     uint256 internal constant INACCURACY_SCALE = 1_000_000;
@@ -37,11 +41,13 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     error AmountOutExceeded();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
+    error PoolIsMetaPool();
 
-    constructor(IPoolManager _manager, ICurveStableSwapNG _pool)
+    constructor(IPoolManager _manager, ICurveStableSwapNG _pool, ICurveStableSwapFactoryNG _curveFactory)
         BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
     {
         pool = _pool;
+        curveFactory = _curveFactory;
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -77,6 +83,8 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        if (curveFactory.is_meta(address(pool))) revert PoolIsMetaPool();
+
         uint256 totalCoins = pool.N_COINS();
         bool token0Found = false;
         bool token1Found = false;

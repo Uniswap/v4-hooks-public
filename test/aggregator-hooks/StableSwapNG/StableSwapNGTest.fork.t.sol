@@ -23,7 +23,10 @@ import {
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol";
 import {
     ICurveStableSwapNG
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapNG.sol";
+import {
+    ICurveStableSwapFactoryNG
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
 contract StableSwapNGForkedTest is Test {
@@ -42,6 +45,7 @@ contract StableSwapNGForkedTest is Test {
 
     // Loaded from .env
     address curvePoolAddress;
+    address curveFactoryNg;
 
     // Dynamic token storage for multi-token pools
     Currency[] public poolTokens; // All tokens in the Curve pool (sorted by address)
@@ -81,6 +85,8 @@ contract StableSwapNGForkedTest is Test {
         uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
         // Load Curve pool address from env vars
         curvePoolAddress = vm.envAddress("STABLE_SWAP_NG_POOL");
+        // Load Curve factory address from env vars
+        curveFactoryNg = vm.envAddress("CURVE_FACTORY_NG");
         // Load V4 infrastructure address from env vars
         address poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
@@ -100,8 +106,8 @@ contract StableSwapNGForkedTest is Test {
         swapRouter = new SafePoolSwapTest(manager);
         feeAdapter = new MockV4FeeAdapter(manager, address(this));
 
-        // Deploy factory
-        factory = new StableSwapNGAggregatorFactory(manager);
+        // Deploy factory with real Curve NG factory
+        factory = new StableSwapNGAggregatorFactory(manager, ICurveStableSwapFactoryNG(curveFactoryNg));
 
         // Dynamically fetch all tokens from the Curve pool
         numTokens = curvePool.N_COINS();
@@ -137,7 +143,7 @@ contract StableSwapNGForkedTest is Test {
         uint160 flags =
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), curveFactoryNg);
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(factory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 

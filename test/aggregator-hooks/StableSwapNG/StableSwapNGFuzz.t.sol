@@ -19,7 +19,7 @@ import {
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
 import {
     ICurveStableSwapNG
-} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/IStableSwapNG.sol";
+} from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapNG.sol";
 import {
     StableSwapNGAggregator
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
@@ -91,9 +91,6 @@ contract StableSwapNGFuzz is Test {
         // Set this contract as the protocol fee controller
         manager.setProtocolFeeController(address(feeAdapter));
 
-        // Deploy hook factory
-        hookFactory = new StableSwapNGAggregatorFactory(manager);
-
         // Deploy Curve factory from precompiled bytecode
         curveFactory = ICurveStableSwapFactoryNG(_deployFromBytecode(FACTORY_BYTECODE_PATH));
         mathImpl = _deployFromBytecode(MATH_BYTECODE_PATH);
@@ -108,6 +105,9 @@ contract StableSwapNGFuzz is Test {
 
         bytes32 poolImplSlot = keccak256(abi.encode(SLOT_POOL_IMPL_BASE, uint256(0)));
         vm.store(address(curveFactory), poolImplSlot, bytes32(uint256(uint160(poolImpl))));
+
+        // Deploy hook factory (uses curveFactory for is_meta check)
+        hookFactory = new StableSwapNGAggregatorFactory(manager, curveFactory);
     }
 
     /// @notice Deploy contract from hex bytecode file
@@ -247,7 +247,7 @@ contract StableSwapNGFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(curveFactory));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 
@@ -280,7 +280,7 @@ contract StableSwapNGFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
 
-        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool));
+        bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(curveFactory));
         (address expectedHookAddress, bytes32 salt) =
             HookMiner.find(address(hookFactory), flags, type(StableSwapNGAggregator).creationCode, constructorArgs);
 
