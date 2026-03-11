@@ -49,11 +49,6 @@ contract SelfCreateHookScript is Script {
         bytes32 salt = vm.envBytes32("SALT");
         address poolManager = vm.envAddress("POOL_MANAGER");
 
-        // Pool initialization parameters
-        address currency0 = vm.envAddress("CURRENCY0");
-        console.log("Currency0:", currency0);
-        address currency1 = vm.envAddress("CURRENCY1");
-        console.log("Currency1:", currency1);
         uint24 fee = uint24(vm.envUint("FEE"));
         int24 tickSpacing = int24(int256(vm.envUint("TICK_SPACING")));
         uint160 sqrtPriceX96 = uint160(vm.envUint("SQRT_PRICE_X96"));
@@ -74,16 +69,23 @@ contract SelfCreateHookScript is Script {
             revert("Invalid protocol ID");
         }
 
-        // Initialize the pool
-        PoolKey memory poolKey = PoolKey({
-            currency0: Currency.wrap(currency0),
-            currency1: Currency.wrap(currency1),
-            fee: fee,
-            tickSpacing: tickSpacing,
-            hooks: IHooks(hookAddress)
-        });
-
-        IPoolManager(poolManager).initialize(poolKey, sqrtPriceX96);
+        // Initialize one Uniswap pool per token pair. TOKENS is comma-separated (2+ for fluid, 2+ for stableswap).
+        address[] memory tokens = vm.envAddress("TOKENS", ",");
+        require(tokens.length >= 2, "TOKENS must have at least 2 addresses");
+        for (uint256 i = 0; i < tokens.length; i++) {
+            for (uint256 j = i + 1; j < tokens.length; j++) {
+                (address c0, address c1) = tokens[i] < tokens[j] ? (tokens[i], tokens[j]) : (tokens[j], tokens[i]);
+                PoolKey memory poolKey = PoolKey({
+                    currency0: Currency.wrap(c0),
+                    currency1: Currency.wrap(c1),
+                    fee: fee,
+                    tickSpacing: tickSpacing,
+                    hooks: IHooks(hookAddress)
+                });
+                IPoolManager(poolManager).initialize(poolKey, sqrtPriceX96);
+                console.log("Initialized pool:", c0, c1);
+            }
+        }
 
         vm.stopBroadcast();
 
@@ -93,25 +95,20 @@ contract SelfCreateHookScript is Script {
         console.log("Salt:", vm.toString(salt));
         console.log("Protocol ID:", protocolId);
         console.log("Pool Manager:", poolManager);
-        console.log("Currency0:", currency0);
-        console.log("Currency1:", currency1);
+        console.log("Tokens:");
+        console.log("Tokens length:", tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            console.log("Token:", tokens[i]);
+        }
         console.log("Fee:", fee);
         console.log("Tick Spacing:", uint24(tickSpacing));
         console.log("Sqrt Price X96:", sqrtPriceX96);
-        console.log("Pool ID:");
-        console.logBytes32(PoolId.unwrap(poolKey.toId()));
-
-        // Pseudo TVL from the aggregator hook (amount0, amount1 in the external pool)
-        (uint256 amount0, uint256 amount1) = IAggregatorHook(hookAddress).pseudoTotalValueLocked(poolKey.toId());
-        console.log("pseudoTotalValueLocked amount0:", amount0);
-        console.log("pseudoTotalValueLocked amount1:", amount1);
-
         console.log("================================");
     }
 
     function _deployStableSwap(bytes32 salt, address poolManager) internal returns (address) {
         address curvePool = vm.envAddress("CURVE_POOL");
-        address metaRegistry = vm.envAddress("META_REGISTRY");
+        address metaRegistry = vm.envAddress("METAREGISTRY");
 
         StableSwapAggregator hook = new StableSwapAggregator{salt: salt}(
             IPoolManager(poolManager), ICurveStableSwap(curvePool), IMetaRegistry(metaRegistry)
@@ -122,10 +119,10 @@ contract SelfCreateHookScript is Script {
 
     function _deployStableSwapNG(bytes32 salt, address poolManager) internal returns (address) {
         address curvePool = vm.envAddress("CURVE_POOL");
-        address curveFactoryNG = vm.envAddress("CURVE_FACTORY_NG");
+        address curveFactory = vm.envAddress("CURVE_FACTORY");
 
         StableSwapNGAggregator hook = new StableSwapNGAggregator{salt: salt}(
-            IPoolManager(poolManager), ICurveStableSwapNG(curvePool), ICurveStableSwapFactoryNG(curveFactoryNG)
+            IPoolManager(poolManager), ICurveStableSwapNG(curvePool), ICurveStableSwapFactoryNG(curveFactory)
         );
 
         return address(hook);
@@ -133,7 +130,7 @@ contract SelfCreateHookScript is Script {
 
     function _deployFluidDexT1(bytes32 salt, address poolManager) internal returns (address) {
         address fluidPool = vm.envAddress("FLUID_POOL");
-        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_RESERVES_RESOLVER");
+        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_RESOLVER");
         address fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
 
         FluidDexT1Aggregator hook = new FluidDexT1Aggregator{salt: salt}(
