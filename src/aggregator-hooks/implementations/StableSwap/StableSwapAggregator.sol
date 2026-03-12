@@ -39,6 +39,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
     error PoolIsMetaPool();
+    error ExchangeFailed();
 
     constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
         BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
@@ -121,7 +122,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
         internal
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
@@ -145,10 +146,19 @@ contract StableSwapAggregator is BaseAggregatorHook {
             revert ExactOutputNotSupported();
         }
 
+        uint256 value = takeCurrency.isAddressZero() ? amountTake : 0;
+
         poolManager.take(takeCurrency, address(this), amountTake);
 
+        uint256 balanceBefore = settleCurrency.balanceOfSelf();
+
         // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-        amountSettle = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0);
+        // Uses selector since 3pool doesn't return a value but has the same signature
+        (bool success,) = payable(address(pool)).call{value: value}(
+            abi.encodeWithSelector(pool.exchange.selector, tokenInIndex, tokenOutIndex, amountTake, 0)
+        );
+        if (!success) revert ExchangeFailed();
+        amountSettle = settleCurrency.balanceOfSelf() - balanceBefore;
 
         hasSettled = false;
         return (amountSettle, amountTake, hasSettled);

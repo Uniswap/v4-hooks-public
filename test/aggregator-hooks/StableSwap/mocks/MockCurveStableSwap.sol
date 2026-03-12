@@ -60,7 +60,7 @@ contract MockCurveStableSwap is ICurveStableSwap {
         return returnGetDy;
     }
 
-    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256) {
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external payable override returns (uint256) {
         if (revertExchange) revert ExchangeRevert();
         // Transfer tokenIn from caller
         IERC20(coinsList[uint256(uint128(i))]).transferFrom(msg.sender, address(this), dx);
