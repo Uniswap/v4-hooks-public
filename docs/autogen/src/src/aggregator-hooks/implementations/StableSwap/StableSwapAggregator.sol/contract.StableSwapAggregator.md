@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/84add4c8d04fadca18c5c25fdb9127940d213780/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d3d70ef9ec9b052aacf15a77488055ff2827e873/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -99,7 +99,7 @@ settle' pattern and set hasSettled to true
 
 
 ```solidity
-function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
     internal
     override
     returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
@@ -108,7 +108,7 @@ function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata param
 
 |Name|Type|Description|
 |----|----|-----------|
-|`<none>`|`Currency`||
+|`settleCurrency`|`Currency`|The currency to be settled on the V4 PoolManager (swapper's output currency)|
 |`takeCurrency`|`Currency`|The currency to be taken from the V4 PoolManager (swapper's input currency)|
 |`params`|`SwapParams`|The swap parameters|
 |`poolId`|`PoolId`|The V4 Pool ID|
@@ -145,6 +145,12 @@ error ExactOutputNotSupported();
 
 ```solidity
 error PoolIsMetaPool();
+```
+
+### ExchangeFailed
+
+```solidity
+error ExchangeFailed();
 ```
 
 ## Structs
