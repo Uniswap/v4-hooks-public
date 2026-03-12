@@ -164,16 +164,18 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
         SwapParams calldata params
     ) internal returns (uint256 amountOut) {
         poolManager.sync(settleCurrency);
+        uint256 balanceBefore = settleCurrency.balanceOf(address(poolManager));
         // Is exactOut has accuracy issues on Curve, so we do the gas inefficient way of transferring here first to ensure exact amount
         if (params.amountSpecified > 0) {
             // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
-            amountOut = uint256(params.amountSpecified);
+            pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
+            uint256(params.amountSpecified);
             settleCurrency.transfer(address(poolManager), uint256(params.amountSpecified));
         } else {
             // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
+            pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(poolManager));
         }
+        amountOut = settleCurrency.balanceOf(address(poolManager)) - balanceBefore;
         poolManager.settle();
     }
 

@@ -21,6 +21,7 @@ import {StableSwapAggregator} from "../../../src/aggregator-hooks/implementation
 import {
     StableSwapAggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol";
+import {MockCurveStableSwap} from "./mocks/MockCurveStableSwap.sol";
 import {MockMetaRegistry} from "./mocks/MockMetaRegistry.sol";
 import {IMetaRegistry} from "../../../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
 
@@ -50,6 +51,8 @@ contract StableSwapFuzz is Test {
     // admin is at slot 0, fee_receiver is at slot 1
     uint256 constant SLOT_ADMIN = 0;
     uint256 constant SLOT_FEE_RECEIVER = 1;
+
+    address constant CURVE_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     // Precompiled bytecode paths
     string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/StableSwap/precompiled/StableSwapFactory.bin";
@@ -395,6 +398,74 @@ contract StableSwapFuzz is Test {
         testFuzz_exactIn_oneForZero(
             53, 102089634039300134962802909115238314461027419237443557584673670268305811701761, 4339
         );
+    }
+
+    // ========== NATIVE INPUT FUZZ TESTS ==========
+
+    /// @notice Fuzz test: Exact input swap with native ETH input (zeroForOne: ETH -> ERC20)
+    function testFuzz_exactIn_nativeInput_zeroForOne(uint256 seed) public {
+        (MockERC20 token1, uint256 amountIn, StableSwapAggregator hook, PoolKey memory poolKey) =
+            _setupNativePoolAndHook(seed);
+
+        uint256 expectedOut = hook.quote(true, -int256(amountIn), poolKey.toId());
+        assertGt(expectedOut, 0, "Quote should be non-zero");
+
+        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceTokenBefore = token1.balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap{value: amountIn}(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(aliceEthBefore - alice.balance, amountIn, "Should spend exact ETH");
+        assertEq(token1.balanceOf(alice) - aliceTokenBefore, expectedOut, "Received should match quote");
+    }
+
+    /// @notice Setup a pool with native ETH (currency0) and one ERC20, deploy hook
+    function _setupNativePoolAndHook(uint256 seed)
+        internal
+        returns (MockERC20 token1, uint256 amountIn, StableSwapAggregator hook, PoolKey memory poolKey)
+    {
+        bytes32 tokenSalt = keccak256(abi.encode(seed, "nativeToken"));
+        token1 = new MockERC20{salt: tokenSalt}("Token1", "TK1", 18);
+        token1.mint(address(this), 100_000 ether);
+        token1.mint(address(manager), 100_000 ether);
+
+        address[] memory coins = new address[](2);
+        coins[0] = CURVE_NATIVE_CURRENCY;
+        coins[1] = address(token1);
+
+        MockCurveStableSwap nativeMockPool = new MockCurveStableSwap(coins);
+        uint256 poolBalance = bound(uint256(keccak256(abi.encode(seed, "balance"))), 20_000 ether, 100_000 ether);
+        token1.mint(address(nativeMockPool), poolBalance);
+        nativeMockPool.setBalance(1, poolBalance);
+
+        uint256 dy = bound(uint256(keccak256(abi.encode(seed, "dy"))), 1000 ether, poolBalance / 20);
+        nativeMockPool.setReturnGetDy(dy);
+        nativeMockPool.setReturnExchange(dy);
+
+        Currency[] memory currencies = new Currency[](2);
+        currencies[0] = Currency.wrap(address(0));
+        currencies[1] = Currency.wrap(address(token1));
+
+        hook = _deployHookMulti(ICurveStableSwap(address(nativeMockPool)), currencies);
+
+        poolKey = _buildPoolKey(currencies[0], currencies[1], IHooks(address(hook)));
+
+        amountIn = bound(uint256(keccak256(abi.encode(seed, "amountIn"))), 1 ether, 100 ether);
+
+        vm.deal(alice, amountIn * 2);
+        vm.deal(address(manager), amountIn * 2);
+        vm.deal(address(hook), amountIn * 2);
+
+        token1.mint(alice, poolBalance);
+        vm.startPrank(alice);
+        token1.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
     }
 
     // ========== HELPERS ==========

@@ -24,6 +24,7 @@ library SafeCurrencySettler {
         if (burn) {
             manager.burn(payer, currency.toId(), amount);
         } else if (currency.isAddressZero()) {
+            manager.sync(currency);
             manager.settle{value: amount}();
         } else {
             manager.sync(currency);

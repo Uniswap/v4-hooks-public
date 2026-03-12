@@ -382,5 +382,70 @@ contract StableSwapForkedTest is Test {
         assertGt(amount1, 0, "amount1 should be non-zero");
     }
 
+    // ========== NATIVE INPUT TESTS ==========
+
+    /// @notice Test exact input swap with native ETH: ETH -> Token (zeroForOne)
+    /// @dev Requires STABLE_SWAP_NATIVE_POOL in .env (e.g. Curve stETH/ETH pool)
+    function test_swapExactInput_NativeInput_ZeroForOne() public {
+        address nativePoolAddress;
+        try vm.envAddress("STABLE_SWAP_NATIVE_POOL") returns (address _addr) {
+            if (_addr == address(0)) vm.skip(true);
+            nativePoolAddress = _addr;
+        } catch {
+            vm.skip(true);
+        }
+
+        ICurveStableSwap nativeCurvePool = ICurveStableSwap(nativePoolAddress);
+        // Native pool: ETH (0xEee or index 0) and ERC20 (e.g. stETH at index 1)
+        address token1Addr = nativeCurvePool.coins(1);
+        uint256 amountIn = 1 ether;
+
+        StableSwapAggregator nativeHook = _deployHookForPool(nativeCurvePool);
+
+        PoolKey memory nativePoolKey = PoolKey({
+            currency0: Currency.wrap(address(0)), // Native ETH
+            currency1: Currency.wrap(token1Addr),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(nativeHook))
+        });
+
+        manager.initialize(nativePoolKey, SQRT_PRICE_1_1);
+
+        // Fund test contract (it sends value when calling swap), alice, and manager
+        vm.deal(address(this), 10 ether);
+        vm.deal(alice, 10 ether);
+        vm.deal(address(manager), 10 ether);
+
+        uint256 expectedOut = nativeHook.quote(true, -int256(amountIn), nativePoolKey.toId());
+        assertGt(expectedOut, 0, "Quote should return non-zero");
+
+        uint256 aliceTokenBefore = IERC20(token1Addr).balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap{value: amountIn}(
+            nativePoolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        // Curve's get_dy can exceed actual exchange output by a few wei; allow small rounding tolerance
+        uint256 received = IERC20(token1Addr).balanceOf(alice) - aliceTokenBefore;
+        assertApproxEqAbs(received, expectedOut, 10, "Received should be within 10 wei of quote");
+        assertLe(received, expectedOut, "Received must not exceed quote (no over-delivery)");
+    }
+
+    function _deployHookForPool(ICurveStableSwap _curvePool) internal returns (StableSwapAggregator) {
+        uint160 flags =
+            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+
+        bytes memory constructorArgs = abi.encode(address(manager), address(_curvePool), metaRegistry);
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(StableSwapAggregator).creationCode, constructorArgs);
+
+        return new StableSwapAggregator{salt: salt}(manager, _curvePool, IMetaRegistry(metaRegistry));
+    }
+
     receive() external payable {}
 }

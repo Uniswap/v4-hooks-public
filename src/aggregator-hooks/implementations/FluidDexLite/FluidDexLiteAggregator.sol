@@ -124,10 +124,14 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
         bool isExactIn = params.amountSpecified < 0;
+        // Must send to hook due to V4 settle needing msg.value for native currency
+        address recipient = settleCurrency.isAddressZero() ? address(this) : address(poolManager);
 
         if (!settleCurrency.isAddressZero()) {
             poolManager.sync(settleCurrency);
         }
+
+        uint256 balanceBefore = settleCurrency.balanceOf(recipient);
 
         uint256 value;
         if (takeCurrency.isAddressZero()) {
@@ -149,23 +153,22 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
                 // Safe to disable slippage check since these are checked in the router
                 amountLimit: isExactIn ? 0 : type(uint256).max,
                 payer: address(this),
-                recipient: settleCurrency.isAddressZero() ? address(this) : address(poolManager),
+                recipient: recipient,
                 extraData: bytes("")
             }),
             value
         );
 
+        if (isExactIn) {
+            amountTake = uint256(-params.amountSpecified);
+        } else {
+            amountTake = amountUnspecified;
+        }
+
+        amountSettle = settleCurrency.balanceOf(recipient) - balanceBefore;
         if (!settleCurrency.isAddressZero()) {
             hasSettled = true;
             poolManager.settle();
-        }
-
-        if (isExactIn) {
-            amountTake = uint256(-params.amountSpecified);
-            amountSettle = amountUnspecified;
-        } else {
-            amountSettle = uint256(params.amountSpecified);
-            amountTake = amountUnspecified;
         }
 
         return (amountSettle, amountTake, hasSettled);

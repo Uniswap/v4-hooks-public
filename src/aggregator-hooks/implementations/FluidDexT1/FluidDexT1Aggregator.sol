@@ -48,6 +48,15 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
 
+    /// @notice Packed context for Fluid swap calls (reduces stack depth).
+    struct FluidSwapContext {
+        bool inputIsNative;
+        bool outputIsNative;
+        bool fluidSwap0to1;
+        Currency settleCurrency;
+        Currency takeCurrency;
+    }
+
     constructor(
         IPoolManager _manager,
         IFluidDexT1 _fluidDex,
@@ -153,14 +162,27 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
+        (amountSettle, amountTake, hasSettled) = _executeFluidSwap(settleCurrency, takeCurrency, params);
+        return (amountSettle, amountTake, hasSettled);
+    }
+
+    /// @notice Executes the Fluid swap and measures actual output (handles stETH-style rounding).
+    function _executeFluidSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params)
+        internal
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
+    {
         if (_getTransientInflight()) revert Reentrancy();
 
-        // Pre-compute values to avoid stack depth issues
-        bool inputIsNative = takeCurrency.isAddressZero();
-        bool outputIsNative = settleCurrency.isAddressZero();
-        bool fluidSwap0to1 = _isReversed ? !params.zeroForOne : params.zeroForOne;
+        FluidSwapContext memory ctx = FluidSwapContext({
+            inputIsNative: takeCurrency.isAddressZero(),
+            outputIsNative: settleCurrency.isAddressZero(),
+            fluidSwap0to1: _isReversed ? !params.zeroForOne : params.zeroForOne,
+            settleCurrency: settleCurrency,
+            takeCurrency: takeCurrency
+        });
 
-        if (!outputIsNative) {
+        uint256 balanceBefore = settleCurrency.balanceOf(address(poolManager));
+        if (!ctx.outputIsNative) {
             poolManager.sync(settleCurrency);
         }
 
@@ -168,64 +190,45 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
 
         if (params.amountSpecified < 0) {
             amountTake = uint256(-params.amountSpecified);
-            amountSettle = _swapExactIn(
-                inputIsNative,
-                fluidSwap0to1,
-                amountTake,
-                outputIsNative ? address(this) : address(poolManager),
-                takeCurrency
-            );
+            amountSettle = _swapExactIn(ctx, amountTake, ctx.outputIsNative ? address(this) : address(poolManager));
         } else {
             amountSettle = uint256(params.amountSpecified);
-            amountTake = _swapExactOut(
-                inputIsNative, outputIsNative, fluidSwap0to1, amountSettle, address(this), settleCurrency
-            );
+            amountTake = _swapExactOut(ctx, amountSettle);
         }
 
         _setTransientInflight(false);
 
-        if (!outputIsNative) {
+        if (!ctx.outputIsNative) {
+            amountSettle = settleCurrency.balanceOf(address(poolManager)) - balanceBefore;
             hasSettled = true;
             poolManager.settle();
         }
-
-        return (amountSettle, amountTake, hasSettled);
     }
 
-    function _swapExactIn(
-        bool inputIsNative,
-        bool fluidSwap0to1,
-        uint256 amountIn,
-        address recipient,
-        Currency takeCurrency
-    ) internal returns (uint256 amountOut) {
-        if (inputIsNative) {
-            poolManager.take(takeCurrency, address(this), amountIn);
+    function _swapExactIn(FluidSwapContext memory ctx, uint256 amountIn, address recipient)
+        internal
+        returns (uint256 amountOut)
+    {
+        if (ctx.inputIsNative) {
+            poolManager.take(ctx.takeCurrency, address(this), amountIn);
             // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = fluidPool.swapIn{value: amountIn}(fluidSwap0to1, amountIn, 0, recipient);
+            amountOut = fluidPool.swapIn{value: amountIn}(ctx.fluidSwap0to1, amountIn, 0, recipient);
         } else {
-            // MinAmoountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = fluidPool.swapInWithCallback(fluidSwap0to1, amountIn, 0, recipient);
+            // MinAmountOut is 0 to avoid slippage check because it is checked in the router
+            amountOut = fluidPool.swapInWithCallback(ctx.fluidSwap0to1, amountIn, 0, recipient);
         }
     }
 
-    function _swapExactOut(
-        bool inputIsNative,
-        bool outputIsNative,
-        bool fluidSwap0to1,
-        uint256 amountOut,
-        address recipient,
-        Currency settleCurrency
-    ) internal returns (uint256 amountIn) {
-        if (inputIsNative) {
+    function _swapExactOut(FluidSwapContext memory ctx, uint256 amountOut) internal returns (uint256 amountIn) {
+        if (ctx.inputIsNative) {
             revert NativeCurrencyExactOut();
         } else {
             // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
             amountIn = fluidPool.swapOutWithCallback(
-                fluidSwap0to1, amountOut + _getBuffer(amountOut), type(uint256).max, recipient
+                ctx.fluidSwap0to1, amountOut + _getBuffer(amountOut), type(uint256).max, address(this)
             );
-            if (!outputIsNative) {
-                settleCurrency.transfer(address(poolManager), amountOut);
+            if (!ctx.outputIsNative) {
+                ctx.settleCurrency.transfer(address(poolManager), amountOut);
             }
         }
     }
