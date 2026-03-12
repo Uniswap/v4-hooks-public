@@ -1,5 +1,5 @@
 # ICurveStableSwapNG
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/37a7cb81b7d428c0f0c3a3b22f8af4d012f72874/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapNG.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapNG.sol)
 
 **Title:**
 ICurveStableSwapNG

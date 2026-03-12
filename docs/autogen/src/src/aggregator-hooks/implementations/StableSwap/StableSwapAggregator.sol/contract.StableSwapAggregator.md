@@ -1,5 +1,9 @@
 # StableSwapAggregator
+<<<<<<< agg-hook-3pool-support
 [Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d3d70ef9ec9b052aacf15a77488055ff2827e873/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+=======
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+>>>>>>> aggregator-hooks
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)

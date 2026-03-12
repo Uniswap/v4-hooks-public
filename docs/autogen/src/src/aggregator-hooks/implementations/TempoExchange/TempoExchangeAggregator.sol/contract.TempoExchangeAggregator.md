@@ -1,5 +1,5 @@
 # TempoExchangeAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/0d898f379fdd8fbc42644ea0b0c8de37213bdae1/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -30,6 +30,20 @@ Maps Uniswap V4 pool IDs to their token addresses
 
 ```solidity
 mapping(PoolId => PoolTokens) public poolIdToTokens
+```
+
+
+### INACCURACY_BUFFER
+
+```solidity
+uint256 private constant INACCURACY_BUFFER = 20
+```
+
+
+### INACCURACY_SCALE
+
+```solidity
+uint256 private constant INACCURACY_SCALE = 1_000_000
 ```
 
 
@@ -98,6 +112,15 @@ function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams
     internal
     override
     returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
+```
+
+### _getBuffer
+
+Returns a buffer to account for per-tick vs per-order rounding in exact-out quotes
+
+
+```solidity
+function _getBuffer(uint256 amount) internal pure returns (uint256);
 ```
 
 ### _safeToUint128
