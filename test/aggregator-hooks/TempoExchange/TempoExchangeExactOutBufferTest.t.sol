@@ -183,6 +183,28 @@ contract TempoExchangeExactOutBufferTest is Test {
         // The fact we got here without revert means the buffer absorbed the discrepancy
     }
 
+    /// @notice Exact-out swap reverts when discrepancy exceeds the buffer
+    function test_exactOutRevertsWhenDiscrepancyExceedsBuffer() public {
+        uint256 amountOut = SWAP_AMOUNT;
+
+        // Calculate the buffer for this swap's quoted input
+        uint128 quotedIn =
+            tempoExchange.quoteSwapExactAmountOut(address(alphaUSD), address(betaUSD), uint128(amountOut));
+        uint256 buffer = _getBuffer(uint256(quotedIn));
+
+        // Set discrepancy to exceed the buffer by 1
+        tempoExchange.setDiscrepancy(uint128(buffer) + 1);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
     /// @notice Exact-out swap with zero discrepancy still works (baseline)
     function test_exactOutWithZeroDiscrepancy() public {
         // discrepancy is already 0 from setUp
