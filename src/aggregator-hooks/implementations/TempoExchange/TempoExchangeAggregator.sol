@@ -34,6 +34,10 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
     /// @notice Maps Uniswap V4 pool IDs to their token addresses
     mapping(PoolId => PoolTokens) public poolIdToTokens;
 
+    /// @notice Canonical pool per token pair (key = keccak256(abi.encode(ordered token0, ordered token1)))
+    /// @dev Enforces one pool per pair
+    mapping(bytes32 => PoolId) private _canonicalPoolByPair;
+
     // Tempo's exact-out quoting operates per-tick while execution operates per-order,
     // so accumulated rounding can cause the real input consumed to differ from the quoted value.
     // Buffer scales with amount: max(INACCURACY_BUFFER, amount / INACCURACY_SCALE)
@@ -43,6 +47,7 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
     error AmountExceedsUint128();
     error TokensNotSupported(address token0, address token1);
     error ExchangeDoesNotSupportPair(address token0, address token1);
+    error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _tempoExchange The Tempo stablecoin exchange address
@@ -105,6 +110,14 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         catch {
             revert ExchangeDoesNotSupportPair(token0, token1);
         }
+
+        // Enforce one canonical pool per token pair
+        bytes32 pairKey = _canonicalPairKey(token0, token1);
+        PoolId existing = _canonicalPoolByPair[pairKey];
+        if (PoolId.unwrap(existing) != bytes32(0)) {
+            revert PairAlreadyHasCanonicalPool(existing, token0, token1);
+        }
+        _canonicalPoolByPair[pairKey] = key.toId();
 
         // Store token addresses for this pool
         poolIdToTokens[key.toId()] = PoolTokens({token0: token0, token1: token1});
@@ -175,6 +188,12 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
         }
 
         return (amountSettle, amountTake, hasSettled);
+    }
+
+    /// @notice Returns the canonical storage key for a token pair (ordered by address)
+    function _canonicalPairKey(address token0, address token1) private pure returns (bytes32) {
+        (address t0, address t1) = token0 < token1 ? (token0, token1) : (token1, token0);
+        return keccak256(abi.encode(t0, t1));
     }
 
     /// @notice Returns a buffer to account for per-tick vs per-order rounding in exact-out quotes
