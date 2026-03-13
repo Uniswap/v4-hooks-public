@@ -39,6 +39,8 @@ contract StableSwapAggregatorUnitTest is Test {
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
 
+    address constant CURVE_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     address public alice = makeAddr("alice");
     PoolKey public poolKey;
     PoolId public poolId;
@@ -323,5 +325,97 @@ contract StableSwapAggregatorUnitTest is Test {
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
+    }
+
+    // ========== NATIVE INPUT SWAP TESTS ==========
+
+    /// @notice Test exact input swap with native ETH input: ETH -> ERC20 (zeroForOne)
+    function test_swap_exactIn_nativeInput_zeroForOne() public {
+        // Create mock pool with native (Curve uses 0xEee) as coin0 and token1 as coin1
+        address[] memory coins = new address[](2);
+        coins[0] = CURVE_NATIVE_CURRENCY;
+        coins[1] = address(token1);
+        MockCurveStableSwap nativeMockPool = new MockCurveStableSwap(coins);
+
+        StableSwapAggregator nativeHook = _deployHook(nativeMockPool, mockMetaRegistry);
+
+        PoolKey memory nativePoolKey = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 100,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(nativeHook))
+        });
+
+        poolManager.initialize(nativePoolKey, SQRT_PRICE_1_1);
+
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        nativeMockPool.setReturnExchange(amountOut);
+        nativeMockPool.setReturnGetDy(amountOut);
+        token1.mint(address(nativeMockPool), amountOut);
+
+        vm.deal(alice, amountIn);
+        vm.deal(address(poolManager), amountIn);
+        vm.deal(address(nativeHook), amountIn);
+
+        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceToken1Before = token1.balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap{value: amountIn}(
+            nativePoolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(aliceEthBefore - alice.balance, amountIn, "Alice should spend exact ETH");
+        assertEq(token1.balanceOf(alice) - aliceToken1Before, amountOut, "Alice should receive token1");
+    }
+
+    /// @notice Test exact input swap with native ETH output: ERC20 -> ETH (oneForZero)
+    function test_swap_exactIn_nativeOutput_oneForZero() public {
+        // Create mock pool with native (Curve uses 0xEee) as coin0 and token1 as coin1
+        address[] memory coins = new address[](2);
+        coins[0] = CURVE_NATIVE_CURRENCY;
+        coins[1] = address(token1);
+        MockCurveStableSwap nativeMockPool = new MockCurveStableSwap(coins);
+
+        StableSwapAggregator nativeHook = _deployHook(nativeMockPool, mockMetaRegistry);
+
+        PoolKey memory nativePoolKey = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 101,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(nativeHook))
+        });
+
+        poolManager.initialize(nativePoolKey, SQRT_PRICE_1_1);
+
+        uint256 amountIn = 100 ether;
+        uint256 amountOut = 95 ether;
+        nativeMockPool.setReturnExchange(amountOut);
+        nativeMockPool.setReturnGetDy(amountOut);
+
+        // Mock pool needs ETH to send as native output
+        vm.deal(address(nativeMockPool), amountOut);
+        token1.mint(address(poolManager), amountIn);
+        token1.mint(address(nativeHook), amountIn);
+
+        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceToken1Before = token1.balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            nativePoolKey,
+            SwapParams({zeroForOne: false, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MAX_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(aliceToken1Before - token1.balanceOf(alice), amountIn, "Alice should spend exact token1");
+        assertEq(alice.balance - aliceEthBefore, amountOut, "Alice should receive native ETH");
     }
 }
