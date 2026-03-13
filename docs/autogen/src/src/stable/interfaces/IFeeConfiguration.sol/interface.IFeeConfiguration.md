@@ -1,5 +1,5 @@
 # IFeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/97913700dd84646dfed3f83706f7bd0300120541/src/stable/interfaces/IFeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/2906ec0c427bcf81632102bfdde9ba69213d4800/src/stable/interfaces/IFeeConfiguration.sol)
 
 Interface for the FeeConfiguration
 
@@ -123,4 +123,18 @@ error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 |Name|Type|Description|
 |----|----|-----------|
 |`invalidSqrtPrice`|`uint256`|The invalid reference sqrt price|
+
+### InvalidTargetMultiplier
+Error thrown when target multiplier is invalid (must be 0-100)
+
+
+```solidity
+error InvalidTargetMultiplier(uint256 targetMultiplier);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`targetMultiplier`|`uint256`|The invalid target multiplier|
 

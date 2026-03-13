@@ -255,7 +255,7 @@ contract FeeCalculationTest is Test {
     // INVARIANT: adjustedFee >= newTargetFee after price moves further from reference
     // When price moves further from reference while outside optimal range:
     //   - The old fee (which may have decayed to old target) gets adjusted upward
-    //     to preserve the same effective price at the new AMM price
+    //     to preserve the same pre-impact price at the new AMM price
     //   - The new target is higher because price is further from reference
     //   - The adjusted fee must still be >= the new target for decay math to work
     // =============================================================================
