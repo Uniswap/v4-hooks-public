@@ -1,5 +1,5 @@
 # ICurveStableSwap
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/cb12c6c0911770a6a8d03fb673d3e51d473f59d8/src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol)
 
 **Title:**
 ICurveStableSwap
@@ -39,7 +39,7 @@ Executes a token swap
 
 
 ```solidity
-function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external returns (uint256);
+function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external payable returns (uint256);
 ```
 **Parameters**
 

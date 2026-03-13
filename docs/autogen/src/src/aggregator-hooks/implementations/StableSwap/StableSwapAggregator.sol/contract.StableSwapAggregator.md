@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/cb12c6c0911770a6a8d03fb673d3e51d473f59d8/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -13,6 +13,15 @@ Supports exact-input swaps only due to StableSwap pool limitations
 
 
 ## State Variables
+### CURVE_NATIVE_ETH
+Curve's address for native currency
+
+
+```solidity
+address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+```
+
+
 ### pool
 The Curve StableSwap pool
 
@@ -83,6 +92,15 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
 ```
 
+### _currencyMatchesCoin
+
+Check if a Curve pool coin matches a V4 currency (handles native: V4=address(0), Curve=0xEee)
+
+
+```solidity
+function _currencyMatchesCoin(Currency currency, address coin) internal pure returns (bool);
+```
+
 ### _beforeInitialize
 
 
@@ -99,7 +117,7 @@ settle' pattern and set hasSettled to true
 
 
 ```solidity
-function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
     internal
     override
     returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
@@ -108,7 +126,7 @@ function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata param
 
 |Name|Type|Description|
 |----|----|-----------|
-|`<none>`|`Currency`||
+|`settleCurrency`|`Currency`|The currency to be settled on the V4 PoolManager (swapper's output currency)|
 |`takeCurrency`|`Currency`|The currency to be taken from the V4 PoolManager (swapper's input currency)|
 |`params`|`SwapParams`|The swap parameters|
 |`poolId`|`PoolId`|The V4 Pool ID|
@@ -145,6 +163,12 @@ error ExactOutputNotSupported();
 
 ```solidity
 error PoolIsMetaPool();
+```
+
+### ExchangeFailed
+
+```solidity
+error ExchangeFailed();
 ```
 
 ## Structs

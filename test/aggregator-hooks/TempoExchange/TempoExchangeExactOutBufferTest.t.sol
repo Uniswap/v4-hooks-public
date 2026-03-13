@@ -269,8 +269,7 @@ contract TempoExchangeExactOutBufferTest is Test {
         uint256 amountIn = SWAP_AMOUNT;
 
         // Get the raw quote from the exchange directly
-        uint128 rawQuote =
-            tempoExchange.quoteSwapExactAmountIn(address(alphaUSD), address(betaUSD), uint128(amountIn));
+        uint128 rawQuote = tempoExchange.quoteSwapExactAmountIn(address(alphaUSD), address(betaUSD), uint128(amountIn));
 
         // Get the quote from the hook
         uint256 hookQuote = hook.quote(true, -int256(amountIn), poolId);
@@ -354,8 +353,7 @@ contract TempoExchangeExactOutBufferTest is Test {
         amountOut = uint128(bound(amountOut, 1 * 10 ** DECIMALS, 100_000 * 10 ** DECIMALS));
 
         // Calculate what the buffer would be for this amount's quoted input
-        uint128 quotedIn =
-            tempoExchange.quoteSwapExactAmountOut(address(alphaUSD), address(betaUSD), amountOut);
+        uint128 quotedIn = tempoExchange.quoteSwapExactAmountOut(address(alphaUSD), address(betaUSD), amountOut);
         uint256 buffer = _getBuffer(uint256(quotedIn));
 
         // Bound discrepancy to be within the buffer
@@ -365,7 +363,9 @@ contract TempoExchangeExactOutBufferTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -382,7 +382,9 @@ contract TempoExchangeExactOutBufferTest is Test {
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT}),
+            SwapParams({
+                zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );

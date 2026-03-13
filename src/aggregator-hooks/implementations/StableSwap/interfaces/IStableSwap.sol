@@ -18,7 +18,7 @@ interface ICurveStableSwap {
     /// @param dx Amount of input tokens to swap
     /// @param min_dy Minimum amount of output tokens to receive (slippage protection)
     /// @return The actual amount of output tokens received
-    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external returns (uint256);
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external payable returns (uint256);
 
     /// @notice Returns the token address at a given index
     /// @param i Index of the token in the pool
