@@ -225,7 +225,9 @@ contract TempoExchangeTest is Test {
         assertEq(token1Received, amountOut, "Token1 received should match exact output amount");
 
         uint256 token0Spent = token0Before - token0After;
-        assertEq(token0Spent, expectedIn, "Token0 spent should match quote");
+        // Quote includes a safety buffer for per-tick vs per-order rounding; actual spend may be less
+        assertLe(token0Spent, expectedIn, "Token0 spent should not exceed quote");
+        assertGt(token0Spent, 0, "Token0 spent should be non-zero");
     }
 
     /// @notice Test exact output swap: Token1 -> Token0 (one to zero)
@@ -254,7 +256,9 @@ contract TempoExchangeTest is Test {
         assertEq(token0Received, amountOut, "Token0 received should match exact output amount");
 
         uint256 token1Spent = token1Before - token1After;
-        assertEq(token1Spent, expectedIn, "Token1 spent should match quote");
+        // Quote includes a safety buffer for per-tick vs per-order rounding; actual spend may be less
+        assertLe(token1Spent, expectedIn, "Token1 spent should not exceed quote");
+        assertGt(token1Spent, 0, "Token1 spent should be non-zero");
     }
 
     // ========== ERROR PATH TESTS ==========
@@ -608,7 +612,8 @@ contract TempoExchangeTest is Test {
         uint256 token1After = betaUSD.balanceOf(alice);
 
         assertEq(token1After - token1Before, amountOut, "Output amount mismatch");
-        assertEq(token0Before - token0After, expectedIn, "Input amount mismatch");
+        // Quote includes buffer; actual spend may be less
+        assertLe(token0Before - token0After, expectedIn, "Input should not exceed quote");
     }
 
     /// @notice Fuzz test for exact output swaps (one to zero)
@@ -636,7 +641,8 @@ contract TempoExchangeTest is Test {
         uint256 token1After = betaUSD.balanceOf(alice);
 
         assertEq(token0After - token0Before, amountOut, "Output amount mismatch");
-        assertEq(token1Before - token1After, expectedIn, "Input amount mismatch");
+        // Quote includes buffer; actual spend may be less
+        assertLe(token1Before - token1After, expectedIn, "Input should not exceed quote");
     }
 
     // ========== GAS COMPARISON TESTS ==========
@@ -767,11 +773,18 @@ contract TempoExchangeTest is Test {
         // Get output for exact input
         uint256 outputFromExactIn = hook.quote(true, -int256(uint256(amount)), poolId);
 
-        // Get input required for that output
+        // Get input required for that output (includes safety buffer)
         uint256 inputForExactOut = hook.quote(true, int256(outputFromExactIn), poolId);
 
-        // Due to fee calculation rounding, input should be <= original amount
-        assertLe(inputForExactOut, amount, "Round-trip should not exceed original");
+        // The exact-out quote includes a buffer for rounding safety, so the round-trip
+        // may slightly exceed the original. Allow up to buffer tolerance.
+        uint256 bufferTolerance = _getBuffer(uint256(amount));
+        assertLe(inputForExactOut, uint256(amount) + bufferTolerance, "Round-trip should not exceed original + buffer");
+    }
+
+    function _getBuffer(uint256 amount) internal pure returns (uint256) {
+        uint256 scaled = amount / 1_000_000;
+        return scaled > 20 ? scaled : 20;
     }
 
     /// ========== Avoid Stack-Too-Deep Errors ==========

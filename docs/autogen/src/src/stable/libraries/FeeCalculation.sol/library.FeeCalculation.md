@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/f8565fc81da8b1c3268bd1879afff1a802eed712/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/5eddc0db14b239606bfb3a1843555f658dca116d/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation

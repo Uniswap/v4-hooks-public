@@ -1,5 +1,5 @@
 # ICurveStableSwap
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d3d70ef9ec9b052aacf15a77488055ff2827e873/src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/5eddc0db14b239606bfb3a1843555f658dca116d/src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol)
 
 **Title:**
 ICurveStableSwap

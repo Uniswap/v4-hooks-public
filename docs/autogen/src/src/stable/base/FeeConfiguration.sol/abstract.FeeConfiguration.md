@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/2906ec0c427bcf81632102bfdde9ba69213d4800/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/5eddc0db14b239606bfb3a1843555f658dca116d/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish

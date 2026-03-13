@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/2ba6ec61009d5c9155eb6a2690e3da45c86435f9/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/5eddc0db14b239606bfb3a1843555f658dca116d/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
