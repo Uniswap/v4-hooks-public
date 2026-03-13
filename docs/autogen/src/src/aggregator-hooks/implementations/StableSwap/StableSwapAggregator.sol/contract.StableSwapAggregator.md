@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d3d70ef9ec9b052aacf15a77488055ff2827e873/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/2ba6ec61009d5c9155eb6a2690e3da45c86435f9/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -13,6 +13,15 @@ Supports exact-input swaps only due to StableSwap pool limitations
 
 
 ## State Variables
+### CURVE_NATIVE_ETH
+Curve's address for native currency
+
+
+```solidity
+address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+```
+
+
 ### pool
 The Curve StableSwap pool
 
@@ -81,6 +90,15 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 ```solidity
 function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+```
+
+### _currencyMatchesCoin
+
+Check if a Curve pool coin matches a V4 currency (handles native: V4=address(0), Curve=0xEee)
+
+
+```solidity
+function _currencyMatchesCoin(Currency currency, address coin) internal pure returns (bool);
 ```
 
 ### _beforeInitialize
