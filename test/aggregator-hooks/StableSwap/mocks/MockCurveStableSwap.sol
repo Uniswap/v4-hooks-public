@@ -7,6 +7,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @title MockCurveStableSwap
 /// @notice Mock Curve StableSwap pool with settable return values for unit tests.
 contract MockCurveStableSwap is ICurveStableSwap {
+    /// @notice Curve's convention for native ETH (matches StableSwapAggregator)
+    address internal constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     address[] public coinsList;
     mapping(uint256 => uint256) public balancesMap;
     uint256 public returnGetDy;
@@ -60,12 +62,23 @@ contract MockCurveStableSwap is ICurveStableSwap {
         return returnGetDy;
     }
 
-    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256) {
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external payable override returns (uint256) {
         if (revertExchange) revert ExchangeRevert();
-        // Transfer tokenIn from caller
-        IERC20(coinsList[uint256(uint128(i))]).transferFrom(msg.sender, address(this), dx);
+        address tokenIn = coinsList[uint256(uint128(i))];
+        address tokenOut = coinsList[uint256(uint128(j))];
+        // Transfer tokenIn from caller (native ETH arrives via msg.value)
+        if (tokenIn != address(0) && tokenIn != CURVE_NATIVE_ETH) {
+            IERC20(tokenIn).transferFrom(msg.sender, address(this), dx);
+        } else {
+            require(msg.value == dx, "Native input amount mismatch");
+        }
         // Transfer tokenOut to caller
-        IERC20(coinsList[uint256(uint128(j))]).transfer(msg.sender, returnExchange);
+        if (tokenOut != address(0) && tokenOut != CURVE_NATIVE_ETH) {
+            IERC20(tokenOut).transfer(msg.sender, returnExchange);
+        } else {
+            (bool ok,) = payable(msg.sender).call{value: returnExchange}("");
+            require(ok, "Native transfer failed");
+        }
         (min_dy); // silence unused
         return returnExchange;
     }

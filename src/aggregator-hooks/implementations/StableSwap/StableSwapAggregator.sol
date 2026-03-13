@@ -21,6 +21,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
+    /// @notice Curve's address for native currency
+    address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     /// @notice The Curve StableSwap pool
     ICurveStableSwap public pool;
 
@@ -39,6 +42,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
     error PoolIsMetaPool();
+    error ExchangeFailed();
 
     constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
         BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
@@ -70,6 +74,14 @@ contract StableSwapAggregator is BaseAggregatorHook {
         amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
 
+    /// @notice Check if a Curve pool coin matches a V4 currency (handles native: V4=address(0), Curve=0xEee)
+    function _currencyMatchesCoin(Currency currency, address coin) internal pure returns (bool) {
+        address unwrapped = Currency.unwrap(currency);
+        if (unwrapped == coin) return true;
+        if (unwrapped == address(0) && coin == CURVE_NATIVE_ETH) return true;
+        return false;
+    }
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         if (metaRegistry.is_meta(address(pool), 0)) revert PoolIsMetaPool();
 
@@ -83,11 +95,12 @@ contract StableSwapAggregator is BaseAggregatorHook {
             // Try to get coin at index i, break if it reverts (end of coins)
             try pool.coins(uint256(uint128(i))) returns (address coin) {
                 if (coin == address(0)) break;
-                if (coin == Currency.unwrap(key.currency0)) {
+                // V4 uses address(0) for native; Curve uses CURVE_NATIVE_ETH
+                if (_currencyMatchesCoin(key.currency0, coin)) {
                     token0Index = i;
                     token0Found = true;
                 }
-                if (coin == Currency.unwrap(key.currency1)) {
+                if (_currencyMatchesCoin(key.currency1, coin)) {
                     token1Index = i;
                     token1Found = true;
                 }
@@ -111,9 +124,13 @@ contract StableSwapAggregator is BaseAggregatorHook {
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 
-        // Use forceApprove to set allowance (safe to call multiple times for multi-token pools)
-        IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
-        IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
+        // Use forceApprove to set allowance (skip for native currency). Safe to call multiple times for multi-token pools
+        if (!key.currency0.isAddressZero()) {
+            IERC20(Currency.unwrap(key.currency0)).forceApprove(address(pool), type(uint256).max);
+        }
+        if (!key.currency1.isAddressZero()) {
+            IERC20(Currency.unwrap(key.currency1)).forceApprove(address(pool), type(uint256).max);
+        }
 
         emit AggregatorPoolRegistered(key.toId());
         pollTokenJar();
@@ -121,7 +138,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function _conductSwap(Currency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+    function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
         internal
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
@@ -145,10 +162,19 @@ contract StableSwapAggregator is BaseAggregatorHook {
             revert ExactOutputNotSupported();
         }
 
+        uint256 value = takeCurrency.isAddressZero() ? amountTake : 0;
+
         poolManager.take(takeCurrency, address(this), amountTake);
 
+        uint256 balanceBefore = settleCurrency.balanceOfSelf();
+
         // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-        amountSettle = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0);
+        // Uses selector since 3pool doesn't return a value but has the same signature
+        (bool success,) = payable(address(pool)).call{value: value}(
+            abi.encodeWithSelector(pool.exchange.selector, tokenInIndex, tokenOutIndex, amountTake, 0)
+        );
+        if (!success) revert ExchangeFailed();
+        amountSettle = settleCurrency.balanceOfSelf() - balanceBefore;
 
         hasSettled = false;
         return (amountSettle, amountTake, hasSettled);
