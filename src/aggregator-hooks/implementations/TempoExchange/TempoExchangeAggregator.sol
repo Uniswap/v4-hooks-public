@@ -169,7 +169,8 @@ contract TempoExchangeAggregator is BaseAggregatorHook {
             poolManager.take(takeCurrency, address(this), bufferedIn);
 
             // Execute swap on Tempo and capture actual input consumed
-            uint128 actualIn = tempoExchange.swapExactAmountOut(tokenIn, tokenOut, amountOut, _safeToUint128(bufferedIn));
+            uint128 actualIn =
+                tempoExchange.swapExactAmountOut(tokenIn, tokenOut, amountOut, _safeToUint128(bufferedIn));
             amountTake = uint256(actualIn);
 
             // Return unused input tokens to PoolManager
