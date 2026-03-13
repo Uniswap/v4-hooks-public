@@ -380,6 +380,21 @@ contract TempoExchangeTest is Test {
         manager.initialize(fakePoolKey, SQRT_PRICE_1_1);
     }
 
+    /// @notice Test that a second pool for the same token pair (different fee/tickSpacing) reverts
+    function test_initializeDuplicatePair_reverts() public {
+        PoolKey memory duplicatePoolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: 3000, // Different fee
+            tickSpacing: 60, // Different tickSpacing
+            hooks: IHooks(address(hook))
+        });
+
+        // PoolManager wraps hook errors in WrappedError; we only assert that initialization reverts
+        vm.expectRevert();
+        manager.initialize(duplicatePoolKey, SQRT_PRICE_1_1);
+    }
+
     // ========== SINGLETON PATTERN TESTS ==========
 
     /// @notice Test that the same hook can support multiple pools (singleton pattern)
