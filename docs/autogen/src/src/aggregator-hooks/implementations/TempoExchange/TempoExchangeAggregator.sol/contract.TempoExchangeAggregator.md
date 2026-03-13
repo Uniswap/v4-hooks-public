@@ -1,5 +1,5 @@
 # TempoExchangeAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/448040189515f587351ce7e06c097f94cdde108c/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -30,6 +30,17 @@ Maps Uniswap V4 pool IDs to their token addresses
 
 ```solidity
 mapping(PoolId => PoolTokens) public poolIdToTokens
+```
+
+
+### _canonicalPoolByPair
+Canonical pool per token pair (key = keccak256(abi.encode(ordered token0, ordered token1)))
+
+Enforces one pool per pair
+
+
+```solidity
+mapping(bytes32 => PoolId) private _canonicalPoolByPair
 ```
 
 
@@ -114,6 +125,15 @@ function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams
     returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
 ```
 
+### _canonicalPairKey
+
+Returns the canonical storage key for a token pair (ordered by address)
+
+
+```solidity
+function _canonicalPairKey(address token0, address token1) private pure returns (bytes32);
+```
+
 ### _getBuffer
 
 Returns a buffer to account for per-tick vs per-order rounding in exact-out quotes
@@ -161,6 +181,12 @@ error TokensNotSupported(address token0, address token1);
 
 ```solidity
 error ExchangeDoesNotSupportPair(address token0, address token1);
+```
+
+### PairAlreadyHasCanonicalPool
+
+```solidity
+error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
 ```
 
 ## Structs
