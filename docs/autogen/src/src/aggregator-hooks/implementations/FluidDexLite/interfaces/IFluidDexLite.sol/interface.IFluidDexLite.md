@@ -1,5 +1,5 @@
 # IFluidDexLite
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/269a4bc7c24c99a9bf6408262df37a462d8a2b9c/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol)
 
 **Title:**
 IFluidDexLite
@@ -150,14 +150,25 @@ struct Reserves {
 }
 ```
 
+### ConstantViews
+
+```solidity
+struct ConstantViews {
+    address liquidity;
+    address deployer;
+}
+```
+
 ### DexEntireData
 
 ```solidity
 struct DexEntireData {
+    bytes8 dexId;
     DexKey dexKey;
-    DexState dexState;
+    ConstantViews constantViews;
     Prices prices;
     Reserves reserves;
+    DexState dexState;
 }
 ```
 

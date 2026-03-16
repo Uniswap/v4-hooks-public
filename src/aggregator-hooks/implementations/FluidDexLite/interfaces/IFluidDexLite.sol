@@ -76,11 +76,18 @@ interface IFluidDexLite {
         uint256 token1ImaginaryReserves;
     }
 
+    struct ConstantViews {
+        address liquidity;
+        address deployer;
+    }
+
     struct DexEntireData {
+        bytes8 dexId;
         DexKey dexKey;
-        DexState dexState;
+        ConstantViews constantViews;
         Prices prices;
         Reserves reserves;
+        DexState dexState;
     }
 
     /// @notice Executes a single-hop swap on the Fluid DEX Lite pool

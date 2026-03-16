@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/269a4bc7c24c99a9bf6408262df37a462d8a2b9c/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -192,6 +192,16 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4);
 ```
 
+### _beforeAddLiquidity
+
+
+```solidity
+function _beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata params, bytes calldata)
+    internal
+    override
+    returns (bytes4);
+```
+
 ### _beforeSwap
 
 
@@ -237,12 +247,5 @@ Required for handling native ETH transfers during swap operations
 
 ```solidity
 receive() external payable;
-```
-
-## Events
-### TokenJarUpdated
-
-```solidity
-event TokenJarUpdated(address indexed tokenJar);
 ```
 

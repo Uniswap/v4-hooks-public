@@ -1,5 +1,5 @@
 # IAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/269a4bc7c24c99a9bf6408262df37a462d8a2b9c/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
 
 **Title:**
 IAggregatorHook
@@ -66,6 +66,12 @@ function pseudoTotalValueLocked(PoolId poolId) external view returns (uint256 am
 event AggregatorPoolRegistered(PoolId indexed poolId);
 ```
 
+### TokenJarUpdated
+
+```solidity
+event TokenJarUpdated(address indexed tokenJar);
+```
+
 ## Errors
 ### InsufficientLiquidity
 
@@ -83,5 +89,11 @@ error UnspecifiedAmountExceeded();
 
 ```solidity
 error PoolDoesNotExist();
+```
+
+### LiquidityNotAllowed
+
+```solidity
+error LiquidityNotAllowed();
 ```
 
