@@ -40,8 +40,11 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     /// @inheritdoc ProtocolFees
     function pollTokenJar() public virtual override returns (address) {
-        tokenJar = _getTokenJar(poolManager);
-        if (tokenJar != address(0)) emit TokenJarUpdated(tokenJar);
+        address newTokenJar = _getTokenJar(poolManager);
+        if (tokenJar != newTokenJar) {
+            tokenJar = newTokenJar;
+            emit TokenJarUpdated(tokenJar);
+        }
         return tokenJar;
     }
 
