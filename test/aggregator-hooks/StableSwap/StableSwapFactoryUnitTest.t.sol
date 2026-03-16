@@ -64,7 +64,10 @@ contract StableSwapFactoryUnitTest is Test {
         bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockMetaRegistry));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
             type(StableSwapAggregator).creationCode,
             args
         );
@@ -84,7 +87,10 @@ contract StableSwapFactoryUnitTest is Test {
         bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockMetaRegistry));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
             type(StableSwapAggregator).creationCode,
             args
         );

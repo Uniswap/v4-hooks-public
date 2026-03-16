@@ -151,8 +151,10 @@ contract FluidDexT1NativeForkedTest is Test {
     }
 
     function _deployHook() internal {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
 
         bytes memory constructorArgs =
             abi.encode(address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity);

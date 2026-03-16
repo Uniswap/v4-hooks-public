@@ -10,7 +10,7 @@ import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -31,8 +31,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     /// @notice The publicly displayed version of the aggregator hook.
     /// @dev Although this should never change after construction, strings cannot be labelled immutable.
     string public aggregatorHookVersion;
-
-    event TokenJarUpdated(address indexed tokenJar);
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
@@ -77,6 +75,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         permissions.beforeSwap = true;
         permissions.beforeSwapReturnDelta = true;
         permissions.beforeInitialize = true;
+        permissions.beforeAddLiquidity = true;
     }
 
     /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
@@ -109,6 +108,14 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         // NOTE: Token jar will be grabbed in first protocol fee payment if not done here.
         pollTokenJar();
         return IHooks.beforeInitialize.selector;
+    }
+
+    function _beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata params, bytes calldata)
+        internal
+        override
+        returns (bytes4)
+    {
+        revert LiquidityNotAllowed();
     }
 
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
