@@ -37,6 +37,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
 
     error UnauthorizedCaller();
     error NativeCurrencyExactOut();
+    error IncorrectNativeCurrency();
     error HookAlreadyInitialized(PoolId poolId);
 
     struct FluidDexLiteSwapParams {
@@ -93,6 +94,10 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
         // Convert address(0) (Uniswap v4 native currency) to Fluid's native currency representation
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
+
+        if (token0 == FLUID_NATIVE_CURRENCY || token1 == FLUID_NATIVE_CURRENCY) {
+            revert IncorrectNativeCurrency();
+        }
 
         if (token0 == address(0)) {
             token0 = FLUID_NATIVE_CURRENCY;
