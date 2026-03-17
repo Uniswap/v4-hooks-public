@@ -155,6 +155,21 @@ contract StableSwapNGAggregatorUnitTest is Test {
         assertEq(a1, 2000 ether);
     }
 
+    function test_pseudoTotalValueLocked_revertsInvalidPoolId() public {
+        // Use a poolId that was never initialized (no token info in mapping)
+        PoolKey memory uninitializedKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 999,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        PoolId uninitializedPoolId = uninitializedKey.toId();
+
+        vm.expectRevert(StableSwapNGAggregator.InvalidPoolId.selector);
+        hook.pseudoTotalValueLocked(uninitializedPoolId);
+    }
+
     // ========== _beforeInitialize ==========
 
     function test_beforeInitialize_revertsTokensNotInPool() public {

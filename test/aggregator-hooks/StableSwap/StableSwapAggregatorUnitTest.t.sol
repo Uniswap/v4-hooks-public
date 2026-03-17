@@ -145,6 +145,21 @@ contract StableSwapAggregatorUnitTest is Test {
         assertEq(a1, 2000 ether);
     }
 
+    function test_pseudoTotalValueLocked_revertsInvalidPoolId() public {
+        // Use a poolId that was never initialized (no token info in mapping)
+        PoolKey memory uninitializedKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 999,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        PoolId uninitializedPoolId = uninitializedKey.toId();
+
+        vm.expectRevert(StableSwapAggregator.InvalidPoolId.selector);
+        hook.pseudoTotalValueLocked(uninitializedPoolId);
+    }
+
     // ========== _beforeInitialize ==========
 
     function test_beforeInitialize_revertsTokensNotInPool() public {
@@ -307,6 +322,27 @@ contract StableSwapAggregatorUnitTest is Test {
 
         assertEq(token1.balanceOf(alice), 1000 ether - amountIn);
         assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
+    }
+
+    function test_swap_exactIn_revertsExchangeFailed() public {
+        mockPool.setRevertExchange(true);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(StableSwapAggregator.ExchangeFailed.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(100 ether), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
     }
 
     function test_swap_exactOut_reverts() public {
