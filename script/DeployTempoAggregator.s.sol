@@ -17,7 +17,6 @@ import {SafePoolSwapTest} from "../test/aggregator-hooks/shared/SafePoolSwapTest
 ///      curl -X POST https://rpc.moderato.tempo.xyz -H "Content-Type: application/json" \
 ///        -d '{"jsonrpc":"2.0","method":"tempo_fundAddress","params":["ADDRESS"],"id":1}'
 contract DeployTempoAggregator is Script {
-    // Default testnet addresses (Tempo Moderato, chain 42431)
     address constant DEFAULT_POOL_MANAGER = 0x33620f62C5b9B2086dD6b62F4A297A9f30347029;
     address constant DEFAULT_TEMPO_EXCHANGE = 0xDEc0000000000000000000000000000000000000;
 
