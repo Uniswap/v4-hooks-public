@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/cb12c6c0911770a6a8d03fb673d3e51d473f59d8/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -165,10 +165,22 @@ error ExactOutputNotSupported();
 error PoolIsMetaPool();
 ```
 
+### PoolNotRegistered
+
+```solidity
+error PoolNotRegistered();
+```
+
 ### ExchangeFailed
 
 ```solidity
 error ExchangeFailed();
+```
+
+### InvalidPoolId
+
+```solidity
+error InvalidPoolId();
 ```
 
 ## Structs

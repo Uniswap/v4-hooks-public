@@ -1,5 +1,5 @@
 # IMetaRegistry
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
 
 **Title:**
 IMetaRegistry
@@ -30,5 +30,29 @@ function is_meta(address _pool, uint256 _handler_id) external view returns (bool
 |Name|Type|Description|
 |----|----|-----------|
 |`<none>`|`bool`|True if the pool is a metapool|
+
+
+### is_registered
+
+Check if a pool is registered in Curve's registry
+
+Reverts if the pool is not in any registry
+
+
+```solidity
+function is_registered(address _pool, uint256 _handler_id) external view returns (bool);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_pool`|`address`|Address of the pool|
+|`_handler_id`|`uint256`|ID of the RegistryHandler (0 for default)|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bool`|True if the pool is registered|
 
 

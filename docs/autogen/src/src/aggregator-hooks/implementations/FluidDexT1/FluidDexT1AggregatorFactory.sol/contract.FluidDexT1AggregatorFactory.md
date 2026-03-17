@@ -1,5 +1,5 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 **Title:**
 FluidDexT1AggregatorFactory
@@ -28,6 +28,15 @@ IFluidDexReservesResolver public immutable fluidDexReservesResolver
 ```
 
 
+### fluidDexResolver
+The Fluid DEX resolver for swap queries
+
+
+```solidity
+IFluidDexResolver public immutable fluidDexResolver
+```
+
+
 ### fluidLiquidity
 The Fluid Liquidity Layer contract address
 
@@ -45,6 +54,7 @@ address public immutable fluidLiquidity
 constructor(
     IPoolManager _poolManager,
     IFluidDexReservesResolver _fluidDexReservesResolver,
+    IFluidDexResolver _fluidDexResolver,
     address _fluidLiquidity
 ) ;
 ```
