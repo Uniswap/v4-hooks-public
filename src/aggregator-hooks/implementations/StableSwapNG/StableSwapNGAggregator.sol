@@ -42,6 +42,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
     error PoolIsMetaPool();
+    error InvalidPoolId();
 
     constructor(IPoolManager _manager, ICurveStableSwapNG _pool, ICurveStableSwapFactoryNG _curveFactory)
         BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
@@ -78,6 +79,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
+        if (poolInfo.token0Index == 0 && poolInfo.token1Index == 0) revert InvalidPoolId();
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
         amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
@@ -95,8 +97,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
             if (coin == Currency.unwrap(key.currency0)) {
                 token0Index = int128(int256(i));
                 token0Found = true;
-            }
-            if (coin == Currency.unwrap(key.currency1)) {
+            } else if (coin == Currency.unwrap(key.currency1)) {
                 token1Index = int128(int256(i));
                 token1Found = true;
             }

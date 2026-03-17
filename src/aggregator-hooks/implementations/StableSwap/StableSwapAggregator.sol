@@ -43,6 +43,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error ExactOutputNotSupported();
     error PoolIsMetaPool();
     error ExchangeFailed();
+    error InvalidPoolId();
 
     constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
         BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
@@ -70,6 +71,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
+        if (poolInfo.token0Index == 0 && poolInfo.token1Index == 0) revert InvalidPoolId();
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
         amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
