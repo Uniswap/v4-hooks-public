@@ -41,6 +41,7 @@ contract StableSwapFactoryUnitTest is Test {
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwap(coins);
         mockMetaRegistry = new MockMetaRegistry();
+        mockMetaRegistry.setIsRegistered(address(mockPool), true);
         feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
     }
 
@@ -56,6 +57,7 @@ contract StableSwapFactoryUnitTest is Test {
         coins2[0] = address(tkA);
         coins2[1] = address(tkB);
         MockCurveStableSwap pool2 = new MockCurveStableSwap(coins2);
+        mockMetaRegistry.setIsRegistered(address(pool2), true);
 
         Currency[] memory tokens = new Currency[](2);
         tokens[0] = Currency.wrap(address(tkA));

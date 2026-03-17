@@ -77,7 +77,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+    function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
         if (poolInfo.token0Index == 0 && poolInfo.token1Index == 0) revert InvalidPoolId();
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
@@ -87,7 +87,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         if (curveFactory.is_meta(address(pool))) revert PoolIsMetaPool();
 
-        uint256 totalCoins = pool.N_COINS();
+        uint256 totalCoins = curveFactory.get_n_coins(address(pool));
         bool token0Found = false;
         bool token1Found = false;
         int128 token0Index;
