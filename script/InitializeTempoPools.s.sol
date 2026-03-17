@@ -25,10 +25,9 @@ contract InitializeTempoPools is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    // Default testnet addresses (Tempo Moderato, chain 42431)
-    address constant DEFAULT_POOL_MANAGER = 0x72B37Ad2798c6C2B51C7873Ed2E291a88bB909a2;
+    address constant DEFAULT_POOL_MANAGER = 0x33620f62C5b9B2086dD6b62F4A297A9f30347029;
     address constant DEFAULT_TEMPO_EXCHANGE = 0xDEc0000000000000000000000000000000000000;
-    address constant DEFAULT_PATH_USD = 0x20C0000000000000000000000000000000000001;
+    address constant DEFAULT_PATH_USD = 0x20C0000000000000000000000000000000000000;
 
     uint24 constant POOL_FEE = 500;
     int24 constant TICK_SPACING = 10;
