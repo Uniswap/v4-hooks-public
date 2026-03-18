@@ -21,6 +21,7 @@ import {MockV4FeeAdapter} from "./mocks/MockV4FeeAdapter.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {BaseAggregatorHook} from "../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {IAggregatorHook} from "../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 contract BaseAggregatorHookUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -256,7 +257,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountOut);
 
-        uint256 expectedFee = (amountOut * fee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountOut, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -282,7 +283,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token0.mint(address(hook), amountOut);
 
-        uint256 expectedFee = (amountOut * fee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountOut, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -309,7 +310,7 @@ contract BaseAggregatorHookUnitTest is Test {
         token0.mint(address(hook), amountIn);
 
         // For exact-out, fee = amountIn * protocolFee / (PIPS_DENOMINATOR - protocolFee)
-        uint256 expectedFee = (amountIn * fee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountIn, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -335,7 +336,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountIn);
 
-        uint256 expectedFee = (amountIn * fee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountIn, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
 
         vm.prank(alice);
         swapRouter.swap(
