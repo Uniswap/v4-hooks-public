@@ -484,7 +484,8 @@ contract BaseAggregatorHookUnitTest is Test {
             externalSource.setReturns(amountOut, amountIn, false);
             token0.mint(address(hook), amountOut);
 
-            uint256 expectedFee = (amountOut * oneForZeroFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+            uint256 expectedFee =
+                FullMath.mulDivRoundingUp(amountOut, oneForZeroFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
             vm.prank(alice);
             swapRouter.swap(
