@@ -10,7 +10,9 @@ import {StableSwapNGAggregator} from "../src/aggregator-hooks/implementations/St
 import {StableSwapAggregator} from "../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol";
 import {FluidDexT1Aggregator} from "../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {FluidDexLiteAggregator} from "../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
-import {TempoExchangeAggregator} from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
+import {
+    TempoExchangeAggregator
+} from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner
 /// @dev This script finds a salt that produces a hook address with the correct flags and first byte identifier
