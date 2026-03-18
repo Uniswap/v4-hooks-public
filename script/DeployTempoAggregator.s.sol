@@ -3,8 +3,6 @@ pragma solidity 0.8.29;
 
 import "forge-std/Script.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {
     TempoExchangeAggregator
 } from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
@@ -19,38 +17,13 @@ import {SafePoolSwapTest} from "../test/aggregator-hooks/shared/SafePoolSwapTest
 ///      curl -X POST https://rpc.moderato.tempo.xyz -H "Content-Type: application/json" \
 ///        -d '{"jsonrpc":"2.0","method":"tempo_fundAddress","params":["ADDRESS"],"id":1}'
 contract DeployTempoAggregator is Script {
-    // Default testnet addresses (Tempo Moderato, chain 42431)
-    address constant DEFAULT_POOL_MANAGER = 0x72B37Ad2798c6C2B51C7873Ed2E291a88bB909a2;
+    address constant DEFAULT_POOL_MANAGER = 0x33620f62C5b9B2086dD6b62F4A297A9f30347029;
     address constant DEFAULT_TEMPO_EXCHANGE = 0xDEc0000000000000000000000000000000000000;
 
-    /// @notice Mine salt (view-only). Run as: forge script ... --sig "mineSalt()"
-    function mineSalt() external view {
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
-        address poolManager = vm.envOr("POOL_MANAGER", DEFAULT_POOL_MANAGER);
-        address tempoExchange = vm.envOr("TEMPO_EXCHANGE", DEFAULT_TEMPO_EXCHANGE);
-
-        uint160 flags = uint160(
-            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
-                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-        );
-        bytes memory constructorArgs = abi.encode(poolManager, tempoExchange);
-
-        // Mine against the deterministic CREATE2 factory
-        (address expectedHook, bytes32 salt) =
-            HookMiner.find(CREATE2_FACTORY, flags, type(TempoExchangeAggregator).creationCode, constructorArgs);
-
-        console.log("Deployer:", deployer);
-        console.log("CREATE2 Factory:", CREATE2_FACTORY);
-        console.log("Expected hook address:", expectedHook);
-        console.log("Salt:");
-        console.logBytes32(salt);
-        console.log("");
-        console.log("Set HOOK_SALT and run deploy:");
-        console.log(string.concat("  HOOK_SALT=", vm.toString(salt)));
-    }
-
-    /// @notice Deploy using pre-mined salt. Run with --broadcast --skip-simulation
+    /// @notice Deploy using pre-mined salt (e.g. from script/mine_hook.sh). Run with --broadcast --skip-simulation
+    /// @dev If the salt was mined via script/mine_hook.sh, you must pass --via-ir so the deployed
+    ///      bytecode matches the bytecode used during mining; otherwise CREATE2 yields a different
+    ///      address and the hook constructor reverts with HookAddressNotValid.
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         bytes32 salt = vm.envBytes32("HOOK_SALT");

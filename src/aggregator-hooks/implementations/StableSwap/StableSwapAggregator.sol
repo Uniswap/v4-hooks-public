@@ -42,6 +42,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
     error PoolIsMetaPool();
+    error PoolNotRegistered();
     error ExchangeFailed();
     error InvalidPoolId();
 
@@ -85,6 +86,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        bool registered = metaRegistry.is_registered(address(pool), 0);
+        if (!registered) revert PoolNotRegistered();
+
         if (metaRegistry.is_meta(address(pool), 0)) revert PoolIsMetaPool();
 
         // Find token indices by iterating through pool coins (max 8 coins in Curve pools)

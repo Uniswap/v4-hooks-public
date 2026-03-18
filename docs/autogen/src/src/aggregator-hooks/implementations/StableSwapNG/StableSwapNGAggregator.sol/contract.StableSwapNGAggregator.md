@@ -94,7 +94,7 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1);
 ```
 
 ### _beforeInitialize

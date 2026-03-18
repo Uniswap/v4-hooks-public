@@ -165,6 +165,12 @@ error ExactOutputNotSupported();
 error PoolIsMetaPool();
 ```
 
+### PoolNotRegistered
+
+```solidity
+error PoolNotRegistered();
+```
+
 ### ExchangeFailed
 
 ```solidity
