@@ -49,7 +49,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     }
 
     /// @inheritdoc IAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+    function pseudoTotalValueLocked(PoolId poolId) external virtual returns (uint256 amount0, uint256 amount1);
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)

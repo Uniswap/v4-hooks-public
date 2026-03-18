@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -94,7 +94,7 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1);
 ```
 
 ### _beforeInitialize
@@ -179,6 +179,12 @@ error TokensNotInPool(address token0, address token1);
 
 ```solidity
 error PoolIsMetaPool();
+```
+
+### InvalidPoolId
+
+```solidity
+error InvalidPoolId();
 ```
 
 ## Structs

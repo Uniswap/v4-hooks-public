@@ -14,6 +14,7 @@
         - [❱ interfaces](src/aggregator-hooks/implementations/FluidDexT1/interfaces/README.md)
           - [IDexCallback](src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
           - [IFluidDexReservesResolver](src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol/interface.IFluidDexReservesResolver.md)
+          - [IFluidDexResolver](src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol/interface.IFluidDexResolver.md)
           - [IFluidDexT1](src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol/interface.IFluidDexT1.md)
         - [FluidDexT1Aggregator](src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol/contract.FluidDexT1Aggregator.md)
         - [FluidDexT1AggregatorFactory](src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol/contract.FluidDexT1AggregatorFactory.md)

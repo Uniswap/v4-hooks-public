@@ -13,6 +13,9 @@ import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementation
 import {
     FluidDexT1AggregatorFactory
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol";
+import {
+    IFluidDexResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
 contract FluidDexT1FactoryUnitTest is Test {
@@ -45,7 +48,9 @@ contract FluidDexT1FactoryUnitTest is Test {
     }
 
     function test_factory_createPool() public {
-        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(poolManager, mockResolver, fluidLiquidity);
+        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
+            poolManager, mockResolver, IFluidDexResolver(address(mockResolver)), fluidLiquidity
+        );
 
         MockERC20 tkA = new MockERC20("A", "A", 18);
         MockERC20 tkB = new MockERC20("B", "B", 18);
@@ -54,7 +59,9 @@ contract FluidDexT1FactoryUnitTest is Test {
         MockFluidDexT1 pool2 = new MockFluidDexT1();
         mockResolver.setDexTokens(address(tkA), address(tkB));
 
-        bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockResolver), fluidLiquidity);
+        bytes memory args = abi.encode(
+            address(poolManager), address(pool2), address(mockResolver), address(mockResolver), fluidLiquidity
+        );
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(
@@ -78,9 +85,13 @@ contract FluidDexT1FactoryUnitTest is Test {
     }
 
     function test_factory_computeAddress_matchesDeployedAddress() public {
-        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(poolManager, mockResolver, fluidLiquidity);
+        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
+            poolManager, mockResolver, IFluidDexResolver(address(mockResolver)), fluidLiquidity
+        );
 
-        bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockResolver), fluidLiquidity);
+        bytes memory args = abi.encode(
+            address(poolManager), address(mockPool), address(mockResolver), address(mockResolver), fluidLiquidity
+        );
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
             uint160(

@@ -7,7 +7,7 @@ import {
 } from "../../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
 
 /// @title MockFluidDexReservesResolver
-/// @notice Mock Fluid DEX T1 reserves resolver with settable getDexTokens, getPoolWithReserves, estimateSwapIn/Out for unit tests.
+/// @notice Mock Fluid DEX T1 reserves resolver with settable getDexTokens, getPoolReserves, estimateSwapIn/Out for unit tests.
 contract MockFluidDexReservesResolver is IFluidDexReservesResolver {
     address public returnToken0;
     address public returnToken1;
@@ -16,14 +16,14 @@ contract MockFluidDexReservesResolver is IFluidDexReservesResolver {
     uint256 public returnEstimateSwapIn;
     uint256 public returnEstimateSwapOut;
     bool public revertGetDexTokens;
-    bool public revertGetPoolWithReserves;
+    bool public revertGetPoolReserves;
     bool public revertEstimateSwapIn;
     bool public revertEstimateSwapOut;
 
     error GetDexTokensRevert();
     error EstimateSwapInRevert();
     error EstimateSwapOutRevert();
-    error GetPoolWithReservesRevert();
+    error GetPoolReservesRevert();
 
     function setDexTokens(address token0, address token1) external {
         returnToken0 = token0;
@@ -47,8 +47,8 @@ contract MockFluidDexReservesResolver is IFluidDexReservesResolver {
         revertGetDexTokens = doRevert;
     }
 
-    function setRevertGetPoolWithReserves(bool doRevert) external {
-        revertGetPoolWithReserves = doRevert;
+    function setRevertGetPoolReserves(bool doRevert) external {
+        revertGetPoolReserves = doRevert;
     }
 
     function setRevertEstimateSwapIn(bool doRevert) external {
@@ -59,23 +59,23 @@ contract MockFluidDexReservesResolver is IFluidDexReservesResolver {
         revertEstimateSwapOut = doRevert;
     }
 
-    function getDexTokens(address) external view override returns (address token0_, address token1_) {
+    function getDexTokens(address) external view returns (address token0_, address token1_) {
         if (revertGetDexTokens) revert GetDexTokensRevert();
         return (returnToken0, returnToken1);
     }
 
-    function estimateSwapIn(address, bool, uint256, uint256) external payable override returns (uint256 amountOut_) {
+    function estimateSwapIn(address, bool, uint256, uint256) external payable returns (uint256 amountOut_) {
         if (revertEstimateSwapIn) revert EstimateSwapInRevert();
         return returnEstimateSwapIn;
     }
 
-    function estimateSwapOut(address, bool, uint256, uint256) external payable override returns (uint256 amountIn_) {
+    function estimateSwapOut(address, bool, uint256, uint256) external payable returns (uint256 amountIn_) {
         if (revertEstimateSwapOut) revert EstimateSwapOutRevert();
         return returnEstimateSwapOut;
     }
 
-    function getPoolWithReserves(address dex_) external view override returns (PoolWithReserves memory poolData_) {
-        if (revertGetPoolWithReserves) revert GetPoolWithReservesRevert();
+    function getPoolReserves(address dex_) external view override returns (PoolWithReserves memory poolData_) {
+        if (revertGetPoolReserves) revert GetPoolReservesRevert();
         poolData_.pool = dex_;
         poolData_.token0 = returnToken0;
         poolData_.token1 = returnToken1;

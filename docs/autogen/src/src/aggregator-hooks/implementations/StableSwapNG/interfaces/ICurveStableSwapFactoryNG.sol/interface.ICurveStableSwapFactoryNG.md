@@ -1,5 +1,5 @@
 # ICurveStableSwapFactoryNG
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
 
 **Title:**
 ICurveStableSwapFactoryNG
@@ -212,5 +212,28 @@ function is_meta(address _pool) external view returns (bool);
 |Name|Type|Description|
 |----|----|-----------|
 |`<none>`|`bool`|True if the pool is a metapool|
+
+
+### get_n_coins
+
+Get the number of coins in a pool
+
+Reverts if pool was not deployed by this factory
+
+
+```solidity
+function get_n_coins(address _pool) external view returns (uint256);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_pool`|`address`|Pool address (must be deployed by this factory)|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`uint256`|Number of coins in the pool|
 
 

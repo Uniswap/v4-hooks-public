@@ -16,6 +16,9 @@ import {MockFluidDexT1, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./
 import {MockFluidDexReservesResolver} from "./mocks/MockFluidDexReservesResolver.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
+import {
+    IFluidDexResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {IAggregatorHook} from "../../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -99,10 +102,14 @@ contract FluidDexT1AggregatorUnitTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockResolver, fluidLiquidity);
+        bytes memory constructorArgs = abi.encode(
+            poolManager, _mockPool, _mockResolver, IFluidDexResolver(address(_mockResolver)), fluidLiquidity
+        );
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
-        return new FluidDexT1Aggregator{salt: salt}(poolManager, _mockPool, _mockResolver, fluidLiquidity);
+        return new FluidDexT1Aggregator{salt: salt}(
+            poolManager, _mockPool, _mockResolver, IFluidDexResolver(address(_mockResolver)), fluidLiquidity
+        );
     }
 
     // ========== CONSTRUCTOR ==========
@@ -110,6 +117,7 @@ contract FluidDexT1AggregatorUnitTest is Test {
     function test_constructor_setsImmutables() public view {
         assertEq(address(hook.fluidPool()), address(mockPool));
         assertEq(address(hook.fluidDexReservesResolver()), address(mockResolver));
+        assertEq(address(hook.fluidDexResolver()), address(mockResolver));
         assertEq(hook.fluidLiquidity(), fluidLiquidity);
     }
 

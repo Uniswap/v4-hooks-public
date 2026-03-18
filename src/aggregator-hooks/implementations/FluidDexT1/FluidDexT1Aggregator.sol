@@ -12,6 +12,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IFluidDexT1} from "./interfaces/IFluidDexT1.sol";
 import {IDexCallback} from "./interfaces/IDexCallback.sol";
 import {IFluidDexReservesResolver} from "./interfaces/IFluidDexReservesResolver.sol";
+import {IFluidDexResolver} from "./interfaces/IFluidDexResolver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -28,6 +29,8 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     address public immutable fluidLiquidity;
     /// @notice The Fluid DEX reserves resolver for pool state queries
     IFluidDexReservesResolver public immutable fluidDexReservesResolver;
+    /// @notice The Fluid DEX resolver for swap queries
+    IFluidDexResolver public immutable fluidDexResolver;
     /// @notice The Uniswap V4 pool ID associated with this aggregator
     PoolId public localPoolId;
 
@@ -52,11 +55,13 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         IPoolManager _manager,
         IFluidDexT1 _fluidDex,
         IFluidDexReservesResolver _fluidDexReservesResolver,
+        IFluidDexResolver _fluidDexResolver,
         address _fluidLiquidity
     ) BaseAggregatorHook(_manager, "FluidDexT1Aggregator v1.0") {
         fluidPool = _fluidDex;
         fluidLiquidity = _fluidLiquidity;
         fluidDexReservesResolver = _fluidDexReservesResolver;
+        fluidDexResolver = _fluidDexResolver;
     }
 
     /// @inheritdoc IDexCallback
@@ -79,12 +84,11 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         bool fluidSwap0to1 = _isReversed ? !zeroToOne : zeroToOne;
         if (amountSpecified < 0) {
-            amountUnspecified = fluidDexReservesResolver.estimateSwapIn(
-                address(fluidPool), fluidSwap0to1, uint256(-amountSpecified), 0
-            );
+            amountUnspecified =
+                fluidDexResolver.estimateSwapIn(address(fluidPool), fluidSwap0to1, uint256(-amountSpecified), 0);
         } else {
             uint256 amount = uint256(amountSpecified);
-            amountUnspecified = fluidDexReservesResolver.estimateSwapOut(
+            amountUnspecified = fluidDexResolver.estimateSwapOut(
                 // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
                 address(fluidPool),
                 fluidSwap0to1,
@@ -95,12 +99,12 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+    /// @dev Uses call (not staticcall) because Fluid's getPoolReserves internally calls getDexPricesAndExchangePrices
+    ///      which performs state changes; staticcall would cause StateChangeDuringStaticCall and return zeros.
+    function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         (bool success, bytes memory data) = address(fluidDexReservesResolver)
-            .staticcall(
-                abi.encodeWithSelector(IFluidDexReservesResolver.getPoolWithReserves.selector, address(fluidPool))
-            );
+            .call(abi.encodeWithSelector(IFluidDexReservesResolver.getPoolReserves.selector, address(fluidPool)));
         if (success && data.length > 0) {
             IFluidDexReservesResolver.PoolWithReserves memory poolData =
                 abi.decode(data, (IFluidDexReservesResolver.PoolWithReserves));
@@ -114,7 +118,7 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         if (PoolId.unwrap(localPoolId) != bytes32(0)) revert HookAlreadyInitialized(localPoolId);
-        (address token0, address token1) = fluidDexReservesResolver.getDexTokens(address(fluidPool));
+        (address token0, address token1) = fluidDexResolver.getDexTokens(address(fluidPool));
         if (token0 == FLUID_NATIVE_CURRENCY) {
             token0 = address(0);
         }
