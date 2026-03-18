@@ -131,7 +131,7 @@ contract SelfCreateHookScript is Script {
 
     function _deployFluidDexT1(bytes32 salt, address poolManager) internal returns (address) {
         address fluidPool = vm.envAddress("FLUID_POOL");
-        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_RESOLVER");
+        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESERVES_RESOLVER");
         address fluidDexResolver = vm.envOr("FLUID_DEX_T1_RESOLVER", fluidDexReservesResolver);
         address fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
 
