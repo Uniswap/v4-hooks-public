@@ -22,10 +22,10 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     using SafeERC20 for IERC20;
 
     /// @notice The Curve StableSwap NG pool
-    ICurveStableSwapNG public pool;
+    ICurveStableSwapNG public immutable pool;
 
     /// @notice The Curve StableSwap NG factory for checking meta pool status
-    ICurveStableSwapFactoryNG public curveFactory;
+    ICurveStableSwapFactoryNG public immutable curveFactory;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
     uint256 internal constant INACCURACY_SCALE = 1_000_000;
