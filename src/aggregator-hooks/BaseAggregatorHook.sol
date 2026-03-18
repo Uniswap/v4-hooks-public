@@ -177,10 +177,10 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     }
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
-        if (token.balanceOf(payer) >= amount) {
+        if (payer == address(this)) {
             token.transfer(address(poolManager), amount);
         } else {
-            revert InsufficientLiquidity();
+            IERC20(Currency.unwrap(token)).safeTransferFrom(payer, address(poolManager), amount);
         }
     }
 

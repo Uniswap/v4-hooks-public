@@ -6,7 +6,6 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 /// @title IAggregatorHook
 /// @notice Interface for the AggregatorHook contract. An implemented aggregator hook should be able to use liquidity from external sources
 interface IAggregatorHook {
-    error InsufficientLiquidity();
     error UnspecifiedAmountExceeded();
     error PoolDoesNotExist();
     error LiquidityNotAllowed();
