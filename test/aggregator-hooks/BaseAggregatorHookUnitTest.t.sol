@@ -181,30 +181,6 @@ contract BaseAggregatorHookUnitTest is Test {
         assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
     }
 
-    function test_InsufficientLiquidity_payerBalanceLessThanSettle() public {
-        uint256 amountIn = 100 ether;
-        uint256 amountOut = 95 ether;
-        externalSource.setReturns(amountOut, amountIn, false);
-        token1.mint(address(hook), 50 ether);
-
-        vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CustomRevert.WrappedError.selector,
-                address(hook),
-                IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(IAggregatorHook.InsufficientLiquidity.selector),
-                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
-            )
-        );
-        swapRouter.swap(
-            poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
-            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-    }
-
     function test_pollTokenJar_unsetFeeController() public {
         poolManager.setProtocolFeeController(address(0));
         hook.pollTokenJar();

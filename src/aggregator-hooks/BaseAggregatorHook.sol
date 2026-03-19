@@ -113,7 +113,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         return IHooks.beforeInitialize.selector;
     }
 
-    function _beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata params, bytes calldata)
+    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
         override
         returns (bytes4)
@@ -177,10 +177,10 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     }
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
-        if (token.balanceOf(payer) >= amount) {
+        if (payer == address(this)) {
             token.transfer(address(poolManager), amount);
         } else {
-            revert InsufficientLiquidity();
+            IERC20(Currency.unwrap(token)).safeTransferFrom(payer, address(poolManager), amount);
         }
     }
 
