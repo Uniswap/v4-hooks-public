@@ -1,5 +1,5 @@
 # IAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/32c84f07f909144d663bb585541758b0c694aa93/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
 
 **Title:**
 IAggregatorHook
@@ -73,12 +73,6 @@ event TokenJarUpdated(address indexed tokenJar);
 ```
 
 ## Errors
-### InsufficientLiquidity
-
-```solidity
-error InsufficientLiquidity();
-```
-
 ### UnspecifiedAmountExceeded
 
 ```solidity
