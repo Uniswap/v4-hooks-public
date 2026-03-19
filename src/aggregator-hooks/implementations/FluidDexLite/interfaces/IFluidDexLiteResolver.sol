@@ -26,7 +26,6 @@ interface IFluidDexLiteResolver {
     /// @return Reserves struct with real and imaginary reserves for both tokens
     function getPricesAndReserves(IFluidDexLite.DexKey memory dexKey)
         external
-        view
         returns (IFluidDexLite.Prices memory, IFluidDexLite.Reserves memory);
 
     /// @notice Estimates the result of a single-hop swap without executing it
