@@ -29,6 +29,7 @@ library SwapSimulator {
         uint128 liquidity;
         int256 amountRemaining;
         int256 amountCalc;
+        uint160 sqrtPriceLimitX96;
     }
 
     /// @notice Simulate a swap against a v4 pool's current state.
@@ -47,15 +48,43 @@ library SwapSimulator {
         uint24 lpFeePips,
         int24 tickSpacing
     ) internal view returns (uint256 result) {
+        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        (uint256 amountIn, uint256 amountOut) =
+            simulateSwapToPrice(manager, poolId, zeroForOne, amountSpecified, lpFeePips, tickSpacing, sqrtPriceLimitX96);
+        result = amountSpecified < 0 ? amountOut : amountIn;
+    }
+
+    /// @notice Simulate a swap up to a target price, returning both amounts.
+    /// @dev Walks ticks until the price limit is reached or the specified amount is exhausted.
+    ///      Mirrors Pool.sol's swap loop with protocol fee handling.
+    /// @param manager The PoolManager contract.
+    /// @param poolId The pool to simulate against.
+    /// @param zeroForOne The swap direction.
+    /// @param amountSpecified Negative for exact input, positive for exact output.
+    /// @param lpFeePips The LP fee to apply (same as the hook's fee override).
+    /// @param tickSpacing The pool's tick spacing.
+    /// @param sqrtPriceLimitX96 The target price. Swap terminates when this price is reached
+    ///        or the specified amount is exhausted, whichever comes first.
+    /// @return amountIn Total input consumed (including fees).
+    /// @return amountOut Total output received.
+    function simulateSwapToPrice(
+        IPoolManager manager,
+        PoolId poolId,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint24 lpFeePips,
+        int24 tickSpacing,
+        uint160 sqrtPriceLimitX96
+    ) internal view returns (uint256 amountIn, uint256 amountOut) {
         SwapState memory s;
         {
             int24 tick;
             uint24 protocolFee;
             (s.sqrtPriceX96, tick, protocolFee,) = manager.getSlot0(poolId);
             s.tick = tick;
+            s.sqrtPriceLimitX96 = sqrtPriceLimitX96;
 
             // Combine protocol fee with LP fee override, mirroring Pool.sol's fee calculation.
-            // Mutate lpFeePips in place to avoid an extra stack slot.
             uint16 directionalProtocolFee = zeroForOne
                 ? protocolFee.getZeroForOneFee()
                 : protocolFee.getOneForZeroFee();
@@ -65,26 +94,48 @@ library SwapSimulator {
         }
         s.liquidity = manager.getLiquidity(poolId);
 
-        if (s.sqrtPriceX96 == 0 || amountSpecified == 0) return 0;
+        if (s.sqrtPriceX96 == 0 || amountSpecified == 0) return (0, 0);
 
-        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
         s.amountRemaining = amountSpecified;
 
-        // Tick-walking loop — mirrors Pool.sol.
-        // Gas hotspots by impact:
-        // - Highest: per-iteration next-tick lookup and bitmap masking.
-        // - Medium: step accumulation and tick-cross liquidity updates.
-        // - Lower: per-iteration bounds checks and branch bookkeeping.
-        while (s.amountRemaining != 0 && s.sqrtPriceX96 != sqrtPriceLimitX96) {
+        _walkTicks(manager, poolId, s, zeroForOne, lpFeePips, tickSpacing, amountSpecified < 0);
+
+        if (amountSpecified < 0) {
+            amountIn = uint256(s.amountRemaining - amountSpecified);
+            amountOut = uint256(s.amountCalc);
+        } else {
+            amountIn = uint256(-s.amountCalc);
+            amountOut = uint256(amountSpecified - s.amountRemaining);
+        }
+    }
+
+    /// @dev Core tick-walking loop — mirrors Pool.sol. Modifies `s` in place.
+    ///      Extracted from the main function to stay within stack depth limits.
+    ///
+    ///      Gas hotspots by impact:
+    ///      - Highest: per-iteration next-tick lookup and bitmap masking.
+    ///      - Medium: step accumulation and tick-cross liquidity updates.
+    ///      - Lower: per-iteration bounds checks and branch bookkeeping.
+    function _walkTicks(
+        IPoolManager manager,
+        PoolId poolId,
+        SwapState memory s,
+        bool zeroForOne,
+        uint24 feePips,
+        int24 tickSpacing,
+        bool exactInput
+    ) private view {
+        while (s.amountRemaining != 0 && s.sqrtPriceX96 != s.sqrtPriceLimitX96) {
             (int24 tickNext, bool initialized) = _nextInitializedTick(manager, poolId, s.tick, tickSpacing, zeroForOne);
 
+            // Clamp tickNext to valid range (MIN_TICK, MAX_TICK)
             assembly ("memory-safe") {
                 tickNext := signextend(2, tickNext)
                 if slt(tickNext, sub(0, 887272)) { tickNext := sub(0, 887272) }
                 if sgt(tickNext, 887272) { tickNext := 887272 }
             }
 
-            // Cache tick→price: the original computed getSqrtPriceAtTick(tickNext) TWICE
+            // Cache tick→price: avoids computing getSqrtPriceAtTick(tickNext) twice
             // per step (swap target + boundary check). ~600-1200 gas saved per tick step.
             uint160 sqrtPriceNextX96 = TickMath.getSqrtPriceAtTick(tickNext);
 
@@ -94,9 +145,9 @@ library SwapSimulator {
             {
                 uint160 sqrtPriceStartX96 = _stepAndAccumulate(
                     s,
-                    SwapMath.getSqrtPriceTarget(zeroForOne, sqrtPriceNextX96, sqrtPriceLimitX96),
-                    lpFeePips,
-                    amountSpecified < 0
+                    SwapMath.getSqrtPriceTarget(zeroForOne, sqrtPriceNextX96, s.sqrtPriceLimitX96),
+                    feePips,
+                    exactInput
                 );
 
                 // Price moved mid-tick (didn't reach boundary) — recompute tick
@@ -119,13 +170,6 @@ library SwapSimulator {
                     s.tick = zeroForOne ? tickNext - 1 : tickNext;
                 }
             }
-        }
-
-        // Return the appropriate result based on swap type
-        if (amountSpecified < 0) {
-            result = uint256(s.amountCalc);
-        } else {
-            result = uint256(-s.amountCalc);
         }
     }
 
