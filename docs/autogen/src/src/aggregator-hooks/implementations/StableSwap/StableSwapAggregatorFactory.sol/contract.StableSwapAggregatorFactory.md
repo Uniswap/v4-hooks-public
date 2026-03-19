@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/f7ab391e45215eabb441ad299560b1162713b80d/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/8fd53f4e7f0f38c3fe67c592e0aac9ed04bb8427/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -41,7 +41,7 @@ constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) ;
 Creates a new StableSwapAggregator hook and initializes pools for all token pairs
 
 Note: The caller should try to pass in the entire list of
-tokens they want tradeable from this pool in a single calls.
+tokens they want tradeable from this pool in a single call.
 
 Note: If a pool has already been created using an incomplete token set, the remaining
 pools should be initialized directly on the PoolManager using .initialize()
