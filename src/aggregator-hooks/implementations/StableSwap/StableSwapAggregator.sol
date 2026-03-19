@@ -25,10 +25,10 @@ contract StableSwapAggregator is BaseAggregatorHook {
     address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice The Curve StableSwap pool
-    ICurveStableSwap public pool;
+    ICurveStableSwap public immutable pool;
 
     /// @notice The Curve MetaRegistry for checking meta pool status
-    IMetaRegistry public metaRegistry;
+    IMetaRegistry public immutable metaRegistry;
 
     struct PoolInfo {
         int128 token0Index;
