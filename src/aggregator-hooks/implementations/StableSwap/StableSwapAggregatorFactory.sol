@@ -37,7 +37,7 @@ contract StableSwapAggregatorFactory {
     /// @param sqrtPriceX96 The initial sqrt price for each pool
     /// @return hook The deployed hook address
     /// @dev Note: The caller should try to pass in the entire list of
-    /// tokens they want tradeable from this pool in a single calls.
+    /// tokens they want tradeable from this pool in a single call.
     /// @dev Note: If a pool has already been created using an incomplete token set, the remaining
     ///  pools should be initialized directly on the PoolManager using .initialize()
     ///  with the previously deployed hook address
