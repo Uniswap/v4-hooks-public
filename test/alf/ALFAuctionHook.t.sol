@@ -631,7 +631,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_quote_targeted_selectsBestQuoter_zeroForOne() public view {
         // B has lower bidFee (1% vs 5%) → B wins
         (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(currency0, currency1, true, -1e18, _buildBothTargets());
+            auctionHook.quote(true, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -640,7 +640,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_quote_targeted_selectsBestQuoter_oneForZero() public view {
         // A has lower askFee (1% vs 5%) → A wins
         (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(currency0, currency1, false, -1e18, _buildBothTargets());
+            auctionHook.quote(false, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterA));
         assertTrue(bestQuote > 0);
@@ -652,7 +652,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(currency0, currency1, true, -1e18, _buildTargetedHookData(targets));
+            auctionHook.quote(true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -661,7 +661,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_quote_matchesSwapExecution() public {
         // Get the quote first
         (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(currency0, currency1, true, -1e18, _buildBothTargets());
+            auctionHook.quote(true, -1e18, _buildBothTargets());
 
         // Execute the actual swap
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
@@ -680,21 +680,21 @@ contract ALFAuctionHookTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         vm.expectRevert(ALFAuctionHook.NoValidQuotes.selector);
-        auctionHook.quote(currency0, currency1, true, -1e18, _buildBothTargets());
+        auctionHook.quote(true, -1e18, _buildBothTargets());
     }
 
     function test_quote_skipsUnliveQuoter() public {
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, false);
 
-        (, address winner,,) = auctionHook.quote(currency0, currency1, true, -1e18, _buildBothTargets());
+        (, address winner,,) = auctionHook.quote(true, -1e18, _buildBothTargets());
         assertEq(winner, address(quoterA));
     }
 
     function test_quote_exactOutput() public view {
         // Exact output: picks quoter requiring least input
         (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(currency0, currency1, true, 0.5e18, _buildBothTargets());
+            auctionHook.quote(true, 0.5e18, _buildBothTargets());
 
         // B has lower bidFee → requires less input → wins
         assertEq(winner, address(quoterB));

@@ -223,8 +223,6 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     /// @return bestQuote      The best indicative (output for exact-in, input for exact-out).
     /// @return winnerHookData The constructed ALFHookData to pass in nested execution.
     function quote(
-        Currency,
-        Currency,
         bool zeroForOne,
         int256 amountSpecified,
         bytes calldata hookData
