@@ -13,8 +13,9 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     /// @notice The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
     uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4;
-    /// @notice The scale used to preserve precision in decay factor math.
-    uint256 internal constant Q24 = 2 ** 24; // 16,777,216
+
+    /// @notice The maximum target multiplier (100 = 100%, full closeBoundaryFee subtraction)
+    uint256 public constant MAX_TARGET_MULTIPLIER = 100;
 
     /// @notice The address of the config manager
     /// @dev The config manager is the address that can update the fee configuration for a pool
@@ -55,6 +56,7 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _updateFeeConfig(PoolId _poolId, FeeConfig calldata _feeConfig) internal {
         _validateKAndLogK(_feeConfig.k, _feeConfig.logK);
         _validateOptimalFeeE6(_feeConfig.optimalFeeE6);
+        _validateTargetMultiplier(_feeConfig.targetMultiplier);
         _validateReferenceSqrtPriceX96(_feeConfig.referenceSqrtPriceX96);
         _resetFeeState(_poolId);
         feeConfig[_poolId] = _feeConfig;
@@ -91,6 +93,12 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
         }
     }
 
+    /// @notice Validate the target multiplier (0-100, representing 0%-100%)
+    /// @param _targetMultiplier The target multiplier to validate
+    function _validateTargetMultiplier(uint256 _targetMultiplier) internal pure {
+        if (_targetMultiplier > MAX_TARGET_MULTIPLIER) revert InvalidTargetMultiplier(_targetMultiplier);
+    }
+
     /// @notice Validate the reference sqrt price
     /// @dev The optimal range is defined in terms of PRICE (not sqrt price):
     ///      [referencePrice * (1 - maxOptimalFee), referencePrice / (1 - maxOptimalFee)]
@@ -125,7 +133,6 @@ abstract contract FeeConfiguration is IFeeConfiguration, BlockNumberish {
     function _resetFeeState(PoolId _poolId) internal {
         feeState[_poolId].decayingFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
         feeState[_poolId].blockNumber = uint40(_getBlockNumberish());
-        // sqrtAmmPriceX96 is intentionally not reset: the UNDEFINED_DECAYING_FEE_E12 sentinel
-        // causes _calculateDecayingFee to ignore the stale value and start fresh from farBoundaryFee.
+        feeState[_poolId].sqrtAmmPriceX96 = 0; // Force the next swap to read a fresh price from the pool, not the cached start-of-block price
     }
 }

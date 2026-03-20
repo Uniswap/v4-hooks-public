@@ -124,3 +124,17 @@ error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
 |----|----|-----------|
 |`invalidSqrtPrice`|`uint256`|The invalid reference sqrt price|
 
+### InvalidTargetMultiplier
+Error thrown when target multiplier is invalid (must be 0-100)
+
+
+```solidity
+error InvalidTargetMultiplier(uint256 targetMultiplier);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`targetMultiplier`|`uint256`|The invalid target multiplier|
+

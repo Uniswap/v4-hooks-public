@@ -20,12 +20,12 @@ uint256 public constant MAX_OPTIMAL_FEE_E6 = 1e4
 ```
 
 
-### Q24
-The scale used to preserve precision in decay factor math.
+### MAX_TARGET_MULTIPLIER
+The maximum target multiplier (100 = 100%, full closeBoundaryFee subtraction)
 
 
 ```solidity
-uint256 internal constant Q24 = 2 ** 24
+uint256 public constant MAX_TARGET_MULTIPLIER = 100
 ```
 
 
@@ -153,6 +153,21 @@ function _validateOptimalFeeE6(uint256 _optimalFeeE6) internal pure;
 |Name|Type|Description|
 |----|----|-----------|
 |`_optimalFeeE6`|`uint256`|The optimal fee to validate|
+
+
+### _validateTargetMultiplier
+
+Validate the target multiplier (0-100, representing 0%-100%)
+
+
+```solidity
+function _validateTargetMultiplier(uint256 _targetMultiplier) internal pure;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_targetMultiplier`|`uint256`|The target multiplier to validate|
 
 
 ### _validateReferenceSqrtPriceX96

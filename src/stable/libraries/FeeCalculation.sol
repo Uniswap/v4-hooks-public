@@ -36,7 +36,7 @@ library FeeCalculation {
         priceRatioX96 = sqrtPriceRatioX96 * sqrtPriceRatioX96;
     }
 
-    /// @notice Calculate close boundary fee - measures the fee to reach the close boundary of the optimal range.
+    /// @notice Calculate close boundary fee - measures the fee that places the pre-impact price at the close boundary of the optimal range.
     /// @param priceRatioX96 Price ratio to reference price in Q96 format from calculatePriceRatioX96
     /// @param optimalFeeE6 Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6.
     /// @return closeBoundaryFeeE12 Close boundary fee. If <= 0, price is inside optimal range. If > 0, price is outside.
@@ -61,7 +61,7 @@ library FeeCalculation {
             int256(ONE_E12) - int256((ONE_E12 * priceRatioX96 * ONE_E6) / (ONE_E6 - optimalFeeE6) / FixedPoint96.Q96);
     }
 
-    /// @notice Calculate fee when price is inside optimal range
+    /// @notice Calculate fee when price is inside optimal range. Sets fee such that the pre-impact price equals the boundary.
     /// @param priceRatioX96 Price ratio in Q96 format
     /// @param optimalFeeE6 Optimal fee in parts per million
     /// @param ammPriceBelowRP True if AMM price < reference price
@@ -76,13 +76,14 @@ library FeeCalculation {
         // Note: This calculation assumes the price is inside the optimal range. Else it will revert with arithmetic underflow.
         // (i.e., priceRatioX96 >= Q96 * (ONE_E6 - optimalFee) / ONE_E6
 
-        // if userSellsZeroForOne => sellPrice = (1 - optimalFee) * RP [lower bound]
-        // ammPrice * (1 - fee) = (1 - optimalFee) * RP
-        // fee = 1 - (1 - optimalFee) * RP / ammPrice
+        // Pre-impact price derivations:
+        // if userSellsZeroForOne => pre-impact sell price = (1 - optimalFee) * RP [lower bound]
+        //   ammPrice * (1 - fee) = (1 - optimalFee) * RP
+        //   fee = 1 - (1 - optimalFee) * RP / ammPrice
 
-        // if !userSellsZeroForOne => buyPrice = RP / (1 - optimalFee) [upper bound]
-        // ammPrice / (1 - fee) = RP / (1 - optimalFee)
-        // fee = 1 - (1 - optimalFee) * ammPrice / RP
+        // if !userSellsZeroForOne => pre-impact buy price = RP / (1 - optimalFee) [upper bound]
+        //   ammPrice / (1 - fee) = RP / (1 - optimalFee)
+        //   fee = 1 - (1 - optimalFee) * ammPrice / RP
 
         if (ammPriceBelowRP == userSellsZeroForOne) {
             feeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * FixedPoint96.Q96) / priceRatioX96 / ONE_E6;
@@ -91,7 +92,7 @@ library FeeCalculation {
         }
     }
 
-    /// @notice Calculate far boundary fee - the fee that would place the effective price exactly at the "far" boundary.
+    /// @notice Calculate far boundary fee - the fee that places the pre-impact price at the "far" boundary.
     ///         The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96, must be <= Q96
     /// @param optimalFeeE6 Optimal fee in parts per million
@@ -116,7 +117,7 @@ library FeeCalculation {
         farBoundaryFeeE12 = ONE_E12 - (ONE_E12 * (ONE_E6 - optimalFeeE6) * priceRatioX96) / FixedPoint96.Q96 / ONE_E6;
     }
 
-    /// @notice Adjust previous fee to preserve the same effective price when AMM price moves further from reference
+    /// @notice Adjust previous fee to preserve the same pre-impact price when AMM price moves further from reference
     /// @param priceRatioX96 Price ratio in Q96 format from calculatePriceRatioX96 (always <= Q96 since it's min/max)
     /// @param previousDecayingFeeE12 Previous flexible fee in 1e12 precision
     /// @return adjustedFeeE12 Adjusted previous fee accounting for price movement in 1e12 precision

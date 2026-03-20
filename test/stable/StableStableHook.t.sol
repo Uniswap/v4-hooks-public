@@ -38,6 +38,7 @@ contract StableStableHookTest is Test, Deployers {
         k: K,
         logK: LOG_K,
         optimalFeeE6: OPTIMAL_FEE_E6, // 0.9 bps
+        targetMultiplier: 50,
         referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
     });
 
@@ -141,11 +142,12 @@ contract StableStableHookTest is Test, Deployers {
         assertEq(slot0SqrtPriceX96, Constants.SQRT_PRICE_1_1);
         assertEq(slot0ProtocolFee, 0);
         assertEq(slot0Tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_PRICE_1_1));
-        (uint256 k, uint256 logK, uint24 optimalFeeE6, uint160 referenceSqrtPriceX96) =
+        (uint256 k, uint256 logK, uint24 optimalFeeE6, uint8 targetMultiplier, uint160 referenceSqrtPriceX96) =
             hook.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optimalFeeE6, OPTIMAL_FEE_E6);
+        assertEq(targetMultiplier, 50);
         assertEq(referenceSqrtPriceX96, REFERENCE_SQRT_PRICE_X96);
         (uint256 previousDecayingFeeE12, uint160 previousSqrtAmmPriceX96, uint256 blockNumber) =
             hook.feeState(testPoolKey.toId());
