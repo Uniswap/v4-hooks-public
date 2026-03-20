@@ -12,3 +12,4 @@ lcov.info
 
 broadcast/*/31337
 deployments/**/31337.*
+broadcast/

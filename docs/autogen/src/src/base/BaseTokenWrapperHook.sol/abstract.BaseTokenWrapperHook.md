@@ -1,5 +1,5 @@
 # BaseTokenWrapperHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/f59df65aac634225df286566d7903789d79f680c/src/base/BaseTokenWrapperHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/base/BaseTokenWrapperHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver

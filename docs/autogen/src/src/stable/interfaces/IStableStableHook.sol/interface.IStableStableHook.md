@@ -1,5 +1,5 @@
 # IStableStableHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/ce42c57a36d39c34e88585c787469bc4f01d9c84/src/stable/interfaces/IStableStableHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/stable/interfaces/IStableStableHook.sol)
 
 Interface for the StableStableHook
 
