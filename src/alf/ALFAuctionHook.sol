@@ -3,11 +3,13 @@ pragma solidity ^0.8.0;
 
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {toBeforeSwapDelta, BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
@@ -17,16 +19,19 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 
 /// @title ALFAuctionHook
 /// @notice Stateless atomic auction hook on a virtual (zero-liquidity) pool.
-///         Queries targeted quoters via IALFHook, picks the best indicative quote, then
-///         executes a nested swap on the winner's pool. Delta forwarding ensures
-///         the auction hook's net position is zero -- the outer caller receives
-///         the winner's execution as their swap result.
+///         Queries targeted quoters via IALFHook and executes a greedy split fill
+///         across candidates sorted by entry price. Each quoter is filled until
+///         its marginal price worsens to the next-best candidate's level, then
+///         remaining flow moves to the next quoter. Delta forwarding ensures
+///         the auction hook's net position is zero.
 ///
 ///         Callers MUST provide targets in hookData (AuctionHookData). The auction
 ///         queries only the specified quoters, each receiving its own curve update
-///         alongside the shared attestation.
+///         alongside the shared attestation (if provided).
 contract ALFAuctionHook is BaseHook, IUnlockCallback {
     using CurrencyLibrary for Currency;
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     uint256 internal constant MAX_PIPS = 1_000_000;
 
@@ -34,13 +39,23 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     address public owner;
     address public feeRecipient;
 
+    /// @dev Internal struct for tracking quoter candidates during split fill.
+    struct FillCandidate {
+        PoolKey poolKey;
+        bytes hookData;
+        uint160 sqrtPriceX96;
+        uint256 indicative;
+    }
+
     error NoValidQuotes();
     error LiquidityNotAllowed();
+    error InsufficientLiquidity();
     error QuoteDeviation(uint256 indicative, uint256 executed);
     error Unauthorized();
     error TargetsRequired();
 
-    event AuctionExecuted(address indexed winner, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
+    event AuctionExecuted(address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
+    event FillExecuted(address indexed quoter, int128 amount0, int128 amount1);
     event ProtocolFeesCollected(Currency indexed currency, address indexed recipient, uint256 amount);
 
     constructor(IPoolManager _poolManager, uint24 _protocolFeePips, address _owner)
@@ -117,13 +132,13 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
             swapAmount = params.amountSpecified + int256(feeAmount); // less negative
         }
 
-        // 2. Run auction + execute nested swap on winner's pool
-        (BalanceDelta nestedDelta, address winner, uint256 bestQuote) =
+        // 2. Run split fill across candidates sorted by entry price
+        (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote) =
             _auctionAndSwap(key, params.zeroForOne, swapAmount, hookData);
 
         // 3. Exact output: compute fee from realized input
         if (params.amountSpecified >= 0 && protocolFeePips > 0) {
-            int128 realizedInput = params.zeroForOne ? nestedDelta.amount0() : nestedDelta.amount1();
+            int128 realizedInput = params.zeroForOne ? totalDelta.amount0() : totalDelta.amount1();
             feeAmount = uint256(int256(-realizedInput)) * protocolFeePips / MAX_PIPS;
         }
 
@@ -132,44 +147,41 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
             poolManager.mint(address(this), (params.zeroForOne ? key.currency0 : key.currency1).toId(), feeAmount);
         }
 
-        // 5. Enforce strict mode: revert if execution deviates beyond tolerance
+        // 5. Enforce strict mode: revert if aggregate execution is below best indicative
         if (hookData.length > 0) {
             uint24 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
             if (tol > 0) {
-                uint256 executed = _extractOutput(nestedDelta, params);
-                uint256 dev = executed > bestQuote ? executed - bestQuote : bestQuote - executed;
-                if (dev * MAX_PIPS > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                uint256 executed = _extractOutput(totalDelta, params);
+                // Downside-only: split fill should match or exceed best individual indicative
+                if (executed < bestQuote) {
+                    uint256 dev = bestQuote - executed;
+                    if (dev * MAX_PIPS > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                }
             }
         }
 
-        emit AuctionExecuted(winner, params.zeroForOne, params.amountSpecified, bestQuote);
+        emit AuctionExecuted(primaryQuoter, params.zeroForOne, params.amountSpecified, bestQuote);
 
         // 6. Convert BalanceDelta -> BeforeSwapDelta (negate + fee adjustment)
-        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(nestedDelta, params, feeAmount), 0);
+        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params, feeAmount), 0);
     }
 
     // ──── Internal: Auction Router ────
 
-    /// @dev Run auction, then execute nested swap on winner's pool. Returns the
-    ///      nested swap delta, winner address, and best indicative quote.
+    /// @dev Build sorted candidates, then execute greedy split fill across them.
+    ///      Each quoter is filled until the price limit (next candidate's entry price)
+    ///      or input/output exhaustion. Returns the accumulated delta, primary quoter
+    ///      (best entry price), and best individual indicative (for tolerance checking).
     function _auctionAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
-        returns (BalanceDelta nestedDelta, address winner, uint256 bestQuote)
+        returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
     {
-        PoolKey memory winnerPoolKey;
-        bytes memory winnerHookData;
-        (winnerPoolKey, winner, bestQuote, winnerHookData) =
-            _auction(zeroForOne, swapAmount, hookData);
+        (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual) =
+            _prepareCandidates(zeroForOne, swapAmount, hookData);
 
-        nestedDelta = poolManager.swap(
-            winnerPoolKey,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: swapAmount,
-                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            winnerHookData
-        );
+        bestQuote = bestIndividual;
+        primaryQuoter = address(candidates[0].poolKey.hooks);
+        totalDelta = _executeFills(candidates, count, zeroForOne, swapAmount);
     }
 
     /// @dev Decode AuctionHookData and run the targeted auction. Requires targets in hookData.
@@ -261,6 +273,121 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
         ) {
             q = indicative;
         } catch {}
+    }
+
+    // ──── Internal: Split Fill ────
+
+    /// @dev Query all targeted quoters, read their pool prices, and return a sorted candidate
+    ///      array (best entry price first). Also returns the best individual indicative quote.
+    function _prepareCandidates(bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+        internal
+        view
+        returns (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual)
+    {
+        if (hookData.length == 0) revert TargetsRequired();
+        AuctionHookData memory ahd = abi.decode(hookData, (AuctionHookData));
+        if (ahd.targets.length == 0) revert TargetsRequired();
+
+        bool isExactInput = swapAmount < 0;
+        candidates = new FillCandidate[](ahd.targets.length);
+
+        for (uint256 i = 0; i < ahd.targets.length; i++) {
+            (uint256 q, bytes memory quoterHookData) =
+                _queryTarget(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
+            if (q == 0) continue;
+
+            (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(ahd.targets[i].poolKey.toId());
+
+            candidates[count] = FillCandidate({
+                poolKey: ahd.targets[i].poolKey,
+                hookData: quoterHookData,
+                sqrtPriceX96: sqrtPriceX96,
+                indicative: q
+            });
+
+            // Track the best individual indicative for tolerance checking
+            if (count == 0 || (isExactInput ? q > bestIndividual : q < bestIndividual)) {
+                bestIndividual = q;
+            }
+            count++;
+        }
+
+        if (count == 0) revert NoValidQuotes();
+
+        // Insertion sort by indicative quality — fine for small candidate sets (3-5 quoters).
+        // The indicative captures fee, liquidity depth, and price impact in a single number.
+        // exact input: highest output first; exact output: lowest required input first.
+        // sqrtPriceX96 is still used for price limits during execution.
+        for (uint256 i = 1; i < count; i++) {
+            FillCandidate memory key = candidates[i];
+            uint256 j = i;
+            while (j > 0 && _worseQuote(candidates[j - 1].indicative, key.indicative, isExactInput)) {
+                candidates[j] = candidates[j - 1];
+                j--;
+            }
+            candidates[j] = key;
+        }
+    }
+
+    /// @dev Execute sequential fills across sorted candidates. Each quoter receives the
+    ///      full remaining amount with a sqrtPriceLimitX96 set to the next candidate's
+    ///      current price. The swap naturally terminates when the price worsens to the
+    ///      next candidate's level, and remaining flow passes to the next quoter.
+    ///
+    ///      For exact output, reverts with InsufficientLiquidity if the aggregate fill
+    ///      doesn't satisfy the full requested amount.
+    function _executeFills(FillCandidate[] memory candidates, uint256 count, bool zeroForOne, int256 swapAmount)
+        internal
+        returns (BalanceDelta totalDelta)
+    {
+        int256 remaining = swapAmount;
+        bool exactInput = swapAmount < 0;
+
+        for (uint256 i = 0; i < count && remaining != 0; i++) {
+            // Price limit = next candidate's entry price if it would actually constrain the swap.
+            // v4 requires: zeroForOne → limit < currentPrice, oneForZero → limit > currentPrice.
+            // When candidates share the same sqrtPrice (common: same initial tick), the next
+            // candidate's price isn't a valid limit — fall through to the extreme.
+            uint160 limit;
+            if (i + 1 < count) {
+                uint160 nextPrice = candidates[i + 1].sqrtPriceX96;
+                bool validLimit = zeroForOne
+                    ? nextPrice < candidates[i].sqrtPriceX96
+                    : nextPrice > candidates[i].sqrtPriceX96;
+                limit = validLimit
+                    ? nextPrice
+                    : (zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
+            } else {
+                limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+            }
+
+            BalanceDelta delta = poolManager.swap(
+                candidates[i].poolKey,
+                SwapParams({zeroForOne: zeroForOne, amountSpecified: remaining, sqrtPriceLimitX96: limit}),
+                candidates[i].hookData
+            );
+
+            // Update remaining: extract the "filled" component from the delta
+            //   exact input  → filled = input consumed (negative), remaining moves toward 0
+            //   exact output → filled = output received (positive), remaining moves toward 0
+            int128 filled = exactInput
+                ? (zeroForOne ? delta.amount0() : delta.amount1())
+                : (zeroForOne ? delta.amount1() : delta.amount0());
+            remaining -= int256(filled);
+            totalDelta = totalDelta + delta;
+
+            emit FillExecuted(address(candidates[i].poolKey.hooks), delta.amount0(), delta.amount1());
+        }
+
+        // Exact output: revert if aggregate fill doesn't cover the requested amount
+        if (!exactInput && remaining > 0) revert InsufficientLiquidity();
+    }
+
+    /// @dev Returns true if indicative `a` is worse than `b` for the given swap type.
+    ///      Used by insertion sort to place best quotes first.
+    function _worseQuote(uint256 a, uint256 b, bool isExactInput) internal pure returns (bool) {
+        // exact input: higher output = better; exact output: lower required input = better
+        return isExactInput ? a < b : a > b;
     }
 
     // ──── Internal: Helpers ────
