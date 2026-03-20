@@ -16,7 +16,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {ProtocolFees} from "./ProtocolFees.sol";
 
 /// @title BaseAggregatorHook

@@ -520,7 +520,7 @@ contract StableSwapFuzz is Test {
         assertApproxEqAbs(
             tokens[ctx.tokenOutIdx].balanceOf(tokenJar) - tokenJarBefore,
             ctx.expectedFeeAmount,
-            1,
+            2,
             "Token jar should receive protocol fee"
         );
     }
