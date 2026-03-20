@@ -25,7 +25,6 @@ import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 import {ALFHookData} from "./interfaces/IALFHook.sol";
 
 /// @title SparkSmartPoolHook
-/// @author ALF
 /// @notice Rehypothecating spread quoter using Just-In-Time (JIT) liquidity for Spark's stablecoin
 ///         markets. All pool assets live in ERC4626 vaults earning yield between swaps. Liquidity is
 ///         deployed to the pool only for the duration of each swap:
@@ -572,6 +571,57 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
             ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
             : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
         (,, amountOut,) = SwapMath.computeSwapStep(sqrtPriceX96, limit, liquidity, amountSpecified, feePips);
+    }
+
+    /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
+    /// @dev Overrides SpreadQuoterBase (which uses SwapSimulator against onchain LP) because
+    ///      JIT pools have zero liquidity between swaps. Uses a single SwapMath step with the
+    ///      caller's price limit clamped to the JIT tick range boundary.
+    function swapToPrice(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata hookData
+    ) external view override returns (uint256 amountIn, uint256 amountOut) {
+        PoolId poolId = key.toId();
+
+        // Resolve fee and liquidity in a scoped block to keep stack shallow for computeSwapStep.
+        uint24 feePips;
+        uint128 liquidity;
+        {
+            PricingState memory state = pricingState[poolId];
+            if (!state.live) return (0, 0);
+
+            liquidity = _computeJITLiquidity(poolId, key);
+            if (liquidity == 0) return (0, 0);
+
+            bool isAttested;
+            if (hookData.length > 0) {
+                ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
+                if (hd.attestationData.length > 0) {
+                    (, bool valid) = attestationRegistry.verify(hd.attestationData);
+                    isAttested = valid;
+                }
+            }
+            feePips = _effectiveFee(state, zeroForOne, isAttested);
+        }
+
+        // Clamp the caller's price limit to the JIT tick range boundary.
+        // The JIT position can't provide liquidity beyond its tick range.
+        uint160 effectiveLimit;
+        {
+            uint160 tickBoundary = zeroForOne
+                ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
+                : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
+            effectiveLimit = zeroForOne
+                ? (sqrtPriceLimitX96 > tickBoundary ? sqrtPriceLimitX96 : tickBoundary)
+                : (sqrtPriceLimitX96 < tickBoundary ? sqrtPriceLimitX96 : tickBoundary);
+        }
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        (, amountIn, amountOut,) =
+            SwapMath.computeSwapStep(sqrtPriceX96, effectiveLimit, liquidity, amountSpecified, feePips);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

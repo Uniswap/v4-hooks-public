@@ -63,4 +63,23 @@ interface IALFHook {
     /// @return token0 Immediately swappable token0 liquidity.
     /// @return token1 Immediately swappable token1 liquidity.
     function getEffectiveLiquidity(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
+
+    /// @notice Simulate a swap up to a target price, returning both input consumed and output received.
+    /// @dev Used by the auction hook and router for split fill planning. The swap terminates
+    ///      when the target price is reached or the specified amount is exhausted, whichever
+    ///      comes first. Returns (0, 0) for hooks that do not support price-bounded simulation.
+    /// @param key The pool key for this quoter's pool.
+    /// @param zeroForOne The swap direction.
+    /// @param amountSpecified The swap amount. Negative = exact input.
+    /// @param sqrtPriceLimitX96 The target price (Q64.96). Swap stops when this price is reached.
+    /// @param hookData ABI-encoded ALFHookData struct, or empty bytes.
+    /// @return amountIn Total input consumed (including fees).
+    /// @return amountOut Total output received.
+    function swapToPrice(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata hookData
+    ) external view returns (uint256 amountIn, uint256 amountOut);
 }

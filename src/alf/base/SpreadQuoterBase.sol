@@ -100,6 +100,44 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, state);
     }
 
+    /// @notice Simulate a swap up to a target price, returning both amounts.
+    /// @dev Resolves hookData (curve updates, attestation) the same way as getIndicativeQuote,
+    ///      then delegates to SwapSimulator.simulateSwapToPrice with the effective fee.
+    function swapToPrice(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata hookData
+    ) external view virtual override returns (uint256 amountIn, uint256 amountOut) {
+        // Resolve fee in a scoped block to keep the stack shallow for simulateSwapToPrice.
+        uint24 feePips;
+        {
+            PricingState memory state = pricingState[key.toId()];
+            bool isAttested;
+
+            if (hookData.length > 0) {
+                ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
+                if (hd.curveUpdateData.length > 0) {
+                    (PricingState memory newState,,,) =
+                        abi.decode(hd.curveUpdateData, (PricingState, PoolId, uint256, bytes));
+                    state = newState;
+                }
+                if (hd.attestationData.length > 0) {
+                    (, bool valid) = attestationRegistry.verify(hd.attestationData);
+                    isAttested = valid;
+                }
+            }
+
+            if (!state.live) return (0, 0);
+            feePips = _effectiveFee(state, zeroForOne, isAttested);
+        }
+
+        return SwapSimulator.simulateSwapToPrice(
+            poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing, sqrtPriceLimitX96
+        );
+    }
+
     // ──── Hook Lifecycle ────
 
     function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick) internal override returns (bytes4) {

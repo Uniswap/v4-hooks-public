@@ -69,6 +69,22 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         return (0, 0);
     }
 
+    // ──── Price-bounded simulation (default: unsupported) ────
+
+    /// @inheritdoc IALFHook
+    /// @dev Default returns (0, 0). Spread quoters override with SwapSimulator-backed
+    ///      implementation. Hooks that cannot support price-bounded simulation (e.g.,
+    ///      flat quoters, external wrappers) keep this default.
+    function swapToPrice(PoolKey calldata, bool, int256, uint160, bytes calldata)
+        external
+        view
+        virtual
+        override
+        returns (uint256, uint256)
+    {
+        return (0, 0);
+    }
+
     // ──── Internal: Attestation ────
 
     /// @dev Parse and verify attestation from raw bytes.
