@@ -319,24 +319,43 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     //                          AUCTION INTERNALS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Top-level auction-and-execute. Prepares sorted candidates, then runs the
-    ///      greedy split fill. Separated from _beforeSwap to manage stack depth.
+    /// @dev Top-level auction-and-execute. Detects the execution mode from the hookData:
+    ///
+    ///      **Autonomous mode** (all targets have amountSpecified = 0):
+    ///        Queries indicatives, sorts candidates by quote quality, and executes a greedy
+    ///        split fill with price limits. Fully self-contained.
+    ///
+    ///      **Pre-planned mode** (any target has amountSpecified != 0):
+    ///        Executes targets in the given order with their specified amounts. A target
+    ///        with amountSpecified = 0 receives whatever remains. Skips sorting. Indicatives
+    ///        are queried only if tolerance enforcement is enabled.
+    ///
     /// @param zeroForOne The swap direction.
     /// @param swapAmount The swap amount (after protocol fee deduction for exact input).
     /// @param hookData   ABI-encoded AuctionHookData from the caller.
     /// @return totalDelta     Accumulated BalanceDelta across all fills.
-    /// @return primaryQuoter  The first quoter in fill order (best indicative).
-    /// @return bestQuote      The best individual indicative (tolerance baseline).
+    /// @return primaryQuoter  The first quoter in fill order.
+    /// @return bestQuote      The best individual indicative (tolerance baseline). 0 if skipped.
     function _auctionAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
         returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
     {
-        (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual) =
-            _prepareCandidates(zeroForOne, swapAmount, hookData);
+        if (hookData.length == 0) revert TargetsRequired();
+        AuctionHookData memory ahd = abi.decode(hookData, (AuctionHookData));
+        if (ahd.targets.length == 0) revert TargetsRequired();
 
-        bestQuote = bestIndividual;
-        primaryQuoter = address(candidates[0].poolKey.hooks);
-        totalDelta = _executeFills(candidates, count, zeroForOne, swapAmount);
+        if (_isPrePlanned(ahd.targets)) {
+            // Pre-planned: router-optimized execution order and amounts
+            (totalDelta, primaryQuoter, bestQuote) =
+                _executePrePlanned(ahd, zeroForOne, swapAmount);
+        } else {
+            // Autonomous: self-contained split fill with indicative sorting
+            (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual) =
+                _prepareCandidates(zeroForOne, swapAmount, ahd);
+            bestQuote = bestIndividual;
+            primaryQuoter = address(candidates[0].poolKey.hooks);
+            totalDelta = _executeFills(candidates, count, zeroForOne, swapAmount);
+        }
     }
 
     /// @dev Single-winner auction used by the `quote()` view function. Iterates all targets
@@ -462,7 +481,104 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     //                          SPLIT FILL
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Phase 1 of split fill: build and sort the candidate array.
+    /// @dev Returns true if any target has a non-zero amountSpecified, indicating the router
+    ///      has pre-planned the split and the auction should execute in the given order.
+    function _isPrePlanned(TargetedQuoter[] memory targets) internal pure returns (bool) {
+        for (uint256 i = 0; i < targets.length; i++) {
+            if (targets[i].amountSpecified != 0) return true;
+        }
+        return false;
+    }
+
+    /// @dev Pre-planned execution: router has determined the optimal fill order and per-quoter
+    ///      amounts. Execute targets in the given order with their specified amounts.
+    ///
+    ///      A target with amountSpecified = 0 acts as a "fill remaining" catch-all, receiving
+    ///      whatever input/output is left after prior fills. Typically the last target.
+    ///
+    ///      Skips indicative queries and sorting for gas efficiency. If tolerance checking is
+    ///      enabled (strictTolerancePips > 0), indicatives are queried on-demand for the
+    ///      tolerance baseline.
+    ///
+    /// @param ahd         Decoded AuctionHookData.
+    /// @param zeroForOne  The swap direction.
+    /// @param swapAmount  The total swap amount.
+    /// @return totalDelta     Accumulated BalanceDelta across all fills.
+    /// @return primaryQuoter  The first target's hook address.
+    /// @return bestQuote      Best individual indicative (0 if tolerance is disabled).
+    function _executePrePlanned(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+        internal
+        returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
+    {
+        primaryQuoter = address(ahd.targets[0].poolKey.hooks);
+
+        // Query indicatives only if tolerance checking is enabled
+        if (ahd.strictTolerancePips > 0) {
+            bestQuote = _queryBestIndicative(ahd, zeroForOne, swapAmount);
+        }
+
+        totalDelta = _runPrePlannedFills(ahd, zeroForOne, swapAmount);
+    }
+
+    /// @dev Query all targets for indicatives and return the best one.
+    ///      Used by pre-planned mode only when tolerance enforcement is enabled.
+    function _queryBestIndicative(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+        internal
+        view
+        returns (uint256 best)
+    {
+        bool exactInput = swapAmount < 0;
+        for (uint256 i = 0; i < ahd.targets.length; i++) {
+            (uint256 q,) = _queryTarget(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
+            if (q == 0) continue;
+            if (best == 0 || (exactInput ? q > best : q < best)) {
+                best = q;
+            }
+        }
+    }
+
+    /// @dev Execute targets in the given order with their pre-planned amounts.
+    ///      Separated from _executePrePlanned to manage stack depth.
+    function _runPrePlannedFills(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+        internal
+        returns (BalanceDelta totalDelta)
+    {
+        int256 remaining = swapAmount;
+        bool exactInput = swapAmount < 0;
+        uint160 noLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+
+        for (uint256 i = 0; i < ahd.targets.length && remaining != 0; i++) {
+            BalanceDelta delta;
+            {
+                bytes memory quoterHookData = abi.encode(
+                    ALFHookData({attestationData: ahd.attestationData, curveUpdateData: ahd.targets[i].curveUpdateData})
+                );
+                int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
+
+                delta = poolManager.swap(
+                    ahd.targets[i].poolKey,
+                    SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
+                    quoterHookData
+                );
+            }
+
+            int128 filled = exactInput
+                ? (zeroForOne ? delta.amount0() : delta.amount1())
+                : (zeroForOne ? delta.amount1() : delta.amount0());
+            remaining -= int256(filled);
+            totalDelta = totalDelta + delta;
+
+            emit FillExecuted(address(ahd.targets[i].poolKey.hooks), delta.amount0(), delta.amount1());
+        }
+
+        if (!exactInput && remaining > 0) revert InsufficientLiquidity();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                    AUTONOMOUS SPLIT FILL
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Phase 1 of autonomous split fill: build and sort the candidate array.
     ///
     ///      For each target in the AuctionHookData:
     ///        - Query the quoter for an indicative quote (via _queryTarget)
@@ -480,19 +596,15 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     ///
     /// @param zeroForOne The swap direction.
     /// @param swapAmount The swap amount (after any fee deduction).
-    /// @param hookData   ABI-encoded AuctionHookData.
+    /// @param ahd        Decoded AuctionHookData.
     /// @return candidates    Array of valid candidates, sorted best-first.
     /// @return count         Number of valid candidates (may be < candidates.length).
     /// @return bestIndividual The best individual indicative quote (tolerance baseline).
-    function _prepareCandidates(bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+    function _prepareCandidates(bool zeroForOne, int256 swapAmount, AuctionHookData memory ahd)
         internal
         view
         returns (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual)
     {
-        if (hookData.length == 0) revert TargetsRequired();
-        AuctionHookData memory ahd = abi.decode(hookData, (AuctionHookData));
-        if (ahd.targets.length == 0) revert TargetsRequired();
-
         bool isExactInput = swapAmount < 0;
         candidates = new FillCandidate[](ahd.targets.length);
 
@@ -542,7 +654,7 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     ///      For each candidate (best indicative first):
     ///        1. Compute a sqrtPriceLimitX96 from the next candidate's pool price. This causes
     ///           the v4 swap loop to terminate when the current candidate's marginal price
-    ///           worsens to the next candidate's entry level — the optimal crossover point.
+    ///           worsens to the next candidate's entry level (the optimal crossover point).
     ///        2. Execute a nested poolManager.swap() with the full remaining amount and the
     ///           computed price limit. The swap fills as much as possible within the limit.
     ///        3. Extract the "filled" amount from the delta and update remaining.

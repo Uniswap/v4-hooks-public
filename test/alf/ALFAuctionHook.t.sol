@@ -175,8 +175,8 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function _buildBothTargets() internal view returns (bytes memory) {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
         return _buildTargetedHookData(targets);
     }
 
@@ -328,8 +328,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         bytes memory hookData = abi.encode(
             AuctionHookData({
@@ -360,8 +360,8 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_targeted_selectsBetterQuoter() public {
         // Target both quoters — B should win for zeroForOne (1% vs 5% bid fee)
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -375,7 +375,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_targeted_singleQuoter() public {
         // Target only A for zeroForOne — A executes with its 5% bidFee
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -392,8 +392,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -411,8 +411,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -436,8 +436,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // B still wins → nested swap through B at 1%
         BalanceDelta delta =
@@ -515,8 +515,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         );
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -546,7 +546,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
         // Target only A so it's the winner
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
 
         swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -557,8 +557,8 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_targeted_emitsAuctionExecutedWithWinner() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // B wins with lower bidFee (1%) for zeroForOne
         vm.expectEmit(true, false, false, false);
@@ -584,8 +584,8 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_strict_passesWhenQuoteMatchesExecution() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // Strict mode should pass — spread quoter's indicative matches execution exactly
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookData(targets));
@@ -595,7 +595,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_strict_exactOutput() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // Exact output with strict mode
         BalanceDelta delta = swap(auctionPoolKey, true, 0.5e18, _buildStrictHookData(targets));
@@ -607,7 +607,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         // SpreadQuoter is deterministic (indicative == executed), so any tolerance > 0 passes.
         // Use a large tolerance (10%) to demonstrate the feature.
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
         assertEq(delta.amount0(), -1e18);
@@ -617,7 +617,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_strict_zeroToleranceDisablesCheck() public {
         // strictTolerancePips = 0 → no strict check at all
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
         assertEq(delta.amount0(), -1e18);
@@ -648,8 +648,8 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter() public view {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         (, address winner, uint256 bestQuote,) =
             auctionHook.quote(currency0, currency1, true, -1e18, _buildTargetedHookData(targets));
@@ -802,8 +802,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         _deployFeeAuctionHook(10_000); // 1% fee
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: ""});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         BalanceDelta delta = swap(feeAuctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
         assertEq(delta.amount0(), -1e18);
@@ -815,7 +815,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         _deployFeeAuctionHook(10_000); // 1% fee
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: ""});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // Strict mode with fee: indicative quote uses fee-adjusted amount, execution matches
         bytes memory hookData =
