@@ -1,5 +1,5 @@
 # FluidDexLiteAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/269a4bc7c24c99a9bf6408262df37a462d8a2b9c/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/3f6bc966a9bb92f3653b399dedead4d6e95c20a7/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IFluidDexLiteCallback](/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol/interface.IFluidDexLiteCallback.md)
@@ -128,7 +128,7 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1);
 ```
 
 ### _beforeInitialize

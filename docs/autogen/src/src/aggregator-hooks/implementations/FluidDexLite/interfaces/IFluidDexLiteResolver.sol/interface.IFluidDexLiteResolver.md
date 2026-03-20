@@ -1,5 +1,5 @@
 # IFluidDexLiteResolver
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/3f6bc966a9bb92f3653b399dedead4d6e95c20a7/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol)
 
 **Title:**
 IFluidDexLiteResolver
@@ -73,7 +73,6 @@ Retrieves current prices and reserves for a DEX pool
 ```solidity
 function getPricesAndReserves(IFluidDexLite.DexKey memory dexKey)
     external
-    view
     returns (IFluidDexLite.Prices memory, IFluidDexLite.Reserves memory);
 ```
 **Parameters**

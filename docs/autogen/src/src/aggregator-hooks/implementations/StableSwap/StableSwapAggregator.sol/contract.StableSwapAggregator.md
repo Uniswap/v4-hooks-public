@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/8ff278587c0e1dc5132910482c532180ce16546b/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/3f6bc966a9bb92f3653b399dedead4d6e95c20a7/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -27,7 +27,7 @@ The Curve StableSwap pool
 
 
 ```solidity
-ICurveStableSwap public pool
+ICurveStableSwap public immutable pool
 ```
 
 
@@ -36,7 +36,7 @@ The Curve MetaRegistry for checking meta pool status
 
 
 ```solidity
-IMetaRegistry public metaRegistry
+IMetaRegistry public immutable metaRegistry
 ```
 
 
