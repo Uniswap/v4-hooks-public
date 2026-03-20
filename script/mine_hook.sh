@@ -15,6 +15,7 @@ show_help() {
     echo "                       0xF1 - FluidDexT1"
     echo "                       0xF2 - FluidDexV2 (not yet implemented)"
     echo "                       0xF3 - FluidDexLite"
+    echo "                       0x71 - Tempo (TempoExchange)"
     echo "  max_attempts       Optional. Maximum mining attempts (default: 500)"
     echo "  deployer_address   Optional. Address that will deploy the hook."
     echo "                     Use factory address for factory deploys, wallet address for self-deploys."
@@ -30,8 +31,15 @@ show_help() {
     echo "  # Mine with wallet as deployer (for self-deploy)"
     echo "  $0 0x00000000... 0xF3 500 0xYourWalletAddress"
     echo ""
+    echo "  # Mine Tempo aggregator (CONSTRUCTOR_ARGS = abi.encode(poolManager, tempoExchange))"
+    echo "  $0 \$(cast abi-encode 'constructor(address,address)' \$POOL_MANAGER \$TEMPO_EXCHANGE) 0x71"
+    echo ""
+    echo "  # Find a different 0x71 salt (start searching from salt 20M)"
+    echo "  INITIAL_SALT_OFFSET=20000000 $0 \$(cast abi-encode ...) 0x71 500"
+    echo ""
     echo "Options:"
     echo "  -h, --help         Show this help message and exit"
+    echo "  INITIAL_SALT_OFFSET  Env var: start mining from this salt (default 0). Use to find a different salt."
 }
 
 # Check for help flag
