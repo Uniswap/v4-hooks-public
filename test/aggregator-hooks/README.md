@@ -15,7 +15,7 @@ Note: Fork tests must be ran on a USDT pool atleast once (since USDT has slightl
 Aggregator Hook tests must be ran with the following command:
 
 ```bash
-FOUNDRY_PROFILE=aggregator_hooks forge test --match-path "test/aggregator-hooks/*" --skip src/stable/*
+FOUNDRY_PROFILE=aggregator_hooks forge test --match-path "test/aggregator-hooks/*"
 ```
 
 ### Fuzz Testing (Curve pools)
