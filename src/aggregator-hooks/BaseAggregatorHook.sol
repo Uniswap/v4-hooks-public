@@ -10,7 +10,7 @@ import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -32,8 +32,6 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     /// @dev Although this should never change after construction, strings cannot be labelled immutable.
     string public aggregatorHookVersion;
 
-    event TokenJarUpdated(address indexed tokenJar);
-
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
     constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) {
@@ -42,13 +40,16 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     /// @inheritdoc ProtocolFees
     function pollTokenJar() public virtual override returns (address) {
-        tokenJar = _getTokenJar(poolManager);
-        if (tokenJar != address(0)) emit TokenJarUpdated(tokenJar);
+        address newTokenJar = _getTokenJar(poolManager);
+        if (tokenJar != newTokenJar) {
+            tokenJar = newTokenJar;
+            emit TokenJarUpdated(tokenJar);
+        }
         return tokenJar;
     }
 
     /// @inheritdoc IAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+    function pseudoTotalValueLocked(PoolId poolId) external virtual returns (uint256 amount0, uint256 amount1);
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
@@ -77,6 +78,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         permissions.beforeSwap = true;
         permissions.beforeSwapReturnDelta = true;
         permissions.beforeInitialize = true;
+        permissions.beforeAddLiquidity = true;
     }
 
     /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
@@ -109,6 +111,14 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         // NOTE: Token jar will be grabbed in first protocol fee payment if not done here.
         pollTokenJar();
         return IHooks.beforeInitialize.selector;
+    }
+
+    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        override
+        returns (bytes4)
+    {
+        revert LiquidityNotAllowed();
     }
 
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
@@ -167,10 +177,10 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     }
 
     function _pay(Currency token, address payer, uint256 amount) internal override {
-        if (token.balanceOf(payer) >= amount) {
+        if (payer == address(this)) {
             token.transfer(address(poolManager), amount);
         } else {
-            revert InsufficientLiquidity();
+            IERC20(Currency.unwrap(token)).safeTransferFrom(payer, address(poolManager), amount);
         }
     }
 

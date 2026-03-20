@@ -30,6 +30,9 @@ import {
 import {
     IFluidDexReservesResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
+import {
+    IFluidDexResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol";
 import {FluidDexT1Aggregator} from "../../../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 
@@ -44,6 +47,7 @@ contract FluidDexT1ERC20Fuzz is Test {
     address liquidity;
     address dexFactoryAddress;
     address dexReservesResolver;
+    address dexResolver;
     address dexT1DeploymentLogic;
     address timelock;
 
@@ -121,7 +125,8 @@ contract FluidDexT1ERC20Fuzz is Test {
         // Load Fluid infrastructure addresses from env vars
         liquidity = vm.envAddress("FLUID_LIQUIDITY");
         dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
-        dexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        dexReservesResolver = vm.envOr("FLUID_DEX_T1_RESERVES_RESOLVER", vm.envAddress("FLUID_DEX_T1_RESOLVER"));
+        dexResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
         dexT1DeploymentLogic = vm.envAddress("FLUID_DEX_T1_DEPLOYMENT_LOGIC");
         timelock = vm.envAddress("FLUID_DEX_T1_TIMELOCK");
 
@@ -151,8 +156,9 @@ contract FluidDexT1ERC20Fuzz is Test {
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
         feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
-        hookFactory =
-            new FluidDexT1AggregatorFactory(poolManager, IFluidDexReservesResolver(dexReservesResolver), liquidity);
+        hookFactory = new FluidDexT1AggregatorFactory(
+            poolManager, IFluidDexReservesResolver(dexReservesResolver), IFluidDexResolver(dexResolver), liquidity
+        );
 
         // Set this contract as the protocol fee controller
         poolManager.setProtocolFeeController(address(feeAdapter));
@@ -394,10 +400,14 @@ contract FluidDexT1ERC20Fuzz is Test {
 
     /// @notice Deploy V4 hook for the pool
     function _deployHook(PoolSetup memory setup) internal returns (HookDeployment memory deployment) {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
 
-        bytes memory constructorArgs = abi.encode(address(poolManager), setup.fluidPool, address(resolver), liquidity);
+        bytes memory constructorArgs = abi.encode(
+            address(poolManager), setup.fluidPool, address(dexReservesResolver), address(dexResolver), liquidity
+        );
 
         (, bytes32 hookSalt) =
             HookMiner.find(address(hookFactory), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);

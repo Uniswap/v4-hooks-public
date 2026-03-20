@@ -310,8 +310,10 @@ contract FluidDexLiteNativeFuzz is Test {
 
     /// @notice Deploy V4 hook for the pool
     function _deployHook(PoolSetup memory setup) internal returns (HookDeployment memory deployment) {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
 
         bytes memory constructorArgs = abi.encode(address(poolManager), address(dexLite), address(resolver), setup.salt);
 

@@ -6,7 +6,8 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -20,12 +21,14 @@ import {MockV4FeeAdapter} from "./mocks/MockV4FeeAdapter.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {BaseAggregatorHook} from "../../src/aggregator-hooks/BaseAggregatorHook.sol";
 import {IAggregatorHook} from "../../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 contract BaseAggregatorHookUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
+    PoolModifyLiquidityTest public modifyLiquidityRouter;
     MockExternalLiqSource public externalSource;
     MockAggregatorHook public hook;
     MockV4FeeAdapter public feeAdapter;
@@ -50,6 +53,7 @@ contract BaseAggregatorHookUnitTest is Test {
         poolManager =
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
+        modifyLiquidityRouter = new PoolModifyLiquidityTest(poolManager);
         externalSource = new MockExternalLiqSource();
         feeAdapter = new MockV4FeeAdapter(poolManager, tokenJar);
 
@@ -57,8 +61,10 @@ contract BaseAggregatorHookUnitTest is Test {
         token1 = new MockERC20("Token1", "TK1", 18);
         if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
 
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
         bytes memory constructorArgs = abi.encode(poolManager, externalSource);
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(MockAggregatorHook).creationCode, constructorArgs);
         hook = new MockAggregatorHook{salt: salt}(IPoolManager(address(poolManager)), externalSource);
@@ -82,6 +88,26 @@ contract BaseAggregatorHookUnitTest is Test {
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
         vm.stopPrank();
+        token0.approve(address(modifyLiquidityRouter), type(uint256).max);
+        token1.approve(address(modifyLiquidityRouter), type(uint256).max);
+    }
+
+    function test_revertAddLiquidity() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeAddLiquidity.selector,
+                abi.encodeWithSelector(IAggregatorHook.LiquidityNotAllowed.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+
+        modifyLiquidityRouter.modifyLiquidity(
+            poolKey,
+            ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1000e18, salt: bytes32(0)}),
+            ""
+        );
     }
 
     function test_getHookPermissions() public view {
@@ -89,6 +115,7 @@ contract BaseAggregatorHookUnitTest is Test {
         assertTrue(p.beforeSwap);
         assertTrue(p.beforeSwapReturnDelta);
         assertTrue(p.beforeInitialize);
+        assertTrue(p.beforeAddLiquidity);
     }
 
     function test_beforeInitialize_emitsAggregatorPoolRegistered() public {
@@ -97,7 +124,10 @@ contract BaseAggregatorHookUnitTest is Test {
         bytes memory args = abi.encode(IPoolManager(address(poolManager)), src2);
         (, bytes32 salt2) = HookMiner.find(
             address(this),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
             type(MockAggregatorHook).creationCode,
             args
         );
@@ -149,30 +179,6 @@ contract BaseAggregatorHookUnitTest is Test {
         // oneForZero exact-out: alice pays token1 (amountIn), receives token0 (amountOut)
         assertEq(token0.balanceOf(alice), INITIAL_BALANCE + amountOut);
         assertEq(token1.balanceOf(alice), INITIAL_BALANCE - amountIn);
-    }
-
-    function test_InsufficientLiquidity_payerBalanceLessThanSettle() public {
-        uint256 amountIn = 100 ether;
-        uint256 amountOut = 95 ether;
-        externalSource.setReturns(amountOut, amountIn, false);
-        token1.mint(address(hook), 50 ether);
-
-        vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CustomRevert.WrappedError.selector,
-                address(hook),
-                IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(IAggregatorHook.InsufficientLiquidity.selector),
-                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
-            )
-        );
-        swapRouter.swap(
-            poolKey,
-            SwapParams({zeroForOne: true, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: MIN_PRICE}),
-            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
     }
 
     function test_pollTokenJar_unsetFeeController() public {
@@ -227,7 +233,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountOut);
 
-        uint256 expectedFee = (amountOut * fee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountOut, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -253,7 +259,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token0.mint(address(hook), amountOut);
 
-        uint256 expectedFee = (amountOut * fee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountOut, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -280,7 +286,7 @@ contract BaseAggregatorHookUnitTest is Test {
         token0.mint(address(hook), amountIn);
 
         // For exact-out, fee = amountIn * protocolFee / (PIPS_DENOMINATOR - protocolFee)
-        uint256 expectedFee = (amountIn * fee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountIn, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -306,7 +312,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountIn);
 
-        uint256 expectedFee = (amountIn * fee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountIn, fee, ProtocolFeeLibrary.PIPS_DENOMINATOR - fee);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -354,7 +360,7 @@ contract BaseAggregatorHookUnitTest is Test {
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountOut);
 
-        uint256 expectedFee = (amountOut * maxFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+        uint256 expectedFee = FullMath.mulDivRoundingUp(amountOut, maxFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
         vm.prank(alice);
         swapRouter.swap(
@@ -430,7 +436,8 @@ contract BaseAggregatorHookUnitTest is Test {
             externalSource.setReturns(amountOut, amountIn, false);
             token1.mint(address(hook), amountOut);
 
-            uint256 expectedFee = (amountOut * zeroForOneFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+            uint256 expectedFee =
+                FullMath.mulDivRoundingUp(amountOut, zeroForOneFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
             vm.prank(alice);
             swapRouter.swap(
@@ -453,7 +460,8 @@ contract BaseAggregatorHookUnitTest is Test {
             externalSource.setReturns(amountOut, amountIn, false);
             token0.mint(address(hook), amountOut);
 
-            uint256 expectedFee = (amountOut * oneForZeroFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+            uint256 expectedFee =
+                FullMath.mulDivRoundingUp(amountOut, oneForZeroFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
 
             vm.prank(alice);
             swapRouter.swap(

@@ -26,6 +26,7 @@ import {IFluidDexT1} from "../src/aggregator-hooks/implementations/FluidDexT1/in
 import {
     IFluidDexReservesResolver
 } from "../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
+import {IFluidDexResolver} from "../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 import {IFluidDexLite} from "../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLite.sol";
 import {
     IFluidDexLiteResolver
@@ -130,13 +131,15 @@ contract SelfCreateHookScript is Script {
 
     function _deployFluidDexT1(bytes32 salt, address poolManager) internal returns (address) {
         address fluidPool = vm.envAddress("FLUID_POOL");
-        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_RESOLVER");
+        address fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESERVES_RESOLVER");
+        address fluidDexResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
         address fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
 
         FluidDexT1Aggregator hook = new FluidDexT1Aggregator{salt: salt}(
             IPoolManager(poolManager),
             IFluidDexT1(fluidPool),
             IFluidDexReservesResolver(fluidDexReservesResolver),
+            IFluidDexResolver(fluidDexResolver),
             fluidLiquidity
         );
 

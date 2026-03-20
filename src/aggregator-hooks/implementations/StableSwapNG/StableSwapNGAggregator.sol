@@ -22,10 +22,10 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     using SafeERC20 for IERC20;
 
     /// @notice The Curve StableSwap NG pool
-    ICurveStableSwapNG public pool;
+    ICurveStableSwapNG public immutable pool;
 
     /// @notice The Curve StableSwap NG factory for checking meta pool status
-    ICurveStableSwapFactoryNG public curveFactory;
+    ICurveStableSwapFactoryNG public immutable curveFactory;
 
     uint256 internal constant INACCURACY_BUFFER = 20;
     uint256 internal constant INACCURACY_SCALE = 1_000_000;
@@ -42,6 +42,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
     error PoolIsMetaPool();
+    error InvalidPoolId();
 
     constructor(IPoolManager _manager, ICurveStableSwapNG _pool, ICurveStableSwapFactoryNG _curveFactory)
         BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
@@ -76,8 +77,9 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+    function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
+        if (poolInfo.token0Index == 0 && poolInfo.token1Index == 0) revert InvalidPoolId();
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
         amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
@@ -85,7 +87,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
         if (curveFactory.is_meta(address(pool))) revert PoolIsMetaPool();
 
-        uint256 totalCoins = pool.N_COINS();
+        uint256 totalCoins = curveFactory.get_n_coins(address(pool));
         bool token0Found = false;
         bool token1Found = false;
         int128 token0Index;
@@ -95,8 +97,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
             if (coin == Currency.unwrap(key.currency0)) {
                 token0Index = int128(int256(i));
                 token0Found = true;
-            }
-            if (coin == Currency.unwrap(key.currency1)) {
+            } else if (coin == Currency.unwrap(key.currency1)) {
                 token1Index = int128(int256(i));
                 token1Found = true;
             }
@@ -167,7 +168,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
         // Is exactOut has accuracy issues on Curve, so we do the gas inefficient way of transferring here first to ensure exact amount
         if (params.amountSpecified > 0) {
             // MinAmountOut is 0 to avoid slippage check because it is checked in the router
-            amountOut = pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
+            pool.exchange(tokenInIndex, tokenOutIndex, amountTake, 0, address(this));
             amountOut = uint256(params.amountSpecified);
             settleCurrency.transfer(address(poolManager), uint256(params.amountSpecified));
         } else {

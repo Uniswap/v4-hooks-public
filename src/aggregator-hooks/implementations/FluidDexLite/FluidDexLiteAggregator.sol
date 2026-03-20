@@ -80,7 +80,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     }
 
     /// @inheritdoc BaseAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+    function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1) {
         if (PoolId.unwrap(poolId) != PoolId.unwrap(localPoolId)) revert PoolDoesNotExist();
         (, IFluidDexLite.Reserves memory reserves) = fluidDexLiteResolver.getPricesAndReserves(dexKey);
         if (_isReversed) {

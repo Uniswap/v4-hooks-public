@@ -25,10 +25,10 @@ contract StableSwapAggregator is BaseAggregatorHook {
     address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice The Curve StableSwap pool
-    ICurveStableSwap public pool;
+    ICurveStableSwap public immutable pool;
 
     /// @notice The Curve MetaRegistry for checking meta pool status
-    IMetaRegistry public metaRegistry;
+    IMetaRegistry public immutable metaRegistry;
 
     struct PoolInfo {
         int128 token0Index;
@@ -42,7 +42,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     error TokensNotInPool(address token0, address token1);
     error ExactOutputNotSupported();
     error PoolIsMetaPool();
+    error PoolNotRegistered();
     error ExchangeFailed();
+    error InvalidPoolId();
 
     constructor(IPoolManager _manager, ICurveStableSwap _pool, IMetaRegistry _metaRegistry)
         BaseAggregatorHook(_manager, "StableSwapAggregator v1.0")
@@ -70,6 +72,7 @@ contract StableSwapAggregator is BaseAggregatorHook {
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolInfo memory poolInfo = poolIdToTokenInfo[poolId];
+        if (poolInfo.token0Index == 0 && poolInfo.token1Index == 0) revert InvalidPoolId();
         amount0 = pool.balances(uint256(uint128(poolInfo.token0Index)));
         amount1 = pool.balances(uint256(uint128(poolInfo.token1Index)));
     }
@@ -83,6 +86,9 @@ contract StableSwapAggregator is BaseAggregatorHook {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        bool registered = metaRegistry.is_registered(address(pool), 0);
+        if (!registered) revert PoolNotRegistered();
+
         if (metaRegistry.is_meta(address(pool), 0)) revert PoolIsMetaPool();
 
         // Find token indices by iterating through pool coins (max 8 coins in Curve pools)

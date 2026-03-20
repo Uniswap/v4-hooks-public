@@ -45,6 +45,7 @@ contract StableSwapNGFactoryUnitTest is Test {
         coins[1] = address(token1);
         mockPool = new MockCurveStableSwapNG(coins);
         mockFactory = new MockCurveStableSwapFactoryNG();
+        mockFactory.setNCoins(address(mockPool), 2);
         feeAdapter = new MockV4FeeAdapter(poolManager, address(this));
     }
 
@@ -60,6 +61,7 @@ contract StableSwapNGFactoryUnitTest is Test {
         coins2[0] = address(tkA);
         coins2[1] = address(tkB);
         MockCurveStableSwapNG pool2 = new MockCurveStableSwapNG(coins2);
+        mockFactory.setNCoins(address(pool2), 2);
 
         Currency[] memory tokens = new Currency[](2);
         tokens[0] = Currency.wrap(address(tkA));
@@ -68,7 +70,10 @@ contract StableSwapNGFactoryUnitTest is Test {
         bytes memory args = abi.encode(address(poolManager), address(pool2), address(mockFactory));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
             type(StableSwapNGAggregator).creationCode,
             args
         );
@@ -88,7 +93,10 @@ contract StableSwapNGFactoryUnitTest is Test {
         bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockFactory));
         (, bytes32 factorySalt) = HookMiner.find(
             address(factory),
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
             type(StableSwapNGAggregator).creationCode,
             args
         );

@@ -10,6 +10,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 abstract contract ProtocolFees {
     using ProtocolFeeLibrary for uint24;
@@ -60,12 +61,14 @@ abstract contract ProtocolFees {
         returns (uint256)
     {
         if (isExactInput) {
-            return (amountUnspecified * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
+            return FullMath.mulDivRoundingUp(amountUnspecified, protocolFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
         } else {
             // This calculation ensures the fee is the correct proportion of the total input.
             // For a protocol fee of X%, the fee amount will be X% of the total input rather than X%
             // of the pre-protocol fee input.
-            return (amountUnspecified * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
+            return FullMath.mulDivRoundingUp(
+                amountUnspecified, protocolFee, ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee
+            );
         }
     }
 

@@ -149,8 +149,10 @@ contract StableSwapForkedTest is Test {
     }
 
     function _deployHook() internal {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
 
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), metaRegistry);
         (address hookAddress, bytes32 salt) =
@@ -369,7 +371,7 @@ contract StableSwapForkedTest is Test {
     }
 
     /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances
-    function test_pseudoTotalValueLocked() public view {
+    function test_pseudoTotalValueLocked() public {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
 
         (int128 token0Index, int128 token1Index) = hook.poolIdToTokenInfo(poolId);

@@ -1,5 +1,5 @@
 # FluidDexT1Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IDexCallback](/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
@@ -37,6 +37,15 @@ The Fluid DEX reserves resolver for pool state queries
 
 ```solidity
 IFluidDexReservesResolver public immutable fluidDexReservesResolver
+```
+
+
+### fluidDexResolver
+The Fluid DEX resolver for swap queries
+
+
+```solidity
+IFluidDexResolver public immutable fluidDexResolver
 ```
 
 
@@ -93,6 +102,7 @@ constructor(
     IPoolManager _manager,
     IFluidDexT1 _fluidDex,
     IFluidDexReservesResolver _fluidDexReservesResolver,
+    IFluidDexResolver _fluidDexResolver,
     address _fluidLiquidity
 ) BaseAggregatorHook(_manager, "FluidDexT1Aggregator v1.0");
 ```
@@ -143,9 +153,12 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 ### pseudoTotalValueLocked
 
+Uses call (not staticcall) because Fluid's getPoolReserves internally calls getDexPricesAndExchangePrices
+which performs state changes; staticcall would cause StateChangeDuringStaticCall and return zeros.
+
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1);
 ```
 
 ### _beforeInitialize

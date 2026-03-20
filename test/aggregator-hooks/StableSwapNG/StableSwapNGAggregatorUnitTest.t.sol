@@ -64,6 +64,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
 
         // Create mock factory (defaults to false for all pools)
         mockFactory = new MockCurveStableSwapFactoryNG();
+        mockFactory.setNCoins(address(mockPool), 2);
 
         // Deploy hook with valid address
         hook = _deployHook(mockPool, mockFactory);
@@ -102,6 +103,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
     {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
         bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockFactory);
         (, bytes32 salt) =
@@ -154,6 +156,21 @@ contract StableSwapNGAggregatorUnitTest is Test {
         assertEq(a1, 2000 ether);
     }
 
+    function test_pseudoTotalValueLocked_revertsInvalidPoolId() public {
+        // Use a poolId that was never initialized (no token info in mapping)
+        PoolKey memory uninitializedKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 999,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        PoolId uninitializedPoolId = uninitializedKey.toId();
+
+        vm.expectRevert(StableSwapNGAggregator.InvalidPoolId.selector);
+        hook.pseudoTotalValueLocked(uninitializedPoolId);
+    }
+
     // ========== _beforeInitialize ==========
 
     function test_beforeInitialize_revertsTokensNotInPool() public {
@@ -162,6 +179,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         wrongCoins[0] = address(0xdead);
         wrongCoins[1] = address(0xbeef);
         MockCurveStableSwapNG wrongPool = new MockCurveStableSwapNG(wrongCoins);
+        mockFactory.setNCoins(address(wrongPool), 2);
 
         StableSwapNGAggregator hook2 = _deployHook(wrongPool, mockFactory);
 
@@ -195,6 +213,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[0] = address(0xdead); // wrong token0
         partialCoins[1] = address(token1); // correct token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
+        mockFactory.setNCoins(address(partialPool), 2);
 
         StableSwapNGAggregator hook2 = _deployHook(partialPool, mockFactory);
 
@@ -224,6 +243,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
         partialCoins[0] = address(token0); // correct token0
         partialCoins[1] = address(0xbeef); // wrong token1
         MockCurveStableSwapNG partialPool = new MockCurveStableSwapNG(partialCoins);
+        mockFactory.setNCoins(address(partialPool), 2);
 
         StableSwapNGAggregator hook2 = _deployHook(partialPool, mockFactory);
 
@@ -249,6 +269,7 @@ contract StableSwapNGAggregatorUnitTest is Test {
 
     function test_beforeInitialize_revertsPoolIsMetaPool() public {
         MockCurveStableSwapFactoryNG metaFactory = new MockCurveStableSwapFactoryNG();
+        metaFactory.setNCoins(address(mockPool), 2);
         metaFactory.setIsMeta(address(mockPool), true);
 
         StableSwapNGAggregator hook2 = _deployHook(mockPool, metaFactory);

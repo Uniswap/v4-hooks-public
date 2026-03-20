@@ -22,6 +22,9 @@ import {IFluidDexT1} from "../../../src/aggregator-hooks/implementations/FluidDe
 import {
     IFluidDexReservesResolver
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol";
+import {
+    IFluidDexResolver
+} from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 
 /// @title FluidDexT1NativeForkedTest
 /// @notice Tests for Fluid DEX T1 with native ETH token pairs
@@ -38,6 +41,7 @@ contract FluidDexT1NativeForkedTest is Test {
     // Fluid infrastructure addresses (loaded from env vars)
     address fluidLiquidity;
     address fluidDexReservesResolver;
+    address fluidDexResolver;
 
     // Pool configuration
     uint24 constant POOL_FEE = 500; // 0.05%
@@ -62,7 +66,8 @@ contract FluidDexT1NativeForkedTest is Test {
     SafePoolSwapTest public swapRouter;
     FluidDexT1Aggregator public hook;
     IFluidDexT1 public fluidPool;
-    IFluidDexReservesResolver public fluidResolver;
+    IFluidDexReservesResolver public fluidReservesResolver;
+    IFluidDexResolver public fluidResolver;
 
     PoolKey public poolKey;
     PoolId public poolId;
@@ -90,7 +95,8 @@ contract FluidDexT1NativeForkedTest is Test {
         // Load Fluid infrastructure addresses from env vars
         fluidPoolAddress = vm.envAddress("FLUID_DEX_T1_POOL_NATIVE");
         fluidLiquidity = vm.envAddress("FLUID_LIQUIDITY");
-        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
+        fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESERVES_RESOLVER");
+        fluidDexResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
         // Load V4 infrastructure address from env vars
         poolManagerAddress = vm.envAddress("POOL_MANAGER");
 
@@ -104,10 +110,11 @@ contract FluidDexT1NativeForkedTest is Test {
         alice = address(uint160(uint256(keccak256("fluid_test_alice_native_v1"))));
 
         fluidPool = IFluidDexT1(fluidPoolAddress);
-        fluidResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
+        fluidReservesResolver = IFluidDexReservesResolver(fluidDexReservesResolver);
+        fluidResolver = IFluidDexResolver(fluidDexResolver);
         manager = IPoolManager(poolManagerAddress);
 
-        // Dynamically fetch tokens from the pool via resolver
+        // Dynamically fetch tokens from the pool via resolver (getDexTokens is on IFluidDexResolver)
         (address fluidToken0, address fluidToken1) = fluidResolver.getDexTokens(fluidPoolAddress);
 
         // Identify which token is native and which is ERC20
@@ -151,15 +158,20 @@ contract FluidDexT1NativeForkedTest is Test {
     }
 
     function _deployHook() internal {
-        uint160 flags =
-            uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG);
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
 
-        bytes memory constructorArgs =
-            abi.encode(address(manager), address(fluidPool), address(fluidResolver), fluidLiquidity);
+        bytes memory constructorArgs = abi.encode(
+            address(manager), address(fluidPool), address(fluidReservesResolver), address(fluidResolver), fluidLiquidity
+        );
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(FluidDexT1Aggregator).creationCode, constructorArgs);
 
-        hook = new FluidDexT1Aggregator{salt: salt}(manager, fluidPool, fluidResolver, fluidLiquidity);
+        hook = new FluidDexT1Aggregator{salt: salt}(
+            manager, fluidPool, fluidReservesResolver, fluidResolver, fluidLiquidity
+        );
         require(address(hook) == hookAddress, "Hook address mismatch");
     }
 
@@ -325,16 +337,11 @@ contract FluidDexT1NativeForkedTest is Test {
         assertGt(expectedOut, uint256(amountIn) * 70 / 100, "Quote should be within reasonable range");
     }
 
-    /// @notice Test pseudoTotalValueLocked doesn't revert and returns values for native pool
-    function test_pseudoTotalValueLocked() public view {
+    /// @notice Test pseudoTotalValueLocked returns non-zero reserves
+    /// @dev When resolver returns data, at least one reserve should be non-zero. (0,0) indicates resolver failure.
+    function test_pseudoTotalValueLocked() public {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
-
-        if (amount0 == 0 && amount1 == 0) {
-            return;
-        }
-
-        assertGt(amount0, 0, "amount0 should be non-zero");
-        assertGt(amount1, 0, "amount1 should be non-zero");
+        assertTrue(amount0 > 0 || amount1 > 0, "At least one reserve should be non-zero");
     }
 
     receive() external payable {}

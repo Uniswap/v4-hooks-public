@@ -79,4 +79,10 @@ interface ICurveStableSwapFactoryNG {
     /// @param _pool Address of the pool
     /// @return True if the pool is a metapool
     function is_meta(address _pool) external view returns (bool);
+
+    /// @notice Get the number of coins in a pool
+    /// @param _pool Pool address (must be deployed by this factory)
+    /// @return Number of coins in the pool
+    /// @dev Reverts if pool was not deployed by this factory
+    function get_n_coins(address _pool) external view returns (uint256);
 }

@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/f7ab391e45215eabb441ad299560b1162713b80d/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -65,7 +65,7 @@ Returns the pseudo TVL: the amount of the UniswapV4 pool's tokens locked in the 
 
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external view virtual returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external virtual returns (uint256 amount0, uint256 amount1);
 ```
 **Parameters**
 
@@ -192,6 +192,16 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4);
 ```
 
+### _beforeAddLiquidity
+
+
+```solidity
+function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+    internal
+    override
+    returns (bytes4);
+```
+
 ### _beforeSwap
 
 
@@ -237,12 +247,5 @@ Required for handling native ETH transfers during swap operations
 
 ```solidity
 receive() external payable;
-```
-
-## Events
-### TokenJarUpdated
-
-```solidity
-event TokenJarUpdated(address indexed tokenJar);
 ```
 

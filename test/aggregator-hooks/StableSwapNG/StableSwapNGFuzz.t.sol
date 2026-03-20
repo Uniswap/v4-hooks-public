@@ -245,6 +245,7 @@ contract StableSwapNGFuzz is Test {
     {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
 
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(curveFactory));
@@ -278,6 +279,7 @@ contract StableSwapNGFuzz is Test {
     {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
 
         bytes memory constructorArgs = abi.encode(address(manager), address(curvePool), address(curveFactory));

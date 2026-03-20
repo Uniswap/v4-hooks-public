@@ -63,6 +63,7 @@ contract StableSwapAggregatorUnitTest is Test {
 
         // Create mock meta registry (defaults to false for all pools)
         mockMetaRegistry = new MockMetaRegistry();
+        mockMetaRegistry.setIsRegistered(address(mockPool), true);
 
         // Deploy hook with valid address
         hook = _deployHook(mockPool, mockMetaRegistry);
@@ -101,6 +102,7 @@ contract StableSwapAggregatorUnitTest is Test {
     {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
         bytes memory constructorArgs = abi.encode(poolManager, _mockPool, _mockMetaRegistry);
         (, bytes32 salt) =
@@ -144,6 +146,21 @@ contract StableSwapAggregatorUnitTest is Test {
         assertEq(a1, 2000 ether);
     }
 
+    function test_pseudoTotalValueLocked_revertsInvalidPoolId() public {
+        // Use a poolId that was never initialized (no token info in mapping)
+        PoolKey memory uninitializedKey = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 999,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        PoolId uninitializedPoolId = uninitializedKey.toId();
+
+        vm.expectRevert(StableSwapAggregator.InvalidPoolId.selector);
+        hook.pseudoTotalValueLocked(uninitializedPoolId);
+    }
+
     // ========== _beforeInitialize ==========
 
     function test_beforeInitialize_revertsTokensNotInPool() public {
@@ -152,6 +169,7 @@ contract StableSwapAggregatorUnitTest is Test {
         wrongCoins[0] = address(0xdead);
         wrongCoins[1] = address(0xbeef);
         MockCurveStableSwap wrongPool = new MockCurveStableSwap(wrongCoins);
+        mockMetaRegistry.setIsRegistered(address(wrongPool), true);
 
         StableSwapAggregator hook2 = _deployHook(wrongPool, mockMetaRegistry);
 
@@ -185,6 +203,7 @@ contract StableSwapAggregatorUnitTest is Test {
         partialCoins[0] = address(0xdead); // wrong token0
         partialCoins[1] = address(token1); // correct token1
         MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
+        mockMetaRegistry.setIsRegistered(address(partialPool), true);
 
         StableSwapAggregator hook2 = _deployHook(partialPool, mockMetaRegistry);
 
@@ -214,6 +233,7 @@ contract StableSwapAggregatorUnitTest is Test {
         partialCoins[0] = address(token0); // correct token0
         partialCoins[1] = address(0xbeef); // wrong token1
         MockCurveStableSwap partialPool = new MockCurveStableSwap(partialCoins);
+        mockMetaRegistry.setIsRegistered(address(partialPool), true);
 
         StableSwapAggregator hook2 = _deployHook(partialPool, mockMetaRegistry);
 
@@ -237,9 +257,37 @@ contract StableSwapAggregatorUnitTest is Test {
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
+    function test_beforeInitialize_revertsPoolNotRegistered() public {
+        // Create a meta registry that does not have the pool registered
+        MockMetaRegistry unregisteredRegistry = new MockMetaRegistry();
+        // Do NOT call setIsRegistered - pool will not be registered
+
+        StableSwapAggregator hook2 = _deployHook(mockPool, unregisteredRegistry);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 5,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapAggregator.PoolNotRegistered.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
     function test_beforeInitialize_revertsPoolIsMetaPool() public {
         // Create a meta registry that reports the pool as a meta pool
         MockMetaRegistry metaPoolRegistry = new MockMetaRegistry();
+        metaPoolRegistry.setIsRegistered(address(mockPool), true);
         metaPoolRegistry.setIsMeta(address(mockPool), true);
 
         StableSwapAggregator hook2 = _deployHook(mockPool, metaPoolRegistry);
@@ -308,6 +356,27 @@ contract StableSwapAggregatorUnitTest is Test {
         assertEq(token0.balanceOf(alice), 1000 ether + amountOut);
     }
 
+    function test_swap_exactIn_revertsExchangeFailed() public {
+        mockPool.setRevertExchange(true);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(StableSwapAggregator.ExchangeFailed.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(100 ether), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
     function test_swap_exactOut_reverts() public {
         vm.prank(alice);
         vm.expectRevert(
@@ -336,6 +405,7 @@ contract StableSwapAggregatorUnitTest is Test {
         coins[0] = CURVE_NATIVE_CURRENCY;
         coins[1] = address(token1);
         MockCurveStableSwap nativeMockPool = new MockCurveStableSwap(coins);
+        mockMetaRegistry.setIsRegistered(address(nativeMockPool), true);
 
         StableSwapAggregator nativeHook = _deployHook(nativeMockPool, mockMetaRegistry);
 
@@ -381,6 +451,7 @@ contract StableSwapAggregatorUnitTest is Test {
         coins[0] = CURVE_NATIVE_CURRENCY;
         coins[1] = address(token1);
         MockCurveStableSwap nativeMockPool = new MockCurveStableSwap(coins);
+        mockMetaRegistry.setIsRegistered(address(nativeMockPool), true);
 
         StableSwapAggregator nativeHook = _deployHook(nativeMockPool, mockMetaRegistry);
 
