@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/4792b7bc3cc8cb0cc9d78c3049624b287c6653d6/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -94,7 +94,7 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 
 ```solidity
-function pseudoTotalValueLocked(PoolId poolId) external override returns (uint256 amount0, uint256 amount1);
+function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
 ```
 
 ### _beforeInitialize

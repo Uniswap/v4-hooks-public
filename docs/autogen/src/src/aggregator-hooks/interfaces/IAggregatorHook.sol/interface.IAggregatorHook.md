@@ -1,5 +1,5 @@
 # IAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/4792b7bc3cc8cb0cc9d78c3049624b287c6653d6/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
 
 **Title:**
 IAggregatorHook
@@ -70,6 +70,12 @@ event AggregatorPoolRegistered(PoolId indexed poolId);
 
 ```solidity
 event TokenJarUpdated(address indexed tokenJar);
+```
+
+### AggregatorHookSwap
+
+```solidity
+event AggregatorHookSwap(PoolId indexed poolId, address indexed sender, int256 amount0, int256 amount1);
 ```
 
 ## Errors
