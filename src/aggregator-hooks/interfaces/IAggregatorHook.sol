@@ -12,6 +12,7 @@ interface IAggregatorHook {
 
     event AggregatorPoolRegistered(PoolId indexed poolId);
     event TokenJarUpdated(address indexed tokenJar);
+    event AggregatorHookSwap(PoolId indexed poolId, address indexed sender, int256 amount0, int256 amount1);
 
     /// @notice Quotes amount of unspecified side for a given amount of specified side
     /// @param zeroToOne Whether the swap is from token0 to token1 or from token1 to token0
