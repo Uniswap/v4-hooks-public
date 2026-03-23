@@ -34,7 +34,16 @@ abstract contract ProtocolFees {
         int128 unspecifiedDelta
     ) internal returns (int128) {
         uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
+        return _applyWithProtocolFee(poolManager, key, params, unspecifiedDelta, protocolFee);
+    }
 
+    function _applyWithProtocolFee(
+        IPoolManager poolManager,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        int128 unspecifiedDelta,
+        uint24 protocolFee
+    ) internal returns (int128) {
         if (protocolFee == 0) return 0;
         // Assumes that if a protocol fee is set, there should be a token jar.
         if (tokenJar == address(0)) pollTokenJar();

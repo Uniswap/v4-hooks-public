@@ -163,14 +163,14 @@ contract BaseAggregatorHookUnitTest is Test {
     }
 
     /// @dev PoolManager passes `msg.sender` into the hook (the swap router), not the end user.
-    function test_beforeSwap_emitsAggregatorHookSwap() public {
+    function test_beforeSwap_emitsHookSwap() public {
         uint256 amountIn = 100 ether;
         uint256 amountOut = 95 ether;
         externalSource.setReturns(amountOut, amountIn, false);
         token1.mint(address(hook), amountOut);
 
         vm.expectEmit(true, true, false, true);
-        emit IAggregatorHook.AggregatorHookSwap(poolId, address(swapRouter), int256(amountIn), -int256(amountOut));
+        emit IAggregatorHook.HookSwap(poolId, address(swapRouter), int256(amountIn), -int256(amountOut), 0);
 
         vm.prank(alice);
         swapRouter.swap(

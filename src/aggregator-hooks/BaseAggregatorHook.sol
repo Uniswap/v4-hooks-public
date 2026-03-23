@@ -127,13 +127,13 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
-        bool isExactInput = params.amountSpecified < 0;
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, isExactInput);
+        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        unspecifiedDelta += _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
+        uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
+        unspecifiedDelta += _applyWithProtocolFee(poolManager, key, params, unspecifiedDelta, protocolFee);
 
-        if (!isExactInput) {
+        if (params.amountSpecified >= 0) {
             // For exactOut, in cases where the implementation's amountOut may be off.
             // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
@@ -141,7 +141,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
         int256 amount0;
         int256 amount1;
-        if (params.zeroForOne == isExactInput) {
+        if (params.zeroForOne == params.amountSpecified < 0) {
             amount0 = specified;
             amount1 = unspecifiedDelta;
         } else {
@@ -149,7 +149,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
             amount1 = specified;
         }
 
-        emit AggregatorHookSwap(key.toId(), sender, amount0, amount1);
+        emit HookSwap(key.toId(), sender, amount0, amount1, protocolFee);
 
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }
