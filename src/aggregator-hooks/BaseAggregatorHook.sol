@@ -114,13 +114,14 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
+        pure
         override
         returns (bytes4)
     {
         revert LiquidityNotAllowed();
     }
 
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -137,6 +138,18 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
             // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
         }
+
+        int256 amount0;
+        int256 amount1;
+        if (params.zeroForOne == isExactInput) {
+            amount0 = specified;
+            amount1 = unspecifiedDelta;
+        } else {
+            amount0 = unspecifiedDelta;
+            amount1 = specified;
+        }
+
+        emit AggregatorHookSwap(key.toId(), sender, amount0, amount1);
 
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }
