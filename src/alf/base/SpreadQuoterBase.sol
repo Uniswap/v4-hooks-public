@@ -35,20 +35,12 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     );
 
     mapping(PoolId => PricingState) public pricingState;
-    mapping(PoolId => mapping(uint256 => bytes32)) internal blockUpdateHash;
-    address public priceSigner;
-
     mapping(PoolId => int24) public activeLowerTick;
 
     event PricingStateUpdated(PoolId indexed poolId, PricingState state);
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
-    event PriceSignerUpdated(address indexed newSigner);
     event ActiveTickUpdated(PoolId indexed poolId, int24 activeLowerTick);
 
-    error ExpiredUpdate();
-    error PoolMismatch();
-    error ConflictingCurveUpdate();
-    error InvalidPriceSigner();
     error InvalidTickRange();
     error WrongActiveTick();
 
@@ -199,21 +191,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         (PricingState memory newState, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
 
-        if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
-        if (block.timestamp > deadline) revert ExpiredUpdate();
+        _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
-        bytes32 updateHash = keccak256(curveUpdateData);
-        bytes32 existing = blockUpdateHash[poolId][block.number];
-
-        if (existing == bytes32(0)) {
+        if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
             _verifySignature(newState, poolId, deadline, sig);
-            blockUpdateHash[poolId][block.number] = updateHash;
             pricingState[poolId] = newState;
             emit PricingStateUpdated(poolId, newState);
-        } else if (existing != updateHash) {
-            revert ConflictingCurveUpdate();
         }
-        // else: same update, no-op
     }
 
     function _verifySignature(PricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)

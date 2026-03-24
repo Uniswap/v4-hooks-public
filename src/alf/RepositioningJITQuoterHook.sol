@@ -58,14 +58,11 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
 
     mapping(PoolId => RepositioningConfig) public repoConfig;
     mapping(PoolId => ActivePosition) public activePosition;
-    mapping(PoolId => mapping(uint256 => bytes32)) internal blockUpdateHash;
-    address public priceSigner;
 
     // ──── Events ────
 
     event ConfigUpdated(PoolId indexed poolId, RepositioningConfig config);
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
-    event PriceSignerUpdated(address indexed newSigner);
     event Deposit(Currency indexed token, uint256 amount);
     event Withdrawal(Currency indexed token, uint256 amount);
     event PositionWithdrawn(PoolId indexed poolId);
@@ -73,10 +70,6 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
     // ──── Errors ────
 
     error LiquidityNotAllowed();
-    error ExpiredUpdate();
-    error PoolMismatch();
-    error ConflictingCurveUpdate();
-    error InvalidPriceSigner();
 
     // ──── Constructor ────
 
@@ -273,19 +266,12 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
         (RepositioningConfig memory newConfig, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (RepositioningConfig, PoolId, uint256, bytes));
 
-        if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
-        if (block.timestamp > deadline) revert ExpiredUpdate();
+        _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
-        bytes32 updateHash = keccak256(curveUpdateData);
-        bytes32 existing = blockUpdateHash[poolId][block.number];
-
-        if (existing == bytes32(0)) {
+        if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
             _verifySignature(newConfig, poolId, deadline, sig);
-            blockUpdateHash[poolId][block.number] = updateHash;
             repoConfig[poolId] = newConfig;
             emit ConfigUpdated(poolId, newConfig);
-        } else if (existing != updateHash) {
-            revert ConflictingCurveUpdate();
         }
     }
 

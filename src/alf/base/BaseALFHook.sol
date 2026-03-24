@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
@@ -125,6 +126,42 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         } else {
             _settle(currency, address(this), amount);
         }
+    }
+
+    // ──── Internal: Signed Curve Updates ────
+
+    /// @dev Per-pool, per-block update hash for one-update-per-block enforcement.
+    ///      Shared across all quoter types to avoid redeclaring in each base.
+    mapping(PoolId => mapping(uint256 => bytes32)) internal _curveUpdateHash;
+
+    /// @dev Address authorized to sign EIP-712 curve updates.
+    address public priceSigner;
+
+    error ExpiredUpdate();
+    error PoolMismatch();
+    error ConflictingCurveUpdate();
+    error InvalidPriceSigner();
+
+    event PriceSignerUpdated(address indexed newSigner);
+
+    /// @dev Validate common curve update fields (pool identity and deadline).
+    function _validateCurveUpdateMeta(PoolId poolId, PoolId updatePoolId, uint256 deadline) internal view {
+        if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
+        if (block.timestamp > deadline) revert ExpiredUpdate();
+    }
+
+    /// @dev Enforce one-update-per-block. Returns true if this is a new update that should
+    ///      be verified and applied. Returns false if the same update was already applied
+    ///      this block (idempotent replay). Reverts if a different update was already applied.
+    function _checkAndMarkCurveUpdate(PoolId poolId, bytes memory curveUpdateData) internal returns (bool isNew) {
+        bytes32 updateHash = keccak256(curveUpdateData);
+        bytes32 existing = _curveUpdateHash[poolId][block.number];
+        if (existing == bytes32(0)) {
+            _curveUpdateHash[poolId][block.number] = updateHash;
+            return true;
+        }
+        if (existing != updateHash) revert ConflictingCurveUpdate();
+        return false;
     }
 
     // ──── Abstract: Pricing ────

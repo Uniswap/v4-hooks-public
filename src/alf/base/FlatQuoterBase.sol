@@ -44,8 +44,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
     // ──── State ────
 
     mapping(PoolId => FlatPricingState) public flatPricingState;
-    mapping(PoolId => mapping(uint256 => bytes32)) internal blockUpdateHash;
-    address public priceSigner;
 
     /// @dev Token decimals per pool, set during afterInitialize.
     mapping(PoolId => uint8) internal poolDecimals0;
@@ -55,7 +53,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
 
     event FlatPricingStateUpdated(PoolId indexed poolId, FlatPricingState state);
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
-    event PriceSignerUpdated(address indexed newSigner);
     event Deposit(Currency indexed token, uint256 amount);
     event Withdrawal(Currency indexed token, uint256 amount);
 
@@ -63,10 +60,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
 
     error LiquidityNotAllowed();
     error InsufficientInventory();
-    error ExpiredUpdate();
-    error PoolMismatch();
-    error ConflictingCurveUpdate();
-    error InvalidPriceSigner();
 
     constructor(
         IPoolManager _poolManager,
@@ -199,19 +192,12 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         (FlatPricingState memory newState, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (FlatPricingState, PoolId, uint256, bytes));
 
-        if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
-        if (block.timestamp > deadline) revert ExpiredUpdate();
+        _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
-        bytes32 updateHash = keccak256(curveUpdateData);
-        bytes32 existing = blockUpdateHash[poolId][block.number];
-
-        if (existing == bytes32(0)) {
+        if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
             _verifySignature(newState, poolId, deadline, sig);
-            blockUpdateHash[poolId][block.number] = updateHash;
             flatPricingState[poolId] = newState;
             emit FlatPricingStateUpdated(poolId, newState);
-        } else if (existing != updateHash) {
-            revert ConflictingCurveUpdate();
         }
     }
 

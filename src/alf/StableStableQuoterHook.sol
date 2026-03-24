@@ -44,23 +44,16 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
 
     mapping(PoolId => uint16) public attestedDiscountBps;
     mapping(PoolId => bool) public poolLive;
-    address public priceSigner;
-    mapping(PoolId => mapping(uint256 => bytes32)) internal blockUpdateHash;
 
     // ──── Errors & Events ────
 
     error MustUseDynamicFee(uint24 lpFee);
     error InvalidHookAddress(address hookAddress);
     error InvalidInitializer(address caller);
-    error ExpiredUpdate();
-    error PoolMismatch();
-    error ConflictingCurveUpdate();
-    error InvalidPriceSigner();
 
     event PoolInitialized(PoolKey indexed poolKey, uint160 sqrtPriceX96, FeeConfig feeConfig);
     event PoolConfigUpdated(PoolId indexed poolId);
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
-    event PriceSignerUpdated(address indexed newSigner);
 
     // ──── Constructor ────
 
@@ -370,23 +363,16 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
         (StableCurveUpdate memory update, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (StableCurveUpdate, PoolId, uint256, bytes));
 
-        if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
-        if (block.timestamp > deadline) revert ExpiredUpdate();
+        _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
-        bytes32 updateHash = keccak256(curveUpdateData);
-        bytes32 existing = blockUpdateHash[poolId][block.number];
-
-        if (existing == bytes32(0)) {
+        if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
             _verifySignature(update, poolId, deadline, sig);
-            blockUpdateHash[poolId][block.number] = updateHash;
 
             _applyFeeConfig(poolId, update.feeConfig);
             attestedDiscountBps[poolId] = update.attestedDiscountBps;
             poolLive[poolId] = update.live;
 
             emit PoolConfigUpdated(poolId);
-        } else if (existing != updateHash) {
-            revert ConflictingCurveUpdate();
         }
     }
 
