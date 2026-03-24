@@ -160,7 +160,11 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
         FeeConfig storage s = feeConfig[poolId];
         return
             FeeConfig({
-                k: s.k, logK: s.logK, optimalFeeE6: s.optimalFeeE6, referenceSqrtPriceX96: s.referenceSqrtPriceX96
+                k: s.k,
+                logK: s.logK,
+                optimalFeeE6: s.optimalFeeE6,
+                targetMultiplier: s.targetMultiplier,
+                referenceSqrtPriceX96: s.referenceSqrtPriceX96
             });
     }
 
@@ -274,7 +278,7 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
         bool zeroForOne
     ) internal view returns (uint256 lpFeeE12, uint256 decayingFeeE12) {
         return _computeDynamicFeeFromMemory(
-            FeeConfig(config.k, config.logK, config.optimalFeeE6, config.referenceSqrtPriceX96),
+            FeeConfig(config.k, config.logK, config.optimalFeeE6, config.targetMultiplier, config.referenceSqrtPriceX96),
             FeeState(state.decayingFeeE12, state.sqrtAmmPriceX96, state.blockNumber),
             sqrtAmmPriceX96,
             zeroForOne

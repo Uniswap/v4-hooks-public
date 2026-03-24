@@ -42,7 +42,7 @@ contract StableStableQuoterHookCrossVerificationTest is Test, Deployers {
     int24 constant TICK_SPACING = 60;
 
     FeeConfig testFeeConfig =
-        FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+        FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
     PoolKey origPoolKey;
     PoolKey quoterPoolKey;

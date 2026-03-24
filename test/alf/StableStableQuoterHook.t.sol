@@ -47,7 +47,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
     int24 constant TICK_SPACING = 60;
 
     FeeConfig testFeeConfig =
-        FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+        FeeConfig({k: K, logK: LOG_K, optimalFeeE6: OPTIMAL_FEE_E6, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
     PoolKey testPoolKey;
 
@@ -115,7 +115,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
         assertEq(tick, TickMath.getTickAtSqrtPrice(Constants.SQRT_PRICE_1_1));
 
         // Verify fee config
-        (uint256 k, uint256 logK, uint24 optFee, uint160 refPrice) = hook.feeConfig(testPoolKey.toId());
+        (uint256 k, uint256 logK, uint24 optFee,, uint160 refPrice) = hook.feeConfig(testPoolKey.toId());
         assertEq(k, K);
         assertEq(logK, LOG_K);
         assertEq(optFee, OPTIMAL_FEE_E6);
@@ -385,7 +385,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
         // Increase fee from 90 pips to 10_000 pips (1%)
         StableStableQuoterHook.StableCurveUpdate memory update = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -405,7 +405,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
         StableStableQuoterHook.StableCurveUpdate memory update = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -426,7 +426,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
         StableStableQuoterHook.StableCurveUpdate memory update1 = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -438,7 +438,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
         // Different update in same block
         StableStableQuoterHook.StableCurveUpdate memory update2 = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 20_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 20_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -455,7 +455,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
         StableStableQuoterHook.StableCurveUpdate memory update = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -473,7 +473,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
         StableStableQuoterHook.StableCurveUpdate memory update = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -492,7 +492,7 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
         StableStableQuoterHook.StableCurveUpdate memory update = StableStableQuoterHook.StableCurveUpdate({
             feeConfig: FeeConfig({
-                k: K, logK: LOG_K, optimalFeeE6: 10_000, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
+                k: K, logK: LOG_K, optimalFeeE6: 10_000, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96
             }),
             attestedDiscountBps: 0,
             live: true
@@ -519,12 +519,12 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
     function test_updatePoolConfig_changesConfig() public {
         FeeConfig memory newConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 500, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 500, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
         vm.prank(owner);
         hook.updatePoolConfig(testPoolKey, newConfig, 100, true);
 
-        (,, uint24 optFee,) = hook.feeConfig(testPoolKey.toId());
+        (,, uint24 optFee,,) = hook.feeConfig(testPoolKey.toId());
         assertEq(optFee, 500);
         assertEq(hook.attestedDiscountBps(testPoolKey.toId()), 100);
     }
@@ -571,12 +571,12 @@ contract StableStableQuoterHookTest is Test, Deployers {
 
     function test_updateFeeConfig_viaConfigManager() public {
         FeeConfig memory newConfig =
-            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 500, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
+            FeeConfig({k: K, logK: LOG_K, optimalFeeE6: 500, targetMultiplier: 0, referenceSqrtPriceX96: REFERENCE_SQRT_PRICE_X96});
 
         vm.prank(configManager);
         hook.updateFeeConfig(testPoolKey.toId(), newConfig);
 
-        (,, uint24 optFee,) = hook.feeConfig(testPoolKey.toId());
+        (,, uint24 optFee,,) = hook.feeConfig(testPoolKey.toId());
         assertEq(optFee, 500);
     }
 
