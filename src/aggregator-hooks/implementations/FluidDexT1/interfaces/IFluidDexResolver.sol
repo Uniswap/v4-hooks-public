@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.29;
+pragma solidity ^0.8.0;
 
 /// @title IFluidDexResolver
 /// @notice Interface for the Fluid DEX T1 resolver
