@@ -19,8 +19,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
-import {IAttestationRegistry, Attestation} from "../interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "../interfaces/IALFHook.sol";
+import {IAttestationRegistry} from "../interfaces/IAttestationRegistry.sol";
 
 /// @title FlatQuoterBase
 /// @notice Shared base for flat-price quoter hooks. Provides flat coefficient pricing,
@@ -97,22 +96,13 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         override
         returns (uint256 outputAmount)
     {
-        FlatPricingState memory state = flatPricingState[key.toId()];
-        bool isAttested;
-        address attester;
+        (bytes memory curveUpdateData, bool isAttested, address attester) = _resolveHookData(hookData);
 
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                (FlatPricingState memory newState,,,) =
-                    abi.decode(hd.curveUpdateData, (FlatPricingState, PoolId, uint256, bytes));
-                state = newState;
-            }
-            if (hd.attestationData.length > 0) {
-                (Attestation memory att, bool valid) = attestationRegistry.verify(hd.attestationData);
-                isAttested = valid;
-                attester = valid ? att.attester : address(0);
-            }
+        FlatPricingState memory state = flatPricingState[key.toId()];
+        if (curveUpdateData.length > 0) {
+            (FlatPricingState memory newState,,,) =
+                abi.decode(curveUpdateData, (FlatPricingState, PoolId, uint256, bytes));
+            state = newState;
         }
 
         return _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, state);
@@ -246,19 +236,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
     }
 
     // ──── Internal: Settlement Helpers ────
-
-    /// @dev Settle output to PM. Prefers burning ERC-6909 claims, then ERC-20.
-    function _settleOutput(Currency currency, uint256 amount) internal {
-        uint256 claimBal = poolManager.balanceOf(address(this), currency.toId());
-        if (claimBal >= amount) {
-            poolManager.burn(address(this), currency.toId(), amount);
-        } else if (claimBal > 0) {
-            poolManager.burn(address(this), currency.toId(), claimBal);
-            _settle(currency, address(this), amount - claimBal);
-        } else {
-            _settle(currency, address(this), amount);
-        }
-    }
 
     /// @dev Construct BeforeSwapDelta from swap params and computed amounts.
     function _buildBeforeSwapDelta(SwapParams calldata params, uint256 inputAmount, uint256 outputAmount)

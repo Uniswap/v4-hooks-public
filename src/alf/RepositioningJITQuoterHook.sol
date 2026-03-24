@@ -17,8 +17,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {BaseALFHook} from "./base/BaseALFHook.sol";
-import {IAttestationRegistry, Attestation} from "./interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "./interfaces/IALFHook.sol";
+import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 
 /// @title RepositioningJITQuoterHook
 /// @notice JIT liquidity repositioning quoter that manages its own LP inventory and repositions
@@ -126,20 +125,13 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
         override
         returns (uint256 outputAmount)
     {
-        RepositioningConfig memory config = repoConfig[key.toId()];
-        bool isAttested;
+        (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
 
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                (RepositioningConfig memory newConfig,,,) =
-                    abi.decode(hd.curveUpdateData, (RepositioningConfig, PoolId, uint256, bytes));
-                config = newConfig;
-            }
-            if (hd.attestationData.length > 0) {
-                (, bool valid) = attestationRegistry.verify(hd.attestationData);
-                isAttested = valid;
-            }
+        RepositioningConfig memory config = repoConfig[key.toId()];
+        if (curveUpdateData.length > 0) {
+            (RepositioningConfig memory newConfig,,,) =
+                abi.decode(curveUpdateData, (RepositioningConfig, PoolId, uint256, bytes));
+            config = newConfig;
         }
 
         return _priceWithConfig(zeroForOne, amountSpecified, isAttested, config);
@@ -174,12 +166,9 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // 1. Apply curve update if present
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                _applyCurveUpdate(key.toId(), hd.curveUpdateData);
-            }
+        (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
+        if (curveUpdateData.length > 0) {
+            _applyCurveUpdate(key.toId(), curveUpdateData);
         }
 
         PoolId poolId = key.toId();

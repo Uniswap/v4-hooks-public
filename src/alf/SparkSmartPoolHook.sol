@@ -22,7 +22,6 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "./interfaces/IALFHook.sol";
 
 /// @title SparkSmartPoolHook
 /// @notice Rehypothecating spread quoter using Just-In-Time (JIT) liquidity for Spark's stablecoin
@@ -322,15 +321,10 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         internal
         returns (uint24 feeOverride)
     {
-        bool isAttested;
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                _applyCurveUpdate(poolId, hd.curveUpdateData);
-            }
-            if (hd.attestationData.length > 0) {
-                (isAttested,) = _resolveAttestation(hd.attestationData);
-            }
+        (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
+
+        if (curveUpdateData.length > 0) {
+            _applyCurveUpdate(poolId, curveUpdateData);
         }
 
         PricingState memory state = pricingState[poolId];
@@ -514,14 +508,7 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         override
         returns (uint256 outputAmount)
     {
-        bool isAttested;
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.attestationData.length > 0) {
-                (, bool valid) = attestationRegistry.verify(hd.attestationData);
-                isAttested = valid;
-            }
-        }
+        (, bool isAttested,) = _resolveHookData(hookData);
         return _price(key, zeroForOne, amountSpecified, isAttested, address(0));
     }
 
@@ -596,14 +583,7 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
             liquidity = _computeJITLiquidity(poolId, key);
             if (liquidity == 0) return (0, 0);
 
-            bool isAttested;
-            if (hookData.length > 0) {
-                ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-                if (hd.attestationData.length > 0) {
-                    (, bool valid) = attestationRegistry.verify(hd.attestationData);
-                    isAttested = valid;
-                }
-            }
+            (, bool isAttested,) = _resolveHookData(hookData);
             feePips = _effectiveFee(state, zeroForOne, isAttested);
         }
 

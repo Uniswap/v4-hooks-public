@@ -42,12 +42,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         override
         returns (uint256 outputAmount)
     {
-        bytes memory attestationData;
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            attestationData = hd.attestationData;
-        }
-        (bool isAttested, address attester) = _resolveAttestation(attestationData);
+        (, bool isAttested, address attester) = _resolveHookData(hookData);
         return _price(key, zeroForOne, amountSpecified, isAttested, attester);
     }
 
@@ -85,7 +80,22 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         return (0, 0);
     }
 
-    // ──── Internal: Attestation ────
+    // ──── Internal: HookData Resolution ────
+
+    /// @dev Decode ALFHookData from raw hookData bytes and resolve attestation in one shot.
+    ///      Returns the curve update payload (for type-specific handling by subclasses) and
+    ///      the attestation result. This consolidates the repeated decode+attest pattern that
+    ///      appears in getIndicativeQuote, swapToPrice, and _beforeSwap across all quoters.
+    function _resolveHookData(bytes calldata hookData)
+        internal
+        view
+        returns (bytes memory curveUpdateData, bool isAttested, address attester)
+    {
+        if (hookData.length == 0) return ("", false, address(0));
+        ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
+        curveUpdateData = hd.curveUpdateData;
+        (isAttested, attester) = _resolveAttestation(hd.attestationData);
+    }
 
     /// @dev Parse and verify attestation from raw bytes.
     /// @return isAttested Whether a valid attestation was provided.
@@ -98,6 +108,23 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         if (attestationData.length == 0) return (false, address(0));
         (Attestation memory att, bool valid) = attestationRegistry.verify(attestationData);
         return (valid, valid ? att.attester : address(0));
+    }
+
+    // ──── Internal: Settlement ────
+
+    /// @dev Settle an amount to the PoolManager, preferring ERC-6909 claim burns over ERC-20
+    ///      transfers. This avoids unnecessary token movements when the hook already holds
+    ///      claims from prior swap cycles.
+    function _settleWithClaimPriority(Currency currency, uint256 amount) internal {
+        uint256 claimBal = poolManager.balanceOf(address(this), currency.toId());
+        if (claimBal >= amount) {
+            poolManager.burn(address(this), currency.toId(), amount);
+        } else if (claimBal > 0) {
+            poolManager.burn(address(this), currency.toId(), claimBal);
+            _settle(currency, address(this), amount - claimBal);
+        } else {
+            _settle(currency, address(this), amount);
+        }
     }
 
     // ──── Abstract: Pricing ────

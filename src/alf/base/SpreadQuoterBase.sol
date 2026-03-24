@@ -12,8 +12,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
-import {IAttestationRegistry, Attestation} from "../interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "../interfaces/IALFHook.sol";
+import {IAttestationRegistry} from "../interfaces/IAttestationRegistry.sol";
 import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 
 /// @title SpreadQuoterBase
@@ -77,24 +76,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         override
         returns (uint256 outputAmount)
     {
+        (bytes memory curveUpdateData, bool isAttested, address attester) = _resolveHookData(hookData);
+
         PricingState memory state = pricingState[key.toId()];
-        bool isAttested;
-        address attester;
-
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-
-            if (hd.curveUpdateData.length > 0) {
-                (PricingState memory newState,,,) =
-                    abi.decode(hd.curveUpdateData, (PricingState, PoolId, uint256, bytes));
-                state = newState;
-            }
-
-            if (hd.attestationData.length > 0) {
-                (Attestation memory att, bool valid) = attestationRegistry.verify(hd.attestationData);
-                isAttested = valid;
-                attester = valid ? att.attester : address(0);
-            }
+        if (curveUpdateData.length > 0) {
+            (PricingState memory newState,,,) =
+                abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+            state = newState;
         }
 
         return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, state);
@@ -110,23 +98,15 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         uint160 sqrtPriceLimitX96,
         bytes calldata hookData
     ) external view virtual override returns (uint256 amountIn, uint256 amountOut) {
-        // Resolve fee in a scoped block to keep the stack shallow for simulateSwapToPrice.
         uint24 feePips;
         {
-            PricingState memory state = pricingState[key.toId()];
-            bool isAttested;
+            (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
 
-            if (hookData.length > 0) {
-                ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-                if (hd.curveUpdateData.length > 0) {
-                    (PricingState memory newState,,,) =
-                        abi.decode(hd.curveUpdateData, (PricingState, PoolId, uint256, bytes));
-                    state = newState;
-                }
-                if (hd.attestationData.length > 0) {
-                    (, bool valid) = attestationRegistry.verify(hd.attestationData);
-                    isAttested = valid;
-                }
+            PricingState memory state = pricingState[key.toId()];
+            if (curveUpdateData.length > 0) {
+                (PricingState memory newState,,,) =
+                    abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+                state = newState;
             }
 
             if (!state.live) return (0, 0);
@@ -155,16 +135,10 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        bool isAttested;
+        (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
 
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                _applyCurveUpdate(key.toId(), hd.curveUpdateData);
-            }
-            if (hd.attestationData.length > 0) {
-                (isAttested,) = _resolveAttestation(hd.attestationData);
-            }
+        if (curveUpdateData.length > 0) {
+            _applyCurveUpdate(key.toId(), curveUpdateData);
         }
 
         PricingState memory state = pricingState[key.toId()];

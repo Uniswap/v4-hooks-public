@@ -14,8 +14,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {BaseALFHook} from "./base/BaseALFHook.sol";
-import {IAttestationRegistry, Attestation} from "./interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "./interfaces/IALFHook.sol";
+import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 import {SwapSimulator} from "./libraries/SwapSimulator.sol";
 import {FeeConfiguration} from "../stable/base/FeeConfiguration.sol";
 import {FeeCalculation} from "../stable/libraries/FeeCalculation.sol";
@@ -141,22 +140,18 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
         discount = attestedDiscountBps[poolId];
         live = poolLive[poolId];
 
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
+        {
+            bytes memory curveUpdateData;
+            (curveUpdateData, isAttested,) = _resolveHookData(hookData);
 
-            if (hd.curveUpdateData.length > 0) {
+            if (curveUpdateData.length > 0) {
                 (StableCurveUpdate memory update,,,) =
-                    abi.decode(hd.curveUpdateData, (StableCurveUpdate, PoolId, uint256, bytes));
+                    abi.decode(curveUpdateData, (StableCurveUpdate, PoolId, uint256, bytes));
                 config = update.feeConfig;
                 discount = update.attestedDiscountBps;
                 live = update.live;
                 state.decayingFeeE12 = uint40(FeeCalculation.UNDEFINED_DECAYING_FEE_E12);
                 state.blockNumber = uint40(_getBlockNumberish());
-            }
-
-            if (hd.attestationData.length > 0) {
-                (, bool valid) = attestationRegistry.verify(hd.attestationData);
-                isAttested = valid;
             }
         }
 
@@ -222,10 +217,10 @@ contract StableStableQuoterHook is BaseALFHook, FeeConfiguration, EIP712, Ownabl
         PoolId poolId = key.toId();
 
         // 1. Handle curve update from hookData
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                _applyCurveUpdate(poolId, hd.curveUpdateData);
+        {
+            (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
+            if (curveUpdateData.length > 0) {
+                _applyCurveUpdate(poolId, curveUpdateData);
             }
         }
 

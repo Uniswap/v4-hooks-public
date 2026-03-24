@@ -11,7 +11,6 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
-import {ALFHookData} from "./interfaces/IALFHook.sol";
 import {FlatQuoterBase} from "./base/FlatQuoterBase.sol";
 
 /// @title FlatLevelQuoterHook
@@ -58,11 +57,10 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // Apply hookData curve update if present
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            if (hd.curveUpdateData.length > 0) {
-                _applyCurveUpdate(key.toId(), hd.curveUpdateData);
+        {
+            (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
+            if (curveUpdateData.length > 0) {
+                _applyCurveUpdate(key.toId(), curveUpdateData);
             }
         }
 
@@ -94,7 +92,7 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
         uint256 claimBal = poolManager.balanceOf(address(this), outputCurrency.toId());
         if (erc20Bal + claimBal < outputAmount) revert InsufficientInventory();
 
-        _settleOutput(outputCurrency, outputAmount);
+        _settleWithClaimPriority(outputCurrency, outputAmount);
         poolManager.mint(address(this), inputCurrency.toId(), inputAmount);
 
         BeforeSwapDelta bsd;
