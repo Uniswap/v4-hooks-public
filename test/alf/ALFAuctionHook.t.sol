@@ -64,7 +64,7 @@ contract ALFAuctionHookTest is Test, Deployers {
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags))
         );
         deployCodeTo(
-            "ALFAuctionHook", abi.encode(manager, uint24(0), address(this)), address(auctionHook)
+            "ALFAuctionHook", abi.encode(manager, address(this)), address(auctionHook)
         );
 
         // ── Deploy quoters (native LP model with LP gating) ──
@@ -704,146 +704,22 @@ contract ALFAuctionHookTest is Test, Deployers {
     // ════════════════════════════════════════════
     //  Protocol Fee Tests
     // ════════════════════════════════════════════
-
-    ALFAuctionHook public feeAuctionHook;
-    PoolKey feeAuctionPoolKey;
-
-    function _deployFeeAuctionHook(uint24 feePips) internal {
-        uint160 auctionFlags =
-            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
-        feeAuctionHook = ALFAuctionHook(
-            address(uint160((uint256(type(uint160).max) - (3 << 14)) & clearAllHookPermissionsMask | auctionFlags))
-        );
-        deployCodeTo(
-            "ALFAuctionHook", abi.encode(manager, feePips, address(this)), address(feeAuctionHook)
-        );
-        feeAuctionPoolKey = PoolKey({
-            currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(feeAuctionHook))
-        });
-        manager.initialize(feeAuctionPoolKey, Constants.SQRT_PRICE_1_1);
-    }
-
-    function test_auctionFee_exactInput() public {
-        _deployFeeAuctionHook(10_000); // 1% fee
-
-        MockERC20 token0 = MockERC20(Currency.unwrap(currency0));
-        MockERC20 token1 = MockERC20(Currency.unwrap(currency1));
-        uint256 bal0Before = token0.balanceOf(address(this));
-        uint256 bal1Before = token1.balanceOf(address(this));
-
-        BalanceDelta delta = swap(feeAuctionPoolKey, true, -1e18, _buildBothTargets());
-
-        // User pays full 1e18 token0
-        assertEq(delta.amount0(), -1e18);
-        assertEq(token0.balanceOf(address(this)), bal0Before - 1e18);
-
-        // Output is based on 0.99e18 input (1% fee taken), with B's 1% bidFee on that
-        uint256 received = token1.balanceOf(address(this)) - bal1Before;
-        assertTrue(received > 0);
-        // 0.99e18 * (1 - 0.01) ≈ 0.9801e18
-        assertApproxEqRel(received, 0.9801e18, 0.01e18);
-
-        // Auction hook accumulated 0.01e18 in ERC-6909 claims
-        uint256 claims = manager.balanceOf(address(feeAuctionHook), currency0.toId());
-        assertEq(claims, 0.01e18);
-    }
-
-    function test_auctionFee_exactOutput() public {
-        _deployFeeAuctionHook(10_000); // 1% fee
-
-        MockERC20 token0 = MockERC20(Currency.unwrap(currency0));
-        uint256 bal0Before = token0.balanceOf(address(this));
-
-        BalanceDelta delta = swap(feeAuctionPoolKey, true, 0.5e18, _buildBothTargets());
-
-        // User gets the exact output they asked for
-        assertEq(delta.amount1(), int128(0.5e18));
-
-        // User paid more than the no-fee case due to protocol fee on input
-        uint256 paid = bal0Before - token0.balanceOf(address(this));
-        assertTrue(paid > 0);
-
-        // Claims accumulated on input currency (token0)
-        uint256 claims = manager.balanceOf(address(feeAuctionHook), currency0.toId());
-        assertTrue(claims > 0);
-
-        // Fee should be ~1% of realized input
-        assertApproxEqRel(claims, paid * 10_000 / 1_000_000, 0.01e18);
-    }
-
-    function test_auctionFee_collectFees() public {
-        _deployFeeAuctionHook(10_000); // 1% fee
-        address recipient = makeAddr("feeRecipient");
-        feeAuctionHook.setFeeRecipient(recipient);
-
-        // Do a swap to accumulate fees
-        swap(feeAuctionPoolKey, true, -1e18, _buildBothTargets());
-
-        uint256 claims = manager.balanceOf(address(feeAuctionHook), currency0.toId());
-        assertEq(claims, 0.01e18);
-
-        // Collect fees → ERC-20 sent to recipient
-        MockERC20 token0 = MockERC20(Currency.unwrap(currency0));
-        uint256 recipientBefore = token0.balanceOf(recipient);
-
-        feeAuctionHook.collectProtocolFees(currency0);
-
-        assertEq(token0.balanceOf(recipient), recipientBefore + 0.01e18);
-        assertEq(manager.balanceOf(address(feeAuctionHook), currency0.toId()), 0);
-    }
+    // Protocol fees are now read from the pool's slot0 (set by the v4 fee adapter)
+    // and taken directly to the token jar during _beforeSwap via _applyProtocolFee.
+    // Full protocol fee testing requires a fee adapter mock — covered in fork tests.
 
     function test_auctionFee_zeroFee() public {
-        // The default setUp uses 0 fee — verify no claims accumulate
+        // Default pool has no protocol fee set in slot0 — verify no fee taken
         swap(auctionPoolKey, true, -1e18, _buildBothTargets());
         assertEq(manager.balanceOf(address(auctionHook), currency0.toId()), 0);
     }
 
-    function test_auctionFee_targetedMode() public {
-        _deployFeeAuctionHook(10_000); // 1% fee
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
-
-        BalanceDelta delta = swap(feeAuctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
-        assertEq(delta.amount0(), -1e18);
-        assertTrue(delta.amount1() > 0);
-        assertEq(manager.balanceOf(address(feeAuctionHook), currency0.toId()), 0.01e18);
-    }
-
-    function test_auctionFee_strictMode() public {
-        _deployFeeAuctionHook(10_000); // 1% fee
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
-
-        // Strict mode with fee: indicative quote uses fee-adjusted amount, execution matches
-        bytes memory hookData =
-            abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: 1}));
-        BalanceDelta delta = swap(feeAuctionPoolKey, true, -1e18, hookData);
-        assertEq(delta.amount0(), -1e18);
-        assertTrue(delta.amount1() > 0);
-    }
-
-    function test_auctionFee_governance() public {
-        _deployFeeAuctionHook(10_000);
-        address newRecipient = makeAddr("newRecipient");
+    function test_governance_transferOwnership() public {
         address newOwner = makeAddr("newOwner");
+        auctionHook.transferOwnership(newOwner);
+        assertEq(auctionHook.owner(), newOwner);
 
-        // Only owner can set fee recipient
-        vm.prank(makeAddr("rando"));
         vm.expectRevert(ALFAuctionHook.Unauthorized.selector);
-        feeAuctionHook.setFeeRecipient(newRecipient);
-
-        // Owner can set recipient and transfer ownership
-        feeAuctionHook.setFeeRecipient(newRecipient);
-        assertEq(feeAuctionHook.feeRecipient(), newRecipient);
-
-        feeAuctionHook.transferOwnership(newOwner);
-        assertEq(feeAuctionHook.owner(), newOwner);
-
-        // Old owner can no longer act
-        vm.expectRevert(ALFAuctionHook.Unauthorized.selector);
-        feeAuctionHook.setFeeRecipient(address(this));
+        auctionHook.transferOwnership(address(this));
     }
 }

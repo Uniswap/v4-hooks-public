@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.26;
 
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -20,13 +20,14 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
 import {IAttestationRegistry} from "../interfaces/IAttestationRegistry.sol";
+import {ALFProtocolFees} from "./ALFProtocolFees.sol";
 
 /// @title FlatQuoterBase
 /// @notice Shared base for flat-price quoter hooks. Provides flat coefficient pricing,
 ///         EIP-712 signed curve updates, and inventory management (deposit/withdraw/claims).
 ///         Subclasses implement `_beforeSwap()` and `getHookPermissions()`, and may
 ///         override `withdraw()` and `getIndicativeQuote()`.
-abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCallback {
+abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCallback, ALFProtocolFees {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
@@ -80,7 +81,7 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         return true;
     }
 
-    /// @notice Indicative quote with hookData-aware pricing.
+    /// @notice Indicative quote with hookData-aware pricing and protocol fee deduction.
     /// @dev Virtual — subclasses may override to add inventory caps or other constraints.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
@@ -98,7 +99,31 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
             state = newState;
         }
 
-        return _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, state);
+        outputAmount = _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, state);
+
+        // Reflect protocol fee so indicative matches execution fidelity
+        uint24 protocolFee = _getProtocolFee(poolManager, zeroForOne, key.toId());
+        if (protocolFee > 0 && outputAmount > 0) {
+            bool isExactInput = amountSpecified < 0;
+            uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, outputAmount);
+            if (isExactInput) {
+                outputAmount -= feeAmount;
+            } else {
+                outputAmount += feeAmount;
+            }
+        }
+    }
+
+    // ──── Protocol Fees ────
+
+    /// @notice Resolve and cache the token jar address from the v4 fee adapter.
+    function pollTokenJar() public override returns (address) {
+        address newTokenJar = _getTokenJar(poolManager);
+        if (tokenJar != newTokenJar) {
+            tokenJar = newTokenJar;
+            emit TokenJarUpdated(newTokenJar);
+        }
+        return tokenJar;
     }
 
     // ──── Hook Lifecycle ────

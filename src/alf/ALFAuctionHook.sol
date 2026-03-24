@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.26;
 
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -14,6 +13,7 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {toBeforeSwapDelta, BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseHook} from "../base/BaseHook.sol";
+import {ALFProtocolFees} from "./base/ALFProtocolFees.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
 import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 
@@ -51,11 +51,10 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///
 ///         ## Protocol Fee
 ///
-///         The auction hook applies its own protocol fee (separate from v4 pool-level fees):
-///           - Exact input: fee is deducted from the input amount before split fill
-///           - Exact output: fee is computed from the realized input after split fill
-///         Fees accumulate as ERC-6909 claims on the PoolManager and are collected via
-///         `collectProtocolFees()`.
+///         The auction hook reads the v4 protocol fee from the virtual pool's slot0 and
+///         applies it to the unspecified delta after the split fill completes. Fees are
+///         taken directly to the token jar via `poolManager.take()`, matching the same
+///         mechanism used by aggregator hooks and flat quoters.
 ///
 ///         ## Tolerance Enforcement
 ///
@@ -87,23 +86,13 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///         `targets` array. Each target specifies a quoter's PoolKey and optional per-quoter
 ///         curve update data. The auction constructs per-quoter ALFHookData that pairs the
 ///         shared attestation with each quoter's curve update.
-contract ALFAuctionHook is BaseHook, IUnlockCallback {
+contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    /// @dev 100% in pips. Used as the denominator for protocol fee calculations.
-    uint256 internal constant MAX_PIPS = 1_000_000;
-
-    /// @notice The auction hook's protocol fee in pips (1000 = 0.1%, 10_000 = 1%).
-    /// @dev    Immutable — set at deployment. Separate from v4 pool-level protocol fees.
-    uint24 public immutable protocolFeePips;
-
-    /// @notice Contract owner. Can set the fee recipient and transfer ownership.
+    /// @notice Contract owner. Can transfer ownership.
     address public owner;
-
-    /// @notice Address that receives collected protocol fees.
-    address public feeRecipient;
 
     /// @dev Tracks a quoter candidate during the split fill process.
     ///      Built during `_prepareCandidates`, sorted by indicative quality, and consumed
@@ -158,23 +147,14 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     /// @param amount1 Token1 delta for this fill (negative = input, positive = output).
     event FillExecuted(address indexed quoter, int128 amount0, int128 amount1);
 
-    /// @notice Emitted when accumulated protocol fees are collected.
-    /// @param currency  The currency collected.
-    /// @param recipient The address that received the fees.
-    /// @param amount    The amount collected.
-    event ProtocolFeesCollected(Currency indexed currency, address indexed recipient, uint256 amount);
-
     // ──── Constructor ────
 
-    /// @param _poolManager    The Uniswap v4 PoolManager.
-    /// @param _protocolFeePips The auction's protocol fee in pips. Immutable after deployment.
-    /// @param _owner          Initial owner and fee recipient.
-    constructor(IPoolManager _poolManager, uint24 _protocolFeePips, address _owner)
+    /// @param _poolManager The Uniswap v4 PoolManager.
+    /// @param _owner       Initial owner.
+    constructor(IPoolManager _poolManager, address _owner)
         BaseHook(_poolManager)
     {
-        protocolFeePips = _protocolFeePips;
         owner = _owner;
-        feeRecipient = _owner;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -250,67 +230,41 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     }
 
     /// @dev Core auction entry point. Orchestrates:
-    ///      1. Protocol fee deduction (exact input) or deferral (exact output)
-    ///      2. Greedy split fill across sorted candidates
-    ///      3. Protocol fee computation from realized input (exact output)
-    ///      4. Fee minting as ERC-6909 claims
-    ///      5. Tolerance enforcement (downside-only)
-    ///      6. Delta conversion for the virtual pool
+    ///      1. Greedy split fill across sorted candidates
+    ///      2. Protocol fee application (reads fee from slot0, takes to token jar)
+    ///      3. Tolerance enforcement (downside-only)
+    ///      4. Delta conversion for the virtual pool
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        uint256 feeAmount;
-        int256 swapAmount = params.amountSpecified;
-
-        // 1. Exact input: deduct protocol fee upfront, reducing the amount available for fills.
-        //    The fee is taken from the swapper's input before any quoter sees it.
-        if (params.amountSpecified < 0 && protocolFeePips > 0) {
-            feeAmount = uint256(-params.amountSpecified) * protocolFeePips / MAX_PIPS;
-            swapAmount = params.amountSpecified + int256(feeAmount); // less negative
-        }
-
-        // 2. Build sorted candidates and execute greedy split fill.
-        //    Returns the accumulated delta across all fills, the primary quoter (first filled),
-        //    and the best individual indicative (used as the tolerance baseline).
+        // 1. Build sorted candidates and execute greedy split fill.
         (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote) =
-            _auctionAndSwap(key, params.zeroForOne, swapAmount, hookData);
+            _auctionAndSwap(key, params.zeroForOne, params.amountSpecified, hookData);
 
-        // 3. Exact output: compute fee from the total realized input across all fills.
-        //    Can only be computed after execution since we don't know the input cost upfront.
-        if (params.amountSpecified >= 0 && protocolFeePips > 0) {
-            int128 realizedInput = params.zeroForOne ? totalDelta.amount0() : totalDelta.amount1();
-            feeAmount = uint256(int256(-realizedInput)) * protocolFeePips / MAX_PIPS;
-        }
+        // 2. Apply protocol fee from slot0 — takes fee directly to token jar.
+        //    The unspecified delta is the side the swapper doesn't control:
+        //    exact-in → output, exact-out → input.
+        int128 unspecifiedDelta = _extractUnspecified(totalDelta, params);
+        int128 feeAdjustment = _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
 
-        // 4. Mint ERC-6909 claims for the protocol fee. These accumulate on the PoolManager
-        //    and are collected later via collectProtocolFees(). The fee currency is always
-        //    the input token (token0 for zeroForOne, token1 for oneForZero).
-        if (feeAmount > 0) {
-            poolManager.mint(address(this), (params.zeroForOne ? key.currency0 : key.currency1).toId(), feeAmount);
-        }
-
-        // 5. Tolerance enforcement (downside-only). Split fill output should be >= the best
-        //    individual indicative in the common case (splitting across multiple quoters at
-        //    better marginal prices). Only revert if execution is *worse* than the baseline.
+        // 3. Tolerance enforcement (downside-only).
         if (hookData.length > 0) {
-            uint24 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
+            uint256 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
             if (tol > 0) {
                 uint256 executed = _extractOutput(totalDelta, params);
                 if (executed < bestQuote) {
                     uint256 dev = bestQuote - executed;
-                    if (dev * MAX_PIPS > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                    if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                 }
             }
         }
 
         emit AuctionExecuted(primaryQuoter, params.zeroForOne, params.amountSpecified, bestQuote);
 
-        // 6. Convert the accumulated BalanceDelta into a BeforeSwapDelta that offsets the
-        //    virtual pool's swap. The negation ensures the auction hook's net position is zero.
-        //    The protocol fee is added to the appropriate delta component so the swapper pays it.
-        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params, feeAmount), 0);
+        // 4. Convert BalanceDelta → BeforeSwapDelta, adjusting for the protocol fee.
+        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params, feeAdjustment), 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -753,15 +707,6 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Extract the "output" amount from a BalanceDelta for tolerance comparison.
-    ///
-    ///      For exact input: output is the received token (positive delta on the output side).
-    ///      For exact output: "output" per IALFHook convention is the required input (abs of
-    ///      the negative delta on the input side).
-    ///
-    ///      Used to compare aggregate execution against the best individual indicative.
-    /// @param delta  The accumulated BalanceDelta from all fills.
-    /// @param params The original swap parameters.
-    /// @return The output amount as a positive uint256.
     function _extractOutput(BalanceDelta delta, SwapParams calldata params) internal pure returns (uint256) {
         bool isExactInput = params.amountSpecified < 0;
         if (isExactInput) {
@@ -773,94 +718,54 @@ contract ALFAuctionHook is BaseHook, IUnlockCallback {
         }
     }
 
+    /// @dev Extract the unspecified delta component for protocol fee calculation.
+    function _extractUnspecified(BalanceDelta delta, SwapParams calldata params) internal pure returns (int128) {
+        bool isExactInput = params.amountSpecified < 0;
+        if (isExactInput) {
+            return params.zeroForOne ? delta.amount1() : delta.amount0();
+        } else {
+            return params.zeroForOne ? delta.amount0() : delta.amount1();
+        }
+    }
+
     /// @dev Convert the accumulated BalanceDelta from nested fills into a BeforeSwapDelta
-    ///      that offsets the virtual pool's swap.
-    ///
-    ///      The BeforeSwapDelta has two components: `specified` and `unspecified`.
-    ///        - specified:   maps to the token the swapper specified (input for exact-in, output for exact-out)
-    ///        - unspecified: maps to the other token
-    ///
-    ///      The nested delta is negated so the virtual pool's swap produces the inverse
-    ///      position, netting the auction hook's balance to zero. The protocol fee is added
-    ///      to the appropriate component so the swapper pays it:
-    ///        - exact input:  fee added to specified (increases the input the swapper pays)
-    ///        - exact output: fee added to unspecified (increases the input the swapper pays)
-    ///
-    /// @param delta     The accumulated BalanceDelta from all nested fills.
-    /// @param params    The original swap parameters.
-    /// @param feeAmount The protocol fee amount (0 if no fee).
-    /// @return The BeforeSwapDelta to return from _beforeSwap.
-    function _toBeforeSwapDelta(BalanceDelta delta, SwapParams calldata params, uint256 feeAmount)
+    ///      that offsets the virtual pool's swap. The fee adjustment (from _applyProtocolFee)
+    ///      is added to the unspecified component so the swapper pays it.
+    function _toBeforeSwapDelta(BalanceDelta delta, SwapParams calldata params, int128 feeAdjustment)
         internal
         pure
         returns (BeforeSwapDelta)
     {
-        bool isExactInput = params.amountSpecified < 0;
         int128 specified;
         int128 unspecified;
 
-        // Map (amount0, amount1) → (specified, unspecified) based on direction and swap type.
-        // For exact-input zeroForOne: specified = amount0, unspecified = amount1
-        // For exact-input oneForZero: specified = amount1, unspecified = amount0
-        // (and vice versa for exact-output, where the specified token is the output)
-        if (isExactInput == params.zeroForOne) {
+        if ((params.amountSpecified < 0) == params.zeroForOne) {
             specified = -delta.amount0();
-            unspecified = -delta.amount1();
+            unspecified = -delta.amount1() + feeAdjustment;
         } else {
             specified = -delta.amount1();
-            unspecified = -delta.amount0();
-        }
-
-        // Add the protocol fee to the appropriate component.
-        if (feeAmount > 0) {
-            if (isExactInput) {
-                specified += int128(uint128(feeAmount));
-            } else {
-                unspecified += int128(uint128(feeAmount));
-            }
+            unspecified = -delta.amount0() + feeAdjustment;
         }
 
         return toBeforeSwapDelta(specified, unspecified);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                          FEE COLLECTION
+    //                          PROTOCOL FEES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Collect accumulated protocol fees for a currency.
-    /// @dev    Fees accumulate as ERC-6909 claims on the PoolManager during auction execution.
-    ///        This function burns the claims and takes the underlying tokens, transferring
-    ///        them to `feeRecipient`. Callable by anyone (no access control needed since
-    ///        fees always go to feeRecipient).
-    /// @param currency The currency to collect fees for.
-    function collectProtocolFees(Currency currency) external {
-        uint256 claims = poolManager.balanceOf(address(this), currency.toId());
-        if (claims == 0) return;
-        poolManager.unlock(abi.encode(currency, claims, feeRecipient));
-    }
-
-    /// @inheritdoc IUnlockCallback
-    /// @dev Called by PoolManager during collectProtocolFees(). Burns ERC-6909 claims and
-    ///      takes the underlying tokens to the fee recipient.
-    function unlockCallback(bytes calldata data) external returns (bytes memory) {
-        require(msg.sender == address(poolManager));
-        (Currency currency, uint256 amount, address recipient) = abi.decode(data, (Currency, uint256, address));
-        poolManager.burn(address(this), currency.toId(), amount);
-        poolManager.take(currency, recipient, amount);
-        emit ProtocolFeesCollected(currency, recipient, amount);
-        return "";
+    /// @notice Resolve and cache the token jar address from the v4 fee adapter.
+    function pollTokenJar() public override returns (address) {
+        address newTokenJar = _getTokenJar(poolManager);
+        if (tokenJar != newTokenJar) {
+            tokenJar = newTokenJar;
+        }
+        return tokenJar;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          GOVERNANCE
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Set the fee recipient address.
-    /// @param _feeRecipient The new fee recipient.
-    function setFeeRecipient(address _feeRecipient) external {
-        if (msg.sender != owner) revert Unauthorized();
-        feeRecipient = _feeRecipient;
-    }
 
     /// @notice Transfer ownership of the auction hook.
     /// @param newOwner The new owner address.
