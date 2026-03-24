@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.29;
+pragma solidity ^0.8.0;
 
 import {IFluidDexT1} from "./IFluidDexT1.sol";
 
