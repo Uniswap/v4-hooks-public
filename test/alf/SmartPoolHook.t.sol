@@ -16,16 +16,16 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {SparkSmartPoolHook} from "../../src/alf/SparkSmartPoolHook.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
-contract SparkSmartPoolHookTest is Test, Deployers {
+contract SmartPoolHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    SparkSmartPoolHook public hook;
+    SmartPoolHook public hook;
 
     MockERC4626 public vault0;
     MockERC4626 public vault1;
@@ -59,9 +59,9 @@ contract SparkSmartPoolHookTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SparkSmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
-            "SparkSmartPoolHook",
+            "SmartPoolHook",
             abi.encode(manager, uint32(100_000), owner),
             address(hook)
         );
@@ -161,7 +161,7 @@ contract SparkSmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 1_000e18);
         token1.approve(address(hook), 1_000e18);
-        vm.expectRevert(SparkSmartPoolHook.ExternalDepositsDisabled.selector);
+        vm.expectRevert(SmartPoolHook.ExternalDepositsDisabled.selector);
         hook.addLiquidity(testPoolKey, 1_000e18);
         vm.stopPrank();
     }
@@ -200,7 +200,7 @@ contract SparkSmartPoolHookTest is Test, Deployers {
         _depositAsOperator(1_000e18);
 
         vm.prank(operator);
-        vm.expectRevert(SparkSmartPoolHook.InsufficientShares.selector);
+        vm.expectRevert(SmartPoolHook.InsufficientShares.selector);
         hook.removeLiquidity(testPoolKey, 2_000e18);
     }
 

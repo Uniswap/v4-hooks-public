@@ -22,10 +22,10 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 
-/// @title SparkSmartPoolHook
-/// @notice Rehypothecating spread quoter using Just-In-Time (JIT) liquidity for Spark's stablecoin
-///         markets. All pool assets live in ERC4626 vaults earning yield between swaps. Liquidity is
-///         deployed to the pool only for the duration of each swap:
+/// @title SmartPoolHook
+/// @notice Rehypothecating spread quoter using Just-In-Time (JIT) liquidity with ERC4626 vaults.
+///         All pool assets live in vaults earning yield between swaps. Liquidity is deployed to
+///         the pool only for the duration of each swap:
 ///
 ///           beforeSwap  → withdraw from vaults, deploy concentrated LP
 ///           [pool executes swap against the LP]
@@ -41,7 +41,7 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///         - Positive net deltas are minted as ERC-6909 claims (PoolManager may lack ERC-20 since
 ///           the swapper settles after afterSwap). Claims are redeemed in the next beforeSwap.
 ///         - Total managed assets = ERC-20 balance + ERC-6909 claims + ERC4626 vault balance.
-contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
+contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -50,7 +50,7 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     // ──── Constants ────
 
     /// @notice Salt used for the hook's LP positions in the PoolManager.
-    bytes32 public constant LP_SALT = bytes32(uint256(0x5350524B)); // "SPRK"
+    bytes32 public constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
 
     /// @dev Rounding direction for share-to-amount conversions.
     enum Rounding {
@@ -149,7 +149,7 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         IPoolManager _poolManager,
         uint32 maxGas_,
         address owner_
-    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "SparkSmartPoolHook") {}
+    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "SmartPoolHook") {}
 
     // ──── Hook Permissions ────
 
