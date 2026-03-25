@@ -1,6 +1,15 @@
 {
+  "lib/blocknumberish": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "b911c96b35aaaa45e79715e160b295d2efd56285"
+    }
+  },
   "lib/briefcase": {
     "rev": "2b00819e5694c075a5437a9a0cde109fac0e6578"
+  },
+  "lib/fluid-contracts-public": {
+    "rev": "a9949b48ba1247d4f478cd0acb40896b5c8bf3f8"
   },
   "lib/forge-chronicles": {
     "rev": "d1fb566915f23a01f08747264c56f8925f15751a"
@@ -8,11 +17,23 @@
   "lib/forge-std": {
     "rev": "60acb7aaadcce2d68e52986a0a66fe79f07d138f"
   },
-  "lib/v4-core": {
+  "lib/openzeppelin-contracts": {
     "tag": {
-      "name": "v4.0.0",
-      "rev": "e50237c43811bd9b526eff40f26772152a42daba"
+      "name": "v5.5.0",
+      "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
     }
+  },
+  "lib/protocol-fees": {
+    "branch": {
+      "name": "v4-fee-adapter",
+      "rev": "e9262fb5e3553f83ad1fc009183f3455b16e85dd"
+    }
+  },
+  "lib/solady": {
+    "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
+  "lib/v4-core": {
+    "rev": "d153b048868a60c2403a3ef5b2301bb247884d46"
   },
   "lib/v4-periphery": {
     "rev": "3779387e5d296f39df543d23524b050f89a62917"

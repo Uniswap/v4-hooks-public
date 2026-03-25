@@ -1,6 +1,7 @@
 
 
 # Contents
+- [aggregator-hooks](/src/aggregator-hooks)
 - [base](/src/base)
 - [interfaces](/src/interfaces)
 - [utils](/src/utils)
