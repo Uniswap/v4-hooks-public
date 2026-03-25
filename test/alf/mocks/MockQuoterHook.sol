@@ -8,7 +8,6 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseALFHook} from "../../../src/alf/base/BaseALFHook.sol";
-import {IAttestationRegistry} from "../../../src/alf/interfaces/IAttestationRegistry.sol";
 
 /// @title MockQuoterHook
 /// @notice Minimal concrete implementation of BaseALFHook for testing the base class.
@@ -23,9 +22,8 @@ contract MockQuoterHook is BaseALFHook {
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_
-    ) BaseALFHook(_poolManager, _attestationRegistry, maxGas_) {
+    ) BaseALFHook(_poolManager, maxGas_) {
         live = true;
     }
 

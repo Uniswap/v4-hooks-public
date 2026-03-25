@@ -18,8 +18,6 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {SparkSmartPoolHook} from "../../src/alf/SparkSmartPoolHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry} from "../../src/alf/interfaces/IAttestationRegistry.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 contract SparkSmartPoolHookTest is Test, Deployers {
@@ -27,7 +25,6 @@ contract SparkSmartPoolHookTest is Test, Deployers {
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     SparkSmartPoolHook public hook;
 
     MockERC4626 public vault0;
@@ -53,8 +50,6 @@ contract SparkSmartPoolHookTest is Test, Deployers {
         token0 = MockERC20(Currency.unwrap(currency0));
         token1 = MockERC20(Currency.unwrap(currency1));
 
-        attestationRegistry = new AttestationRegistry(owner);
-
         // Deploy mock ERC4626 vaults
         vault0 = new MockERC4626(ERC20(address(token0)));
         vault1 = new MockERC4626(ERC20(address(token1)));
@@ -67,7 +62,7 @@ contract SparkSmartPoolHookTest is Test, Deployers {
         hook = SparkSmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "SparkSmartPoolHook",
-            abi.encode(manager, address(attestationRegistry), uint32(100_000), owner),
+            abi.encode(manager, uint32(100_000), owner),
             address(hook)
         );
 

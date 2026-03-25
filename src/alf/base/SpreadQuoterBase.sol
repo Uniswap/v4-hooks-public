@@ -12,7 +12,6 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
-import {IAttestationRegistry} from "../interfaces/IAttestationRegistry.sol";
 import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 
 /// @title SpreadQuoterBase
@@ -46,11 +45,10 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_,
         string memory eip712Name
-    ) BaseALFHook(_poolManager, _attestationRegistry, maxGas_) EIP712(eip712Name, "1") Ownable(owner_) {}
+    ) BaseALFHook(_poolManager, maxGas_) EIP712(eip712Name, "1") Ownable(owner_) {}
 
     // ──── IALFHook ────
 

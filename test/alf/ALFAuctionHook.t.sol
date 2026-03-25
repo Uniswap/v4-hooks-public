@@ -21,10 +21,6 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {ALFAuctionHook} from "../../src/alf/ALFAuctionHook.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry, Attestation} from "../../src/alf/interfaces/IAttestationRegistry.sol";
-import {MockAttestationSigner} from "./mocks/MockAttestationSigner.sol";
-import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {AuctionHookData, TargetedQuoter} from "../../src/alf/types/AuctionTypes.sol";
 
 contract ALFAuctionHookTest is Test, Deployers {
@@ -32,7 +28,6 @@ contract ALFAuctionHookTest is Test, Deployers {
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     ALFAuctionHook public auctionHook;
 
     SimpleSpreadQuoterHook public quoterA;
@@ -40,8 +35,6 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     address ownerA = makeAddr("ownerA");
     address ownerB = makeAddr("ownerB");
-    uint256 attesterPk;
-    address attester;
 
     PoolKey auctionPoolKey;
     PoolKey quoterAPoolKey;
@@ -50,12 +43,6 @@ contract ALFAuctionHookTest is Test, Deployers {
     function setUp() public {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
-
-        attestationRegistry = new AttestationRegistry(ownerA);
-
-        (attester, attesterPk) = makeAddrAndKey("attester");
-        vm.prank(ownerA);
-        attestationRegistry.addAttester(attester);
 
         // ── Deploy auction hook ──
         uint160 auctionFlags =
@@ -77,7 +64,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         );
         deployCodeTo(
             "SimpleSpreadQuoterHook",
-            abi.encode(manager, address(attestationRegistry), uint32(50_000), ownerA),
+            abi.encode(manager, uint32(50_000), ownerA),
             address(quoterA)
         );
 
@@ -86,7 +73,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         );
         deployCodeTo(
             "SimpleSpreadQuoterHook",
-            abi.encode(manager, address(attestationRegistry), uint32(50_000), ownerB),
+            abi.encode(manager, uint32(50_000), ownerB),
             address(quoterB)
         );
 
@@ -182,14 +169,6 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function _buildTargetedHookData(TargetedQuoter[] memory targets) internal pure returns (bytes memory) {
         return abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: 0}));
-    }
-
-    function _buildTargetedHookDataWithAttestation(bytes memory attestationData, TargetedQuoter[] memory targets)
-        internal
-        pure
-        returns (bytes memory)
-    {
-        return abi.encode(AuctionHookData({attestationData: attestationData, targets: targets, strictTolerancePips: 0}));
     }
 
     // ──── Auction selects best quoter ────
@@ -316,34 +295,6 @@ contract ALFAuctionHookTest is Test, Deployers {
         );
     }
 
-    // ──── Attestation flows through to winner ────
-
-    function test_attestationForwardsToWinner() public {
-        Attestation memory att = Attestation({
-            attester: attester,
-            swapper: address(swapRouter),
-            deadline: block.timestamp + 1 hours,
-            swapHash: keccak256("test")
-        });
-        bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
-
-        bytes memory hookData = abi.encode(
-            AuctionHookData({
-                attestationData: attestationData, targets: targets, strictTolerancePips: 0
-            })
-        );
-
-        // B still wins on indicative → nested swap goes through B's pool (1% fee)
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, hookData);
-
-        assertEq(delta.amount0(), -1e18);
-        assertApproxEqRel(uint256(int256(delta.amount1())), 0.99e18, 0.01e18);
-    }
-
     // ──── Event emission ────
 
     function test_emitsAuctionExecuted() public {
@@ -424,27 +375,6 @@ contract ALFAuctionHookTest is Test, Deployers {
             )
         );
         swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
-    }
-
-    function test_targeted_withAttestation() public {
-        Attestation memory att = Attestation({
-            attester: attester,
-            swapper: address(swapRouter),
-            deadline: block.timestamp + 1 hours,
-            swapHash: keccak256("test")
-        });
-        bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
-
-        // B still wins → nested swap through B at 1%
-        BalanceDelta delta =
-            swap(auctionPoolKey, true, -1e18, _buildTargetedHookDataWithAttestation(attestationData, targets));
-
-        assertEq(delta.amount0(), -1e18);
-        assertApproxEqRel(uint256(int256(delta.amount1())), 0.99e18, 0.01e18);
     }
 
     // ──── Targeted with curve update ────

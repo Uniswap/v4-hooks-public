@@ -13,7 +13,6 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 import {IAavePool} from "./interfaces/IAavePool.sol";
 
 /// @title AaveRehypothecatingSpreadQuoterHook
@@ -85,13 +84,12 @@ contract AaveRehypothecatingSpreadQuoterHook is SpreadQuoterBase, IUnlockCallbac
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_,
         IAavePool _aavePool,
         uint24 _targetUtilizationPips,
         uint24 _rebalanceThresholdPips
-    ) SpreadQuoterBase(_poolManager, _attestationRegistry, maxGas_, owner_, "AaveRehypothecatingSpreadQuoterHook") {
+    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "AaveRehypothecatingSpreadQuoterHook") {
         aavePool = _aavePool;
         targetUtilizationPips = _targetUtilizationPips;
         rebalanceThresholdPips = _rebalanceThresholdPips;

@@ -21,25 +21,18 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {AaveRehypothecatingSpreadQuoterHook} from "../../src/alf/AaveRehypothecatingSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry, Attestation} from "../../src/alf/interfaces/IAttestationRegistry.sol";
-import {MockAttestationSigner} from "./mocks/MockAttestationSigner.sol";
 import {MockAavePool} from "./mocks/MockAavePool.sol";
 import {IAavePool} from "../../src/alf/interfaces/IAavePool.sol";
-import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 
 contract AaveRehypothecatingSpreadQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     AaveRehypothecatingSpreadQuoterHook public hook;
     MockAavePool public mockAave;
 
     address owner = makeAddr("owner");
-    uint256 attesterPk;
-    address attester;
 
     PoolKey testPoolKey;
 
@@ -60,12 +53,6 @@ contract AaveRehypothecatingSpreadQuoterHookTest is Test, Deployers {
         token0 = MockERC20(Currency.unwrap(currency0));
         token1 = MockERC20(Currency.unwrap(currency1));
 
-        attestationRegistry = new AttestationRegistry(owner);
-
-        (attester, attesterPk) = makeAddrAndKey("attester");
-        vm.prank(owner);
-        attestationRegistry.addAttester(attester);
-
         // Deploy mock Aave pool
         mockAave = new MockAavePool();
         aToken0 = mockAave.addAsset(address(token0));
@@ -85,7 +72,6 @@ contract AaveRehypothecatingSpreadQuoterHookTest is Test, Deployers {
             "AaveRehypothecatingSpreadQuoterHook",
             abi.encode(
                 manager,
-                address(attestationRegistry),
                 uint32(100_000),
                 owner,
                 address(mockAave),
@@ -522,7 +508,6 @@ contract AaveRehypothecatingSpreadQuoterHookTest is Test, Deployers {
             "AaveRehypothecatingSpreadQuoterHook",
             abi.encode(
                 manager,
-                address(attestationRegistry),
                 uint32(100_000),
                 owner,
                 address(mockAave),

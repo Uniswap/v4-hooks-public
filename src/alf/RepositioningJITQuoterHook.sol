@@ -17,7 +17,6 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {BaseALFHook} from "./base/BaseALFHook.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 
 /// @title RepositioningJITQuoterHook
 /// @notice JIT liquidity repositioning quoter that manages its own LP inventory and repositions
@@ -75,11 +74,10 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
     )
-        BaseALFHook(_poolManager, _attestationRegistry, maxGas_)
+        BaseALFHook(_poolManager, maxGas_)
         EIP712("RepositioningJITQuoterHook", "1")
         Ownable(owner_)
     {}

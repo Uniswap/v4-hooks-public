@@ -8,23 +8,16 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IALFHook, ALFHookData} from "../interfaces/IALFHook.sol";
-import {IAttestationRegistry, Attestation} from "../interfaces/IAttestationRegistry.sol";
 
 /// @title BaseALFHook
-/// @notice Abstract base contract for ALF hooks. Provides attestation resolution
-///         and the IALFHook implementation. Quoters extend this and implement
-///         _price() with their proprietary pricing logic.
+/// @notice Abstract base contract for ALF hooks. Provides hookData resolution, settlement
+///         helpers, curve update bookkeeping, and the IALFHook interface. Quoters extend
+///         this and implement _price() with their proprietary pricing logic.
 /// @dev Follows the same BaseHook + DeltaResolver dual-inheritance pattern as BaseTokenWrapperHook.
 abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
-    IAttestationRegistry public immutable attestationRegistry;
     uint32 private immutable _maxGas;
 
-    constructor(
-        IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
-        uint32 maxGas_
-    ) BaseHook(_poolManager) {
-        attestationRegistry = _attestationRegistry;
+    constructor(IPoolManager _poolManager, uint32 maxGas_) BaseHook(_poolManager) {
         _maxGas = maxGas_;
     }
 
@@ -53,14 +46,11 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     // ──── Reserves (default: no off-pool reserves) ────
 
     /// @inheritdoc IALFHook
-    /// @dev Default returns (0, 0). Hooks that manage off-pool capital (JIT, rehypothecation)
-    ///      should override to report their true TVL.
     function getReserves(PoolKey calldata) external view virtual override returns (uint256, uint256) {
         return (0, 0);
     }
 
     /// @inheritdoc IALFHook
-    /// @dev Default returns (0, 0). Override for hooks with off-pool reserves.
     function getEffectiveLiquidity(PoolKey calldata) external view virtual override returns (uint256, uint256) {
         return (0, 0);
     }
@@ -68,9 +58,6 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     // ──── Price-bounded simulation (default: unsupported) ────
 
     /// @inheritdoc IALFHook
-    /// @dev Default returns (0, 0). Spread quoters override with SwapSimulator-backed
-    ///      implementation. Hooks that cannot support price-bounded simulation (e.g.,
-    ///      flat quoters, external wrappers) keep this default.
     function swapToPrice(PoolKey calldata, bool, int256, uint160, bytes calldata)
         external
         view
@@ -83,10 +70,10 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── Internal: HookData Resolution ────
 
-    /// @dev Decode ALFHookData from raw hookData bytes and resolve attestation in one shot.
-    ///      Returns the curve update payload (for type-specific handling by subclasses) and
-    ///      the attestation result. This consolidates the repeated decode+attest pattern that
-    ///      appears in getIndicativeQuote, swapToPrice, and _beforeSwap across all quoters.
+    /// @dev Decode ALFHookData and resolve attestation. Returns curve update payload and
+    ///      attestation result. The base implementation does not verify attestations —
+    ///      subclasses that want attestation support override _resolveAttestation with
+    ///      their own EIP-712 verification against priceSigner.
     function _resolveHookData(bytes calldata hookData)
         internal
         view
@@ -98,24 +85,21 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
         (isAttested, attester) = _resolveAttestation(hd.attestationData);
     }
 
-    /// @dev Parse and verify attestation from raw bytes.
-    /// @return isAttested Whether a valid attestation was provided.
-    /// @return attester The attester address (zero if not attested).
-    function _resolveAttestation(bytes memory attestationData)
+    /// @dev Resolve attestation from raw bytes. Default returns (false, address(0)).
+    ///      Subclasses can override to verify attestationData against their own signer
+    ///      using the hook's EIP-712 infrastructure and priceSigner.
+    function _resolveAttestation(bytes memory)
         internal
         view
+        virtual
         returns (bool isAttested, address attester)
     {
-        if (attestationData.length == 0) return (false, address(0));
-        (Attestation memory att, bool valid) = attestationRegistry.verify(attestationData);
-        return (valid, valid ? att.attester : address(0));
+        return (false, address(0));
     }
 
     // ──── Internal: Settlement ────
 
-    /// @dev Settle an amount to the PoolManager, preferring ERC-6909 claim burns over ERC-20
-    ///      transfers. This avoids unnecessary token movements when the hook already holds
-    ///      claims from prior swap cycles.
+    /// @dev Settle an amount to the PoolManager, preferring ERC-6909 claim burns over ERC-20.
     function _settleWithClaimPriority(Currency currency, uint256 amount) internal {
         uint256 claimBal = poolManager.balanceOf(address(this), currency.toId());
         if (claimBal >= amount) {
@@ -130,11 +114,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── Internal: Signed Curve Updates ────
 
-    /// @dev Per-pool, per-block update hash for one-update-per-block enforcement.
-    ///      Shared across all quoter types to avoid redeclaring in each base.
     mapping(PoolId => mapping(uint256 => bytes32)) internal _curveUpdateHash;
-
-    /// @dev Address authorized to sign EIP-712 curve updates.
     address public priceSigner;
 
     error ExpiredUpdate();
@@ -144,15 +124,11 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     event PriceSignerUpdated(address indexed newSigner);
 
-    /// @dev Validate common curve update fields (pool identity and deadline).
     function _validateCurveUpdateMeta(PoolId poolId, PoolId updatePoolId, uint256 deadline) internal view {
         if (PoolId.unwrap(updatePoolId) != PoolId.unwrap(poolId)) revert PoolMismatch();
         if (block.timestamp > deadline) revert ExpiredUpdate();
     }
 
-    /// @dev Enforce one-update-per-block. Returns true if this is a new update that should
-    ///      be verified and applied. Returns false if the same update was already applied
-    ///      this block (idempotent replay). Reverts if a different update was already applied.
     function _checkAndMarkCurveUpdate(PoolId poolId, bytes memory curveUpdateData) internal returns (bool isNew) {
         bytes32 updateHash = keccak256(curveUpdateData);
         bytes32 existing = _curveUpdateHash[poolId][block.number];
@@ -167,12 +143,6 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     // ──── Abstract: Pricing ────
 
     /// @dev Subclasses MUST implement pricing logic.
-    /// @param key The pool key.
-    /// @param zeroForOne The swap direction.
-    /// @param amountSpecified The swap amount. Negative = exact input.
-    /// @param isAttested Whether the swap has a valid attestation.
-    /// @param attester The attester address (zero if not attested).
-    /// @return outputAmount The quoted output.
     function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
         internal
         view
@@ -181,7 +151,6 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── DeltaResolver: _pay ────
 
-    /// @dev Transfer tokens to the pool manager for delta settlement.
     function _pay(Currency token, address, uint256 amount) internal override {
         token.transfer(address(poolManager), amount);
     }

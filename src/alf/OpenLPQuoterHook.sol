@@ -7,7 +7,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 
 /// @title OpenLPQuoterHook
 /// @notice Bid/ask spread quoter with open LP — anyone can provide liquidity,
@@ -17,10 +16,9 @@ import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 contract OpenLPQuoterHook is SpreadQuoterBase {
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
-    ) SpreadQuoterBase(_poolManager, _attestationRegistry, maxGas_, owner_, "OpenLPQuoterHook") {}
+    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "OpenLPQuoterHook") {}
 
     // ──── Hook Permissions ────
 

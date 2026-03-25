@@ -17,21 +17,14 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {FlatLevelQuoterHook} from "../../src/alf/FlatLevelQuoterHook.sol";
 import {FlatQuoterBase} from "../../src/alf/base/FlatQuoterBase.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry, Attestation} from "../../src/alf/interfaces/IAttestationRegistry.sol";
-import {MockAttestationSigner} from "./mocks/MockAttestationSigner.sol";
-import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 
 contract FlatLevelQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    AttestationRegistry public attestationRegistry;
     FlatLevelQuoterHook public hook;
 
     address owner = makeAddr("owner");
-    uint256 attesterPk;
-    address attester;
 
     PoolKey testPoolKey;
 
@@ -43,12 +36,6 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        attestationRegistry = new AttestationRegistry(owner);
-
-        (attester, attesterPk) = makeAddrAndKey("attester");
-        vm.prank(owner);
-        attestationRegistry.addAttester(attester);
-
         // Deploy hook at flag-mined address
         uint160 flags = uint160(
             Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
@@ -57,7 +44,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         hook = FlatLevelQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "FlatLevelQuoterHook",
-            abi.encode(manager, address(attestationRegistry), uint32(50_000), owner),
+            abi.encode(manager, uint32(50_000), owner),
             address(hook)
         );
 
@@ -200,21 +187,6 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         uint256 output = hook.getIndicativeQuote(testPoolKey, false, -100e18, "");
         // 100 * 0.95 = 95
         assertEq(output, 95e18);
-    }
-
-    function test_getIndicativeQuote_withAttestation() public {
-        Attestation memory att = Attestation({
-            attester: attester,
-            swapper: makeAddr("swapper"),
-            deadline: block.timestamp + 1 hours,
-            swapHash: keccak256("test")
-        });
-        bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-        bytes memory hookData = abi.encode(ALFHookData({attestationData: attestationData, curveUpdateData: ""}));
-
-        uint256 output = hook.getIndicativeQuote(testPoolKey, true, -100e18, hookData);
-        // Base = 98e18, +5 bps → 98 * 10005 / 10000 = 98.049e18
-        assertEq(output, 98.049e18);
     }
 
     function test_getIndicativeQuote_unlivePool_returnsZero() public {

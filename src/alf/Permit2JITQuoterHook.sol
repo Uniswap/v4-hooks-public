@@ -17,7 +17,6 @@ import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/Pool
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {BaseALFHook} from "./base/BaseALFHook.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 
 /// @title Permit2JITQuoterHook
 /// @notice JIT (just-in-time) liquidity quoter that pulls tokens from a maker's wallet via Permit2,
@@ -62,11 +61,10 @@ contract Permit2JITQuoterHook is BaseALFHook, Ownable2Step {
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         IAllowanceTransfer _permit2,
         uint32 maxGas_,
         address owner_
-    ) BaseALFHook(_poolManager, _attestationRegistry, maxGas_) Ownable(owner_) {
+    ) BaseALFHook(_poolManager, maxGas_) Ownable(owner_) {
         permit2 = _permit2;
     }
 

@@ -19,7 +19,6 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
-import {IAttestationRegistry} from "../interfaces/IAttestationRegistry.sol";
 import {ALFProtocolFees} from "./ALFProtocolFees.sol";
 
 /// @title FlatQuoterBase
@@ -64,13 +63,12 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_,
         string memory eip712Name,
         string memory eip712Version
     )
-        BaseALFHook(_poolManager, _attestationRegistry, maxGas_)
+        BaseALFHook(_poolManager, maxGas_)
         EIP712(eip712Name, eip712Version)
         Ownable(owner_)
     {}

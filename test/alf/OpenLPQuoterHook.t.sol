@@ -21,9 +21,6 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {OpenLPQuoterHook} from "../../src/alf/OpenLPQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry, Attestation} from "../../src/alf/interfaces/IAttestationRegistry.sol";
-import {MockAttestationSigner} from "./mocks/MockAttestationSigner.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 
 contract OpenLPQuoterHookTest is Test, Deployers {
@@ -31,12 +28,9 @@ contract OpenLPQuoterHookTest is Test, Deployers {
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     OpenLPQuoterHook public hook;
 
     address owner = makeAddr("owner");
-    uint256 attesterPk;
-    address attester;
 
     PoolKey testPoolKey;
 
@@ -47,18 +41,12 @@ contract OpenLPQuoterHookTest is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        attestationRegistry = new AttestationRegistry(owner);
-
-        (attester, attesterPk) = makeAddrAndKey("attester");
-        vm.prank(owner);
-        attestationRegistry.addAttester(attester);
-
         // Deploy hook — no BEFORE_REMOVE_LIQUIDITY (anyone can remove freely)
         uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG);
         hook = OpenLPQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "OpenLPQuoterHook",
-            abi.encode(manager, address(attestationRegistry), uint32(50_000), owner),
+            abi.encode(manager, uint32(50_000), owner),
             address(hook)
         );
 
@@ -204,20 +192,6 @@ contract OpenLPQuoterHookTest is Test, Deployers {
     function test_getIndicativeQuote_oneForZero() public view {
         uint256 output = hook.getIndicativeQuote(testPoolKey, false, -100e18, "");
         assertApproxEqRel(output, 95e18, 0.01e18);
-    }
-
-    function test_getIndicativeQuote_withAttestation() public {
-        Attestation memory att = Attestation({
-            attester: attester,
-            swapper: makeAddr("swapper"),
-            deadline: block.timestamp + 1 hours,
-            swapHash: keccak256("test")
-        });
-        bytes memory attestationData = MockAttestationSigner.sign(vm, attesterPk, att, address(attestationRegistry));
-        bytes memory hookData = abi.encode(ALFHookData({attestationData: attestationData, curveUpdateData: ""}));
-
-        uint256 output = hook.getIndicativeQuote(testPoolKey, true, -100e18, hookData);
-        assertApproxEqRel(output, 98.049e18, 0.01e18);
     }
 
     function test_getIndicativeQuote_unlivePool_returnsZero() public {

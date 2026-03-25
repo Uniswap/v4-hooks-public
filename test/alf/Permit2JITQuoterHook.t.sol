@@ -19,15 +19,12 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {DeployPermit2} from "permit2/test/utils/DeployPermit2.sol";
 import {Permit2JITQuoterHook} from "../../src/alf/Permit2JITQuoterHook.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
-import {IAttestationRegistry} from "../../src/alf/interfaces/IAttestationRegistry.sol";
 
 contract Permit2JITQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     Permit2JITQuoterHook public hook;
     IAllowanceTransfer public permit2;
 
@@ -49,14 +46,12 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
         DeployPermit2 deployer = new DeployPermit2();
         permit2 = IAllowanceTransfer(deployer.deployPermit2());
 
-        attestationRegistry = new AttestationRegistry(owner);
-
         // Deploy hook at flag-mined address
         uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         hook = Permit2JITQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
             "Permit2JITQuoterHook",
-            abi.encode(manager, address(attestationRegistry), address(permit2), uint32(50_000), owner),
+            abi.encode(manager, address(permit2), uint32(50_000), owner),
             address(hook)
         );
 

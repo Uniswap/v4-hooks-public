@@ -10,7 +10,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 import {FlatQuoterBase} from "./base/FlatQuoterBase.sol";
 
 /// @title FlatLevelQuoterHook
@@ -24,10 +23,9 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
 
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
-    ) FlatQuoterBase(_poolManager, _attestationRegistry, maxGas_, owner_, "FlatLevelQuoterHook", "1") {}
+    ) FlatQuoterBase(_poolManager, maxGas_, owner_, "FlatLevelQuoterHook", "1") {}
 
     // ──── Hook Permissions ────
 

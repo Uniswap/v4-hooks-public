@@ -21,7 +21,6 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
-import {IAttestationRegistry} from "./interfaces/IAttestationRegistry.sol";
 
 /// @title SparkSmartPoolHook
 /// @notice Rehypothecating spread quoter using Just-In-Time (JIT) liquidity for Spark's stablecoin
@@ -144,15 +143,13 @@ contract SparkSmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     // ──── Constructor ────
 
     /// @param _poolManager The Uniswap v4 PoolManager.
-    /// @param _attestationRegistry The attestation registry for flow-based fee discounts.
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_       Initial contract owner (Ownable2Step).
     constructor(
         IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
         uint32 maxGas_,
         address owner_
-    ) SpreadQuoterBase(_poolManager, _attestationRegistry, maxGas_, owner_, "SparkSmartPoolHook") {}
+    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "SparkSmartPoolHook") {}
 
     // ──── Hook Permissions ────
 

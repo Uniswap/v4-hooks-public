@@ -17,14 +17,12 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {RepositioningJITQuoterHook} from "../../src/alf/RepositioningJITQuoterHook.sol";
-import {AttestationRegistry} from "../../src/alf/AttestationRegistry.sol";
 
 contract RepositioningJITQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    AttestationRegistry public attestationRegistry;
     RepositioningJITQuoterHook public hook;
 
     address owner = makeAddr("owner");
@@ -41,8 +39,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        attestationRegistry = new AttestationRegistry(owner);
-
         // Deploy hook at flag-mined address
         uint160 flags = uint160(
             Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
@@ -53,7 +49,7 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
         );
         deployCodeTo(
             "RepositioningJITQuoterHook",
-            abi.encode(manager, address(attestationRegistry), uint32(100_000), owner),
+            abi.encode(manager, uint32(100_000), owner),
             address(hook)
         );
 
