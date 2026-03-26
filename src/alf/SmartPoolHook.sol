@@ -52,14 +52,25 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         IERC4626 vault1;
     }
 
+    /// @dev Packed per-pool scalar state across 2 storage slots.
+    ///
+    ///      Slot 0 (hot — read/written every swap): 23 bytes
+    ///        activeJITLiquidity(16) + tickLower(3) + tickUpper(3) + externalDepositsEnabled(1)
+    ///
+    ///      Slot 1 (cold — read only for deposit auth): 20 bytes
+    ///        operator(20)
+    struct PoolState {
+        uint128 activeJITLiquidity;
+        int24 tickLower;
+        int24 tickUpper;
+        bool externalDepositsEnabled;
+        address operator;
+    }
+
     // ──── Per-Pool State ────
 
-    mapping(PoolId => int24) public poolTickLower;
-    mapping(PoolId => int24) public poolTickUpper;
-    mapping(PoolId => bool) public externalDepositsEnabled;
-    mapping(PoolId => address) public poolOperator;
+    mapping(PoolId => PoolState) public pools;
     mapping(PoolId => PoolKey) internal _poolKeys;
-    mapping(PoolId => uint128) internal _activeJITLiquidity;
 
     // ──── Events ────
 
@@ -106,10 +117,13 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         PoolId poolId = key.toId();
         _poolKeys[poolId] = key;
         pricingState[poolId] = config.pricing;
-        poolTickLower[poolId] = config.tickLower;
-        poolTickUpper[poolId] = config.tickUpper;
-        poolOperator[poolId] = config.operator;
-        externalDepositsEnabled[poolId] = config.allowExternalDeposits;
+        pools[poolId] = PoolState({
+            activeJITLiquidity: 0,
+            tickLower: config.tickLower,
+            tickUpper: config.tickUpper,
+            externalDepositsEnabled: config.allowExternalDeposits,
+            operator: config.operator
+        });
         vaults[poolId][key.currency0] = config.vault0;
         vaults[poolId][key.currency1] = config.vault1;
 
@@ -146,17 +160,17 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         if (tickLower >= tickUpper) revert InvalidTickRange();
         if (tickLower % key.tickSpacing != 0 || tickUpper % key.tickSpacing != 0) revert InvalidTickRange();
         PoolId poolId = key.toId();
-        poolTickLower[poolId] = tickLower;
-        poolTickUpper[poolId] = tickUpper;
+        pools[poolId].tickLower = tickLower;
+        pools[poolId].tickUpper = tickUpper;
         emit TickRangeUpdated(poolId, tickLower, tickUpper);
     }
 
     function setPoolOperator(PoolKey calldata key, address operator) external onlyOwner {
-        poolOperator[key.toId()] = operator;
+        pools[key.toId()].operator = operator;
     }
 
     function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOwner {
-        externalDepositsEnabled[key.toId()] = enabled;
+        pools[key.toId()].externalDepositsEnabled = enabled;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -181,6 +195,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         bytes calldata
     ) external view override returns (uint256 amountIn, uint256 amountOut) {
         PoolId poolId = key.toId();
+        PoolState storage ps = pools[poolId];
         uint24 feePips;
         uint128 liquidity;
         {
@@ -193,8 +208,8 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         uint160 effectiveLimit;
         {
             uint160 boundary = zeroForOne
-                ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
-                : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
+                ? TickMath.getSqrtPriceAtTick(ps.tickLower)
+                : TickMath.getSqrtPriceAtTick(ps.tickUpper);
             effectiveLimit = zeroForOne
                 ? (sqrtPriceLimitX96 > boundary ? sqrtPriceLimitX96 : boundary)
                 : (sqrtPriceLimitX96 < boundary ? sqrtPriceLimitX96 : boundary);
@@ -298,19 +313,20 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         returns (bytes4, int128)
     {
         PoolId poolId = key.toId();
-        uint128 liquidity = _activeJITLiquidity[poolId];
+        PoolState storage ps = pools[poolId];
+        uint128 liquidity = ps.activeJITLiquidity;
         if (liquidity > 0) {
             poolManager.modifyLiquidity(
                 key,
                 ModifyLiquidityParams({
-                    tickLower: poolTickLower[poolId],
-                    tickUpper: poolTickUpper[poolId],
+                    tickLower: ps.tickLower,
+                    tickUpper: ps.tickUpper,
                     liquidityDelta: -int256(uint256(liquidity)),
                     salt: LP_SALT
                 }),
                 ""
             );
-            _activeJITLiquidity[poolId] = 0;
+            ps.activeJITLiquidity = 0;
             _resolveNetDelta(poolId, key);
             _depositAllToVaults(poolId, key);
         }
@@ -325,9 +341,10 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         (uint256 bal0, uint256 bal1) = _totalAssets(key);
         if (bal0 == 0 && bal1 == 0) return;
 
+        PoolState storage ps = pools[poolId];
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-        int24 tl = poolTickLower[poolId];
-        int24 tu = poolTickUpper[poolId];
+        int24 tl = ps.tickLower;
+        int24 tu = ps.tickUpper;
 
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
             sqrtPriceX96, TickMath.getSqrtPriceAtTick(tl), TickMath.getSqrtPriceAtTick(tu), bal0, bal1
@@ -345,7 +362,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
             ModifyLiquidityParams({tickLower: tl, tickUpper: tu, liquidityDelta: int256(uint256(liquidity)), salt: LP_SALT}),
             ""
         );
-        _activeJITLiquidity[poolId] = liquidity;
+        ps.activeJITLiquidity = liquidity;
     }
 
     /// @dev Resolve net delta for both currencies after JIT remove.
@@ -376,6 +393,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         returns (uint256 outputAmount)
     {
         PoolId poolId = key.toId();
+        PoolState storage ps = pools[poolId];
         PricingState memory state = pricingState[poolId];
         if (!state.live) return 0;
 
@@ -385,20 +403,21 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         uint24 feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         uint160 limit = zeroForOne
-            ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
-            : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
+            ? TickMath.getSqrtPriceAtTick(ps.tickLower)
+            : TickMath.getSqrtPriceAtTick(ps.tickUpper);
         (,, outputAmount,) = SwapMath.computeSwapStep(sqrtPriceX96, limit, liquidity, amountSpecified, feePips);
     }
 
     function _computeJITLiquidity(PoolKey memory key) internal view returns (uint128) {
         PoolId poolId = key.toId();
+        PoolState storage ps = pools[poolId];
         (uint256 bal0, uint256 bal1) = _totalAssets(key);
         if (bal0 == 0 && bal1 == 0) return 0;
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         return LiquidityAmounts.getLiquidityForAmounts(
             sqrtPriceX96,
-            TickMath.getSqrtPriceAtTick(poolTickLower[poolId]),
-            TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]),
+            TickMath.getSqrtPriceAtTick(ps.tickLower),
+            TickMath.getSqrtPriceAtTick(ps.tickUpper),
             bal0,
             bal1
         );
@@ -409,8 +428,9 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _requireDepositAuth(PoolId poolId) internal view {
-        if (msg.sender == owner() || msg.sender == poolOperator[poolId]) return;
-        if (externalDepositsEnabled[poolId]) return;
+        PoolState storage ps = pools[poolId];
+        if (msg.sender == owner() || msg.sender == ps.operator) return;
+        if (ps.externalDepositsEnabled) return;
         revert ExternalDepositsDisabled();
     }
 

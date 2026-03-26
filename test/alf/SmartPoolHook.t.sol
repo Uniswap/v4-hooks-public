@@ -111,10 +111,11 @@ contract SmartPoolHookTest is Test, Deployers {
     // ──── Pool Initialization ────
 
     function test_initializePool_setsConfig() public view {
-        assertEq(hook.poolOperator(testPoolId), operator);
-        assertEq(hook.poolTickLower(testPoolId), -10);
-        assertEq(hook.poolTickUpper(testPoolId), 10);
-        assertFalse(hook.externalDepositsEnabled(testPoolId));
+        (, int24 tl, int24 tu, bool extDeposits, address op) = hook.pools(testPoolId);
+        assertEq(op, operator);
+        assertEq(tl, -10);
+        assertEq(tu, 10);
+        assertFalse(extDeposits);
     }
 
     function test_initializePool_revertsOnDirectInit() public {
