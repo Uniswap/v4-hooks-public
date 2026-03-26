@@ -18,6 +18,7 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
+import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 contract SmartPoolHookTest is Test, Deployers {
@@ -95,7 +96,7 @@ contract SmartPoolHookTest is Test, Deployers {
     function _depositAsOperator(uint256 amount) internal {
         // For first deposit: shares = amount, requires (amount, amount) of each token.
         // For subsequent deposits: shares convert proportionally.
-        (uint256 need0, uint256 need1) = hook.previewAddLiquidity(testPoolKey, amount);
+        (uint256 need0, uint256 need1) = hook.previewDeposit(testPoolKey, amount);
         token0.mint(operator, need0);
         token1.mint(operator, need1);
         vm.startPrank(operator);
@@ -193,7 +194,7 @@ contract SmartPoolHookTest is Test, Deployers {
         _depositAsOperator(1_000e18);
 
         vm.prank(operator);
-        vm.expectRevert(SmartPoolHook.InsufficientShares.selector);
+        vm.expectRevert(PoolVault.InsufficientShares.selector);
         hook.removeLiquidity(testPoolKey, 2_000e18);
     }
 
@@ -294,7 +295,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vault1.simulateYield(100e18);
 
         // Preview withdrawal should show more than deposited
-        (uint256 amount0, uint256 amount1) = hook.previewRemoveLiquidity(testPoolKey, 1_000e18);
+        (uint256 amount0, uint256 amount1) = hook.previewWithdraw(testPoolKey, 1_000e18);
         assertEq(amount0, 1_100e18);
         assertEq(amount1, 1_100e18);
     }
@@ -328,7 +329,7 @@ contract SmartPoolHookTest is Test, Deployers {
     // ──── View Functions ────
 
     function test_previewAddLiquidity_firstDeposit() public view {
-        (uint256 a0, uint256 a1) = hook.previewAddLiquidity(testPoolKey, 500e18);
+        (uint256 a0, uint256 a1) = hook.previewDeposit(testPoolKey, 500e18);
         assertEq(a0, 500e18);
         assertEq(a1, 500e18);
     }
