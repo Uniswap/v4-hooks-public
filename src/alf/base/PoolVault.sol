@@ -10,67 +10,138 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title PoolVault
-/// @notice Multi-asset vault for v4 pool hooks, inspired by ERC4626.
+/// @author Uniswap Labs
 ///
-///         Manages proportional share accounting across a pool's two currencies,
-///         with per-pool isolation of vault shares, ERC-6909 claims, and ERC-20 balances.
-///         Designed as a reusable base for any rehypothecating hook that needs:
+/// @notice Multi-asset vault for Uniswap v4 pool hooks, inspired by ERC4626.
 ///
-///           - LP deposit/withdraw with share-based accounting
-///           - ERC4626 vault rehypothecation (assets earn yield between swaps)
-///           - Per-pool ERC-6909 claim tracking (deferred settlement from JIT cycles)
+///         Manages proportional share accounting across a pool's two currencies, with per-pool
+///         isolation of three asset types:
 ///
-///         Unlike ERC4626, shares are non-transferable internal accounting — each pool
-///         has its own share supply tracked via mappings, not an ERC20 token.
+///           1. **ERC4626 vault shares** — assets rehypothecated into yield-bearing vaults between
+///              swaps. Tracked per-pool via `_vaultShares` to isolate multi-pool deployments that
+///              share the same vault contract.
 ///
-/// @dev    Subclasses provide:
-///           - `_poolManager()`: access to the v4 PoolManager (for claim ops)
-///           - Authorization logic for deposits/withdrawals
-///           - JIT lifecycle that calls _depositAllToVaults / _withdrawAllFromVaults
+///           2. **ERC-6909 claims** — deferred settlement tokens minted on the PoolManager when
+///              afterSwap produces a positive delta but the PM lacks ERC-20 (because the swapper
+///              hasn't settled yet). Tracked per-pool via `_claims` and redeemed to ERC-20 in the
+///              next beforeSwap.
+///
+///           3. **Raw ERC-20** — tokens held directly by the hook for pools without a configured
+///              vault. Tracked per-pool via `_erc20` since the hook's global ERC-20 balance is
+///              not attributable to any single pool.
+///
+///         ## Share Model
+///
+///         Unlike ERC4626, shares are **non-transferable internal accounting**. Each pool has its
+///         own share supply tracked via `totalShares` and `userShares` mappings — there is no
+///         ERC-20 share token. This avoids the complexity of per-pool token deployment while
+///         providing the same proportional claim semantics.
+///
+///         Share math follows ERC4626 conventions:
+///           - Deposits round **up** (depositor pays slightly more, preventing dilution)
+///           - Withdrawals round **down** (withdrawer receives slightly less, preventing theft)
+///           - First deposit: 1 share = 1 unit of each token (no virtual shares)
+///           - Conversion uses Solady's `fullMulDiv` / `fullMulDivUp` for overflow-safe precision
+///
+///         ## Integration
+///
+///         Subclasses must provide:
+///           - `_poolManager()` — access to the v4 PoolManager for claim operations
+///           - Authorization logic for deposit/withdraw entry points
+///           - A JIT lifecycle (or equivalent) that calls the vault and claim management functions
+///             during swap callbacks
+///
+/// @dev    **Storage layout**: per-pool state uses nested mappings keyed by PoolId. The mappings
+///         for per-currency data (`vaults`, `_vaultShares`, `_claims`, `_erc20`) are further
+///         keyed by Currency. This two-level mapping cannot be packed into a struct, but the
+///         scalar per-pool fields (`totalShares`) can be co-located with hook-specific state
+///         in subclasses for storage slot packing.
 abstract contract PoolVault {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    // ──── Per-Pool State ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              STATE
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice ERC4626 vault per (pool, currency). address(0) = no vault (ERC-20 held directly).
+    /// @notice ERC4626 vault for each (pool, currency) pair.
+    /// @dev    `address(0)` means no vault is configured — tokens are held as ERC-20 in the hook
+    ///         and tracked via `_erc20`. Vaults are typically set at pool initialization and are
+    ///         immutable for the pool's lifetime.
     mapping(PoolId => mapping(Currency => IERC4626)) public vaults;
 
-    /// @notice Total shares outstanding per pool.
+    /// @notice Total shares outstanding for a pool, across all depositors.
+    /// @dev    Denominator for proportional share conversions. Zero when no deposits have been made.
     mapping(PoolId => uint256) public totalShares;
 
-    /// @notice Share balance per (pool, user).
+    /// @notice Share balance for each (pool, user) pair.
+    /// @dev    Numerator for a user's proportional claim on pool assets.
     mapping(PoolId => mapping(address => uint256)) public userShares;
 
-    /// @dev Per-pool vault share tracking. Isolates multi-pool deployments sharing a vault.
+    /// @dev Number of ERC4626 vault shares this pool owns. Isolated from other pools that may
+    ///      use the same vault contract, preventing one pool from consuming another's shares.
     mapping(PoolId => mapping(Currency => uint256)) internal _vaultShares;
 
-    /// @dev Per-pool ERC-6909 claim tracking. Accumulated in afterSwap, redeemed in beforeSwap.
+    /// @dev ERC-6909 claims on the PoolManager attributed to this pool. Claims are minted when
+    ///      afterSwap produces a positive hook delta (the PM may lack ERC-20 since the swapper
+    ///      hasn't settled yet). They are redeemed to ERC-20 in the next beforeSwap via
+    ///      `_redeemPoolClaims`. Per-pool tracking prevents one pool's claim redemption from
+    ///      consuming another pool's claims when the hook serves multiple pools.
     mapping(PoolId => mapping(Currency => uint256)) internal _claims;
 
-    /// @dev Per-pool ERC-20 tracking for currencies without a vault.
+    /// @dev ERC-20 tokens held by the hook on behalf of this pool. Only used for pools where
+    ///      no ERC4626 vault is configured — the raw balance is not attributable to any pool
+    ///      without explicit tracking.
     mapping(PoolId => mapping(Currency => uint256)) internal _erc20;
 
-    // ──── Events ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              EVENTS
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @notice Emitted when a depositor mints shares by providing proportional token amounts.
+    /// @param poolId   The pool receiving the deposit.
+    /// @param provider The address that received the minted shares.
+    /// @param shares   The number of shares minted.
+    /// @param amount0  The amount of currency0 transferred from the depositor.
+    /// @param amount1  The amount of currency1 transferred from the depositor.
     event Deposit(PoolId indexed poolId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
+
+    /// @notice Emitted when a depositor burns shares and receives proportional token amounts.
+    /// @param poolId   The pool the withdrawal came from.
+    /// @param provider The address whose shares were burned.
+    /// @param shares   The number of shares burned.
+    /// @param amount0  The amount of currency0 transferred to the withdrawer.
+    /// @param amount1  The amount of currency1 transferred to the withdrawer.
     event Withdraw(PoolId indexed poolId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
 
-    // ──── Errors ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              ERRORS
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev The caller attempted to burn more shares than they hold.
     error InsufficientShares();
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          VIEW: ASSET ACCOUNTING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Total managed assets for a pool (both currencies).
+    /// @notice Returns the total managed assets for a pool across both currencies.
+    /// @dev    Sums vault assets (via `convertToAssets`), ERC-6909 claims, and raw ERC-20
+    ///         for each currency. Includes yield accrued in vaults.
+    /// @param key The pool to query.
+    /// @return amount0 Total currency0 assets under management.
+    /// @return amount1 Total currency1 assets under management.
     function totalAssets(PoolKey calldata key) external view returns (uint256 amount0, uint256 amount1) {
         return _totalAssets(key);
     }
 
-    /// @notice Preview the token amounts required to mint `shares`.
-    /// @dev    Rounds up to prevent share dilution.
+    /// @notice Preview the token amounts required to mint `shares` for a pool.
+    /// @dev    Rounds up to prevent existing shareholders from being diluted by new deposits.
+    ///         Callers should approve at least these amounts before calling deposit.
+    /// @param key    The pool to query.
+    /// @param shares The number of shares to preview minting.
+    /// @return amount0 Currency0 required (rounded up).
+    /// @return amount1 Currency1 required (rounded up).
     function previewDeposit(PoolKey calldata key, uint256 shares)
         external
         view
@@ -79,8 +150,12 @@ abstract contract PoolVault {
         return _convertToAmounts(key, shares, true);
     }
 
-    /// @notice Preview the token amounts returned for burning `shares`.
-    /// @dev    Rounds down to prevent over-withdrawal.
+    /// @notice Preview the token amounts returned for burning `shares` from a pool.
+    /// @dev    Rounds down to prevent over-withdrawal at the expense of remaining shareholders.
+    /// @param key    The pool to query.
+    /// @param shares The number of shares to preview burning.
+    /// @return amount0 Currency0 returned (rounded down).
+    /// @return amount1 Currency1 returned (rounded down).
     function previewWithdraw(PoolKey calldata key, uint256 shares)
         external
         view
@@ -93,8 +168,18 @@ abstract contract PoolVault {
     //                          INTERNAL: DEPOSIT / WITHDRAW
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Mint shares to `to` by pulling proportional tokens from `from`.
-    ///      Tokens are deposited to vaults (or tracked as ERC-20 if no vault).
+    /// @dev Mint `shares` to `to` by pulling proportional token amounts from `from`.
+    ///
+    ///      Flow: convert shares → transfer tokens → deposit to vaults → update state → emit.
+    ///      Amounts are rounded up (depositor pays slightly more) to prevent share dilution.
+    ///      Tokens go to the configured ERC4626 vault or are tracked as per-pool ERC-20.
+    ///
+    /// @param key    The pool to deposit into.
+    /// @param from   The address to pull tokens from (must have approved this contract).
+    /// @param to     The address to credit shares to.
+    /// @param shares The number of shares to mint.
+    /// @return amount0 Actual currency0 transferred.
+    /// @return amount1 Actual currency1 transferred.
     function _deposit(PoolKey calldata key, address from, address to, uint256 shares)
         internal
         returns (uint256 amount0, uint256 amount1)
@@ -114,7 +199,18 @@ abstract contract PoolVault {
         emit Deposit(poolId, to, shares, amount0, amount1);
     }
 
-    /// @dev Burn shares from `from` and send proportional tokens to `to`.
+    /// @dev Burn `shares` from `from` and send proportional token amounts to `to`.
+    ///
+    ///      Flow: validate → convert shares → update state → ensure ERC-20 → transfer → emit.
+    ///      Amounts are rounded down (withdrawer receives slightly less) to prevent over-withdrawal.
+    ///      Follows checks-effects-interactions: shares are burned before tokens are transferred.
+    ///
+    /// @param key    The pool to withdraw from.
+    /// @param from   The address whose shares to burn.
+    /// @param to     The address to send tokens to.
+    /// @param shares The number of shares to burn.
+    /// @return amount0 Actual currency0 transferred.
+    /// @return amount1 Actual currency1 transferred.
     function _withdraw(PoolKey calldata key, address from, address to, uint256 shares)
         internal
         returns (uint256 amount0, uint256 amount1)
@@ -140,9 +236,21 @@ abstract contract PoolVault {
     //                          INTERNAL: SHARE MATH
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Convert shares to proportional token amounts.
-    ///      First deposit (totalShares == 0): 1 share = 1 unit of each token.
-    ///      `roundUp`: true for deposits (prevents dilution), false for withdrawals.
+    /// @dev Convert a share amount to the equivalent token amounts for both currencies,
+    ///      proportional to the pool's current total assets.
+    ///
+    ///      When `totalShares == 0` (first deposit), returns `(shares, shares)` — 1 share buys
+    ///      1 unit of each token. This bootstraps the share price without requiring an oracle.
+    ///
+    ///      Uses Solady `fullMulDiv` for overflow-safe 512-bit intermediate precision:
+    ///        amount = shares * totalAsset / totalShares
+    ///
+    /// @param key     The pool to compute amounts for.
+    /// @param shares  The number of shares to convert.
+    /// @param roundUp True for deposits (round up to prevent dilution),
+    ///                false for withdrawals (round down to prevent over-withdrawal).
+    /// @return amount0 The equivalent currency0 amount.
+    /// @return amount1 The equivalent currency1 amount.
     function _convertToAmounts(PoolKey memory key, uint256 shares, bool roundUp)
         internal
         view
@@ -166,14 +274,30 @@ abstract contract PoolVault {
     //                          INTERNAL: ASSET TRACKING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Total managed assets across both currencies for a pool.
+    /// @dev Total managed assets for a pool across both currencies.
+    /// @param key The pool to query.
+    /// @return amount0 Total currency0 (vault + claims + ERC-20).
+    /// @return amount1 Total currency1 (vault + claims + ERC-20).
     function _totalAssets(PoolKey memory key) internal view returns (uint256 amount0, uint256 amount1) {
         PoolId poolId = key.toId();
         amount0 = _assetBalance(poolId, key.currency0);
         amount1 = _assetBalance(poolId, key.currency1);
     }
 
-    /// @dev Per-pool balance for a single currency: vault assets + claims + ERC-20.
+    /// @dev Total managed balance for a single (pool, currency) pair. Sums three sources:
+    ///
+    ///      1. ERC4626 vault: `vault.convertToAssets(_vaultShares[poolId][currency])`
+    ///         Includes accrued yield. Zero if no vault configured.
+    ///
+    ///      2. ERC-6909 claims: `_claims[poolId][currency]`
+    ///         Deferred positive deltas from prior JIT cycles, awaiting redemption.
+    ///
+    ///      3. Raw ERC-20: `_erc20[poolId][currency]`
+    ///         Only nonzero for pools without a vault.
+    ///
+    /// @param poolId   The pool to query.
+    /// @param currency The currency to query.
+    /// @return bal     The total balance across all three sources.
     function _assetBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         bal = _claims[poolId][currency] + _erc20[poolId][currency];
         IERC4626 vault = vaults[poolId][currency];
@@ -187,7 +311,12 @@ abstract contract PoolVault {
     //                          INTERNAL: VAULT OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Deposit amount into the pool's vault. If no vault, track as per-pool ERC-20.
+    /// @dev Deposit `amount` of `currency` into the pool's configured ERC4626 vault.
+    ///      If no vault is configured, the amount is tracked in `_erc20` instead.
+    ///      Vault shares received are recorded in `_vaultShares` for per-pool isolation.
+    /// @param poolId   The pool this deposit belongs to.
+    /// @param currency The currency being deposited.
+    /// @param amount   The amount to deposit (0 is a no-op).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = vaults[poolId][currency];
@@ -200,13 +329,22 @@ abstract contract PoolVault {
         _vaultShares[poolId][currency] += shares;
     }
 
-    /// @dev Withdraw all redeemable vault shares for both currencies. Caps at maxRedeem.
+    /// @dev Withdraw all redeemable vault shares for both currencies of a pool.
+    ///      Caps each redemption at `vault.maxRedeem(address(this))` to handle vaults
+    ///      with high utilization that cannot honor full withdrawal.
+    /// @param poolId The pool whose vaults to drain.
+    /// @param key    The pool key (for currency references).
     function _withdrawAllFromVaults(PoolId poolId, PoolKey calldata key) internal {
         _withdrawAllFromVault(poolId, key.currency0);
         _withdrawAllFromVault(poolId, key.currency1);
     }
 
-    /// @dev Withdraw all redeemable shares for a single (pool, currency).
+    /// @dev Withdraw all redeemable shares for a single (pool, currency) from its vault.
+    ///      Redeems `min(poolShares, vault.maxRedeem(this))` to gracefully handle vaults
+    ///      that cap withdrawals due to utilization, timelocks, or other constraints.
+    ///      Any unredeemed shares remain in `_vaultShares` and are available next cycle.
+    /// @param poolId   The pool to withdraw for.
+    /// @param currency The currency to withdraw.
     function _withdrawAllFromVault(PoolId poolId, Currency currency) internal {
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) return;
@@ -221,13 +359,20 @@ abstract contract PoolVault {
         _vaultShares[poolId][currency] -= toRedeem;
     }
 
-    /// @dev Deposit all hook ERC-20 for both currencies into their vaults.
+    /// @dev Deposit all of the hook's ERC-20 balance for both currencies into their vaults.
+    ///      Called in afterSwap after the JIT cycle resolves, to put assets back to work.
+    /// @param poolId The pool whose assets to re-vault.
+    /// @param key    The pool key (for currency references).
     function _depositAllToVaults(PoolId poolId, PoolKey calldata key) internal {
         _depositAllToVault(poolId, key.currency0);
         _depositAllToVault(poolId, key.currency1);
     }
 
-    /// @dev Deposit hook's ERC-20 balance into vault, or track per-pool.
+    /// @dev Deposit the hook's entire ERC-20 balance of a currency into its vault.
+    ///      If no vault is configured, records the balance in `_erc20` for per-pool tracking.
+    ///      Vault shares received are credited to `_vaultShares[poolId]`.
+    /// @param poolId   The pool this deposit belongs to.
+    /// @param currency The currency to deposit.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
         uint256 bal = IERC20Minimal(Currency.unwrap(currency)).balanceOf(address(this));
         if (bal == 0) return;
@@ -241,7 +386,17 @@ abstract contract PoolVault {
         _vaultShares[poolId][currency] += shares;
     }
 
-    /// @dev Ensure hook holds enough ERC-20 for a transfer. Pulls from vault if needed.
+    /// @dev Ensure the hook holds at least `amount` of ERC-20 for `currency`.
+    ///
+    ///      For vaulted pools: if the hook's current ERC-20 balance is insufficient, redeems
+    ///      vault shares to cover the shortfall. Uses `previewWithdraw` to compute the exact
+    ///      shares needed, capped at the pool's available vault shares.
+    ///
+    ///      For non-vaulted pools: debits `_erc20` tracking. The ERC-20 is already in the hook.
+    ///
+    /// @param poolId   The pool requiring the balance.
+    /// @param currency The currency to ensure.
+    /// @param amount   The minimum ERC-20 balance needed.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) {
@@ -263,7 +418,15 @@ abstract contract PoolVault {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Redeem this pool's ERC-6909 claims to ERC-20 via the PoolManager.
-    ///      Only callable within an unlock context (swap callbacks).
+    ///
+    ///      Claims are burned on the PM and the equivalent ERC-20 is taken to this contract.
+    ///      Only callable within a v4 unlock context (i.e., during swap callbacks) because
+    ///      `burn` and `take` require an active lock.
+    ///
+    ///      After redemption, the ERC-20 is available for vault deposit or LP deployment.
+    ///
+    /// @param poolId   The pool whose claims to redeem.
+    /// @param currency The currency to redeem claims for.
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal {
         uint256 claimBal = _claims[poolId][currency];
         if (claimBal > 0) {
@@ -273,12 +436,20 @@ abstract contract PoolVault {
         }
     }
 
-    /// @dev Record pool claims after minting ERC-6909 on the PoolManager.
+    /// @dev Record newly minted ERC-6909 claims for a pool. Called after `poolManager.mint()`
+    ///      in the JIT delta resolution, when the hook has a positive delta that cannot be
+    ///      settled as ERC-20 (the swapper hasn't paid yet).
+    /// @param poolId   The pool the claims belong to.
+    /// @param currency The currency of the claims.
+    /// @param amount   The claim amount to record.
     function _recordClaims(PoolId poolId, Currency currency, uint256 amount) internal {
         _claims[poolId][currency] += amount;
     }
 
-    /// @dev Clear per-pool ERC-20 tracking (e.g., when deploying all assets as LP).
+    /// @dev Zero out per-pool ERC-20 tracking for a currency. Called when all of a pool's
+    ///      ERC-20 is deployed as LP (e.g., during JIT), so the tracking should reset.
+    /// @param poolId   The pool to clear.
+    /// @param currency The currency to clear.
     function _clearERC20Tracking(PoolId poolId, Currency currency) internal {
         _erc20[poolId][currency] = 0;
     }
@@ -287,6 +458,8 @@ abstract contract PoolVault {
     //                          ABSTRACT: POOL MANAGER ACCESS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Subclasses must provide access to the PoolManager for claim operations.
+    /// @dev Subclasses must provide access to the v4 PoolManager. Required for claim
+    ///      operations (`burn`, `take`) in `_redeemPoolClaims`. Typically returns
+    ///      `poolManager` from the BaseHook inheritance chain.
     function _poolManager() internal view virtual returns (IPoolManager);
 }
