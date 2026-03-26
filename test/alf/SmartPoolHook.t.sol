@@ -32,7 +32,6 @@ contract SmartPoolHookTest is Test, Deployers {
     MockERC4626 public vault1;
 
     address owner = makeAddr("owner");
-    address operator = makeAddr("operator");
     address alice = makeAddr("alice");
 
     PoolKey testPoolKey;
@@ -82,7 +81,6 @@ contract SmartPoolHookTest is Test, Deployers {
                 }),
                 tickLower: -10,
                 tickUpper: 10,
-                operator: operator,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
                 vault1: IERC4626(address(vault1))
@@ -99,9 +97,9 @@ contract SmartPoolHookTest is Test, Deployers {
         // For first deposit: shares = amount, requires (amount, amount) of each token.
         // For subsequent deposits: shares convert proportionally.
         (uint256 need0, uint256 need1) = hook.previewDeposit(testPoolKey, amount);
-        token0.mint(operator, need0);
-        token1.mint(operator, need1);
-        vm.startPrank(operator);
+        token0.mint(owner, need0);
+        token1.mint(owner, need1);
+        vm.startPrank(owner);
         token0.approve(address(hook), need0);
         token1.approve(address(hook), need1);
         hook.addLiquidity(testPoolKey, amount);
@@ -111,8 +109,7 @@ contract SmartPoolHookTest is Test, Deployers {
     // ──── Pool Initialization ────
 
     function test_initializePool_setsConfig() public view {
-        (, int24 tl, int24 tu, bool extDeposits, address op) = hook.pools(testPoolId);
-        assertEq(op, operator);
+        (, int24 tl, int24 tu, bool extDeposits) = hook.pools(testPoolId);
         assertEq(tl, -10);
         assertEq(tu, 10);
         assertFalse(extDeposits);
@@ -139,11 +136,11 @@ contract SmartPoolHookTest is Test, Deployers {
 
     // ──── LP Deposits & Withdrawals ────
 
-    function test_addLiquidity_operatorCanDeposit() public {
+    function test_addLiquidity_ownerCanDeposit() public {
         _depositAsOperator(1_000e18);
 
         assertEq(hook.totalShares(testPoolId), 1_000e18);
-        assertEq(hook.userShares(testPoolId, operator), 1_000e18);
+        assertEq(hook.userShares(testPoolId, owner), 1_000e18);
 
         // Tokens should be in vaults, not in hook
         assertEq(token0.balanceOf(address(hook)), 0);
@@ -158,7 +155,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 1_000e18);
         token1.approve(address(hook), 1_000e18);
-        vm.expectRevert(SmartPoolHook.ExternalDepositsDisabled.selector);
+        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
         hook.addLiquidity(testPoolKey, 1_000e18);
         vm.stopPrank();
     }
@@ -181,22 +178,22 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_removeLiquidity_returnsTokens() public {
         _depositAsOperator(1_000e18);
 
-        uint256 balBefore0 = token0.balanceOf(operator);
-        uint256 balBefore1 = token1.balanceOf(operator);
+        uint256 balBefore0 = token0.balanceOf(owner);
+        uint256 balBefore1 = token1.balanceOf(owner);
 
-        vm.prank(operator);
+        vm.prank(owner);
         hook.removeLiquidity(testPoolKey, 500e18);
 
-        assertEq(hook.userShares(testPoolId, operator), 500e18);
+        assertEq(hook.userShares(testPoolId, owner), 500e18);
         assertEq(hook.totalShares(testPoolId), 500e18);
-        assertEq(token0.balanceOf(operator) - balBefore0, 500e18);
-        assertEq(token1.balanceOf(operator) - balBefore1, 500e18);
+        assertEq(token0.balanceOf(owner) - balBefore0, 500e18);
+        assertEq(token1.balanceOf(owner) - balBefore1, 500e18);
     }
 
     function test_removeLiquidity_revertsInsufficientShares() public {
         _depositAsOperator(1_000e18);
 
-        vm.prank(operator);
+        vm.prank(owner);
         vm.expectRevert(PoolVault.InsufficientShares.selector);
         hook.removeLiquidity(testPoolKey, 2_000e18);
     }
@@ -323,7 +320,6 @@ contract SmartPoolHookTest is Test, Deployers {
                 pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, attestedDiscountBps: 0, live: true}),
                 tickLower: -20,
                 tickUpper: 20,
-                operator: operator,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
                 vault1: IERC4626(address(vault1))
@@ -341,7 +337,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_sharesOf() public {
         _depositAsOperator(1_000e18);
-        assertEq(hook.sharesOf(testPoolKey, operator), 1_000e18);
+        assertEq(hook.sharesOf(testPoolKey, owner), 1_000e18);
         assertEq(hook.sharesOf(testPoolKey, alice), 0);
     }
 }

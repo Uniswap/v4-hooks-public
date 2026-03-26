@@ -46,25 +46,18 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         PricingState pricing;
         int24 tickLower;
         int24 tickUpper;
-        address operator;
         bool allowExternalDeposits;
         IERC4626 vault0;
         IERC4626 vault1;
     }
 
-    /// @dev Packed per-pool scalar state across 2 storage slots.
-    ///
-    ///      Slot 0 (hot — read/written every swap): 23 bytes
-    ///        activeJITLiquidity(16) + tickLower(3) + tickUpper(3) + externalDepositsEnabled(1)
-    ///
-    ///      Slot 1 (cold — read only for deposit auth): 20 bytes
-    ///        operator(20)
+    /// @dev Packed per-pool scalar state in a single storage slot (23 bytes):
+    ///      activeJITLiquidity(16) + tickLower(3) + tickUpper(3) + externalDepositsEnabled(1)
     struct PoolState {
         uint128 activeJITLiquidity;
         int24 tickLower;
         int24 tickUpper;
         bool externalDepositsEnabled;
-        address operator;
     }
 
     // ──── Per-Pool State ────
@@ -74,13 +67,12 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     // ──── Events ────
 
-    event PoolCreated(PoolId indexed poolId, int24 tickLower, int24 tickUpper, address operator);
+    event PoolCreated(PoolId indexed poolId, int24 tickLower, int24 tickUpper);
     event TickRangeUpdated(PoolId indexed poolId, int24 tickLower, int24 tickUpper);
 
     // ──── Errors ────
 
     error LiquidityNotAllowed();
-    error ExternalDepositsDisabled();
     error InvalidHookAddress();
     error MustUseDynamicFee();
     error Unauthorized();
@@ -97,10 +89,10 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Initialize a new pool with vaults, pricing, and operator in one call.
+    /// @notice Initialize a new pool with vaults and pricing in one call.
     /// @dev    Vaults are permanent — set at creation and cannot be changed.
     /// @param key    The PoolKey (must reference this hook and use DYNAMIC_FEE_FLAG).
-    /// @param config Pool configuration (pricing, tick range, vaults, operator).
+    /// @param config Pool configuration (pricing, tick range, vaults).
     /// @return tick  The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, PoolConfig calldata config)
         external
@@ -121,14 +113,13 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
             activeJITLiquidity: 0,
             tickLower: config.tickLower,
             tickUpper: config.tickUpper,
-            externalDepositsEnabled: config.allowExternalDeposits,
-            operator: config.operator
+            externalDepositsEnabled: config.allowExternalDeposits
         });
         vaults[poolId][key.currency0] = config.vault0;
         vaults[poolId][key.currency1] = config.vault1;
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
-        emit PoolCreated(poolId, config.tickLower, config.tickUpper, config.operator);
+        emit PoolCreated(poolId, config.tickLower, config.tickUpper);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -163,10 +154,6 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         pools[poolId].tickLower = tickLower;
         pools[poolId].tickUpper = tickUpper;
         emit TickRangeUpdated(poolId, tickLower, tickUpper);
-    }
-
-    function setPoolOperator(PoolKey calldata key, address operator) external onlyOwner {
-        pools[key.toId()].operator = operator;
     }
 
     function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOwner {
@@ -428,10 +415,9 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _requireDepositAuth(PoolId poolId) internal view {
-        PoolState storage ps = pools[poolId];
-        if (msg.sender == owner() || msg.sender == ps.operator) return;
-        if (ps.externalDepositsEnabled) return;
-        revert ExternalDepositsDisabled();
+        if (msg.sender == owner()) return;
+        if (pools[poolId].externalDepositsEnabled) return;
+        revert Unauthorized();
     }
 
     /// @dev PoolVault needs access to the PoolManager for claim operations.
