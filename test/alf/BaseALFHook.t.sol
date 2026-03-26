@@ -26,11 +26,7 @@ contract BaseALFHookTest is Test, Deployers {
         uint160 flags =
             uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
         hook = MockQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo(
-            "MockQuoterHook",
-            abi.encode(manager, uint32(50_000)),
-            address(hook)
-        );
+        deployCodeTo("MockQuoterHook", abi.encode(manager, uint32(50_000)), address(hook));
 
         tokenA = Currency.wrap(address(0xA));
         tokenB = Currency.wrap(address(0xB));

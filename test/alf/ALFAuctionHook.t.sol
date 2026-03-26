@@ -47,12 +47,9 @@ contract ALFAuctionHookTest is Test, Deployers {
         // ── Deploy auction hook ──
         uint160 auctionFlags =
             uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
-        auctionHook = ALFAuctionHook(
-            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags))
-        );
-        deployCodeTo(
-            "ALFAuctionHook", abi.encode(manager, address(this)), address(auctionHook)
-        );
+        auctionHook =
+            ALFAuctionHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags)));
+        deployCodeTo("ALFAuctionHook", abi.encode(manager, address(this)), address(auctionHook));
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
@@ -62,20 +59,12 @@ contract ALFAuctionHookTest is Test, Deployers {
         quoterA = SimpleSpreadQuoterHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | quoterFlags))
         );
-        deployCodeTo(
-            "SimpleSpreadQuoterHook",
-            abi.encode(manager, uint32(50_000), ownerA),
-            address(quoterA)
-        );
+        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), ownerA), address(quoterA));
 
         quoterB = SimpleSpreadQuoterHook(
             address(uint160((uint256(type(uint160).max) - (1 << 14)) & clearAllHookPermissionsMask | quoterFlags))
         );
-        deployCodeTo(
-            "SimpleSpreadQuoterHook",
-            abi.encode(manager, uint32(50_000), ownerB),
-            address(quoterB)
-        );
+        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), ownerB), address(quoterB));
 
         // ── Create pool keys (dynamic fee for fee override) ──
         quoterAPoolKey = PoolKey({
@@ -120,7 +109,6 @@ contract ALFAuctionHookTest is Test, Deployers {
             SpreadQuoterBase.PricingState({
                 bidFeePips: 50_000, // 5%
                 askFeePips: 10_000, // 1%
-                attestedDiscountBps: 5,
                 live: true
             })
         );
@@ -131,7 +119,6 @@ contract ALFAuctionHookTest is Test, Deployers {
             SpreadQuoterBase.PricingState({
                 bidFeePips: 10_000, // 1%
                 askFeePips: 50_000, // 5%
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -380,7 +367,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     // ──── Targeted with curve update ────
 
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,uint16 attestedDiscountBps,bool live,bytes32 poolId,uint256 deadline)"
+        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
     );
 
     function _signPricingUpdate(
@@ -395,7 +382,6 @@ contract ALFAuctionHookTest is Test, Deployers {
                 PRICING_UPDATE_TYPEHASH,
                 state.bidFeePips,
                 state.askFeePips,
-                state.attestedDiscountBps,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline
@@ -436,7 +422,6 @@ contract ALFAuctionHookTest is Test, Deployers {
         SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
             bidFeePips: 5_000, // 0.5%
             askFeePips: 10_000,
-            attestedDiscountBps: 0,
             live: true
         });
 
@@ -466,7 +451,6 @@ contract ALFAuctionHookTest is Test, Deployers {
         SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
             bidFeePips: 5_000, // 0.5%
             askFeePips: 10_000,
-            attestedDiscountBps: 0,
             live: true
         });
 
@@ -481,7 +465,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         // After the nested swap, A's stored pricing should be updated
-        (uint24 bidFeePips,,,) = quoterA.pricingState(quoterAPoolKey.toId());
+        (uint24 bidFeePips,,) = quoterA.pricingState(quoterAPoolKey.toId());
         assertEq(bidFeePips, 5_000);
     }
 
@@ -560,8 +544,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter_zeroForOne() public view {
         // B has lower bidFee (1% vs 5%) → B wins
-        (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(true, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -569,8 +552,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter_oneForZero() public view {
         // A has lower askFee (1% vs 5%) → A wins
-        (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(false, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(false, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterA));
         assertTrue(bestQuote > 0);
@@ -581,8 +563,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(true, -1e18, _buildTargetedHookData(targets));
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -590,8 +571,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_quote_matchesSwapExecution() public {
         // Get the quote first
-        (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(true, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildBothTargets());
 
         // Execute the actual swap
         BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
@@ -623,8 +603,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
     function test_quote_exactOutput() public view {
         // Exact output: picks quoter requiring least input
-        (, address winner, uint256 bestQuote,) =
-            auctionHook.quote(true, 0.5e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, 0.5e18, _buildBothTargets());
 
         // B has lower bidFee → requires less input → wins
         assertEq(winner, address(quoterB));

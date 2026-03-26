@@ -151,9 +151,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param _owner       Initial owner.
-    constructor(IPoolManager _poolManager, address _owner)
-        BaseHook(_poolManager)
-    {
+    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) {
         owner = _owner;
     }
 
@@ -202,11 +200,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     /// @return winner         The best quoter's hook address.
     /// @return bestQuote      The best indicative (output for exact-in, input for exact-out).
     /// @return winnerHookData The constructed ALFHookData to pass in nested execution.
-    function quote(
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    )
+    function quote(bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
@@ -298,8 +292,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
 
         if (_isPrePlanned(ahd.targets)) {
             // Pre-planned: router-optimized execution order and amounts
-            (totalDelta, primaryQuoter, bestQuote) =
-                _executePrePlanned(ahd, zeroForOne, swapAmount);
+            (totalDelta, primaryQuoter, bestQuote) = _executePrePlanned(ahd, zeroForOne, swapAmount);
         } else {
             // Autonomous: self-contained split fill with indicative sorting
             (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual) =
@@ -319,11 +312,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     /// @return winner         The best quoter's hook address.
     /// @return bestQuote      The best indicative quote.
     /// @return winnerHookData The constructed ALFHookData for the winner.
-    function _auction(
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    )
+    function _auction(bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
@@ -571,10 +560,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
             (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(ahd.targets[i].poolKey.toId());
 
             candidates[count] = FillCandidate({
-                poolKey: ahd.targets[i].poolKey,
-                hookData: quoterHookData,
-                sqrtPriceX96: sqrtPriceX96,
-                indicative: q
+                poolKey: ahd.targets[i].poolKey, hookData: quoterHookData, sqrtPriceX96: sqrtPriceX96, indicative: q
             });
 
             // Track the best individual indicative for tolerance checking.
@@ -658,12 +644,10 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
                 // Only use as a limit if it's strictly on the correct side of the current price.
                 // zeroForOne: price decreases, so limit must be < current to constrain.
                 // oneForZero: price increases, so limit must be > current to constrain.
-                bool validLimit = zeroForOne
-                    ? nextPrice < candidates[i].sqrtPriceX96
-                    : nextPrice > candidates[i].sqrtPriceX96;
-                limit = validLimit
-                    ? nextPrice
-                    : (zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
+                bool validLimit =
+                    zeroForOne ? nextPrice < candidates[i].sqrtPriceX96 : nextPrice > candidates[i].sqrtPriceX96;
+                limit =
+                    validLimit ? nextPrice : (zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
             } else {
                 // Last candidate: no limit, fill as much as possible.
                 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;

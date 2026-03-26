@@ -50,9 +50,7 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
         uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         hook = Permit2JITQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo(
-            "Permit2JITQuoterHook",
-            abi.encode(manager, address(permit2), uint32(50_000), owner),
-            address(hook)
+            "Permit2JITQuoterHook", abi.encode(manager, address(permit2), uint32(50_000), owner), address(hook)
         );
 
         // Create pool key (dynamic fee for fee override)
@@ -97,7 +95,6 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
                 askFeePips: ASK_FEE_PIPS,
                 tickWidth: TICK_WIDTH,
                 liquidity: JIT_LIQUIDITY,
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -279,7 +276,6 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
                 askFeePips: 0,
                 tickWidth: TICK_WIDTH,
                 liquidity: JIT_LIQUIDITY,
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -305,7 +301,6 @@ contract Permit2JITQuoterHookTest is Test, Deployers {
                 askFeePips: 0,
                 tickWidth: 60,
                 liquidity: 1e18,
-                attestedDiscountBps: 0,
                 live: true
             })
         );

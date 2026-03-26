@@ -42,11 +42,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
         hook = FlatLevelQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo(
-            "FlatLevelQuoterHook",
-            abi.encode(manager, uint32(50_000), owner),
-            address(hook)
-        );
+        deployCodeTo("FlatLevelQuoterHook", abi.encode(manager, uint32(50_000), owner), address(hook));
 
         // Create pool key (no dynamic fee needed — hook uses delta override, not fee override)
         testPoolKey =
@@ -60,7 +56,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         hook.updateFlatPricingState(
             testPoolKey,
             FlatQuoterBase.FlatPricingState({
-                bidCoefficient: BID_COEFFICIENT, askCoefficient: ASK_COEFFICIENT, attestedDiscountBps: 5, live: true
+                bidCoefficient: BID_COEFFICIENT, askCoefficient: ASK_COEFFICIENT, live: true
             })
         );
 
@@ -204,7 +200,7 @@ contract FlatLevelQuoterHookTest is Test, Deployers {
         hook.updateFlatPricingState(
             testPoolKey,
             FlatQuoterBase.FlatPricingState({
-                bidCoefficient: 1e18, askCoefficient: 1e18, attestedDiscountBps: 0, live: true
+                bidCoefficient: 1e18, askCoefficient: 1e18, live: true
             })
         );
     }

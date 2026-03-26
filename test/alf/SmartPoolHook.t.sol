@@ -77,7 +77,7 @@ contract SmartPoolHookTest is Test, Deployers {
             SmartPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
                 pricing: SpreadQuoterBase.PricingState({
-                    bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 0, live: true
+                    bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true
                 }),
                 tickLower: -10,
                 tickUpper: 10,
@@ -317,7 +317,7 @@ contract SmartPoolHookTest is Test, Deployers {
             key2,
             SmartPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, attestedDiscountBps: 0, live: true}),
+                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
                 tickLower: -20,
                 tickUpper: 20,
                 allowExternalDeposits: false,

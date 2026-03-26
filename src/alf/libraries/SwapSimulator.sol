@@ -85,9 +85,7 @@ library SwapSimulator {
             s.sqrtPriceLimitX96 = sqrtPriceLimitX96;
 
             // Combine protocol fee with LP fee override, mirroring Pool.sol's fee calculation.
-            uint16 directionalProtocolFee = zeroForOne
-                ? protocolFee.getZeroForOneFee()
-                : protocolFee.getOneForZeroFee();
+            uint16 directionalProtocolFee = zeroForOne ? protocolFee.getZeroForOneFee() : protocolFee.getOneForZeroFee();
             if (directionalProtocolFee != 0) {
                 lpFeePips = directionalProtocolFee.calculateSwapFee(lpFeePips);
             }

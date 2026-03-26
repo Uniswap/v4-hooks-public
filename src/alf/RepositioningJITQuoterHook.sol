@@ -38,7 +38,6 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
         uint24 askFeePips; // Fee override for oneForZero swaps
         uint128 bidCoefficient; // Indicative quote coefficient for zeroForOne (1e18)
         uint128 askCoefficient; // Indicative quote coefficient for oneForZero (1e18)
-        uint16 attestedDiscountBps; // Discount for attested indicative quotes
         bool live;
     }
 
@@ -52,7 +51,7 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
     bytes32 public constant REPO_SALT = bytes32(uint256(0x5245504f)); // "REPO"
 
     bytes32 private constant REPO_CONFIG_UPDATE_TYPEHASH = keccak256(
-        "RepoConfigUpdate(int24 targetTick,int24 tickWidth,uint128 liquidity,uint24 bidFeePips,uint24 askFeePips,uint128 bidCoefficient,uint128 askCoefficient,uint16 attestedDiscountBps,bool live,bytes32 poolId,uint256 deadline)"
+        "RepoConfigUpdate(int24 targetTick,int24 tickWidth,uint128 liquidity,uint24 bidFeePips,uint24 askFeePips,uint128 bidCoefficient,uint128 askCoefficient,bool live,bytes32 poolId,uint256 deadline)"
     );
 
     mapping(PoolId => RepositioningConfig) public repoConfig;
@@ -72,11 +71,7 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
 
     // ──── Constructor ────
 
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_,
-        address owner_
-    )
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
         BaseALFHook(_poolManager, maxGas_)
         EIP712("RepositioningJITQuoterHook", "1")
         Ownable(owner_)
@@ -252,10 +247,6 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
         uint256 amount = amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified);
         uint128 coefficient = zeroForOne ? config.bidCoefficient : config.askCoefficient;
         outputAmount = (amount * coefficient) / 1e18;
-
-        if (isAttested && config.attestedDiscountBps > 0) {
-            outputAmount = (outputAmount * (10_000 + uint256(config.attestedDiscountBps))) / 10_000;
-        }
     }
 
     // ──── Curve Update (EIP-712 Signed) ────
@@ -287,7 +278,6 @@ contract RepositioningJITQuoterHook is BaseALFHook, EIP712, Ownable2Step {
                 config.askFeePips,
                 config.bidCoefficient,
                 config.askCoefficient,
-                config.attestedDiscountBps,
                 config.live,
                 PoolId.unwrap(poolId),
                 deadline

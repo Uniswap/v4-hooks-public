@@ -20,11 +20,9 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
 
     error UnauthorizedLP();
 
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_,
-        address owner_
-    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "SimpleSpreadQuoterHook") {}
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
+        SpreadQuoterBase(_poolManager, maxGas_, owner_, "SimpleSpreadQuoterHook")
+    {}
 
     // ──── Hook Permissions ────
 

@@ -25,12 +25,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     struct PricingState {
         uint24 bidFeePips; // Fee override for zeroForOne swaps (pips, max 1_000_000 = 100%)
         uint24 askFeePips; // Fee override for oneForZero swaps (pips, max 1_000_000 = 100%)
-        uint16 attestedDiscountBps; // Fee reduction for attested flow (bps, 1 bps = 100 pips fee reduction)
         bool live;
     }
 
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,uint16 attestedDiscountBps,bool live,bytes32 poolId,uint256 deadline)"
+        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
     );
 
     mapping(PoolId => PricingState) public pricingState;
@@ -43,12 +42,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     error InvalidTickRange();
     error WrongActiveTick();
 
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_,
-        address owner_,
-        string memory eip712Name
-    ) BaseALFHook(_poolManager, maxGas_) EIP712(eip712Name, "1") Ownable(owner_) {}
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_, string memory eip712Name)
+        BaseALFHook(_poolManager, maxGas_)
+        EIP712(eip712Name, "1")
+        Ownable(owner_)
+    {}
 
     // ──── IALFHook ────
 
@@ -70,8 +68,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
         PricingState memory state = pricingState[key.toId()];
         if (curveUpdateData.length > 0) {
-            (PricingState memory newState,,,) =
-                abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+            (PricingState memory newState,,,) = abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
             state = newState;
         }
 
@@ -94,13 +91,12 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
             PricingState memory state = pricingState[key.toId()];
             if (curveUpdateData.length > 0) {
-                (PricingState memory newState,,,) =
-                    abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+                (PricingState memory newState,,,) = abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
                 state = newState;
             }
 
             if (!state.live) return (0, 0);
-            feePips = _effectiveFee(state, zeroForOne, isAttested);
+            feePips = _effectiveFee(state, zeroForOne);
         }
 
         return SwapSimulator.simulateSwapToPrice(
@@ -136,7 +132,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
 
-        uint24 feePips = _effectiveFee(state, params.zeroForOne, isAttested);
+        uint24 feePips = _effectiveFee(state, params.zeroForOne);
         uint24 feeOverride = feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeOverride);
@@ -164,23 +160,19 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ) internal view returns (uint256 outputAmount) {
         if (!state.live) return 0;
 
-        uint24 feePips = _effectiveFee(state, zeroForOne, isAttested);
+        uint24 feePips = _effectiveFee(state, zeroForOne);
         outputAmount =
             SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing);
     }
 
-    /// @dev Compute the effective fee for a swap direction, reducing the spread for attested flow.
+    /// @dev Compute the effective fee for a swap direction.
     ///      Used by both _beforeSwap (execution) and _priceWithState (indicative) to ensure fidelity.
-    function _effectiveFee(PricingState memory state, bool zeroForOne, bool isAttested)
+    function _effectiveFee(PricingState memory state, bool zeroForOne)
         internal
         pure
         returns (uint24 feePips)
     {
         feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
-        if (isAttested && state.attestedDiscountBps > 0) {
-            uint24 discount = uint24(state.attestedDiscountBps) * 100; // bps → pips
-            feePips = feePips > discount ? feePips - discount : 0;
-        }
     }
 
     // ──── Curve Update Logic ────
@@ -200,6 +192,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     function _verifySignature(PricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)
         internal
+        virtual
         view
     {
         bytes32 structHash = keccak256(
@@ -207,7 +200,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
                 PRICING_UPDATE_TYPEHASH,
                 state.bidFeePips,
                 state.askFeePips,
-                state.attestedDiscountBps,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline

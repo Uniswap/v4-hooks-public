@@ -88,12 +88,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     /// @dev Resolve attestation from raw bytes. Default returns (false, address(0)).
     ///      Subclasses can override to verify attestationData against their own signer
     ///      using the hook's EIP-712 infrastructure and priceSigner.
-    function _resolveAttestation(bytes memory)
-        internal
-        view
-        virtual
-        returns (bool isAttested, address attester)
-    {
+    function _resolveAttestation(bytes memory) internal view virtual returns (bool isAttested, address attester) {
         return (false, address(0));
     }
 

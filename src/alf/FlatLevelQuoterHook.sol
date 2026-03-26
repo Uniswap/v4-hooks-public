@@ -8,7 +8,11 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {
+    BeforeSwapDelta,
+    BeforeSwapDeltaLibrary,
+    toBeforeSwapDelta
+} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {FlatQuoterBase} from "./base/FlatQuoterBase.sol";
 
@@ -21,11 +25,9 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
 
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_,
-        address owner_
-    ) FlatQuoterBase(_poolManager, maxGas_, owner_, "FlatLevelQuoterHook", "1") {}
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
+        FlatQuoterBase(_poolManager, maxGas_, owner_, "FlatLevelQuoterHook", "1")
+    {}
 
     // ──── Hook Permissions ────
 
@@ -106,8 +108,7 @@ contract FlatLevelQuoterHook is FlatQuoterBase {
         poolManager.mint(address(this), inputCurrency.toId(), inputAmount);
 
         bool isExactInput = params.amountSpecified < 0;
-        int128 unspecifiedDelta =
-            isExactInput ? -int128(uint128(outputAmount)) : int128(uint128(inputAmount));
+        int128 unspecifiedDelta = isExactInput ? -int128(uint128(outputAmount)) : int128(uint128(inputAmount));
         int128 fee = _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
 
         BeforeSwapDelta bsd = isExactInput

@@ -47,11 +47,7 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
         hook = RepositioningJITQuoterHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
         );
-        deployCodeTo(
-            "RepositioningJITQuoterHook",
-            abi.encode(manager, uint32(100_000), owner),
-            address(hook)
-        );
+        deployCodeTo("RepositioningJITQuoterHook", abi.encode(manager, uint32(100_000), owner), address(hook));
 
         // Create pool key
         testPoolKey = PoolKey({
@@ -89,7 +85,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
                 askFeePips: ASK_FEE_PIPS,
                 bidCoefficient: 0.98e18,
                 askCoefficient: 0.95e18,
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -184,7 +179,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
                 askFeePips: ASK_FEE_PIPS,
                 bidCoefficient: 0.98e18,
                 askCoefficient: 0.95e18,
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -289,7 +283,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
             askFeePips: 1000,
             bidCoefficient: 1e18,
             askCoefficient: 1e18,
-            attestedDiscountBps: 0,
             live: true
         });
 
@@ -398,7 +391,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
                 askFeePips: ASK_FEE_PIPS,
                 bidCoefficient: 0.98e18,
                 askCoefficient: 0.95e18,
-                attestedDiscountBps: 0,
                 live: true
             })
         );
@@ -522,7 +514,6 @@ contract RepositioningJITQuoterHookTest is Test, Deployers {
             askFeePips: ASK_FEE_PIPS,
             bidCoefficient: 0.98e18,
             askCoefficient: 0.95e18,
-            attestedDiscountBps: 0,
             live: true
         });
 

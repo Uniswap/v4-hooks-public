@@ -20,10 +20,7 @@ contract MockQuoterHook is BaseALFHook {
     bool public lastCallAttested;
     address public lastCallAttester;
 
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_
-    ) BaseALFHook(_poolManager, maxGas_) {
+    constructor(IPoolManager _poolManager, uint32 maxGas_) BaseALFHook(_poolManager, maxGas_) {
         live = true;
     }
 

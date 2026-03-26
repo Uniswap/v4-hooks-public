@@ -43,7 +43,6 @@ contract Permit2JITQuoterHook is BaseALFHook, Ownable2Step {
         uint24 askFeePips; // Fee override for oneForZero swaps
         int24 tickWidth; // Half-width for JIT LP range (in ticks, before alignment)
         uint128 liquidity; // Liquidity units to add per swap
-        uint16 attestedDiscountBps; // Discount for attested indicative quotes
         bool live;
     }
 
@@ -59,12 +58,10 @@ contract Permit2JITQuoterHook is BaseALFHook, Ownable2Step {
     event JITConfigUpdated(PoolId indexed poolId, JITConfig config);
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
 
-    constructor(
-        IPoolManager _poolManager,
-        IAllowanceTransfer _permit2,
-        uint32 maxGas_,
-        address owner_
-    ) BaseALFHook(_poolManager, maxGas_) Ownable(owner_) {
+    constructor(IPoolManager _poolManager, IAllowanceTransfer _permit2, uint32 maxGas_, address owner_)
+        BaseALFHook(_poolManager, maxGas_)
+        Ownable(owner_)
+    {
         permit2 = _permit2;
     }
 
@@ -215,10 +212,6 @@ contract Permit2JITQuoterHook is BaseALFHook, Ownable2Step {
         uint256 coefficient = zeroForOne ? config.bidCoefficient : config.askCoefficient;
 
         outputAmount = (amount * coefficient) / 1e18;
-
-        if (isAttested && config.attestedDiscountBps > 0) {
-            outputAmount = (outputAmount * (10_000 + config.attestedDiscountBps)) / 10_000;
-        }
     }
 
     // ──── Owner Functions ────

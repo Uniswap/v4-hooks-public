@@ -33,12 +33,11 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
     struct FlatPricingState {
         uint128 bidCoefficient; // Price coefficient for zeroForOne, 1e18-scaled
         uint128 askCoefficient; // Price coefficient for oneForZero, 1e18-scaled
-        uint16 attestedDiscountBps; // Discount for attested flow (bps)
         bool live;
     }
 
     bytes32 private constant FLAT_PRICING_UPDATE_TYPEHASH = keccak256(
-        "FlatPricingUpdate(uint128 bidCoefficient,uint128 askCoefficient,uint16 attestedDiscountBps,bool live,bytes32 poolId,uint256 deadline)"
+        "FlatPricingUpdate(uint128 bidCoefficient,uint128 askCoefficient,bool live,bytes32 poolId,uint256 deadline)"
     );
 
     // ──── State ────
@@ -67,11 +66,7 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         address owner_,
         string memory eip712Name,
         string memory eip712Version
-    )
-        BaseALFHook(_poolManager, maxGas_)
-        EIP712(eip712Name, eip712Version)
-        Ownable(owner_)
-    {}
+    ) BaseALFHook(_poolManager, maxGas_) EIP712(eip712Name, eip712Version) Ownable(owner_) {}
 
     // ──── IALFHook ────
 
@@ -150,7 +145,8 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         override
         returns (uint256)
     {
-        return _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, flatPricingState[key.toId()]);
+        return
+            _priceWithState(key.toId(), zeroForOne, amountSpecified, isAttested, attester, flatPricingState[key.toId()]);
     }
 
     function _priceWithState(
@@ -166,10 +162,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
         uint256 amount = amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified);
         uint128 coefficient = zeroForOne ? state.bidCoefficient : state.askCoefficient;
         outputAmount = _computeOutput(poolId, zeroForOne, amount, coefficient);
-
-        if (isAttested && state.attestedDiscountBps > 0) {
-            outputAmount = (outputAmount * (10_000 + state.attestedDiscountBps)) / 10_000;
-        }
     }
 
     // ──── Internal: Decimal-Aware Pricing Helpers ────
@@ -203,8 +195,7 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
     /// @dev Query token decimals with fallback to 18 for native ETH or non-standard tokens.
     function _tokenDecimals(Currency currency) internal view returns (uint8) {
         if (Currency.unwrap(currency) == address(0)) return 18;
-        (bool success, bytes memory data) =
-            Currency.unwrap(currency).staticcall(abi.encodeWithSignature("decimals()"));
+        (bool success, bytes memory data) = Currency.unwrap(currency).staticcall(abi.encodeWithSignature("decimals()"));
         if (success && data.length >= 32) return abi.decode(data, (uint8));
         return 18;
     }
@@ -233,7 +224,6 @@ abstract contract FlatQuoterBase is BaseALFHook, EIP712, Ownable2Step, IUnlockCa
                 FLAT_PRICING_UPDATE_TYPEHASH,
                 state.bidCoefficient,
                 state.askCoefficient,
-                state.attestedDiscountBps,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline

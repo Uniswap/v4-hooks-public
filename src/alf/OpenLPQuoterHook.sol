@@ -14,11 +14,9 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///         the active tick. Owner controls pricing via fee overrides and signed
 ///         hookData curve updates.
 contract OpenLPQuoterHook is SpreadQuoterBase {
-    constructor(
-        IPoolManager _poolManager,
-        uint32 maxGas_,
-        address owner_
-    ) SpreadQuoterBase(_poolManager, maxGas_, owner_, "OpenLPQuoterHook") {}
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
+        SpreadQuoterBase(_poolManager, maxGas_, owner_, "OpenLPQuoterHook")
+    {}
 
     // ──── Hook Permissions ────
 
