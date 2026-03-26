@@ -32,13 +32,12 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///           [pool executes swap against the LP]
 ///           afterSwap   → remove LP, re-deposit to vaults
 ///
-///         Pricing is via SpreadQuoterBase fee overrides with EIP-712 signed curve updates. Each
-///         pool supports a configurable tick range, per-currency ERC4626 vault assignment, and
-///         optional external deposits with share-based accounting.
+///         Pricing is via SpreadQuoterBase fee overrides. The pool operator manages spreads
+///         through the standard `updatePricingState` path — no hookData-based curve updates.
+///         Vaults are configured at pool initialization and cannot be changed.
 ///
-///         All asset tracking is pool-scoped: vault shares, ERC-6909 claims, and indicative
-///         quotes are isolated per pool, enabling a single hook instance to serve multiple pools
-///         without cross-contamination.
+///         All asset tracking is pool-scoped: vault shares and ERC-6909 claims are isolated
+///         per pool, enabling a single hook instance to serve multiple pools.
 contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -65,23 +64,13 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     mapping(PoolId => address) public poolOperator;
     mapping(PoolId => PoolKey) internal _poolKeys;
     mapping(PoolId => uint128) internal _activeJITLiquidity;
-
-    /// @dev Per-pool vault share tracking. Each pool's claim on the vault is tracked separately
-    ///      so that multi-pool deployments sharing a vault don't cross-contaminate.
     mapping(PoolId => mapping(Currency => uint256)) internal _poolVaultShares;
-
-    /// @dev Per-pool ERC-6909 claim tracking. Claims accumulate in afterSwap (when the PM may
-    ///      lack ERC-20 for a take) and are redeemed in the next beforeSwap.
     mapping(PoolId => mapping(Currency => uint256)) internal _poolClaims;
-
-    /// @dev Per-pool ERC-20 balance tracking for pools without a vault configured.
-    ///      When a vault is set, assets are tracked via _poolVaultShares instead.
     mapping(PoolId => mapping(Currency => uint256)) internal _poolERC20;
 
     // ──── Events ────
 
     event PoolCreated(PoolId indexed poolId, int24 tickLower, int24 tickUpper, address operator);
-    event VaultConfigured(PoolId indexed poolId, Currency indexed currency, address vault);
     event LiquidityAdded(PoolId indexed poolId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
     event LiquidityRemoved(PoolId indexed poolId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
     event TickRangeUpdated(PoolId indexed poolId, int24 tickLower, int24 tickUpper);
@@ -107,8 +96,8 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Initialize a new pool with this hook and configure all parameters in one call.
-    /// @dev    Calls `poolManager.initialize` internally.
+    /// @notice Initialize a new pool with vaults, pricing, and operator in one call.
+    /// @dev    Vaults are permanent — set at creation and cannot be changed.
     function initializePool(
         PoolKey calldata key,
         uint160 sqrtPriceX96,
@@ -116,7 +105,9 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         int24 tickLower,
         int24 tickUpper,
         address operator,
-        bool allowExternalDeposits
+        bool allowExternalDeposits,
+        IERC4626 vault0,
+        IERC4626 vault1
     ) external onlyOwner returns (int24 tick) {
         if (!LPFeeLibrary.isDynamicFee(key.fee)) revert MustUseDynamicFee();
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
@@ -130,6 +121,8 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         poolTickUpper[poolId] = tickUpper;
         poolOperator[poolId] = operator;
         externalDepositsEnabled[poolId] = allowExternalDeposits;
+        vaults[poolId][key.currency0] = vault0;
+        vaults[poolId][key.currency1] = vault1;
 
         tick = poolManager.initialize(key, sqrtPriceX96);
         emit PoolCreated(poolId, tickLower, tickUpper, operator);
@@ -139,9 +132,8 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        EXTERNAL: LP DEPOSIT / WITHDRAW
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deposit token0 and token1 proportional to the pool's current asset ratio, receive shares.
-    /// @dev    First deposit: shares mint 1:1 with each token amount. Amounts rounded up (Ceil)
-    ///         to prevent share dilution. Deposited tokens go directly to the configured vaults.
+    /// @notice Deposit token0 and token1 proportional to the pool's current asset ratio.
+    /// @dev    First deposit: 1 share = 1 unit of each token. Amounts rounded up (Ceil).
     function addLiquidity(PoolKey calldata key, uint256 sharesToMint)
         external
         nonReentrant
@@ -152,12 +144,8 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
 
         (amount0, amount1) = _convertSharesToAmounts(key, sharesToMint, Rounding.Ceil);
 
-        if (amount0 > 0) {
-            IERC20Minimal(Currency.unwrap(key.currency0)).transferFrom(msg.sender, address(this), amount0);
-        }
-        if (amount1 > 0) {
-            IERC20Minimal(Currency.unwrap(key.currency1)).transferFrom(msg.sender, address(this), amount1);
-        }
+        if (amount0 > 0) IERC20Minimal(Currency.unwrap(key.currency0)).transferFrom(msg.sender, address(this), amount0);
+        if (amount1 > 0) IERC20Minimal(Currency.unwrap(key.currency1)).transferFrom(msg.sender, address(this), amount1);
 
         _depositToVault(poolId, key.currency0, amount0);
         _depositToVault(poolId, key.currency1, amount1);
@@ -169,8 +157,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     }
 
     /// @notice Burn shares and receive proportional token0 + token1.
-    /// @dev    Amounts rounded down (Floor) to prevent over-withdrawal. Tokens are withdrawn
-    ///         from vaults if necessary.
     function removeLiquidity(PoolKey calldata key, uint256 sharesToBurn)
         external
         nonReentrant
@@ -187,12 +173,8 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         _ensureERC20Balance(poolId, key.currency0, amount0);
         _ensureERC20Balance(poolId, key.currency1, amount1);
 
-        if (amount0 > 0) {
-            IERC20Minimal(Currency.unwrap(key.currency0)).transfer(msg.sender, amount0);
-        }
-        if (amount1 > 0) {
-            IERC20Minimal(Currency.unwrap(key.currency1)).transfer(msg.sender, amount1);
-        }
+        if (amount0 > 0) IERC20Minimal(Currency.unwrap(key.currency0)).transfer(msg.sender, amount0);
+        if (amount1 > 0) IERC20Minimal(Currency.unwrap(key.currency1)).transfer(msg.sender, amount1);
 
         emit LiquidityRemoved(poolId, msg.sender, sharesToBurn, amount0, amount1);
     }
@@ -200,35 +182,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: OWNER CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Configure or remove an ERC4626 vault for a (pool, currency) pair.
-    /// @dev    If changing vaults and the old vault holds shares, they are redeemed first.
-    ///         `address(0)` disables rehypothecation for this asset.
-    function setVault(PoolKey calldata key, Currency currency, IERC4626 vault) external onlyOwner {
-        PoolId poolId = key.toId();
-
-        IERC4626 oldVault = vaults[poolId][currency];
-        if (address(oldVault) != address(0) && address(oldVault) != address(vault)) {
-            uint256 oldShares = _poolVaultShares[poolId][currency];
-            if (oldShares > 0) {
-                oldVault.redeem(oldShares, address(this), address(this));
-                _poolVaultShares[poolId][currency] = 0;
-            }
-        }
-
-        vaults[poolId][currency] = vault;
-
-        if (address(vault) != address(0)) {
-            uint256 bal = IERC20Minimal(Currency.unwrap(currency)).balanceOf(address(this));
-            if (bal > 0) {
-                IERC20Minimal(Currency.unwrap(currency)).approve(address(vault), bal);
-                uint256 shares = vault.deposit(bal, address(this));
-                _poolVaultShares[poolId][currency] += shares;
-            }
-        }
-
-        emit VaultConfigured(poolId, currency, address(vault));
-    }
 
     /// @notice Update the tick range for JIT liquidity deployment.
     function setTickRange(PoolKey calldata key, int24 tickLower, int24 tickUpper) external onlyOwner {
@@ -255,27 +208,23 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Indicative quote using hypothetical JIT liquidity.
-    /// @dev    Overrides SpreadQuoterBase (which simulates against onchain LP) because JIT pools
-    ///         have zero liquidity between swaps. Computes the JIT liquidity from vault assets
-    ///         and simulates a single swap step.
-    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+    /// @dev    Ignores hookData — pricing is fully determined by the stored PricingState.
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata)
         external
         view
         override
         returns (uint256 outputAmount)
     {
-        (, bool isAttested,) = _resolveHookData(hookData);
-        return _price(key, zeroForOne, amountSpecified, isAttested, address(0));
+        return _price(key, zeroForOne, amountSpecified, false, address(0));
     }
 
     /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
-    /// @dev    Uses a single SwapMath step with the caller's price limit clamped to the tick range.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
         int256 amountSpecified,
         uint160 sqrtPriceLimitX96,
-        bytes calldata hookData
+        bytes calldata
     ) external view override returns (uint256 amountIn, uint256 amountOut) {
         PoolId poolId = key.toId();
 
@@ -288,8 +237,7 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
             liquidity = _computeJITLiquidity(key);
             if (liquidity == 0) return (0, 0);
 
-            (, bool isAttested,) = _resolveHookData(hookData);
-            feePips = _effectiveFee(state, zeroForOne, isAttested);
+            feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
         }
 
         uint160 effectiveLimit;
@@ -313,8 +261,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     }
 
     /// @notice Assets available for immediate swapping.
-    /// @dev    For JIT with instant-withdrawal vaults, effective liquidity equals reserves.
-    ///         Differs if a vault has withdrawal delays or caps.
     function getEffectiveLiquidity(PoolKey calldata key)
         external
         view
@@ -328,12 +274,10 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        EXTERNAL: VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Share balance of `user` in the given pool.
     function sharesOf(PoolKey calldata key, address user) external view returns (uint256) {
         return userShares[key.toId()][user];
     }
 
-    /// @notice Preview token amounts returned for burning `shares`.
     function previewRemoveLiquidity(PoolKey calldata key, uint256 shares)
         external
         view
@@ -342,7 +286,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         return _convertSharesToAmounts(key, shares, Rounding.Floor);
     }
 
-    /// @notice Preview token amounts required for minting `shares`.
     function previewAddLiquidity(PoolKey calldata key, uint256 shares)
         external
         view
@@ -378,12 +321,10 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        INTERNAL: HOOK CALLBACKS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Blocks direct pool initialization — callers must use `initializePool`.
     function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         revert Unauthorized();
     }
 
-    /// @dev Only the hook itself may add/remove pool liquidity (during JIT cycles).
     function _beforeAddLiquidity(address sender, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
         view
@@ -404,21 +345,23 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         return IHooks.beforeRemoveLiquidity.selector;
     }
 
-    /// @dev JIT entry: resolve pricing, deploy all managed assets as concentrated LP.
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+    /// @dev JIT entry: read pricing state directly, deploy LP. No hookData processing.
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
+        PricingState memory state = pricingState[poolId];
 
-        uint24 feeOverride = _resolvePricing(poolId, key, params.zeroForOne, hookData);
-        if (feeOverride == 0) {
+        if (!state.live) {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
 
+        uint24 feePips = params.zeroForOne ? state.bidFeePips : state.askFeePips;
         _deployJIT(poolId, key);
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeOverride);
+
+        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
     /// @dev JIT teardown: remove LP, resolve net delta, re-deposit to vaults.
@@ -445,7 +388,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
 
             _resolveNetDelta(poolId, key.currency0);
             _resolveNetDelta(poolId, key.currency1);
-
             _depositAllToVaults(poolId, key);
         }
 
@@ -456,25 +398,7 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        INTERNAL: JIT LIFECYCLE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Resolve pricing from hookData. Returns 0 if not live (swap should no-op).
-    function _resolvePricing(PoolId poolId, PoolKey calldata, bool zeroForOne, bytes calldata hookData)
-        internal
-        returns (uint24 feeOverride)
-    {
-        (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
-        if (curveUpdateData.length > 0) {
-            _applyCurveUpdate(poolId, curveUpdateData);
-        }
-
-        PricingState memory state = pricingState[poolId];
-        if (!state.live) return 0;
-
-        uint24 feePips = _effectiveFee(state, zeroForOne, isAttested);
-        return feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG;
-    }
-
-    /// @dev Deploy all managed assets as JIT LP. Withdraws from vaults (capped at available),
-    ///      redeems pool-scoped claims, then adds concentrated LP at the configured tick range.
+    /// @dev Deploy all managed assets as JIT LP.
     function _deployJIT(PoolId poolId, PoolKey calldata key) internal {
         (uint256 bal0, uint256 bal1) = _getTotalAssets(key);
         if (bal0 == 0 && bal1 == 0) return;
@@ -492,7 +416,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         _redeemPoolClaims(poolId, key.currency0);
         _redeemPoolClaims(poolId, key.currency1);
 
-        // Zero out per-pool ERC-20 tracking — tokens are now deployed as LP
         _poolERC20[poolId][key.currency0] = 0;
         _poolERC20[poolId][key.currency1] = 0;
 
@@ -508,8 +431,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        INTERNAL: DELTA RESOLUTION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Redeem this pool's ERC-6909 claims to ERC-20. Claims accumulate when afterSwap
-    ///      mints positive deltas (PM may lack ERC-20 at that point).
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal {
         uint256 claims = _poolClaims[poolId][currency];
         if (claims > 0) {
@@ -519,10 +440,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         }
     }
 
-    /// @dev Resolve the hook's net delta for a single currency after the JIT cycle.
-    ///      Negative delta: settle from ERC-20.
-    ///      Positive delta: mint as ERC-6909 claims (PM may lack ERC-20 since the swapper
-    ///      hasn't settled yet). Claims are tracked per-pool and redeemed next beforeSwap.
     function _resolveNetDelta(PoolId poolId, Currency currency) internal {
         int256 delta = poolManager.currencyDelta(address(this), currency);
         if (delta < 0) {
@@ -538,7 +455,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     //                        INTERNAL: VAULT OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Deposit `amount` into the pool's vault (or track as ERC-20 if no vault).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = vaults[poolId][currency];
@@ -551,14 +467,11 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         _poolVaultShares[poolId][currency] += shares;
     }
 
-    /// @dev Withdraw all redeemable vault shares for both currencies. Caps at vault.maxRedeem
-    ///      to handle vaults with high utilization that can't honor full withdrawal.
     function _withdrawAllFromVaults(PoolId poolId, PoolKey calldata key) internal {
         _withdrawAllFromVault(poolId, key.currency0);
         _withdrawAllFromVault(poolId, key.currency1);
     }
 
-    /// @dev Withdraw all redeemable shares for a single (pool, currency).
     function _withdrawAllFromVault(PoolId poolId, Currency currency) internal {
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) return;
@@ -573,17 +486,14 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         _poolVaultShares[poolId][currency] -= toRedeem;
     }
 
-    /// @dev Deposit all ERC-20 balances for both currencies into their vaults.
     function _depositAllToVaults(PoolId poolId, PoolKey calldata key) internal {
         _depositAllToVault(poolId, key.currency0);
         _depositAllToVault(poolId, key.currency1);
     }
 
-    /// @dev Deposit the hook's ERC-20 balance of a currency into its vault, or track per-pool.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
         uint256 bal = IERC20Minimal(Currency.unwrap(currency)).balanceOf(address(this));
         if (bal == 0) return;
-
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) {
             _poolERC20[poolId][currency] += bal;
@@ -595,35 +505,26 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                        INTERNAL: ASSET TRACKING
+    //                        INTERNAL: ASSET TRACKING & PRICING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Total managed assets for both currencies of a pool.
     function _getTotalAssets(PoolKey memory key) internal view returns (uint256 amount0, uint256 amount1) {
         PoolId poolId = key.toId();
         amount0 = _getAssetBalance(poolId, key.currency0);
         amount1 = _getAssetBalance(poolId, key.currency1);
     }
 
-    /// @dev Total managed balance for a single (pool, currency) pair.
-    ///      Sums per-pool vault assets + per-pool ERC-6909 claims + per-pool ERC-20 (no-vault case).
     function _getAssetBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         bal = _poolClaims[poolId][currency] + _poolERC20[poolId][currency];
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) != address(0)) {
             uint256 shares = _poolVaultShares[poolId][currency];
-            if (shares > 0) {
-                bal += vault.convertToAssets(shares);
-            }
+            if (shares > 0) bal += vault.convertToAssets(shares);
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        INTERNAL: PRICING
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Indicative output using hypothetical JIT liquidity and a single SwapMath step.
-    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address)
+    /// @dev Indicative output using hypothetical JIT liquidity.
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool, address)
         internal
         view
         override
@@ -636,11 +537,14 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         uint128 liquidity = _computeJITLiquidity(key);
         if (liquidity == 0) return 0;
 
-        uint24 feePips = _effectiveFee(state, zeroForOne, isAttested);
-        return _simulateSwapStep(poolId, zeroForOne, amountSpecified, liquidity, feePips);
+        uint24 feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        uint160 limit = zeroForOne
+            ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
+            : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
+        (,, outputAmount,) = SwapMath.computeSwapStep(sqrtPriceX96, limit, liquidity, amountSpecified, feePips);
     }
 
-    /// @dev Compute the JIT liquidity that would be deployed given current assets and price.
     function _computeJITLiquidity(PoolKey memory key) internal view returns (uint128) {
         PoolId poolId = key.toId();
         (uint256 bal0, uint256 bal1) = _getTotalAssets(key);
@@ -656,25 +560,10 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         );
     }
 
-    /// @dev Single-step swap simulation against hypothetical JIT liquidity.
-    function _simulateSwapStep(PoolId poolId, bool zeroForOne, int256 amountSpecified, uint128 liquidity, uint24 feePips)
-        internal
-        view
-        returns (uint256 amountOut)
-    {
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-        uint160 limit = zeroForOne
-            ? TickMath.getSqrtPriceAtTick(poolTickLower[poolId])
-            : TickMath.getSqrtPriceAtTick(poolTickUpper[poolId]);
-        (,, amountOut,) = SwapMath.computeSwapStep(sqrtPriceX96, limit, liquidity, amountSpecified, feePips);
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     //                        INTERNAL: SHARE MATH & AUTH
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Convert share count to token amounts based on the pool's current asset ratio.
-    ///      First deposit (totalShares == 0): 1 share = 1 unit of each token.
     function _convertSharesToAmounts(PoolKey memory key, uint256 shares, Rounding rounding)
         internal
         view
@@ -694,17 +583,13 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         }
     }
 
-    /// @dev Ensure the hook holds enough ERC-20 for a withdrawal. Pulls from vault if needed.
-    ///      Debits _poolERC20 for no-vault pools.
     function _ensureERC20Balance(PoolId poolId, Currency currency, uint256 amount) internal {
-        // For no-vault pools, debit the per-pool tracker
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) {
             _poolERC20[poolId][currency] -= amount;
             return;
         }
 
-        // For vault pools, withdraw from vault if needed
         uint256 bal = IERC20Minimal(Currency.unwrap(currency)).balanceOf(address(this));
         if (bal >= amount) return;
 
@@ -716,7 +601,6 @@ contract SmartPoolHook is SpreadQuoterBase, ReentrancyGuardTransient {
         _poolVaultShares[poolId][currency] -= shares;
     }
 
-    /// @dev Revert if caller is not authorized to deposit.
     function _requireDepositAuth(PoolId poolId) internal view {
         if (msg.sender == owner() || msg.sender == poolOperator[poolId]) return;
         if (externalDepositsEnabled[poolId]) return;

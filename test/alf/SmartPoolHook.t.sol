@@ -81,15 +81,10 @@ contract SmartPoolHookTest is Test, Deployers {
             -10, // tickLower
             10, // tickUpper
             operator,
-            false // no external deposits
+            false, // no external deposits
+            IERC4626(address(vault0)),
+            IERC4626(address(vault1))
         );
-
-        // Configure vaults
-        hook.setVault(testPoolKey, currency0, IERC4626(address(vault0)));
-        hook.setVault(testPoolKey, currency1, IERC4626(address(vault1)));
-
-        // Set price signer (not used in basic tests but needed for completeness)
-        hook.setPriceSigner(makeAddr("priceSigner"));
         vm.stopPrank();
 
         testPoolId = testPoolKey.toId();
@@ -133,7 +128,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     // ──── Vault Configuration ────
 
-    function test_setVault_configuresVaults() public view {
+    function test_vaultsConfiguredAtInit() public view {
         assertEq(address(hook.vaults(testPoolId, currency0)), address(vault0));
         assertEq(address(hook.vaults(testPoolId, currency1)), address(vault1));
     }
@@ -304,25 +299,6 @@ contract SmartPoolHookTest is Test, Deployers {
         assertEq(amount1, 1_100e18);
     }
 
-    // ──── No-Vault Currency ────
-
-    function test_noVault_tokensHeldAsErc20() public {
-        // Remove vault1 so currency1 has no vault
-        vm.prank(owner);
-        hook.setVault(testPoolKey, currency1, IERC4626(address(0)));
-
-        _depositAsOperator(1_000e18);
-
-        // currency0 should be in vault, currency1 as ERC-20
-        assertGt(vault0.balanceOf(address(hook)), 0);
-        assertEq(token1.balanceOf(address(hook)), 1_000e18);
-
-        // Reserves should still report correctly
-        (uint256 r0, uint256 r1) = hook.getReserves(testPoolKey);
-        assertEq(r0, 1_000e18);
-        assertEq(r1, 1_000e18);
-    }
-
     // ──── Access Control ────
 
     function test_initializePool_onlyOwner() public {
@@ -343,14 +319,10 @@ contract SmartPoolHookTest is Test, Deployers {
             -20,
             20,
             operator,
-            false
+            false,
+            IERC4626(address(vault0)),
+            IERC4626(address(vault1))
         );
-    }
-
-    function test_setVault_onlyOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        hook.setVault(testPoolKey, currency0, IERC4626(address(0)));
     }
 
     // ──── View Functions ────
