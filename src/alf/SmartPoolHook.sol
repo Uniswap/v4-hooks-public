@@ -38,7 +38,21 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     bytes32 public constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
 
-    // ──── Per-Pool Config ────
+    // ──── Types ────
+
+    /// @notice Configuration for initializing a new pool.
+    struct PoolConfig {
+        uint160 sqrtPriceX96;
+        PricingState pricing;
+        int24 tickLower;
+        int24 tickUpper;
+        address operator;
+        bool allowExternalDeposits;
+        IERC4626 vault0;
+        IERC4626 vault1;
+    }
+
+    // ──── Per-Pool State ────
 
     mapping(PoolId => int24) public poolTickLower;
     mapping(PoolId => int24) public poolTickUpper;
@@ -72,34 +86,35 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function initializePool(
-        PoolKey calldata key,
-        uint160 sqrtPriceX96,
-        PricingState calldata pricing,
-        int24 tickLower,
-        int24 tickUpper,
-        address operator,
-        bool allowExternalDeposits,
-        IERC4626 vault0,
-        IERC4626 vault1
-    ) external onlyOwner returns (int24 tick) {
+    /// @notice Initialize a new pool with vaults, pricing, and operator in one call.
+    /// @dev    Vaults are permanent — set at creation and cannot be changed.
+    /// @param key    The PoolKey (must reference this hook and use DYNAMIC_FEE_FLAG).
+    /// @param config Pool configuration (pricing, tick range, vaults, operator).
+    /// @return tick  The initial tick assigned by the PoolManager.
+    function initializePool(PoolKey calldata key, PoolConfig calldata config)
+        external
+        onlyOwner
+        returns (int24 tick)
+    {
         if (!LPFeeLibrary.isDynamicFee(key.fee)) revert MustUseDynamicFee();
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
-        if (tickLower >= tickUpper) revert InvalidTickRange();
-        if (tickLower % key.tickSpacing != 0 || tickUpper % key.tickSpacing != 0) revert InvalidTickRange();
+        if (config.tickLower >= config.tickUpper) revert InvalidTickRange();
+        if (config.tickLower % key.tickSpacing != 0 || config.tickUpper % key.tickSpacing != 0) {
+            revert InvalidTickRange();
+        }
 
         PoolId poolId = key.toId();
         _poolKeys[poolId] = key;
-        pricingState[poolId] = pricing;
-        poolTickLower[poolId] = tickLower;
-        poolTickUpper[poolId] = tickUpper;
-        poolOperator[poolId] = operator;
-        externalDepositsEnabled[poolId] = allowExternalDeposits;
-        vaults[poolId][key.currency0] = vault0;
-        vaults[poolId][key.currency1] = vault1;
+        pricingState[poolId] = config.pricing;
+        poolTickLower[poolId] = config.tickLower;
+        poolTickUpper[poolId] = config.tickUpper;
+        poolOperator[poolId] = config.operator;
+        externalDepositsEnabled[poolId] = config.allowExternalDeposits;
+        vaults[poolId][key.currency0] = config.vault0;
+        vaults[poolId][key.currency1] = config.vault1;
 
-        tick = poolManager.initialize(key, sqrtPriceX96);
-        emit PoolCreated(poolId, tickLower, tickUpper, operator);
+        tick = poolManager.initialize(key, config.sqrtPriceX96);
+        emit PoolCreated(poolId, config.tickLower, config.tickUpper, config.operator);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -75,16 +75,18 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(owner);
         hook.initializePool(
             testPoolKey,
-            TickMath.getSqrtPriceAtTick(0), // 1:1 price
-            SpreadQuoterBase.PricingState({
-                bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 0, live: true
-            }),
-            -10, // tickLower
-            10, // tickUpper
-            operator,
-            false, // no external deposits
-            IERC4626(address(vault0)),
-            IERC4626(address(vault1))
+            SmartPoolHook.PoolConfig({
+                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+                pricing: SpreadQuoterBase.PricingState({
+                    bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 0, live: true
+                }),
+                tickLower: -10,
+                tickUpper: 10,
+                operator: operator,
+                allowExternalDeposits: false,
+                vault0: IERC4626(address(vault0)),
+                vault1: IERC4626(address(vault1))
+            })
         );
         vm.stopPrank();
 
@@ -315,14 +317,16 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.expectRevert();
         hook.initializePool(
             key2,
-            TickMath.getSqrtPriceAtTick(0),
-            SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, attestedDiscountBps: 0, live: true}),
-            -20,
-            20,
-            operator,
-            false,
-            IERC4626(address(vault0)),
-            IERC4626(address(vault1))
+            SmartPoolHook.PoolConfig({
+                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, attestedDiscountBps: 0, live: true}),
+                tickLower: -20,
+                tickUpper: 20,
+                operator: operator,
+                allowExternalDeposits: false,
+                vault0: IERC4626(address(vault0)),
+                vault1: IERC4626(address(vault1))
+            })
         );
     }
 
