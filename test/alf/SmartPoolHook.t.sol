@@ -60,11 +60,7 @@ contract SmartPoolHookTest is Test, Deployers {
                 | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo(
-            "SmartPoolHook",
-            abi.encode(manager, uint32(100_000), owner),
-            address(hook)
-        );
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
 
         // Initialize pool through hook
         testPoolKey = PoolKey({
@@ -79,7 +75,9 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.initializePool(
             testPoolKey,
             TickMath.getSqrtPriceAtTick(0), // 1:1 price
-            SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 0, live: true}),
+            SpreadQuoterBase.PricingState({
+                bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, attestedDiscountBps: 0, live: true
+            }),
             -10, // tickLower
             10, // tickUpper
             operator,

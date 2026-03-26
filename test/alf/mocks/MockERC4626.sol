@@ -8,7 +8,9 @@ contract MockERC4626 is ERC20 {
     ERC20 public immutable asset;
     uint256 internal _yieldAccrued;
 
-    constructor(ERC20 _asset) ERC20(string.concat("Mock Vault ", _asset.name()), string.concat("mv", _asset.symbol()), _asset.decimals()) {
+    constructor(ERC20 _asset)
+        ERC20(string.concat("Mock Vault ", _asset.name()), string.concat("mv", _asset.symbol()), _asset.decimals())
+    {
         asset = _asset;
     }
 
@@ -54,6 +56,14 @@ contract MockERC4626 is ERC20 {
     function convertToAssets(uint256 shares) public view returns (uint256) {
         uint256 supply = totalSupply;
         return supply == 0 ? shares : (shares * totalAssets()) / supply;
+    }
+
+    function maxRedeem(address owner_) external view returns (uint256) {
+        return balanceOf[owner_];
+    }
+
+    function previewWithdraw(uint256 assets) external view returns (uint256) {
+        return convertToShares(assets);
     }
 
     /// @notice Simulate yield accrual by minting additional underlying to the vault.
