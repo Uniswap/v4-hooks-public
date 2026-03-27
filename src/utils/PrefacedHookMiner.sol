@@ -10,7 +10,6 @@ library PrefacedHookMiner {
     uint160 constant FLAG_MASK = Hooks.ALL_HOOK_MASK; // 0000 ... 0000 0011 1111 1111 1111
 
     // Maximum number of iterations to find a salt, avoid infinite loops or MemoryOOG
-    // (arbitrarily set; must match HookMiner.MAX_LOOP)
     uint256 constant MAX_LOOP = 160_444;
 
     /// @notice Find a salt that produces a hook address with the desired `flags` and leading byte `addressPrefix`

@@ -212,9 +212,9 @@ ROUND=0
 while true; do
   TMPROOT=$(mktemp -d)
   PIDS=()
-  declare -a OUTFILES
-  declare -a FINISHED
-  declare -a ECODES
+  declare -a OUTFILES=()
+  declare -a FINISHED=()
+  declare -a ECODES=()
 
   echo "Round $((ROUND + 1)): $MINING_WORKERS workers, base salt $BASE (windows of $MAX_LOOP each)" >&2
 
@@ -226,7 +226,7 @@ while true; do
       forge script "${FORGE_SCRIPT_REL}:MinePrefacedHookScript" \
         --sig "$SIG" \
         --gas-limit "$GAS_LIMIT" \
-        $FORGE_VV \
+        ${FORGE_VV:+"$FORGE_VV"} \
         "$BYTE_HEX" "$CTOR_HEX" "$OFF" "$PREFIX" "$FLAGS" "$DEPLOYER" >"${OUTFILES[w]}" 2>&1
       echo $? >"${OUTFILES[w]}.exit"
     ) &
