@@ -16,7 +16,7 @@
 #   creation_code     path to a file, OR inline 0x… hex (creation bytecode only, no ctor args appended)
 #   constructor_args  path to a file, OR inline 0x… hex (ABI-encoded ctor args), OR "-" for empty
 #   flags_hex         optional uint160 hook flags (default 0xac0 = before/after swap + before add/remove liq, matching old script)
-#   deployer          optional address; use 0x0000000000000000000000000000000000000000 for canonical CREATE2 deployer proxy
+#   deployer          optional address (default: 0x4e59b44847b379578588920cA78FbF26c0B4956C — canonical CREATE2 deployer proxy)
 #   salt_start        optional lower bound for salt search (default 0)
 #
 # For large bytecode, use a file path to avoid shell arg-length limits.
@@ -25,7 +25,7 @@
 MAX_LOOP=160444
 # Hooks.BEFORE_SWAP | AFTER_SWAP | BEFORE_ADD_LIQUIDITY | BEFORE_REMOVE_LIQUIDITY (see lib/v4-core Hooks.sol)
 DEFAULT_FLAGS=0xac0
-ZERO_ADDR=0x0000000000000000000000000000000000000000
+CREATE2_DEPLOYER=0x4e59b44847b379578588920cA78FbF26c0B4956C
 
 FORGE_SCRIPT_REL=script/prefaced-hook-mining/MinePrefacedHook.s.sol
 DEFAULT_GAS_LIMIT=30000000000
@@ -163,7 +163,7 @@ else
 fi
 
 FLAGS=${4:-$DEFAULT_FLAGS}
-DEPLOYER=${5:-$ZERO_ADDR}
+DEPLOYER=${5:-$CREATE2_DEPLOYER}
 BASE=${6:-0}
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

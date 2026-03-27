@@ -51,8 +51,8 @@ Each worker searches a disjoint window of length `MAX_LOOP`. After a round where
 - **`creation_code`** — **Path to a file** or **inline hex** (`0x…` optional). Must be **creation bytecode only** (what `type(MyHook).creationCode` is), not including constructor arguments.
 - **`constructor_args`** — File path or inline hex: **ABI-encoded constructor arguments**. Use **`-`** for none.
 - **`flags_hex`** — Optional `uint160` hook flags; default `0xac0` (before/after swap, before add/remove liquidity). Must match your hook’s [`Hooks`](https://github.com/Uniswap/v4-core/blob/main/src/libraries/Hooks.sol) permissions.
-- **`deployer`** — Optional. Default `0x0000000000000000000000000000000000000000` means the Forge script uses the canonical CREATE2 deployer proxy `0x4e59b44847b379578588920cA78FbF26c0B4956C`.
-- **`salt_start`** — Optional; default `0`. The script advances the base salt automatically after each failed round. To set only `salt_start` while keeping default flags and deployer, pass them explicitly, e.g. `0xac0 0x0000000000000000000000000000000000000000 20000000`.
+- **`deployer`** — Optional; default `0x4e59b44847b379578588920cA78FbF26c0B4956C` (canonical CREATE2 deployer proxy).
+- **`salt_start`** — Optional; default `0`. The script advances the base salt automatically after each failed round. To set only `salt_start` while keeping default flags and deployer, pass them explicitly, e.g. `0xac0 0x4e59b44847b379578588920cA78FbF26c0B4956C 20000000`.
 
 ### Files: hex text vs raw binary
 
@@ -124,7 +124,7 @@ No constructor arguments:
 Custom flags and explicit deployer (zero address still selects the CREATE2 proxy inside the Forge script), starting salt `0`:
 
 ```bash
-./script/prefaced-hook-mining/minePrefacedHook.sh --workers=4 66 ./bytecode.bin - 0x3f3 0x0000000000000000000000000000000000000000 0
+./script/prefaced-hook-mining/minePrefacedHook.sh --workers=4 66 ./bytecode.bin - 0x3f3 0x4e59b44847b379578588920cA78FbF26c0B4956C 0
 ```
 
 ## Calling the Forge script directly
@@ -144,7 +144,7 @@ Example with empty constructor args and defaulting deployer via zero address:
 forge script script/prefaced-hook-mining/MinePrefacedHook.s.sol:MinePrefacedHookScript \
   --sig "run(bytes,bytes,uint256,uint8,uint160,address)" \
   --gas-limit 30000000000 \
-  0x6080… 0x 0 66 0xac0 0x0000000000000000000000000000000000000000
+  0x6080… 0x 0 66 0xac0 0x4e59b44847b379578588920cA78FbF26c0B4956C
 ```
 
 ## After mining
