@@ -1,22 +1,22 @@
 # Prefaced hook address mining
 
-Uniswap v4 hook contracts must deploy to an address whose **low 14 bits** encode which hook callbacks are used (`Hooks` permission flags). [`HookMiner`](../src/utils/HookMiner.sol) searches CREATE2 salts until those bits match and the target address has no code.
+Uniswap v4 hook contracts must deploy to an address whose **low 14 bits** encode which hook callbacks are used (`Hooks` permission flags). [`HookMiner`](../../src/utils/HookMiner.sol) searches CREATE2 salts until those bits match and the target address has no code.
 
-**PrefacedHookMiner** adds an **additional constraint**: the **most significant byte** of the 20-byte address (the first byte you see in `0x**AB**cd…`) must equal a chosen value. That makes hits much rarer than plain `HookMiner`, so this repo also ships a **Forge script** and a **bash loop** that retries over successive salt ranges. This additional byte can by used by routing teams to infer false-positive-tolerable informtation easily, such as external liquidity protocol the hook links to, or routing eschewal altogether.
+**PrefacedHookMiner** adds an **additional constraint**: the **most significant byte** of the 20-byte address (the first byte you see in `0x**AB**cd…`) must equal a chosen value. That makes hits much rarer than plain `HookMiner`, so this repo also ships a **Forge script** and a **bash driver** that retries over successive salt ranges. That byte can be used by routing teams for coarse labeling (for example which external system the hook relates to) or to signal routing behavior.
 
-Allowlist Declination byte: 0x91
+**Allowlist declination byte:** `0x91`
 
-NOTE: The allowlist declination byte should is used as the preface of a hook address to signal to the routing team to not include a hook in the production allowlist. 
+The allowlist declination byte is used as the address prefix to signal that a hook should not be included in the production allowlist.
 
 ## Components
 
 | Piece | Role |
 |--------|------|
-| [`src/utils/PrefacedHookMiner.sol`](../src/utils/PrefacedHookMiner.sol) | Library: `find(deployer, flags, creationCode, constructorArgs, addressPrefix, saltStart)` over `[saltStart, saltStart + MAX_LOOP)`. |
-| [`script/MinePrefacedHook.s.sol`](MinePrefacedHook.s.sol) | `MinePrefacedHookScript.run(bytes,bytes,uint256,uint8,uint160,address)` — logs predicted address and salt; does **not** broadcast. |
-| [`script/minePrefacedHook.sh`](minePrefacedHook.sh) | Calls `forge script` in a loop, bumping the salt lower bound by `MAX_LOOP` after each failed window. |
+| [`src/utils/PrefacedHookMiner.sol`](../../src/utils/PrefacedHookMiner.sol) | Library: `find(deployer, flags, creationCode, constructorArgs, addressPrefix, saltStart)` over `[saltStart, saltStart + MAX_LOOP)`. |
+| [`MinePrefacedHook.s.sol`](MinePrefacedHook.s.sol) | `MinePrefacedHookScript.run(bytes,bytes,uint256,uint8,uint160,address)` — logs predicted address and salt; does **not** broadcast. |
+| [`minePrefacedHook.sh`](minePrefacedHook.sh) | Runs multiple `forge script` workers in parallel per round, then advances the salt base by `MAX_LOOP × workers` until a match is found. |
 
-`MAX_LOOP` is `160_444` in both [`HookMiner`](../src/utils/HookMiner.sol) and `PrefacedHookMiner`. The bash script hardcodes the same number; if you change it in Solidity, update the script.
+`MAX_LOOP` is `160_444` in both [`HookMiner`](../../src/utils/HookMiner.sol) and `PrefacedHookMiner`. The bash script hardcodes the same number; if you change it in Solidity, update the script.
 
 ## What gets checked
 
@@ -31,17 +31,28 @@ For each candidate salt, CREATE2 is applied to `abi.encodePacked(creationCode, c
 Run from the **repository root** (the script `cd`s there).
 
 ```text
-./script/minePrefacedHook.sh <prefix_byte> <creation_code> <constructor_args> [salt_start] [flags_hex] [deployer]
+./script/prefaced-hook-mining/minePrefacedHook.sh [options] <prefix_byte> <creation_code> <constructor_args> [flags_hex] [deployer] [salt_start]
 ```
 
-### Arguments
+### Options (CLI only)
+
+| Option | Meaning |
+|--------|---------|
+| `--workers N` or `--workers=N` | Number of parallel `forge script` processes per round (default: CPU count via `nproc` / `sysctl hw.ncpu`, else `4`). |
+| `--gas-limit N` or `--gas-limit=N` | Passed through to `forge script --gas-limit` (default: `30000000000`). |
+| `--verbose` | Adds `-vvvv` to `forge script`. |
+| `-h`, `--help` | Print usage. |
+
+Each worker searches a disjoint window of length `MAX_LOOP`. After a round where **no** worker finds a salt, the next round starts at `salt_start + MAX_LOOP × workers` (and keeps advancing the same way). Success prints that worker’s logs and exits.
+
+### Positional arguments
 
 - **`prefix_byte`** — Required leading address byte: decimal (`66`) or hex (`0x42`).
-- **`creation_code`** — Either a **path to a file** or **inline hex** (`0x…` optional). Must be **creation bytecode only** (what `type(MyHook).creationCode` is), not including constructor arguments.
-- **`constructor_args`** — File path or inline hex: **ABI-encoded constructor arguments**. Use **`-`** for empty.
-- **`salt_start`** — Optional; default `0`. Each failed run adds `MAX_LOOP` and retries.
-- **`flags_hex`** — Optional `uint160` hook flags; default `0xac0` (before/after swap, before add/remove liquidity — same combination the old example script used). Derive the correct mask from your hook’s permissions and [`Hooks`](https://github.com/Uniswap/v4-core/blob/main/src/libraries/Hooks.sol) flag constants.
-- **`deployer`** — Optional. Default `0x0000000000000000000000000000000000000000` means the script uses the canonical CREATE2 deployer proxy `0x4e59b44847b379578588920cA78FbF26c0B4956C`.
+- **`creation_code`** — **Path to a file** or **inline hex** (`0x…` optional). Must be **creation bytecode only** (what `type(MyHook).creationCode` is), not including constructor arguments.
+- **`constructor_args`** — File path or inline hex: **ABI-encoded constructor arguments**. Use **`-`** for none.
+- **`flags_hex`** — Optional `uint160` hook flags; default `0xac0` (before/after swap, before add/remove liquidity). Must match your hook’s [`Hooks`](https://github.com/Uniswap/v4-core/blob/main/src/libraries/Hooks.sol) permissions.
+- **`deployer`** — Optional. Default `0x0000000000000000000000000000000000000000` means the Forge script uses the canonical CREATE2 deployer proxy `0x4e59b44847b379578588920cA78FbF26c0B4956C`.
+- **`salt_start`** — Optional; default `0`. The script advances the base salt automatically after each failed round. To set only `salt_start` while keeping default flags and deployer, pass them explicitly, e.g. `0xac0 0x0000000000000000000000000000000000000000 20000000`.
 
 ### Files: hex text vs raw binary
 
@@ -49,42 +60,90 @@ If the path points to a file whose contents are **only hex** (with optional `0x`
 
 For **large** bytecode, prefer a **file path** so you do not hit shell argument-length limits.
 
-### Examples
+## Example: `MockCounterHook`
 
-Encode constructor arguments and mine (example pool manager address — replace with yours):
+The repo includes [`test/mocks/MockCounterHook.sol`](../../test/mocks/MockCounterHook.sol): a small `BaseHook` that counts swap / liquidity callbacks. Its permissions match the script’s default flags **`0xac0`** (before/after swap, before add/remove liquidity).
+
+From the **repository root**:
+
+**1. Compile**
+
+```bash
+forge build --contracts test/mocks/MockCounterHook.sol
+```
+
+**2. Creation bytecode (pick one)**
+
+Write hex to a file (easy to pass to the script):
+
+```bash
+forge inspect MockCounterHook bytecode | tr -d '\n' > /tmp/MockCounterHook.creation.hex
+```
+
+Or read it from the build artifact (same bytes as `forge inspect`):
+
+```bash
+jq -r '.bytecode.object' foundry-out/MockCounterHook.sol/MockCounterHook.json | tr -d '\n' > /tmp/MockCounterHook.creation.hex
+```
+
+**3. Constructor arguments**
+
+The constructor is `constructor(IPoolManager _poolManager)`. Encode a pool manager address (use a real address for production; here we use a placeholder):
+
+```bash
+cast abi-encode "constructor(address)" 0x0000000000000000000000000000000000000001 > /tmp/MockCounterHook.ctor.hex
+```
+
+**4. Mine** (example prefix `0x42`; mining can take many rounds — use `--workers` to use more CPUs)
+
+```bash
+./script/prefaced-hook-mining/minePrefacedHook.sh \
+  --workers=8 \
+  0x42 \
+  /tmp/MockCounterHook.creation.hex \
+  /tmp/MockCounterHook.ctor.hex
+```
+
+Omit `--workers` to default to your machine’s CPU count. Add `--verbose` if you want full forge traces.
+
+### Other examples
+
+Encode constructor arguments and mine (replace pool manager and paths):
 
 ```bash
 cast abi-encode "constructor(address)" 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543 > /tmp/my-hook.ctor.hex
-./script/minePrefacedHook.sh 0x42 out/MyHook.sol/MyHook.bytecode /tmp/my-hook.ctor.hex
+./script/prefaced-hook-mining/minePrefacedHook.sh --workers=4 0x42 out/MyHook.sol/MyHook.bytecode /tmp/my-hook.ctor.hex
 ```
 
 No constructor arguments:
 
 ```bash
-./script/minePrefacedHook.sh 0x00 path/to/MyHook.bytecode -
+./script/prefaced-hook-mining/minePrefacedHook.sh 0x00 path/to/MyHook.bytecode -
 ```
 
-Custom flags and explicit deployer (zero address still selects the CREATE2 proxy inside the script):
+Custom flags and explicit deployer (zero address still selects the CREATE2 proxy inside the Forge script), starting salt `0`:
 
 ```bash
-./script/minePrefacedHook.sh 66 ./bytecode.bin - 0 0x3f3 0x0000000000000000000000000000000000000000
+./script/prefaced-hook-mining/minePrefacedHook.sh --workers=4 66 ./bytecode.bin - 0x3f3 0x0000000000000000000000000000000000000000 0
 ```
 
 ## Calling the Forge script directly
 
-One salt window only: `[saltStart, saltStart + MAX_LOOP)`. On revert, increase `saltStart` by `MAX_LOOP` and run again (what the bash script automates).
+One salt window only: `[saltStart, saltStart + MAX_LOOP)`. On revert, increase `saltStart` by `MAX_LOOP` and run again (the bash script automates this across workers and rounds).
 
 ```bash
-forge script script/MinePrefacedHook.s.sol:MinePrefacedHookScript \
+forge script script/prefaced-hook-mining/MinePrefacedHook.s.sol:MinePrefacedHookScript \
   --sig "run(bytes,bytes,uint256,uint8,uint160,address)" \
+  --gas-limit 30000000000 \
   <creation_hex> <ctor_args_hex> <salt_start> <prefix_u8> <flags_hex> <deployer>
 ```
 
 Example with empty constructor args and defaulting deployer via zero address:
 
 ```bash
-forge script script/MinePrefacedHook.s.sol:MinePrefacedHookScript \
+forge script script/prefaced-hook-mining/MinePrefacedHook.s.sol:MinePrefacedHookScript \
   --sig "run(bytes,bytes,uint256,uint8,uint160,address)" \
+  --gas-limit 30000000000 \
   0x6080… 0x 0 66 0xac0 0x0000000000000000000000000000000000000000
 ```
 
