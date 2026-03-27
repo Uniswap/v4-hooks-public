@@ -10,11 +10,11 @@ The allowlist declination byte is used as the address prefix to signal that a ho
 
 ## Components
 
-| Piece | Role |
-|--------|------|
-| [`src/utils/PrefacedHookMiner.sol`](../../src/utils/PrefacedHookMiner.sol) | Library: `find(deployer, flags, creationCode, constructorArgs, addressPrefix, saltStart)` over `[saltStart, saltStart + MAX_LOOP)`. |
-| [`MinePrefacedHook.s.sol`](MinePrefacedHook.s.sol) | `MinePrefacedHookScript.run(bytes,bytes,uint256,uint8,uint160,address)` — logs predicted address and salt; does **not** broadcast. |
-| [`minePrefacedHook.sh`](minePrefacedHook.sh) | Runs multiple `forge script` workers in parallel per round, then advances the salt base by `MAX_LOOP × workers` until a match is found. |
+| Piece                                                                      | Role                                                                                                                                    |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/utils/PrefacedHookMiner.sol`](../../src/utils/PrefacedHookMiner.sol) | Library: `find(deployer, flags, creationCode, constructorArgs, addressPrefix, saltStart)` over `[saltStart, saltStart + MAX_LOOP)`.     |
+| [`MinePrefacedHook.s.sol`](MinePrefacedHook.s.sol)                         | `MinePrefacedHookScript.run(bytes,bytes,uint256,uint8,uint160,address)` — logs predicted address and salt; does **not** broadcast.      |
+| [`minePrefacedHook.sh`](minePrefacedHook.sh)                               | Runs multiple `forge script` workers in parallel per round, then advances the salt base by `MAX_LOOP × workers` until a match is found. |
 
 `MAX_LOOP` is `160_444` in both [`HookMiner`](../../src/utils/HookMiner.sol) and `PrefacedHookMiner`. The bash script hardcodes the same number; if you change it in Solidity, update the script.
 
@@ -36,12 +36,12 @@ Run from the **repository root** (the script `cd`s there).
 
 ### Options (CLI only)
 
-| Option | Meaning |
-|--------|---------|
-| `--workers N` or `--workers=N` | Number of parallel `forge script` processes per round (default: CPU count via `nproc` / `sysctl hw.ncpu`, else `4`). |
-| `--gas-limit N` or `--gas-limit=N` | Passed through to `forge script --gas-limit` (default: `30000000000`). |
-| `--verbose` | Adds `-vvvv` to `forge script`. |
-| `-h`, `--help` | Print usage. |
+| Option                             | Meaning                                                                                                              |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--workers N` or `--workers=N`     | Number of parallel `forge script` processes per round (default: CPU count via `nproc` / `sysctl hw.ncpu`, else `4`). |
+| `--gas-limit N` or `--gas-limit=N` | Passed through to `forge script --gas-limit` (default: `30000000000`).                                               |
+| `--verbose`                        | Adds `-vvvv` to `forge script`.                                                                                      |
+| `-h`, `--help`                     | Print usage.                                                                                                         |
 
 Each worker searches a disjoint window of length `MAX_LOOP`. After a round where **no** worker finds a salt, the next round starts at `salt_start + MAX_LOOP × workers` (and keeps advancing the same way). Success prints that worker’s logs and exits.
 
