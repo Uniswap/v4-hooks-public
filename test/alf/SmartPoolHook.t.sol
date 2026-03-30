@@ -72,23 +72,25 @@ contract SmartPoolHookTest is Test, Deployers {
         });
 
         vm.startPrank(owner);
-        hook.initializePool(
-            testPoolKey,
-            SmartPoolHook.PoolConfig({
-                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-                pricing: SpreadQuoterBase.PricingState({
-                    bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true
-                }),
-                tickLower: -10,
-                tickUpper: 10,
-                allowExternalDeposits: false,
-                vault0: IERC4626(address(vault0)),
-                vault1: IERC4626(address(vault1))
-            })
-        );
+        hook.initializePool(testPoolKey, _defaultConfig());
         vm.stopPrank();
 
         testPoolId = testPoolKey.toId();
+    }
+
+    // ──── Config Helpers ────
+
+    function _defaultConfig() internal view returns (SmartPoolHook.PoolConfig memory) {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        return SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(vault1))
+        });
     }
 
     // ──── Helpers ────
@@ -109,10 +111,12 @@ contract SmartPoolHookTest is Test, Deployers {
     // ──── Pool Initialization ────
 
     function test_initializePool_setsConfig() public view {
-        (, int24 tl, int24 tu, bool extDeposits) = hook.pools(testPoolId);
-        assertEq(tl, -10);
-        assertEq(tu, 10);
-        assertFalse(extDeposits);
+        assertFalse(hook.externalDepositsEnabled(testPoolId));
+        SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        assertEq(dist.length, 1);
+        assertEq(dist[0].tickLower, -10);
+        assertEq(dist[0].tickUpper, 10);
+        assertEq(dist[0].weightBps, 10_000);
     }
 
     function test_initializePool_revertsOnDirectInit() public {
@@ -311,6 +315,9 @@ contract SmartPoolHookTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
+
         vm.prank(alice);
         vm.expectRevert();
         hook.initializePool(
@@ -318,8 +325,7 @@ contract SmartPoolHookTest is Test, Deployers {
             SmartPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
                 pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
-                tickLower: -20,
-                tickUpper: 20,
+                distribution: dist,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
                 vault1: IERC4626(address(vault1))
