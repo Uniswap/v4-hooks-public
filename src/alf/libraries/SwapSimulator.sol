@@ -19,9 +19,6 @@ library SwapSimulator {
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
 
-    bool private constant CHECK_NEXT_TICK_PARITY = false;
-
-    error NextTickParityMismatch();
 
     struct SwapState {
         uint160 sqrtPriceX96;
@@ -264,11 +261,6 @@ library SwapSimulator {
                     : (compressed + int24(uint24(type(uint8).max - bitPos))) * tickSpacing;
             }
 
-            if (CHECK_NEXT_TICK_PARITY) {
-                (int24 refNext, bool refInitialized) =
-                    _nextInitializedTickReference(manager, poolId, tick, tickSpacing, lte);
-                if (refNext != next || refInitialized != initialized) revert NextTickParityMismatch();
-            }
         }
     }
 
@@ -355,53 +347,28 @@ library SwapSimulator {
     ) private pure {
         uint256 n = ticks.length;
 
-        // Find the starting index in the ticks array based on current tick and direction.
-        // For zeroForOne (price decreasing): start from the highest tick <= s.tick
-        // For oneForZero (price increasing): start from the lowest tick > s.tick
-        uint256 idx;
+        // Find starting index. Array is sorted ascending.
+        // zeroForOne: start from highest tick <= s.tick (scan from right).
+        // oneForZero: start from lowest tick > s.tick (scan from left).
+        uint256 idx = n; // n = "exhausted" sentinel
         if (zeroForOne) {
-            // Walk backwards: find last tick <= s.tick
-            idx = n; // will underflow to represent "no more ticks" as n
-            for (uint256 i; i < n; i++) {
-                if (ticks[i].tick <= s.tick) idx = i;
+            // Scan from the right — first match is the highest tick <= s.tick.
+            for (uint256 i = n; i > 0;) {
+                --i;
+                if (ticks[i].tick <= s.tick) { idx = i; break; }
             }
         } else {
-            // Walk forwards: find first tick > s.tick
-            idx = n;
-            for (uint256 i; i < n; i++) {
-                if (ticks[i].tick > s.tick) {
-                    idx = i;
-                    break;
-                }
+            for (uint256 i; i < n; ++i) {
+                if (ticks[i].tick > s.tick) { idx = i; break; }
             }
         }
 
         while (s.amountRemaining != 0 && s.sqrtPriceX96 != s.sqrtPriceLimitX96) {
-            // Determine the next tick boundary (or use the extreme if no more ticks).
-            int24 tickNext;
-            bool initialized;
-
-            if (zeroForOne) {
-                if (idx < n) {
-                    tickNext = ticks[idx].tick;
-                    initialized = true;
-                } else {
-                    tickNext = TickMath.MIN_TICK;
-                    initialized = false;
-                }
-            } else {
-                if (idx < n) {
-                    tickNext = ticks[idx].tick;
-                    initialized = true;
-                } else {
-                    tickNext = TickMath.MAX_TICK;
-                    initialized = false;
-                }
-            }
-
-            // Clamp to valid range
-            if (tickNext < TickMath.MIN_TICK) tickNext = TickMath.MIN_TICK;
-            if (tickNext > TickMath.MAX_TICK) tickNext = TickMath.MAX_TICK;
+            // Next tick boundary, or extreme if no more ticks in this direction.
+            bool initialized = idx < n;
+            int24 tickNext = initialized
+                ? ticks[idx].tick
+                : (zeroForOne ? TickMath.MIN_TICK : TickMath.MAX_TICK);
 
             uint160 sqrtPriceNextX96 = TickMath.getSqrtPriceAtTick(tickNext);
 
@@ -418,7 +385,7 @@ library SwapSimulator {
                 }
             }
 
-            // Cross tick boundary
+            // Cross tick boundary — apply liquidity delta and advance index.
             if (s.sqrtPriceX96 == sqrtPriceNextX96) {
                 if (initialized) {
                     int128 liquidityNet = ticks[idx].liquidityNet;
@@ -430,48 +397,10 @@ library SwapSimulator {
                 unchecked {
                     s.tick = zeroForOne ? tickNext - 1 : tickNext;
                 }
-                // Advance index
-                if (zeroForOne) {
-                    idx = idx == 0 ? n : idx - 1; // move to previous tick, or exhaust
-                } else {
-                    idx = idx + 1; // move to next tick
-                }
+                // Advance: zeroForOne scans left (decreasing), oneForZero scans right (increasing).
+                idx = zeroForOne ? (idx == 0 ? n : idx - 1) : idx + 1;
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        REFERENCE / PARITY
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Reference implementation used only for optional parity assertions.
-    function _nextInitializedTickReference(IPoolManager manager, PoolId poolId, int24 tick, int24 tickSpacing, bool lte)
-        private
-        view
-        returns (int24 next, bool initialized)
-    {
-        unchecked {
-            int24 compressed = TickBitmap.compress(tick, tickSpacing);
-
-            if (lte) {
-                (int16 wordPos, uint8 bitPos) = TickBitmap.position(compressed);
-                uint256 masked =
-                    manager.getTickBitmap(poolId, wordPos) & (type(uint256).max >> (uint256(type(uint8).max) - bitPos));
-
-                initialized = masked != 0;
-                next = initialized
-                    ? (compressed - int24(uint24(bitPos - BitMath.mostSignificantBit(masked)))) * tickSpacing
-                    : (compressed - int24(uint24(bitPos))) * tickSpacing;
-            } else {
-                ++compressed;
-                (int16 wordPos, uint8 bitPos) = TickBitmap.position(compressed);
-                uint256 masked = manager.getTickBitmap(poolId, wordPos) & ~((1 << bitPos) - 1);
-
-                initialized = masked != 0;
-                next = initialized
-                    ? (compressed + int24(uint24(BitMath.leastSignificantBit(masked) - bitPos))) * tickSpacing
-                    : (compressed + int24(uint24(type(uint8).max - bitPos))) * tickSpacing;
-            }
-        }
-    }
 }
