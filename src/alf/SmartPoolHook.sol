@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -15,6 +16,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
+import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -276,62 +278,78 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     /// @dev Deploy JIT liquidity across all distribution buckets.
     ///
-    ///      Allocation strategy: for each bucket, compute the max liquidity achievable with ALL
-    ///      available tokens via `getLiquidityForAmounts`. This tells us each bucket's "capacity"
-    ///      — how much liquidity it could support at the current price. Then scale each bucket by
-    ///      its weight, and find the max scalar that respects token constraints.
+    ///      Three-phase strategy:
+    ///        1. Compute weighted liquidity per bucket and exact token amounts needed
+    ///        2. Withdraw only the required amounts from vaults (rest keeps earning yield)
+    ///        3. Deploy each bucket's position
     ///
-    ///      This ensures capital-optimal allocation: buckets that only need one token (because
-    ///      the price is outside their range) don't waste the other token.
+    ///      Allocation: each bucket's max liquidity from the full balance is computed via
+    ///      getLiquidityForAmounts, then scaled by weight. SqrtPriceMath computes the exact
+    ///      token amounts per bucket, which are summed for targeted vault withdrawal.
     function _deployJIT(PoolId poolId, PoolKey calldata key) internal {
         (uint256 bal0, uint256 bal1) = _totalAssets(key);
         if (bal0 == 0 && bal1 == 0) return;
-
-        _withdrawAllFromVaults(poolId, key);
-        _redeemPoolClaims(poolId, key.currency0);
-        _redeemPoolClaims(poolId, key.currency1);
-        _clearERC20Tracking(poolId, key.currency0);
-        _clearERC20Tracking(poolId, key.currency1);
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         LiquidityBucket[] storage dist = _distribution[poolId];
         uint256 n = dist.length;
         if (n == 0) return;
 
-        // Phase 1: compute each bucket's max liquidity from the full token pool.
-        // The weight then scales this to get the target liquidity per bucket.
-        // We use getLiquidityForAmounts to understand each bucket's token demand profile.
-        uint128[] memory maxLiqs = new uint128[](n);
-        for (uint256 i; i < n; i++) {
-            maxLiqs[i] = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96,
-                TickMath.getSqrtPriceAtTick(dist[i].tickLower),
-                TickMath.getSqrtPriceAtTick(dist[i].tickUpper),
-                bal0,
-                bal1
-            );
-        }
+        // Phase 1: compute weighted liquidity per bucket and total token needs.
+        uint128[] memory liqs = new uint128[](n);
+        uint256 totalNeed0;
+        uint256 totalNeed1;
 
-        // Phase 2: compute weighted target liquidity per bucket and deploy.
-        // Each bucket gets: liq = maxLiq * weightBps / 10_000
-        // Since each maxLiq was computed from the FULL balance, the weighted sum of token
-        // demands is guaranteed to not exceed the balance (weights sum to 10_000).
-        uint128[] storage active = _activeLiquidity[poolId];
         for (uint256 i; i < n; i++) {
-            uint128 liq = uint128(uint256(maxLiqs[i]) * dist[i].weightBps / 10_000);
+            uint160 sqrtLower = TickMath.getSqrtPriceAtTick(dist[i].tickLower);
+            uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(dist[i].tickUpper);
+
+            uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96, sqrtLower, sqrtUpper, bal0, bal1
+            );
+            uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
+            liqs[i] = liq;
+
             if (liq == 0) continue;
 
+            // Compute exact tokens this bucket needs using v4-core's SqrtPriceMath.
+            // getAmount0Delta covers the above-price portion, getAmount1Delta the below-price.
+            if (sqrtPriceX96 < sqrtUpper) {
+                uint160 effectiveUpper = sqrtPriceX96 < sqrtLower ? sqrtLower : sqrtPriceX96;
+                totalNeed0 += SqrtPriceMath.getAmount0Delta(effectiveUpper, sqrtUpper, liq, true);
+            }
+            if (sqrtPriceX96 > sqrtLower) {
+                uint160 effectiveLower = sqrtPriceX96 > sqrtUpper ? sqrtUpper : sqrtPriceX96;
+                totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, effectiveLower, liq, true);
+            }
+        }
+
+        if (totalNeed0 == 0 && totalNeed1 == 0) return;
+
+        // Phase 2: liquidate claims to ERC-20 (cheaper than vault), then pull shortfall from vault.
+        _redeemPoolClaims(poolId, key.currency0);
+        _redeemPoolClaims(poolId, key.currency1);
+
+        uint256 onHand0 = IERC20Minimal(Currency.unwrap(key.currency0)).balanceOf(address(this));
+        uint256 onHand1 = IERC20Minimal(Currency.unwrap(key.currency1)).balanceOf(address(this));
+        if (totalNeed0 > onHand0) _withdrawFromVault(poolId, key.currency0, totalNeed0 - onHand0);
+        if (totalNeed1 > onHand1) _withdrawFromVault(poolId, key.currency1, totalNeed1 - onHand1);
+
+        // Phase 3: deploy each bucket.
+        uint128[] storage active = _activeLiquidity[poolId];
+        for (uint256 i; i < n; i++) {
+            if (liqs[i] == 0) continue;
             poolManager.modifyLiquidity(
                 key,
                 ModifyLiquidityParams({
                     tickLower: dist[i].tickLower,
                     tickUpper: dist[i].tickUpper,
-                    liquidityDelta: int256(uint256(liq)),
+                    liquidityDelta: int256(uint256(liqs[i])),
                     salt: LP_SALT
                 }),
                 ""
             );
-            active[i] = liq;
+            active[i] = liqs[i];
         }
     }
 

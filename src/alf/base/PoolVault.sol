@@ -359,6 +359,28 @@ abstract contract PoolVault {
         _vaultShares[poolId][currency] -= toRedeem;
     }
 
+    /// @dev Withdraw a specific asset amount from the pool's vault. Caps at available shares.
+    ///      For pools without a vault, debits `_erc20` tracking instead (tokens already in hook).
+    /// @param poolId   The pool to withdraw for.
+    /// @param currency The currency to withdraw.
+    /// @param amount   The target asset amount to withdraw.
+    function _withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) internal {
+        if (amount == 0) return;
+        IERC4626 vault = vaults[poolId][currency];
+        if (address(vault) == address(0)) {
+            _erc20[poolId][currency] -= amount;
+            return;
+        }
+        uint256 shares = vault.previewWithdraw(amount);
+        uint256 poolShares = _vaultShares[poolId][currency];
+        if (shares > poolShares) shares = poolShares;
+        uint256 maxRedeemable = vault.maxRedeem(address(this));
+        if (shares > maxRedeemable) shares = maxRedeemable;
+        if (shares == 0) return;
+        vault.redeem(shares, address(this), address(this));
+        _vaultShares[poolId][currency] -= shares;
+    }
+
     /// @dev Deposit all of the hook's ERC-20 balance for both currencies into their vaults.
     ///      Called in afterSwap after the JIT cycle resolves, to put assets back to work.
     /// @param poolId The pool whose assets to re-vault.
