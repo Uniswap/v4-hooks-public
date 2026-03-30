@@ -17,6 +17,7 @@ import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientSta
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
+import {SwapSimulator} from "./libraries/SwapSimulator.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -598,8 +599,8 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     //                        INTERNAL: PRICING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Indicative output using hypothetical multi-range JIT liquidity. Aggregates
-    ///      liquidity across all distribution buckets and simulates a single SwapMath step.
+    /// @dev Indicative output using hypothetical multi-range JIT liquidity. Builds a virtual
+    ///      tick schedule from the distribution and simulates a full multi-step tick walk.
     /// @param key              The pool to simulate.
     /// @param zeroForOne       Swap direction.
     /// @param amountSpecified  Swap amount (negative = exact input).
@@ -607,11 +608,11 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool, address)
         internal view override returns (uint256 outputAmount)
     {
-        (, outputAmount,) = _simulateSwap(key, zeroForOne, amountSpecified);
+        uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        (, outputAmount) = _simulateVirtual(key, zeroForOne, amountSpecified, limit);
     }
 
-    /// @dev Price-bounded swap simulation. Clamps the caller's price limit to the outermost
-    ///      bucket boundary, then simulates using the aggregate liquidity.
+    /// @dev Price-bounded swap simulation using virtual tick walk.
     /// @param key                The pool to simulate.
     /// @param zeroForOne         Swap direction.
     /// @param amountSpecified    Swap amount (negative = exact input).
@@ -621,94 +622,134 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     function _swapToPrice(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
         internal view returns (uint256 amountIn, uint256 amountOut)
     {
-        (uint24 feePips, uint128 totalLiq, int24 outerLower, int24 outerUpper) = _swapParams(key, zeroForOne);
-        if (totalLiq == 0) return (0, 0);
-
-        uint160 boundary = zeroForOne
-            ? TickMath.getSqrtPriceAtTick(outerLower)
-            : TickMath.getSqrtPriceAtTick(outerUpper);
-        uint160 effectiveLimit = zeroForOne
-            ? (sqrtPriceLimitX96 > boundary ? sqrtPriceLimitX96 : boundary)
-            : (sqrtPriceLimitX96 < boundary ? sqrtPriceLimitX96 : boundary);
-
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-        (, amountIn, amountOut,) = SwapMath.computeSwapStep(sqrtPriceX96, effectiveLimit, totalLiq, amountSpecified, feePips);
+        return _simulateVirtual(key, zeroForOne, amountSpecified, sqrtPriceLimitX96);
     }
 
-    /// @dev Shared simulation: compute fee and aggregate liquidity, run one SwapMath step.
-    /// @param key              The pool to simulate.
-    /// @param zeroForOne       Swap direction.
-    /// @param amountSpecified  Swap amount (negative = exact input).
-    /// @return feePips         The directional fee applied.
-    /// @return outputAmount    Output tokens (for exact-in) or input tokens (for exact-out).
-    /// @return sqrtPriceAfter  The sqrt price after the simulated swap step.
-    function _simulateSwap(PoolKey calldata key, bool zeroForOne, int256 amountSpecified)
-        internal view returns (uint24 feePips, uint256 outputAmount, uint160 sqrtPriceAfter)
-    {
-        uint128 totalLiq;
-        int24 outerLower;
-        int24 outerUpper;
-        (feePips, totalLiq, outerLower, outerUpper) = _swapParams(key, zeroForOne);
-        if (totalLiq == 0) return (feePips, 0, 0);
-
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-        uint160 limit = zeroForOne
-            ? TickMath.getSqrtPriceAtTick(outerLower)
-            : TickMath.getSqrtPriceAtTick(outerUpper);
-        (sqrtPriceAfter,, outputAmount,) = SwapMath.computeSwapStep(sqrtPriceX96, limit, totalLiq, amountSpecified, feePips);
-    }
-
-    /// @dev Read the directional fee from PricingState and compute aggregate JIT liquidity.
-    /// @param key        The pool to query.
-    /// @param zeroForOne Swap direction (determines which fee to use).
-    /// @return feePips    The directional fee in pips.
-    /// @return totalLiq   Aggregate weighted liquidity across all buckets.
-    /// @return outerLower The lowest tickLower across all buckets.
-    /// @return outerUpper The highest tickUpper across all buckets.
-    function _swapParams(PoolKey calldata key, bool zeroForOne)
-        internal view returns (uint24 feePips, uint128 totalLiq, int24 outerLower, int24 outerUpper)
-    {
-        PricingState memory state = pricingState[key.toId()];
-        if (!state.live) return (0, 0, 0, 0);
-        feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
-        (totalLiq, outerLower, outerUpper) = _computeAggregateJITLiquidity(key);
-    }
-
-    /// @dev Compute the aggregate JIT liquidity that would be deployed across all buckets,
-    ///      and the outermost tick boundaries. Mirrors the allocation logic from `_deployJIT`
-    ///      but is view-only (no state changes). Used by indicative quotes and swapToPrice.
-    /// @param key         The pool to compute for.
-    /// @return totalLiq   Sum of weighted liquidity across all buckets.
-    /// @return outerLower The lowest tickLower across all buckets.
-    /// @return outerUpper The highest tickUpper across all buckets.
-    function _computeAggregateJITLiquidity(PoolKey memory key)
-        internal view returns (uint128 totalLiq, int24 outerLower, int24 outerUpper)
+    /// @dev Build the virtual tick schedule from the distribution buckets and run a full
+    ///      multi-step swap simulation via SwapSimulator.simulateSwapVirtual.
+    ///
+    ///      The tick schedule is constructed by computing each bucket's weighted liquidity
+    ///      (same allocation as _deployJIT) and emitting +liquidityDelta at tickLower and
+    ///      -liquidityDelta at tickUpper. The schedule is then sorted and passed to the
+    ///      virtual simulator, which walks ticks exactly as Pool.sol would.
+    ///
+    /// @param key                The pool to simulate.
+    /// @param zeroForOne         Swap direction.
+    /// @param amountSpecified    Swap amount (negative = exact input).
+    /// @param sqrtPriceLimitX96  Price limit for the simulation.
+    /// @return amountIn          Total input consumed.
+    /// @return amountOut         Total output received.
+    function _simulateVirtual(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
+        internal view returns (uint256 amountIn, uint256 amountOut)
     {
         PoolId poolId = key.toId();
-        (uint256 bal0, uint256 bal1) = _totalAssets(key);
-        if (bal0 == 0 && bal1 == 0) return (0, 0, 0);
 
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        uint24 feePips;
+        {
+            PricingState memory state = pricingState[poolId];
+            if (!state.live) return (0, 0);
+            feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
+        }
+
+        return _runVirtualSim(poolId, key, zeroForOne, amountSpecified, feePips, sqrtPriceLimitX96);
+    }
+
+    /// @dev Extracted to manage stack depth. Builds tick schedule and calls simulateSwapVirtual.
+    function _runVirtualSim(
+        PoolId poolId, PoolKey calldata key, bool zeroForOne,
+        int256 amountSpecified, uint24 feePips, uint160 sqrtPriceLimitX96
+    ) private view returns (uint256 amountIn, uint256 amountOut) {
+        (uint256 bal0, uint256 bal1) = _totalAssets(key);
+        if (bal0 == 0 && bal1 == 0) return (0, 0);
+
+        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(poolId);
+        if (sqrtPriceX96 == 0) return (0, 0);
+
+        (SwapSimulator.TickDelta[] memory sorted, uint128 liqAtTick) =
+            _buildTickSchedule(poolId, sqrtPriceX96, currentTick, bal0, bal1);
+        if (sorted.length == 0) return (0, 0);
+
+        return SwapSimulator.simulateSwapVirtual(
+            sqrtPriceX96, currentTick, liqAtTick,
+            zeroForOne, amountSpecified, feePips, sqrtPriceLimitX96, sorted
+        );
+    }
+
+    /// @dev Build a sorted, merged tick schedule from the distribution for virtual simulation.
+    /// @param poolId      The pool to build for.
+    /// @param sqrtPriceX96 Current pool sqrt price.
+    /// @param currentTick  Current pool tick.
+    /// @param bal0         Available currency0.
+    /// @param bal1         Available currency1.
+    /// @return sorted                  Sorted, merged tick deltas.
+    /// @return liquidityAtCurrentTick  Sum of liquidity from buckets active at currentTick.
+    function _buildTickSchedule(PoolId poolId, uint160 sqrtPriceX96, int24 currentTick, uint256 bal0, uint256 bal1)
+        internal view returns (SwapSimulator.TickDelta[] memory sorted, uint128 liquidityAtCurrentTick)
+    {
         LiquidityBucket[] storage dist = _distribution[poolId];
         uint256 n = dist.length;
-        if (n == 0) return (0, 0, 0);
+        if (n == 0) return (sorted, 0);
 
-        outerLower = type(int24).max;
-        outerUpper = type(int24).min;
+        SwapSimulator.TickDelta[] memory ticks = new SwapSimulator.TickDelta[](n * 2);
+        uint256 count;
 
         for (uint256 i; i < n; i++) {
-            if (dist[i].tickLower < outerLower) outerLower = dist[i].tickLower;
-            if (dist[i].tickUpper > outerUpper) outerUpper = dist[i].tickUpper;
-
             uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
                 sqrtPriceX96,
                 TickMath.getSqrtPriceAtTick(dist[i].tickLower),
                 TickMath.getSqrtPriceAtTick(dist[i].tickUpper),
-                bal0,
-                bal1
+                bal0, bal1
             );
-            totalLiq += uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
+            uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
+            if (liq == 0) continue;
+
+            ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickLower, liquidityNet: int128(liq)});
+            ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickUpper, liquidityNet: -int128(liq)});
+
+            if (currentTick >= dist[i].tickLower && currentTick < dist[i].tickUpper) {
+                liquidityAtCurrentTick += liq;
+            }
         }
+
+        if (count == 0) return (sorted, 0);
+        sorted = _sortAndMergeTicks(ticks, count);
+    }
+
+    /// @dev Sort tick deltas ascending and merge entries at the same tick.
+    /// @param ticks Raw tick deltas (may have duplicates at same tick from overlapping buckets).
+    /// @param count Number of valid entries in the array.
+    /// @return      Sorted, merged array.
+    function _sortAndMergeTicks(SwapSimulator.TickDelta[] memory ticks, uint256 count)
+        internal pure returns (SwapSimulator.TickDelta[] memory)
+    {
+        // Insertion sort — bounded by 2 * MAX_BUCKETS = 16 entries max.
+        for (uint256 i = 1; i < count; i++) {
+            SwapSimulator.TickDelta memory tmp = ticks[i];
+            uint256 j = i;
+            while (j > 0 && ticks[j - 1].tick > tmp.tick) {
+                ticks[j] = ticks[j - 1];
+                j--;
+            }
+            ticks[j] = tmp;
+        }
+
+        // Merge entries at the same tick
+        SwapSimulator.TickDelta[] memory merged = new SwapSimulator.TickDelta[](count);
+        uint256 mergedCount;
+        for (uint256 i; i < count; i++) {
+            if (mergedCount > 0 && merged[mergedCount - 1].tick == ticks[i].tick) {
+                merged[mergedCount - 1].liquidityNet += ticks[i].liquidityNet;
+            } else {
+                merged[mergedCount++] = ticks[i];
+            }
+        }
+
+        // Trim to actual size
+        SwapSimulator.TickDelta[] memory result = new SwapSimulator.TickDelta[](mergedCount);
+        for (uint256 i; i < mergedCount; i++) {
+            result[i] = merged[i];
+        }
+        return result;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
