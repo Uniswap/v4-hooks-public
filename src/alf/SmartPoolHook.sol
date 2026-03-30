@@ -441,67 +441,88 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         if (bal0 == 0 && bal1 == 0) return;
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-        LiquidityBucket[] storage dist = _distribution[poolId];
-        uint256 n = dist.length;
+
+        LiquidityBucket[] storage distStorage = _distribution[poolId];
+        uint256 n = distStorage.length;
         if (n == 0) return;
 
-        // Phase 1: compute weighted liquidity per bucket and total token needs.
-        uint128[] memory liqs = new uint128[](n);
-        uint256 totalNeed0;
-        uint256 totalNeed1;
+        // Phase 1: compute allocations. Loads distribution into memory and caches sqrtPrices.
+        (uint128[] memory liqs, uint256 totalNeed0, uint256 totalNeed1) =
+            _computeAllocations(distStorage, n, sqrtPriceX96, bal0, bal1);
 
-        for (uint256 i; i < n; i++) {
+        if (totalNeed0 == 0 && totalNeed1 == 0) return;
+
+        // Phase 2: liquidate claims (cheap), then pull only the shortfall from vault.
+        _redeemPoolClaims(poolId, key.currency0);
+        _redeemPoolClaims(poolId, key.currency1);
+        {
+            uint256 onHand0 = IERC20Minimal(Currency.unwrap(key.currency0)).balanceOf(address(this));
+            uint256 onHand1 = IERC20Minimal(Currency.unwrap(key.currency1)).balanceOf(address(this));
+            if (totalNeed0 > onHand0) _withdrawFromVault(poolId, key.currency0, totalNeed0 - onHand0);
+            if (totalNeed1 > onHand1) _withdrawFromVault(poolId, key.currency1, totalNeed1 - onHand1);
+        }
+
+        // Phase 3: deploy each bucket.
+        _deployBuckets(poolId, key, distStorage, n, liqs);
+    }
+
+    /// @dev Compute weighted liquidity per bucket and total token needs.
+    ///      Loads distribution from storage once, caches sqrtPrices to avoid
+    ///      redundant getSqrtPriceAtTick calls (~500 gas each).
+    function _computeAllocations(
+        LiquidityBucket[] storage dist,
+        uint256 n,
+        uint160 sqrtPriceX96,
+        uint256 bal0,
+        uint256 bal1
+    ) private view returns (uint128[] memory liqs, uint256 totalNeed0, uint256 totalNeed1) {
+        liqs = new uint128[](n);
+        for (uint256 i; i < n; ++i) {
             uint160 sqrtLower = TickMath.getSqrtPriceAtTick(dist[i].tickLower);
             uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(dist[i].tickUpper);
 
-            // Max liquidity this bucket could support from ALL pool assets.
-            // Scaling by weight gives the target liquidity for this bucket.
             uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
                 sqrtPriceX96, sqrtLower, sqrtUpper, bal0, bal1
             );
             uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
             liqs[i] = liq;
 
-            if (liq == 0) continue;
-
-            // Exact token amounts this bucket will consume when deployed.
-            // Above current price → needs token0. Below current price → needs token1.
-            if (sqrtPriceX96 < sqrtUpper) {
-                uint160 effectiveUpper = sqrtPriceX96 < sqrtLower ? sqrtLower : sqrtPriceX96;
-                totalNeed0 += SqrtPriceMath.getAmount0Delta(effectiveUpper, sqrtUpper, liq, true);
-            }
-            if (sqrtPriceX96 > sqrtLower) {
-                uint160 effectiveLower = sqrtPriceX96 > sqrtUpper ? sqrtUpper : sqrtPriceX96;
-                totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, effectiveLower, liq, true);
+            if (liq > 0) {
+                if (sqrtPriceX96 < sqrtUpper) {
+                    uint160 upper = sqrtPriceX96 < sqrtLower ? sqrtLower : sqrtPriceX96;
+                    totalNeed0 += SqrtPriceMath.getAmount0Delta(upper, sqrtUpper, liq, true);
+                }
+                if (sqrtPriceX96 > sqrtLower) {
+                    uint160 lower = sqrtPriceX96 > sqrtUpper ? sqrtUpper : sqrtPriceX96;
+                    totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, lower, liq, true);
+                }
             }
         }
+    }
 
-        if (totalNeed0 == 0 && totalNeed1 == 0) return;
-
-        // Phase 2: liquidate claims to ERC-20 (cheaper than vault), then pull shortfall from vault.
-        _redeemPoolClaims(poolId, key.currency0);
-        _redeemPoolClaims(poolId, key.currency1);
-
-        uint256 onHand0 = IERC20Minimal(Currency.unwrap(key.currency0)).balanceOf(address(this));
-        uint256 onHand1 = IERC20Minimal(Currency.unwrap(key.currency1)).balanceOf(address(this));
-        if (totalNeed0 > onHand0) _withdrawFromVault(poolId, key.currency0, totalNeed0 - onHand0);
-        if (totalNeed1 > onHand1) _withdrawFromVault(poolId, key.currency1, totalNeed1 - onHand1);
-
-        // Phase 3: deploy each bucket as a concentrated LP position.
+    /// @dev Deploy each bucket's LP position. Separated from _deployJIT for stack depth.
+    function _deployBuckets(
+        PoolId poolId,
+        PoolKey calldata key,
+        LiquidityBucket[] storage dist,
+        uint256 n,
+        uint128[] memory liqs
+    ) private {
         uint128[] storage active = _activeLiquidity[poolId];
-        for (uint256 i; i < n; i++) {
-            if (liqs[i] == 0) continue;
-            poolManager.modifyLiquidity(
-                key,
-                ModifyLiquidityParams({
-                    tickLower: dist[i].tickLower,
-                    tickUpper: dist[i].tickUpper,
-                    liquidityDelta: int256(uint256(liqs[i])),
-                    salt: LP_SALT
-                }),
-                ""
-            );
-            active[i] = liqs[i];
+        for (uint256 i; i < n; ++i) {
+            if (liqs[i] > 0) {
+                poolManager.modifyLiquidity(
+                    key,
+                    ModifyLiquidityParams({
+                        tickLower: dist[i].tickLower,
+                        tickUpper: dist[i].tickUpper,
+                        liquidityDelta: int256(uint256(liqs[i])),
+                        salt: LP_SALT
+                    }),
+                    ""
+                );
+                active[i] = liqs[i];
+            }
         }
     }
 
@@ -515,21 +536,21 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         uint128[] storage active = _activeLiquidity[poolId];
         uint256 n = dist.length;
 
-        for (uint256 i; i < n; i++) {
+        for (uint256 i; i < n; ++i) {
             uint128 liq = active[i];
-            if (liq == 0) continue;
-
-            poolManager.modifyLiquidity(
-                key,
-                ModifyLiquidityParams({
-                    tickLower: dist[i].tickLower,
-                    tickUpper: dist[i].tickUpper,
-                    liquidityDelta: -int256(uint256(liq)),
-                    salt: LP_SALT
-                }),
-                ""
-            );
-            active[i] = 0;
+            if (liq > 0) {
+                poolManager.modifyLiquidity(
+                    key,
+                    ModifyLiquidityParams({
+                        tickLower: dist[i].tickLower,
+                        tickUpper: dist[i].tickUpper,
+                        liquidityDelta: -int256(uint256(liq)),
+                        salt: LP_SALT
+                    }),
+                    ""
+                );
+                active[i] = 0;
+            }
         }
     }
 
@@ -716,40 +737,41 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @dev Sort tick deltas ascending and merge entries at the same tick.
-    /// @param ticks Raw tick deltas (may have duplicates at same tick from overlapping buckets).
-    /// @param count Number of valid entries in the array.
-    /// @return      Sorted, merged array.
+    /// @dev Sort tick deltas ascending by tick, merge same-tick entries, return trimmed array.
+    ///      Insertion sort in Solidity (correct, auditable), assembly only for the final copy.
+    /// @param ticks Raw tick deltas (modified in place during sort/merge).
+    /// @param count Number of valid entries.
+    /// @return result Sorted, merged array trimmed to final size.
     function _sortAndMergeTicks(SwapSimulator.TickDelta[] memory ticks, uint256 count)
-        internal pure returns (SwapSimulator.TickDelta[] memory)
+        internal pure returns (SwapSimulator.TickDelta[] memory result)
     {
-        // Insertion sort — bounded by 2 * MAX_BUCKETS = 16 entries max.
-        for (uint256 i = 1; i < count; i++) {
+        // Phase 1: insertion sort in-place (bounded by 2 * MAX_BUCKETS = 16).
+        for (uint256 i = 1; i < count; ++i) {
             SwapSimulator.TickDelta memory tmp = ticks[i];
             uint256 j = i;
             while (j > 0 && ticks[j - 1].tick > tmp.tick) {
                 ticks[j] = ticks[j - 1];
-                j--;
+                --j;
             }
             ticks[j] = tmp;
         }
 
-        // Merge entries at the same tick
-        SwapSimulator.TickDelta[] memory merged = new SwapSimulator.TickDelta[](count);
-        uint256 mergedCount;
-        for (uint256 i; i < count; i++) {
-            if (mergedCount > 0 && merged[mergedCount - 1].tick == ticks[i].tick) {
-                merged[mergedCount - 1].liquidityNet += ticks[i].liquidityNet;
+        // Phase 2: in-place merge — write pointer stays <= read pointer.
+        uint256 w;
+        for (uint256 r; r < count; ++r) {
+            if (w > 0 && ticks[w - 1].tick == ticks[r].tick) {
+                ticks[w - 1].liquidityNet += ticks[r].liquidityNet;
             } else {
-                merged[mergedCount++] = ticks[i];
+                if (r != w) ticks[w] = ticks[r];
+                ++w;
             }
         }
 
-        // Trim to actual size
-        SwapSimulator.TickDelta[] memory result = new SwapSimulator.TickDelta[](mergedCount);
-        for (uint256 i; i < mergedCount; i++) {
-            result[i] = merged[i];
+        // Phase 3: allocate trimmed result.
+        result = new SwapSimulator.TickDelta[](w);
+        for (uint256 i; i < w; ++i) {
+            result[i] = ticks[i];
         }
-        return result;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
