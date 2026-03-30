@@ -28,9 +28,9 @@ struct AuctionHookData {
 }
 
 /// @notice A specific quoter target for the auction hook.
-/// @dev The `curveUpdateData` is quoter-specific (e.g., PricingState for SimpleSpread,
-///      FlatPricingState for FlatLevel). The auction hook does not interpret it — it
-///      passes it through to the target quoter via ALFHookData.curveUpdateData.
+/// @dev The `curveUpdateData` is quoter-specific (e.g., PricingState for spread quoters).
+///      The auction hook does not interpret it — it passes it through to the target
+///      quoter via ALFHookData.curveUpdateData.
 ///
 ///      `amountSpecified` controls how much flow this quoter handles:
 ///        - 0: autonomous mode — the auction decides (fills remaining with price limits)
