@@ -1,5 +1,5 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/17d7d5811380e775c83dd0663f30fb95c53d02b9/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/31cb87e60f4a40a92b945f77ed7728229bdff170/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
@@ -38,6 +38,19 @@ function _applyProtocolFee(
     PoolKey calldata key,
     SwapParams calldata params,
     int128 unspecifiedDelta
+) internal returns (int128);
+```
+
+### _applyWithProtocolFee
+
+
+```solidity
+function _applyWithProtocolFee(
+    IPoolManager poolManager,
+    PoolKey calldata key,
+    SwapParams calldata params,
+    int128 unspecifiedDelta,
+    uint24 protocolFee
 ) internal returns (int128);
 ```
 

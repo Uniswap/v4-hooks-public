@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.29;
+pragma solidity ^0.8.0;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -16,7 +16,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
-import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
 import {ProtocolFees} from "./ProtocolFees.sol";
 
 /// @title BaseAggregatorHook
@@ -115,29 +114,42 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
 
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
+        pure
         override
         returns (bytes4)
     {
         revert LiquidityNotAllowed();
     }
 
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
-        bool isExactInput = params.amountSpecified < 0;
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, isExactInput);
+        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
         int128 specified = int128(-params.amountSpecified); // cancel core
 
-        unspecifiedDelta += _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
+        uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
+        unspecifiedDelta += _applyWithProtocolFee(poolManager, key, params, unspecifiedDelta, protocolFee);
 
-        if (!isExactInput) {
+        if (params.amountSpecified >= 0) {
             // For exactOut, in cases where the implementation's amountOut may be off.
             // NOTE: it would be up to the router to handle this
             specified = -int128(uint128(amountOut));
         }
+
+        int256 amount0;
+        int256 amount1;
+        if (params.zeroForOne == params.amountSpecified < 0) {
+            amount0 = specified;
+            amount1 = unspecifiedDelta;
+        } else {
+            amount0 = unspecifiedDelta;
+            amount1 = specified;
+        }
+
+        emit HookSwap(key.toId(), sender, amount0, amount1, protocolFee);
 
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
     }

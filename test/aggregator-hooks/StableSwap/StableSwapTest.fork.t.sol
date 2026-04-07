@@ -371,7 +371,7 @@ contract StableSwapForkedTest is Test {
     }
 
     /// @notice Test pseudoTotalValueLocked returns values matching Curve pool balances
-    function test_pseudoTotalValueLocked() public {
+    function test_pseudoTotalValueLocked() public view {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
 
         (int128 token0Index, int128 token1Index) = hook.poolIdToTokenInfo(poolId);
