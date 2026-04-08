@@ -50,6 +50,7 @@
     - [IStETH](src/interfaces/IWstETH.sol/interface.IStETH.md)
   - [❱ utils](src/utils/README.md)
     - [HookMiner](src/utils/HookMiner.sol/library.HookMiner.md)
+    - [PrefacedHookMiner](src/utils/PrefacedHookMiner.sol/library.PrefacedHookMiner.md)
   - [WETHHook](src/WETHHook.sol/contract.WETHHook.md)
   - [WstETHHook](src/WstETHHook.sol/contract.WstETHHook.md)
   - [WstETHRoutingHook](src/WstETHRoutingHook.sol/contract.WstETHRoutingHook.md)
