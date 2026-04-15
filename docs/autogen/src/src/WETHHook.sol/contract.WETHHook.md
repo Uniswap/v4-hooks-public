@@ -1,8 +1,11 @@
 # WETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/WETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/1f52c3f85ae2e6c0f55bd2f364a64854ec0b34bc/src/WETHHook.sol)
 
 **Inherits:**
-[BaseTokenWrapperHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
+[BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
+
+**Title:**
+Wrapped Ether Hook
 
 Hook for wrapping/unwrapping ETH in Uniswap V4 pools
 

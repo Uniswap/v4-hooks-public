@@ -1,8 +1,11 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/1f52c3f85ae2e6c0f55bd2f364a64854ec0b34bc/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
-[BaseAggregatorHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
+[BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
+
+**Title:**
+StableSwapNGAggregator
 
 Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
 
