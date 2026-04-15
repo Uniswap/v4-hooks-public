@@ -1,5 +1,8 @@
 # IFluidDexT1
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol)
+
+**Title:**
+IFluidDexT1
 
 Interface for the Fluid DEX T1 pool (colloquially Fluid DEX v1)
 
@@ -63,7 +66,7 @@ function swapOut(bool swap0to1_, uint256 amountOut_, uint256 amountInMax_, addre
 
 Executes a swap with an exact input amount using a callback for token transfer
 
-*The caller must implement IFluidDexCallback to provide the input tokens*
+The caller must implement IFluidDexCallback to provide the input tokens
 
 
 ```solidity
@@ -92,7 +95,7 @@ function swapInWithCallback(bool swap0to1_, uint256 amountIn_, uint256 amountOut
 
 Executes a swap with an exact output amount using a callback for token transfer
 
-*The caller must implement IFluidDexCallback to provide the input tokens*
+The caller must implement IFluidDexCallback to provide the input tokens
 
 
 ```solidity

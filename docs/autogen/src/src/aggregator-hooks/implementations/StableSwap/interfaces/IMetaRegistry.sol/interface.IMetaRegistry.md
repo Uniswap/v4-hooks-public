@@ -1,9 +1,12 @@
 # IMetaRegistry
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
+
+**Title:**
+IMetaRegistry
 
 Minimal interface for Curve's MetaRegistry to check meta pool status
 
-*See https://docs.curve.finance/developer/integration/meta-registry#is_meta*
+See https://docs.curve.finance/developer/integration/meta-registry#is_meta
 
 
 ## Functions
@@ -33,7 +36,7 @@ function is_meta(address _pool, uint256 _handler_id) external view returns (bool
 
 Check if a pool is registered in Curve's registry
 
-*Reverts if the pool is not in any registry*
+Reverts if the pool is not in any registry
 
 
 ```solidity

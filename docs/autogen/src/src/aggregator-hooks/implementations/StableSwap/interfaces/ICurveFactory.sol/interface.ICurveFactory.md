@@ -1,9 +1,12 @@
 # ICurveFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwap/interfaces/ICurveFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/interfaces/ICurveFactory.sol)
+
+**Title:**
+ICurveFactory
 
 Interface for Curve Metapool Factory
 
-*Based on the factory at https://github.com/curvefi/curve-factory/blob/master/contracts/Factory.vy*
+Based on the factory at https://github.com/curvefi/curve-factory/blob/master/contracts/Factory.vy
 
 
 ## Functions

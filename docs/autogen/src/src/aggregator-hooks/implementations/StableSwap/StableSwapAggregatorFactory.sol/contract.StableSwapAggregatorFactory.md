@@ -1,9 +1,12 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+
+**Title:**
+StableSwapAggregatorFactory
 
 Factory for creating StableSwapAggregator hooks via CREATE2 and initializing Uniswap V4 pools
 
-*Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool*
+Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 
 
 ## State Variables
@@ -12,7 +15,7 @@ The Uniswap V4 PoolManager contract
 
 
 ```solidity
-IPoolManager public immutable poolManager;
+IPoolManager public immutable poolManager
 ```
 
 
@@ -21,7 +24,7 @@ The Curve MetaRegistry for checking meta pool status
 
 
 ```solidity
-IMetaRegistry public immutable metaRegistry;
+IMetaRegistry public immutable metaRegistry
 ```
 
 
@@ -30,19 +33,19 @@ IMetaRegistry public immutable metaRegistry;
 
 
 ```solidity
-constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry);
+constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) ;
 ```
 
 ### createPool
 
 Creates a new StableSwapAggregator hook and initializes pools for all token pairs
 
-*Note: The caller should try to pass in the entire list of
-tokens they want tradeable from this pool in a single call.*
+Note: The caller should try to pass in the entire list of
+tokens they want tradeable from this pool in a single call.
 
-*Note: If a pool has already been created using an incomplete token set, the remaining
+Note: If a pool has already been created using an incomplete token set, the remaining
 pools should be initialized directly on the PoolManager using .initialize()
-with the previously deployed hook address*
+with the previously deployed hook address
 
 
 ```solidity

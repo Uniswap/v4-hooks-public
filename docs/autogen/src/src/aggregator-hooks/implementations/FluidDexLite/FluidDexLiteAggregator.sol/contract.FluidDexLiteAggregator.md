@@ -1,12 +1,15 @@
 # FluidDexLiteAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IFluidDexLiteCallback](/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol/interface.IFluidDexLiteCallback.md)
 
+**Title:**
+FluidDexLiteAggregator
+
 Uniswap V4 hook that aggregates liquidity from Fluid DEX Lite pools
 
-*Implements the IFluidDexLiteCallback interface for swap callbacks*
+Implements the IFluidDexLiteCallback interface for swap callbacks
 
 
 ## State Variables
@@ -15,7 +18,7 @@ The Fluid DEX Lite contract
 
 
 ```solidity
-IFluidDexLite public immutable fluidDexLite;
+IFluidDexLite public immutable fluidDexLite
 ```
 
 
@@ -24,7 +27,7 @@ The Fluid DEX Lite resolver for pool state queries
 
 
 ```solidity
-IFluidDexLiteResolver public immutable fluidDexLiteResolver;
+IFluidDexLiteResolver public immutable fluidDexLiteResolver
 ```
 
 
@@ -33,7 +36,7 @@ The key identifying the Fluid DEX Lite pool
 
 
 ```solidity
-IFluidDexLite.DexKey public dexKey;
+IFluidDexLite.DexKey public dexKey
 ```
 
 
@@ -42,28 +45,28 @@ The Uniswap V4 pool ID associated with this aggregator
 
 
 ```solidity
-PoolId public localPoolId;
+PoolId public localPoolId
 ```
 
 
 ### _isReversed
 
 ```solidity
-bool private _isReversed;
+bool private _isReversed
 ```
 
 
 ### salt
 
 ```solidity
-bytes32 private immutable salt;
+bytes32 private immutable salt
 ```
 
 
 ### FLUID_NATIVE_CURRENCY
 
 ```solidity
-address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 ```
 
 
@@ -80,7 +83,7 @@ constructor(IPoolManager _manager, IFluidDexLite _dexLite, IFluidDexLiteResolver
 
 Called by Fluid DEX Lite to request token transfer from the caller
 
-*Must transfer exactly `amount_` of `token_` to msg.sender (the DEX)*
+Must transfer exactly `amount_` of `token_` to msg.sender (the DEX)
 
 
 ```solidity
@@ -139,8 +142,8 @@ function _beforeInitialize(address, PoolKey calldata key, uint160) internal over
 
 Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
 
-*To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
-settle' pattern and set hasSettled to true*
+To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true
 
 
 ```solidity

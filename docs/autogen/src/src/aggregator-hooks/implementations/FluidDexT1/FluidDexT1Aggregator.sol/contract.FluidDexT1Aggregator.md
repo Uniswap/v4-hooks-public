@@ -1,12 +1,15 @@
 # FluidDexT1Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IDexCallback](/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
 
+**Title:**
+FluidDexT1Aggregator
+
 Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
 
-*Implements Fluid's IDexCallback interface for swap callbacks*
+Implements Fluid's IDexCallback interface for swap callbacks
 
 
 ## State Variables
@@ -15,7 +18,7 @@ The Fluid DEX T1 pool
 
 
 ```solidity
-IFluidDexT1 public immutable fluidPool;
+IFluidDexT1 public immutable fluidPool
 ```
 
 
@@ -24,7 +27,7 @@ Liquidity Layer contract (tokens are transferred here in the callback)
 
 
 ```solidity
-address public immutable fluidLiquidity;
+address public immutable fluidLiquidity
 ```
 
 
@@ -33,7 +36,7 @@ The Fluid DEX reserves resolver for pool state queries
 
 
 ```solidity
-IFluidDexReservesResolver public immutable fluidDexReservesResolver;
+IFluidDexReservesResolver public immutable fluidDexReservesResolver
 ```
 
 
@@ -42,7 +45,7 @@ The Fluid DEX resolver for swap queries
 
 
 ```solidity
-IFluidDexResolver public immutable fluidDexResolver;
+IFluidDexResolver public immutable fluidDexResolver
 ```
 
 
@@ -51,42 +54,42 @@ The Uniswap V4 pool ID associated with this aggregator
 
 
 ```solidity
-PoolId public localPoolId;
+PoolId public localPoolId
 ```
 
 
 ### _isReversed
 
 ```solidity
-bool private _isReversed;
+bool private _isReversed
 ```
 
 
 ### FLUID_NATIVE_CURRENCY
 
 ```solidity
-address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 ```
 
 
 ### INFLIGHT_SLOT
 
 ```solidity
-bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
+bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e
 ```
 
 
 ### INACCURACY_BUFFER
 
 ```solidity
-uint256 private constant INACCURACY_BUFFER = 20;
+uint256 private constant INACCURACY_BUFFER = 20
 ```
 
 
 ### INACCURACY_SCALE
 
 ```solidity
-uint256 private constant INACCURACY_SCALE = 1_000_000;
+uint256 private constant INACCURACY_SCALE = 1_000_000
 ```
 
 
@@ -108,7 +111,7 @@ constructor(
 
 dex liquidity callback
 
-*Per Fluid docs, tokens should be transferred to the Liquidity Layer.*
+Per Fluid docs, tokens should be transferred to the Liquidity Layer.
 
 
 ```solidity
@@ -150,8 +153,8 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 ### pseudoTotalValueLocked
 
-*Uses call (not staticcall) because Fluid's getPoolReserves internally calls getDexPricesAndExchangePrices
-which performs state changes; staticcall would cause StateChangeDuringStaticCall and return zeros.*
+Uses call (not staticcall) because Fluid's getPoolReserves internally calls getDexPricesAndExchangePrices
+which performs state changes; staticcall would cause StateChangeDuringStaticCall and return zeros.
 
 
 ```solidity
@@ -169,8 +172,8 @@ function _beforeInitialize(address, PoolKey calldata key, uint160) internal over
 
 Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
 
-*To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
-settle' pattern and set hasSettled to true*
+To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true
 
 
 ```solidity

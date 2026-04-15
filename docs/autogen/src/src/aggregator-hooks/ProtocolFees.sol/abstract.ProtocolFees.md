@@ -1,12 +1,12 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/31cb87e60f4a40a92b945f77ed7728229bdff170/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
 ### tokenJar
 
 ```solidity
-address public tokenJar;
+address public tokenJar
 ```
 
 
@@ -15,8 +15,8 @@ address public tokenJar;
 
 Queries the token jar from the pool manager and emits an event if it is updated
 
-*This function should not need to be called externally except in the case of the tokenJar address changing
-after the protocol fee has been set*
+This function should not need to be called externally except in the case of the tokenJar address changing
+after the protocol fee has been set
 
 
 ```solidity

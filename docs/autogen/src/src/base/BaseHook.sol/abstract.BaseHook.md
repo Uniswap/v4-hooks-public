@@ -1,8 +1,11 @@
 # BaseHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/base/BaseHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/base/BaseHook.sol)
 
 **Inherits:**
 IHooks, ImmutableState
+
+**Title:**
+Base Hook
 
 abstract contract for hook implementations
 
@@ -19,7 +22,7 @@ constructor(IPoolManager _manager) ImmutableState(_manager);
 
 Returns a struct of permissions to signal which hook functions are to be implemented
 
-*Used at deployment to validate the address correctly represents the expected permissions*
+Used at deployment to validate the address correctly represents the expected permissions
 
 
 ```solidity
@@ -36,9 +39,9 @@ function getHookPermissions() public pure virtual returns (Hooks.Permissions mem
 
 Validates the deployed hook address agrees with the expected permissions of the hook
 
-*this function is virtual so that we can override it during testing,
+this function is virtual so that we can override it during testing,
 which allows us to deploy an implementation to any address
-and then etch the bytecode into the correct address*
+and then etch the bytecode into the correct address
 
 
 ```solidity
@@ -373,10 +376,13 @@ The hook called before donate
 
 
 ```solidity
-function beforeDonate(address sender, PoolKey calldata key, uint256 amount0, uint256 amount1, bytes calldata hookData)
-    external
-    onlyPoolManager
-    returns (bytes4);
+function beforeDonate(
+    address sender,
+    PoolKey calldata key,
+    uint256 amount0,
+    uint256 amount1,
+    bytes calldata hookData
+) external onlyPoolManager returns (bytes4);
 ```
 **Parameters**
 
@@ -399,7 +405,10 @@ function beforeDonate(address sender, PoolKey calldata key, uint256 amount0, uin
 
 
 ```solidity
-function _beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata) internal virtual returns (bytes4);
+function _beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
+    internal
+    virtual
+    returns (bytes4);
 ```
 
 ### afterDonate
@@ -408,10 +417,13 @@ The hook called after donate
 
 
 ```solidity
-function afterDonate(address sender, PoolKey calldata key, uint256 amount0, uint256 amount1, bytes calldata hookData)
-    external
-    onlyPoolManager
-    returns (bytes4);
+function afterDonate(
+    address sender,
+    PoolKey calldata key,
+    uint256 amount0,
+    uint256 amount1,
+    bytes calldata hookData
+) external onlyPoolManager returns (bytes4);
 ```
 **Parameters**
 
@@ -434,7 +446,10 @@ function afterDonate(address sender, PoolKey calldata key, uint256 amount0, uint
 
 
 ```solidity
-function _afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata) internal virtual returns (bytes4);
+function _afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
+    internal
+    virtual
+    returns (bytes4);
 ```
 
 ## Errors

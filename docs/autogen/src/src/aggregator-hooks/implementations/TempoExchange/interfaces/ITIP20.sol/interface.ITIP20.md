@@ -1,9 +1,12 @@
 # ITIP20
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/TempoExchange/interfaces/ITIP20.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/TempoExchange/interfaces/ITIP20.sol)
+
+**Title:**
+ITIP20
 
 Interface for Tempo TIP-20 tokens (precompile stablecoins)
 
-*Each TIP-20 token defines a quoteToken() forming a DEX tree. PathUSD is the root (quoteToken = address(0)).*
+Each TIP-20 token defines a quoteToken() forming a DEX tree. PathUSD is the root (quoteToken = address(0)).
 
 
 ## Functions
@@ -29,7 +32,7 @@ function symbol() external view returns (string memory);
 
 Returns the parent token in the DEX tree
 
-*PathUSD (the root token) returns address(0)*
+PathUSD (the root token) returns address(0)
 
 
 ```solidity
