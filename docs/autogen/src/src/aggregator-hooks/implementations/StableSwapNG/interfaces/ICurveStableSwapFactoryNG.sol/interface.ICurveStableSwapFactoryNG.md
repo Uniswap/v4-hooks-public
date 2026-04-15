@@ -1,12 +1,9 @@
 # ICurveStableSwapFactoryNG
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
-
-**Title:**
-ICurveStableSwapFactoryNG
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol)
 
 Interface for Curve StableSwap NG Factory
 
-Based on the Vyper implementation at https://github.com/curvefi/stableswap-ng
+*Based on the Vyper implementation at https://github.com/curvefi/stableswap-ng*
 
 
 ## Functions
@@ -218,7 +215,7 @@ function is_meta(address _pool) external view returns (bool);
 
 Get the number of coins in a pool
 
-Reverts if pool was not deployed by this factory
+*Reverts if pool was not deployed by this factory*
 
 
 ```solidity

@@ -1,12 +1,9 @@
 # FluidDexLiteAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
-
-**Title:**
-FluidDexLiteAggregatorFactory
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
 
 Factory for creating FluidDexLiteAggregator hooks via CREATE2 and initializing Uniswap V4 pools
 
-Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
+*Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements*
 
 
 ## State Variables
@@ -15,7 +12,7 @@ The Uniswap V4 PoolManager contract
 
 
 ```solidity
-IPoolManager public immutable poolManager
+IPoolManager public immutable poolManager;
 ```
 
 
@@ -24,7 +21,7 @@ The Fluid DEX Lite contract
 
 
 ```solidity
-IFluidDexLite public immutable fluidDexLite
+IFluidDexLite public immutable fluidDexLite;
 ```
 
 
@@ -33,7 +30,7 @@ The Fluid DEX Lite resolver for pool state queries
 
 
 ```solidity
-IFluidDexLiteResolver public immutable fluidDexLiteResolver
+IFluidDexLiteResolver public immutable fluidDexLiteResolver;
 ```
 
 
@@ -42,7 +39,7 @@ IFluidDexLiteResolver public immutable fluidDexLiteResolver
 
 
 ```solidity
-constructor(IPoolManager _poolManager, IFluidDexLite _fluidDexLite, IFluidDexLiteResolver _fluidDexLiteResolver) ;
+constructor(IPoolManager _poolManager, IFluidDexLite _fluidDexLite, IFluidDexLiteResolver _fluidDexLiteResolver);
 ```
 
 ### createPool

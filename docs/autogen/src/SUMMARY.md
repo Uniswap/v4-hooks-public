@@ -48,6 +48,8 @@
   - [❱ interfaces](src/interfaces/README.md)
     - [IWstETH](src/interfaces/IWstETH.sol/interface.IWstETH.md)
     - [IStETH](src/interfaces/IWstETH.sol/interface.IStETH.md)
+  - [❱ permissioned-pools](src/permissioned-pools/README.md)
+    - [PermissionedHooks](src/permissioned-pools/PermissionedHooks.sol/contract.PermissionedHooks.md)
   - [❱ utils](src/utils/README.md)
     - [HookMiner](src/utils/HookMiner.sol/library.HookMiner.md)
   - [WETHHook](src/WETHHook.sol/contract.WETHHook.md)

@@ -1,12 +1,9 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
-
-**Title:**
-FluidDexT1AggregatorFactory
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 Factory for creating FluidDexT1Aggregator hooks via CREATE2 and initializing Uniswap V4 pools
 
-Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
+*Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements*
 
 
 ## State Variables
@@ -15,7 +12,7 @@ The Uniswap V4 PoolManager contract
 
 
 ```solidity
-IPoolManager public immutable poolManager
+IPoolManager public immutable poolManager;
 ```
 
 
@@ -24,7 +21,7 @@ The Fluid DEX reserves resolver for pool state queries
 
 
 ```solidity
-IFluidDexReservesResolver public immutable fluidDexReservesResolver
+IFluidDexReservesResolver public immutable fluidDexReservesResolver;
 ```
 
 
@@ -33,7 +30,7 @@ The Fluid DEX resolver for swap queries
 
 
 ```solidity
-IFluidDexResolver public immutable fluidDexResolver
+IFluidDexResolver public immutable fluidDexResolver;
 ```
 
 
@@ -42,7 +39,7 @@ The Fluid Liquidity Layer contract address
 
 
 ```solidity
-address public immutable fluidLiquidity
+address public immutable fluidLiquidity;
 ```
 
 
@@ -56,7 +53,7 @@ constructor(
     IFluidDexReservesResolver _fluidDexReservesResolver,
     IFluidDexResolver _fluidDexResolver,
     address _fluidLiquidity
-) ;
+);
 ```
 
 ### createPool

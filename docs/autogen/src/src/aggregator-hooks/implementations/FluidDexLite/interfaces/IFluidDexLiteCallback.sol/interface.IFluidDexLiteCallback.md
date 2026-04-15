@@ -1,8 +1,5 @@
 # IFluidDexLiteCallback
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol)
-
-**Title:**
-IFluidDexLiteCallback
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol)
 
 Callback interface required by Fluid DEX Lite swaps when isCallback is true
 
@@ -12,7 +9,7 @@ Callback interface required by Fluid DEX Lite swaps when isCallback is true
 
 Called by Fluid DEX Lite to request token transfer from the caller
 
-Must transfer exactly `amount_` of `token_` to msg.sender (the DEX)
+*Must transfer exactly `amount_` of `token_` to msg.sender (the DEX)*
 
 
 ```solidity

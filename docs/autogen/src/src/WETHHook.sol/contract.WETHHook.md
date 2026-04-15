@@ -1,15 +1,12 @@
 # WETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/WETHHook.sol)
 
 **Inherits:**
 [BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
 
-**Title:**
-Wrapped Ether Hook
-
 Hook for wrapping/unwrapping ETH in Uniswap V4 pools
 
-Implements 1:1 wrapping/unwrapping of ETH to WETH
+*Implements 1:1 wrapping/unwrapping of ETH to WETH*
 
 
 ## State Variables
@@ -18,7 +15,7 @@ The WETH9 contract
 
 
 ```solidity
-WETH public immutable weth
+WETH public immutable weth;
 ```
 
 
@@ -30,11 +27,7 @@ Creates a new WETH wrapper hook
 
 ```solidity
 constructor(IPoolManager _manager, address payable _weth)
-    BaseTokenWrapperHook(
-        _manager,
-        Currency.wrap(_weth), // wrapper token is WETH
-        CurrencyLibrary.ADDRESS_ZERO // underlying token is ETH (address(0))
-    );
+    BaseTokenWrapperHook(_manager, Currency.wrap(_weth), CurrencyLibrary.ADDRESS_ZERO);
 ```
 **Parameters**
 
@@ -48,7 +41,7 @@ constructor(IPoolManager _manager, address payable _weth)
 
 Deposits underlying tokens to receive wrapper tokens
 
-Note the WETH deposit relies on the WETH wrapper having a receive function that mints WETH to msg.sender
+*Note the WETH deposit relies on the WETH wrapper having a receive function that mints WETH to msg.sender*
 
 
 ```solidity
@@ -72,7 +65,7 @@ function _deposit(uint256 underlyingAmount) internal override returns (uint256, 
 
 Withdraws wrapper tokens to receive underlying tokens
 
-Implementing contracts should handle:
+*Implementing contracts should handle:*
 
 
 ```solidity

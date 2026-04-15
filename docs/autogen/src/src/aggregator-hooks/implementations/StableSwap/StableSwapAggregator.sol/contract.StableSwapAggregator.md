@@ -1,15 +1,12 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
 
-**Title:**
-StableSwapAggregator
-
 Uniswap V4 hook that aggregates liquidity from Curve StableSwap pools
 
-Supports exact-input swaps only due to StableSwap pool limitations
+*Supports exact-input swaps only due to StableSwap pool limitations*
 
 
 ## State Variables
@@ -18,7 +15,7 @@ Curve's address for native currency
 
 
 ```solidity
-address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+address private constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 ```
 
 
@@ -27,7 +24,7 @@ The Curve StableSwap pool
 
 
 ```solidity
-ICurveStableSwap public immutable pool
+ICurveStableSwap public immutable pool;
 ```
 
 
@@ -36,7 +33,7 @@ The Curve MetaRegistry for checking meta pool status
 
 
 ```solidity
-IMetaRegistry public immutable metaRegistry
+IMetaRegistry public immutable metaRegistry;
 ```
 
 
@@ -45,7 +42,7 @@ Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
 
 ```solidity
-mapping(PoolId => PoolInfo) public poolIdToTokenInfo
+mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 ```
 
 
@@ -112,8 +109,8 @@ function _beforeInitialize(address, PoolKey calldata key, uint160) internal over
 
 Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
 
-To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
-settle' pattern and set hasSettled to true
+*To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true*
 
 
 ```solidity

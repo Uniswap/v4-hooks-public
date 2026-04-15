@@ -1,17 +1,14 @@
 # WstETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WstETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/WstETHHook.sol)
 
 **Inherits:**
 [BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
 
-**Title:**
-Wrapped Staked ETH (wstETH) Hook
-
 Hook for wrapping/unwrapping stETH/wstETH in Uniswap V4 pools
 
-Implements dynamic exchange rate wrapping/unwrapping between stETH and wstETH
+*Implements dynamic exchange rate wrapping/unwrapping between stETH and wstETH*
 
-wstETH represents stETH with accrued staking rewards, maintaining a dynamic exchange rate
+*wstETH represents stETH with accrued staking rewards, maintaining a dynamic exchange rate*
 
 
 ## State Variables
@@ -20,7 +17,7 @@ The wstETH contract used for wrapping/unwrapping operations
 
 
 ```solidity
-IWstETH public immutable wstETH
+IWstETH public immutable wstETH;
 ```
 
 
@@ -29,16 +26,12 @@ IWstETH public immutable wstETH
 
 Creates a new wstETH wrapper hook
 
-Initializes with wstETH as wrapper token and stETH as underlying token
+*Initializes with wstETH as wrapper token and stETH as underlying token*
 
 
 ```solidity
 constructor(IPoolManager _manager, IWstETH _wsteth)
-    BaseTokenWrapperHook(
-        _manager,
-        Currency.wrap(address(_wsteth)), // wrapper token is wstETH
-        Currency.wrap(_wsteth.stETH()) // underlying token is stETH
-    );
+    BaseTokenWrapperHook(_manager, Currency.wrap(address(_wsteth)), Currency.wrap(_wsteth.stETH()));
 ```
 **Parameters**
 
@@ -52,7 +45,7 @@ constructor(IPoolManager _manager, IWstETH _wsteth)
 
 Deposits underlying tokens to receive wrapper tokens
 
-Implementing contracts should handle:
+*Implementing contracts should handle:*
 
 
 ```solidity
@@ -80,7 +73,7 @@ function _deposit(uint256 underlyingAmount)
 
 Withdraws wrapper tokens to receive underlying tokens
 
-Implementing contracts should handle:
+*Implementing contracts should handle:*
 
 
 ```solidity
@@ -107,7 +100,7 @@ function _withdraw(uint256 wrapperAmount)
 
 Calculates how much stETH is needed to receive a specific amount of wstETH
 
-Uses current stETH/wstETH exchange rate for calculation
+*Uses current stETH/wstETH exchange rate for calculation*
 
 
 ```solidity
@@ -130,7 +123,7 @@ function _getWrapInputRequired(uint256 wrappedAmount) internal view override ret
 
 Calculates how much wstETH is needed to receive a specific amount of stETH
 
-Uses current stETH/wstETH exchange rate for calculation
+*Uses current stETH/wstETH exchange rate for calculation*
 
 
 ```solidity
@@ -153,7 +146,7 @@ function _getUnwrapInputRequired(uint256 underlyingAmount) internal view overrid
 
 Indicates whether the hook supports exact output swaps
 
-Default implementation returns true
+*Default implementation returns true*
 
 
 ```solidity

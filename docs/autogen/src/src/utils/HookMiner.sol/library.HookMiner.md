@@ -1,8 +1,5 @@
 # HookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/utils/HookMiner.sol)
-
-**Title:**
-HookMiner
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/utils/HookMiner.sol)
 
 a minimal library for mining hook addresses
 
@@ -11,14 +8,14 @@ a minimal library for mining hook addresses
 ### FLAG_MASK
 
 ```solidity
-uint160 constant FLAG_MASK = Hooks.ALL_HOOK_MASK
+uint160 constant FLAG_MASK = Hooks.ALL_HOOK_MASK;
 ```
 
 
 ### MAX_LOOP
 
 ```solidity
-uint256 constant MAX_LOOP = 160_444
+uint256 constant MAX_LOOP = 160_444;
 ```
 
 

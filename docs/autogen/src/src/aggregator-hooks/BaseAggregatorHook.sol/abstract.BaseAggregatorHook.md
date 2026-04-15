@@ -1,26 +1,23 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
 
-**Title:**
-BaseAggregatorHook
-
 Abstract contract for implementing aggregator hooks in Uniswap V4
 
-Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract
+*Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract*
 
 
 ## State Variables
 ### aggregatorHookVersion
 The publicly displayed version of the aggregator hook.
 
-Although this should never change after construction, strings cannot be labelled immutable.
+*Although this should never change after construction, strings cannot be labelled immutable.*
 
 
 ```solidity
-string public aggregatorHookVersion
+string public aggregatorHookVersion;
 ```
 
 
@@ -45,8 +42,8 @@ constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHoo
 
 Queries the token jar from the pool manager and emits an event if it is updated
 
-This function should not need to be called externally except in the case of the tokenJar address changing
-after the protocol fee has been set
+*This function should not need to be called externally except in the case of the tokenJar address changing
+after the protocol fee has been set*
 
 
 ```solidity
@@ -85,8 +82,8 @@ function pseudoTotalValueLocked(PoolId poolId) external virtual returns (uint256
 
 Quotes amount of unspecified side for a given amount of specified side
 
-This function is meant to be called as a view function even though it is not one. This is because the swap
-might be simulated but not finalized. Applies protocol fee on top of the raw quote from the underlying liquidity source
+*This function is meant to be called as a view function even though it is not one. This is because the swap
+might be simulated but not finalized. Applies protocol fee on top of the raw quote from the underlying liquidity source*
 
 
 ```solidity
@@ -114,7 +111,7 @@ function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 
 Returns a struct of permissions to signal which hook functions are to be implemented
 
-Used at deployment to validate the address correctly represents the expected permissions
+*Used at deployment to validate the address correctly represents the expected permissions*
 
 
 ```solidity
@@ -131,8 +128,8 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
 
-To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
-settle' pattern and set hasSettled to true
+*To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true*
 
 
 ```solidity
@@ -243,7 +240,7 @@ function _pay(Currency token, address payer, uint256 amount) internal override;
 
 Allows the contract to receive ETH for native currency swaps
 
-Required for handling native ETH transfers during swap operations
+*Required for handling native ETH transfers during swap operations*
 
 
 ```solidity

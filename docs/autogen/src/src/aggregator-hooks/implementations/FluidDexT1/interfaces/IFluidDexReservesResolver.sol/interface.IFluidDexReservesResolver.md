@@ -1,8 +1,5 @@
 # IFluidDexReservesResolver
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol)
-
-**Title:**
-IFluidDexReservesResolver
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol)
 
 Interface for the Fluid DEX T1 reserves resolver
 
@@ -12,7 +9,7 @@ Interface for the Fluid DEX T1 reserves resolver
 
 Get pool data with reserves for a specific DEX
 
-Matches Fluid's FluidDexReservesResolver.getPoolReserves
+*Matches Fluid's FluidDexReservesResolver.getPoolReserves*
 
 
 ```solidity

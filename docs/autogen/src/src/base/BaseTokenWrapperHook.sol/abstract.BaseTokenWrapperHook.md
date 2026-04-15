@@ -1,19 +1,16 @@
 # BaseTokenWrapperHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/base/BaseTokenWrapperHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/base/BaseTokenWrapperHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
 
-**Title:**
-Base Token Wrapper Hook
-
 Abstract base contract for implementing token wrapper hooks in Uniswap V4
 
-This contract provides the base functionality for wrapping/unwrapping tokens through V4 pools
+*This contract provides the base functionality for wrapping/unwrapping tokens through V4 pools*
 
-All liquidity operations are blocked as liquidity is managed through the underlying token wrapper
+*All liquidity operations are blocked as liquidity is managed through the underlying token wrapper*
 
-Implementing contracts must provide deposit() and withdraw() functions
+*Implementing contracts must provide deposit() and withdraw() functions*
 
 
 ## State Variables
@@ -22,7 +19,7 @@ The wrapped token currency (e.g., WETH)
 
 
 ```solidity
-Currency public immutable wrapperCurrency
+Currency public immutable wrapperCurrency;
 ```
 
 
@@ -31,24 +28,24 @@ The underlying token currency (e.g., ETH)
 
 
 ```solidity
-Currency public immutable underlyingCurrency
+Currency public immutable underlyingCurrency;
 ```
 
 
 ### wrapZeroForOne
 Indicates whether wrapping occurs when swapping from token0 to token1
 
-This is determined by the relative ordering of the wrapper and underlying tokens
+*This is determined by the relative ordering of the wrapper and underlying tokens*
 
-If true: token0 is underlying (e.g. ETH) and token1 is wrapper (e.g. WETH)
+*If true: token0 is underlying (e.g. ETH) and token1 is wrapper (e.g. WETH)*
 
-If false: token0 is wrapper (e.g. WETH) and token1 is underlying (e.g. ETH)
+*If false: token0 is wrapper (e.g. WETH) and token1 is underlying (e.g. ETH)*
 
-This is set in the constructor based on the token addresses to ensure consistent behavior
+*This is set in the constructor based on the token addresses to ensure consistent behavior*
 
 
 ```solidity
-bool public immutable wrapZeroForOne
+bool public immutable wrapZeroForOne;
 ```
 
 
@@ -74,7 +71,7 @@ constructor(IPoolManager _manager, Currency _wrapper, Currency _underlying) Base
 
 Returns a struct of permissions to signal which hook functions are to be implemented
 
-Used at deployment to validate the address correctly represents the expected permissions
+*Used at deployment to validate the address correctly represents the expected permissions*
 
 
 ```solidity
@@ -91,7 +88,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 Validates pool initialization parameters
 
-Ensures pool contains wrapper and underlying tokens with zero fee
+*Ensures pool contains wrapper and underlying tokens with zero fee*
 
 
 ```solidity
@@ -116,7 +113,7 @@ function _beforeInitialize(address, PoolKey calldata poolKey, uint160) internal 
 
 Prevents liquidity operations on wrapper pools
 
-Always reverts as liquidity is managed through the token wrapper
+*Always reverts as liquidity is managed through the token wrapper*
 
 
 ```solidity
@@ -131,7 +128,7 @@ function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams ca
 
 Handles token wrapping and unwrapping during swaps
 
-Processes both exact input (amountSpecified < 0) and exact output (amountSpecified > 0) swaps
+*Processes both exact input (amountSpecified < 0) and exact output (amountSpecified > 0) swaps*
 
 
 ```solidity
@@ -162,7 +159,7 @@ function _beforeSwap(address, PoolKey calldata, SwapParams calldata params, byte
 
 Transfers tokens to the pool manager
 
-The recipient of the payment should be the poolManager
+*The recipient of the payment should be the poolManager*
 
 
 ```solidity
@@ -181,7 +178,7 @@ function _pay(Currency token, address, uint256 amount) internal override;
 
 Deposits underlying tokens to receive wrapper tokens
 
-Implementing contracts should handle:
+*Implementing contracts should handle:*
 
 
 ```solidity
@@ -208,7 +205,7 @@ function _deposit(uint256 underlyingAmount)
 
 Withdraws wrapper tokens to receive underlying tokens
 
-Implementing contracts should handle:
+*Implementing contracts should handle:*
 
 
 ```solidity
@@ -235,9 +232,9 @@ function _withdraw(uint256 wrappedAmount)
 
 Calculates underlying tokens needed to receive desired wrapper tokens
 
-Default implementation assumes 1:1 ratio
+*Default implementation assumes 1:1 ratio*
 
-Override for wrappers with different exchange rates
+*Override for wrappers with different exchange rates*
 
 
 ```solidity
@@ -260,9 +257,9 @@ function _getWrapInputRequired(uint256 wrappedAmount) internal view virtual retu
 
 Calculates wrapper tokens needed to receive desired underlying tokens
 
-Default implementation assumes 1:1 ratio
+*Default implementation assumes 1:1 ratio*
 
-Override for wrappers with different exchange rates
+*Override for wrappers with different exchange rates*
 
 
 ```solidity
@@ -285,9 +282,9 @@ function _getUnwrapInputRequired(uint256 underlyingAmount) internal view virtual
 
 Indicates whether the hook supports exact output swaps
 
-Default implementation returns true
+*Default implementation returns true*
 
-Override for wrappers that cannot support exact output swaps
+*Override for wrappers that cannot support exact output swaps*
 
 
 ```solidity
@@ -298,9 +295,9 @@ function _supportsExactOutput() internal view virtual returns (bool);
 
 Indicates whether the hook supports exact input swaps
 
-Default implementation returns true
+*Default implementation returns true*
 
-Override for wrappers that cannot support exact input swaps
+*Override for wrappers that cannot support exact input swaps*
 
 
 ```solidity
@@ -311,7 +308,7 @@ function _supportsExactInput() internal view virtual returns (bool);
 ### LiquidityNotAllowed
 Thrown when attempting to add or remove liquidity
 
-Liquidity operations are blocked since all liquidity is managed by the token wrapper
+*Liquidity operations are blocked since all liquidity is managed by the token wrapper*
 
 
 ```solidity
@@ -321,7 +318,7 @@ error LiquidityNotAllowed();
 ### InvalidPoolToken
 Thrown when initializing a pool with invalid tokens
 
-Pool must contain exactly one wrapper token and its underlying token
+*Pool must contain exactly one wrapper token and its underlying token*
 
 
 ```solidity
@@ -331,7 +328,7 @@ error InvalidPoolToken();
 ### InvalidPoolFee
 Thrown when initializing a pool with non-zero fee
 
-Fee must be 0 as wrapper pools don't charge fees
+*Fee must be 0 as wrapper pools don't charge fees*
 
 
 ```solidity

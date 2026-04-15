@@ -1,15 +1,12 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
 
-**Title:**
-StableSwapNGAggregator
-
 Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
 
-Supports both exact-input and exact-output swaps
+*Supports both exact-input and exact-output swaps*
 
 
 ## State Variables
@@ -18,7 +15,7 @@ The Curve StableSwap NG pool
 
 
 ```solidity
-ICurveStableSwapNG public immutable pool
+ICurveStableSwapNG public immutable pool;
 ```
 
 
@@ -27,21 +24,21 @@ The Curve StableSwap NG factory for checking meta pool status
 
 
 ```solidity
-ICurveStableSwapFactoryNG public immutable curveFactory
+ICurveStableSwapFactoryNG public immutable curveFactory;
 ```
 
 
 ### INACCURACY_BUFFER
 
 ```solidity
-uint256 internal constant INACCURACY_BUFFER = 20
+uint256 internal constant INACCURACY_BUFFER = 20;
 ```
 
 
 ### INACCURACY_SCALE
 
 ```solidity
-uint256 internal constant INACCURACY_SCALE = 1_000_000
+uint256 internal constant INACCURACY_SCALE = 1_000_000;
 ```
 
 
@@ -50,7 +47,7 @@ Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
 
 ```solidity
-mapping(PoolId => PoolInfo) public poolIdToTokenInfo
+mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 ```
 
 
@@ -108,8 +105,8 @@ function _beforeInitialize(address, PoolKey calldata key, uint160) internal over
 
 Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
 
-To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
-settle' pattern and set hasSettled to true
+*To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true*
 
 
 ```solidity

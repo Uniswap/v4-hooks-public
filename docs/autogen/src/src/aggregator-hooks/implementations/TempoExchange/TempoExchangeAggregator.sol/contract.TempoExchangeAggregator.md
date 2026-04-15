@@ -1,17 +1,14 @@
 # TempoExchangeAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
 
-**Title:**
-TempoExchangeAggregator
-
 Singleton Uniswap V4 hook that aggregates liquidity from Tempo's enshrined stablecoin DEX
 
-Supports multiple pools and both exact-input and exact-output swaps
+*Supports multiple pools and both exact-input and exact-output swaps*
 
-Tempo uses uint128 for amounts; this contract handles the conversion from uint256
+*Tempo uses uint128 for amounts; this contract handles the conversion from uint256*
 
 
 ## State Variables
@@ -20,7 +17,7 @@ The Tempo stablecoin exchange (precompiled contract)
 
 
 ```solidity
-ITempoExchange public immutable tempoExchange
+ITempoExchange public immutable tempoExchange;
 ```
 
 
@@ -29,32 +26,32 @@ Maps Uniswap V4 pool IDs to their token addresses
 
 
 ```solidity
-mapping(PoolId => PoolTokens) public poolIdToTokens
+mapping(PoolId => PoolTokens) public poolIdToTokens;
 ```
 
 
 ### _canonicalPoolByPair
 Canonical pool per token pair (key = keccak256(abi.encode(ordered token0, ordered token1)))
 
-Enforces one pool per pair
+*Enforces one pool per pair*
 
 
 ```solidity
-mapping(bytes32 => PoolId) private _canonicalPoolByPair
+mapping(bytes32 => PoolId) private _canonicalPoolByPair;
 ```
 
 
 ### INACCURACY_BUFFER
 
 ```solidity
-uint256 private constant INACCURACY_BUFFER = 20
+uint256 private constant INACCURACY_BUFFER = 20;
 ```
 
 
 ### INACCURACY_SCALE
 
 ```solidity
-uint256 private constant INACCURACY_SCALE = 1_000_000
+uint256 private constant INACCURACY_SCALE = 1_000_000;
 ```
 
 

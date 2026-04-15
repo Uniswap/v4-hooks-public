@@ -1,8 +1,5 @@
 # IAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/9afdfcf44b2d11aa1d5cca0109c566b27e888ea7/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
-
-**Title:**
-IAggregatorHook
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56f51601c343010d27d45c492f27de85ad1a03d2/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
 
 Interface for the AggregatorHook contract. An implemented aggregator hook should be able to use liquidity from external sources
 
@@ -12,8 +9,8 @@ Interface for the AggregatorHook contract. An implemented aggregator hook should
 
 Quotes amount of unspecified side for a given amount of specified side
 
-This function is meant to be called as a view function even though it is not one. This is because the swap
-might be simulated but not finalized. Applies protocol fee on top of the raw quote from the underlying liquidity source
+*This function is meant to be called as a view function even though it is not one. This is because the swap
+might be simulated but not finalized. Applies protocol fee on top of the raw quote from the underlying liquidity source*
 
 
 ```solidity
