@@ -1,8 +1,5 @@
 # IMetaRegistry
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
-
-**Title:**
-IMetaRegistry
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
 
 Minimal interface for Curve's MetaRegistry to check meta pool status
 

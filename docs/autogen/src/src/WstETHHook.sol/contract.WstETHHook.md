@@ -1,11 +1,8 @@
 # WstETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WstETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/WstETHHook.sol)
 
 **Inherits:**
-[BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
-
-**Title:**
-Wrapped Staked ETH (wstETH) Hook
+[BaseTokenWrapperHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
 
 Hook for wrapping/unwrapping stETH/wstETH in Uniswap V4 pools
 

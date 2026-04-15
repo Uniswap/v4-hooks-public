@@ -1,8 +1,5 @@
 # IAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/9afdfcf44b2d11aa1d5cca0109c566b27e888ea7/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
-
-**Title:**
-IAggregatorHook
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/aggregator-hooks/interfaces/IAggregatorHook.sol)
 
 Interface for the AggregatorHook contract. An implemented aggregator hook should be able to use liquidity from external sources
 

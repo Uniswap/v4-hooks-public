@@ -1,11 +1,8 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
-[IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
-
-**Title:**
-BaseAggregatorHook
+[IAggregatorHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
 
 Abstract contract for implementing aggregator hooks in Uniswap V4
 

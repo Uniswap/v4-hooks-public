@@ -1,11 +1,8 @@
 # WstETHRoutingHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WstETHRoutingHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/WstETHRoutingHook.sol)
 
 **Inherits:**
-[WstETHHook](/src/WstETHHook.sol/contract.WstETHHook.md)
-
-**Title:**
-WstETHRoutingHook
+[WstETHHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/WstETHHook.sol/contract.WstETHHook.md)
 
 A hook that allows simulating the WstETHHook with the v4 Quoter
 

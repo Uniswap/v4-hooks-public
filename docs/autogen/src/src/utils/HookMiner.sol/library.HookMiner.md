@@ -1,8 +1,5 @@
 # HookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/utils/HookMiner.sol)
-
-**Title:**
-HookMiner
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/utils/HookMiner.sol)
 
 a minimal library for mining hook addresses
 

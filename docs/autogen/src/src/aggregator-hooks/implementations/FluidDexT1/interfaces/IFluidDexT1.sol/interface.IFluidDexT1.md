@@ -1,8 +1,5 @@
 # IFluidDexT1
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol)
-
-**Title:**
-IFluidDexT1
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexT1.sol)
 
 Interface for the Fluid DEX T1 pool (colloquially Fluid DEX v1)
 

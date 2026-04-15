@@ -1,15 +1,15 @@
 # PermissionedHooks
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/36a5143b3900085831fa3b3be4e39a784f4eaaab/src/permissioned-pools/PermissionedHooks.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9518e85469f947d05f4f704e2ffa3a584bf5f201/src/permissioned-pools/PermissionedHooks.sol)
 
 **Inherits:**
-IHooks, [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)
+IHooks, [BaseHook](/Users/david.rinconcruz/Uniswap/v4-hooks-public/docs/autogen/src/src/base/BaseHook.sol/abstract.BaseHook.md)
 
 
 ## State Variables
 ### PERMISSIONS_ADAPTER_FACTORY
 
 ```solidity
-IPermissionsAdapterFactory public immutable PERMISSIONS_ADAPTER_FACTORY;
+IPermissionsAdapterFactory public immutable PERMISSIONS_ADAPTER_FACTORY
 ```
 
 
@@ -23,7 +23,7 @@ constructor(IPoolManager manager, IPermissionsAdapterFactory permissionsAdapterF
 
 ### getHookPermissions
 
-*Returns the hook permissions configuration for this contract*
+Returns the hook permissions configuration for this contract
 
 
 ```solidity
@@ -32,7 +32,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 
 ### _beforeInitialize
 
-*Requires at least one pool currency to be a verified permissions adapter*
+Requires at least one pool currency to be a verified permissions adapter
 
 
 ```solidity
@@ -41,7 +41,7 @@ function _beforeInitialize(address, PoolKey calldata key, uint160) internal view
 
 ### _beforeSwap
 
-*Does not need to verify msg.sender address directly, as verifying the allowlist is sufficient due to the fact that any valid senders are allowed wrappers*
+Does not need to verify msg.sender address directly, as verifying the allowlist is sufficient due to the fact that any valid senders are allowed wrappers
 
 
 ```solidity
@@ -54,7 +54,7 @@ function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata, 
 
 ### _beforeAddLiquidity
 
-*Does not need to verify msg.sender address directly, as verifying the allowlist is sufficient due to the fact that any valid senders are allowed wrappers*
+Does not need to verify msg.sender address directly, as verifying the allowlist is sufficient due to the fact that any valid senders are allowed wrappers
 
 
 ```solidity
@@ -67,7 +67,7 @@ function _beforeAddLiquidity(address sender, PoolKey calldata key, ModifyLiquidi
 
 ### _verifyAllowlist
 
-*checks if the sender is allowed to access both tokens in the pool*
+checks if the sender is allowed to access both tokens in the pool
 
 
 ```solidity
@@ -76,7 +76,7 @@ function _verifyAllowlist(IMsgSender sender, PoolKey calldata poolKey, bytes4 se
 
 ### _isAllowed
 
-*checks if the provided token is a permissioned token by checking if it has a verified permissions adapter, if yes, check the allowlist and check whether swapping is enabled*
+checks if the provided token is a permissioned token by checking if it has a verified permissions adapter, if yes, check the allowlist and check whether swapping is enabled
 
 
 ```solidity
