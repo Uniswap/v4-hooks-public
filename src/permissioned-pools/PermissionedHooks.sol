@@ -12,7 +12,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {BaseHook} from "../base/BaseHook.sol";
-import {PermissionFlags, PermissionFlag} from "@uniswap/v4-periphery/src/hooks/permissionedPools/libraries/PermissionFlags.sol";
+import {
+    PermissionFlags,
+    PermissionFlag
+} from "@uniswap/v4-periphery/src/hooks/permissionedPools/libraries/PermissionFlags.sol";
 
 contract PermissionedHooks is IHooks, BaseHook {
     IPermissionsAdapterFactory public immutable PERMISSIONS_ADAPTER_FACTORY;
