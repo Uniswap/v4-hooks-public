@@ -19,7 +19,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
-import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
+import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
@@ -53,9 +53,10 @@ contract SmartPoolHookTest is Test, Deployers {
     uint24 constant BID_FEE_PIPS = 1_000; // 0.1%
     uint24 constant ASK_FEE_PIPS = 1_000;
 
-    /// @dev Quote-fidelity tolerance. The virtual tick walk mirrors v4 Pool.sol exactly,
-    ///      so quote/execution should match to the wei.
+    /// @dev Exact-output spot checks still assert to the wei; broad quote/execution tests use
+    ///      a small relative tolerance because SmartPool now uses a compact indicative quote.
     uint256 constant ABS_TOLERANCE = 1;
+    uint256 constant INDICATIVE_REL_TOLERANCE = 5e14; // 5 bps
 
     function setUp() public {
         deployFreshManagerAndRouters();
@@ -69,7 +70,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         // Deploy hook at flag-mined address.
         uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
@@ -98,7 +99,7 @@ contract SmartPoolHookTest is Test, Deployers {
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
         return SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(vault0)),
@@ -153,7 +154,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: true,
             vault0: vaulted ? IERC4626(address(vault0)) : IERC4626(address(0)),
@@ -220,8 +221,9 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.setDistribution(testPoolKey, dist);
     }
 
-    /// @dev Compares `getIndicativeQuote` output to actual swap execution. The hook is
-    ///      designed so the virtual tick walk matches the CLAMM exactly within 1 wei.
+    /// @dev Compares `getIndicativeQuote` output to actual swap execution. SmartPool uses a
+    ///      compact current-liquidity quote so the deployable hook keeps its composability
+    ///      surface without carrying the full virtual tick-walk simulator.
     ///
     ///      Per IALFHook: for exact-input (amountSpecified < 0), the quote returns the
     ///      *output* side. For exact-output (amountSpecified > 0), the quote returns the
@@ -242,7 +244,7 @@ contract SmartPoolHookTest is Test, Deployers {
             actual = zeroForOne ? uint256(-int256(delta.amount0())) : uint256(-int256(delta.amount1()));
         }
 
-        assertApproxEqAbs(quoted, actual, ABS_TOLERANCE, "Quote/execution mismatch");
+        assertApproxEqRel(quoted, actual, INDICATIVE_REL_TOLERANCE, "Quote/execution mismatch");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -287,7 +289,7 @@ contract SmartPoolHookTest is Test, Deployers {
             key2,
             SmartPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
+                pricing: SmartPoolBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
                 distribution: dist,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
@@ -309,7 +311,7 @@ contract SmartPoolHookTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -334,7 +336,7 @@ contract SmartPoolHookTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -357,7 +359,7 @@ contract SmartPoolHookTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory bad = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({
+            pricing: SmartPoolBase.PricingState({
                 bidFeePips: LPFeeLibrary.MAX_LP_FEE + 1,
                 askFeePips: BID_FEE_PIPS,
                 live: true
@@ -368,7 +370,7 @@ contract SmartPoolHookTest is Test, Deployers {
             vault1: IERC4626(address(0))
         });
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        vm.expectRevert(bytes4(keccak256("FeeOutOfBounds()")));
         hook.initializePool(key2, bad);
     }
 
@@ -474,7 +476,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 1_000e18);
         token1.approve(address(hook), 1_000e18);
-        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
+        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
         hook.addLiquidity(testPoolKey, 1_000e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
     }
@@ -639,14 +641,13 @@ contract SmartPoolHookTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════════════════
     //
     //  SmartPoolHook overrides `_beforeSwap`, `getIndicativeQuote`, and `swapToPrice`
-    //  to ignore hookData entirely — pricing is fully owner-controlled. The signed
-    //  curve-update infrastructure inherited from SpreadQuoterBase is dormant for
-    //  this hook. These tests pin that behavior.
+    //  to ignore hookData entirely — pricing is fully owner-controlled. The hook has
+    //  no signed curve-update path. These tests pin that behavior.
 
     function test_swap_ignoresHookDataCurveUpdate() public {
         _depositAsOperator(10_000e18);
 
-        SpreadQuoterBase.PricingState memory bogus = SpreadQuoterBase.PricingState({
+        SmartPoolBase.PricingState memory bogus = SmartPoolBase.PricingState({
             bidFeePips: 999_000, // ~99.9% — would be catastrophic if applied
             askFeePips: 999_000,
             live: true
@@ -666,7 +667,7 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_indicativeQuote_ignoresHookData() public {
         _depositAsOperator(10_000e18);
 
-        SpreadQuoterBase.PricingState memory bogus = SpreadQuoterBase.PricingState({
+        SmartPoolBase.PricingState memory bogus = SmartPoolBase.PricingState({
             bidFeePips: 999_000,
             askFeePips: 999_000,
             live: true
@@ -1004,6 +1005,8 @@ contract SmartPoolHookTest is Test, Deployers {
         _assertCrossPoolSolvency(testPoolKey, keyB);
 
         // ─── Bob exits B fully — must succeed despite the shared vault ───────────
+        vm.roll(block.number + 10);
+        vm.warp(block.timestamp + 1);
         uint256 bobShares_B = hook.userShares(idB, bob);
         uint256 t0_bobBefore = token0.balanceOf(bob);
         uint256 t1_bobBefore = token1.balanceOf(bob);
@@ -1073,7 +1076,7 @@ contract SmartPoolHookTest is Test, Deployers {
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -1171,25 +1174,25 @@ contract SmartPoolHookTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_updatePricingState_revertsAboveMaxLPFee() public {
-        SpreadQuoterBase.PricingState memory bad = SpreadQuoterBase.PricingState({
+        SmartPoolBase.PricingState memory bad = SmartPoolBase.PricingState({
             bidFeePips: LPFeeLibrary.MAX_LP_FEE + 1,
             askFeePips: BID_FEE_PIPS,
             live: true
         });
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        vm.expectRevert(bytes4(keccak256("FeeOutOfBounds()")));
         hook.updatePricingState(testPoolKey, bad);
 
         // Symmetric for askFeePips.
         bad.bidFeePips = BID_FEE_PIPS;
         bad.askFeePips = LPFeeLibrary.MAX_LP_FEE + 1;
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        vm.expectRevert(bytes4(keccak256("FeeOutOfBounds()")));
         hook.updatePricingState(testPoolKey, bad);
     }
 
     function test_updatePricingState_atMaxIsAccepted() public {
-        SpreadQuoterBase.PricingState memory edge = SpreadQuoterBase.PricingState({
+        SmartPoolBase.PricingState memory edge = SmartPoolBase.PricingState({
             bidFeePips: LPFeeLibrary.MAX_LP_FEE,
             askFeePips: LPFeeLibrary.MAX_LP_FEE,
             live: true
@@ -1214,7 +1217,7 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     function test_pmFeeSync_updatePricingState_updatesPMFee() public {
-        SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
+        SmartPoolBase.PricingState memory newState = SmartPoolBase.PricingState({
             bidFeePips: 250,
             askFeePips: 5_000,
             live: true
@@ -1245,12 +1248,11 @@ contract SmartPoolHookTest is Test, Deployers {
     //                    setActiveTick DISABLED
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev `activeLowerTick` is inherited from SpreadQuoterBase for single-tick LP
-    ///      subclasses. SmartPoolHook deploys multi-bucket distributions and ignores it
-    ///      entirely, so the setter is overridden to revert.
+    /// @dev SmartPoolHook deploys multi-bucket distributions rather than a single
+    ///      active tick, so the compatibility setter is present but disabled.
     function test_setActiveTick_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
+        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
         hook.setActiveTick(testPoolKey, 0);
     }
 
@@ -1283,10 +1285,10 @@ contract SmartPoolHookTest is Test, Deployers {
     //                   QUOTE / EXECUTION FIDELITY
     // ═══════════════════════════════════════════════════════════════════════════
     //
-    //  Validates `getIndicativeQuote` matches actual swap execution across multi-
-    //  range distributions, both directions, exact-input vs exact-output, and after
-    //  price movements. The virtual tick walk in SwapSimulator mirrors v4 Pool.sol
-    //  exactly, so quotes should match to 1 wei.
+    //  Validates `getIndicativeQuote` stays close to actual swap execution across
+    //  multi-range distributions, both directions, exact-input vs exact-output, and
+    //  after price movements. The deployed hook uses a compact current-liquidity
+    //  quote, not the removed full virtual tick-walk simulator.
 
     function test_quoteFidelity_smallSwap_zeroForOne() public {
         _depositAsOperator(10_000e18);
@@ -1376,9 +1378,7 @@ contract SmartPoolHookTest is Test, Deployers {
         _assertQuoteFidelity(false, -500e18);
     }
 
-    /// @dev Single-bucket distribution — the simplest possible JIT shape. Validates that
-    ///      quote/execution fidelity is preserved for the degenerate case where the virtual
-    ///      tick schedule has only two entries (tickLower and tickUpper).
+    /// @dev Single-bucket distribution — the simplest possible JIT shape.
     function test_quoteFidelity_singleBucket_zeroForOne() public {
         _depositAsOperator(10_000e18);
         // Default config is already a single bucket [-10, 10] @ 10_000 bps; no setDistribution.
@@ -1390,9 +1390,7 @@ contract SmartPoolHookTest is Test, Deployers {
         _assertQuoteFidelity(false, -100e18);
     }
 
-    /// @dev Adjacent buckets sharing a tick boundary — the merge step in `_sortAndMergeTicks`
-    ///      must sum `liquidityNet` for both buckets at the shared tick. A bug here would
-    ///      mis-report liquidity at the boundary tick and diverge from execution.
+    /// @dev Adjacent buckets sharing a tick boundary.
     function test_quoteFidelity_tickBoundary_sharedAtZero() public {
         _depositAsOperator(10_000e18);
 
@@ -1407,19 +1405,15 @@ contract SmartPoolHookTest is Test, Deployers {
         _assertQuoteFidelity(true, -100e18);
         vm.revertToState(snap);
 
-        // Large swap that crosses the shared tick boundary at 0 — engages the merged tickNet
-        // entry during the tick walk. zeroForOne moves price down, so the upper bucket's
-        // tickUpper=10 is the first encountered; tickBoundary=0 is the merged transition point.
+        // Large swap that crosses the shared tick boundary at 0.
         _assertQuoteFidelity(true, -2_000e18);
         vm.revertToState(snap);
 
         _assertQuoteFidelity(false, -2_000e18);
     }
 
-    /// @dev MAX_BUCKETS = 8 distribution. Stresses the insertion sort and merge in
-    ///      `_sortAndMergeTicks` (16 raw entries before merge), exercises the upper bound on
-    ///      iteration in `_computeAllocations` / `_buildTickSchedule`, and validates fidelity
-    ///      across a swap that traverses multiple buckets.
+    /// @dev MAX_BUCKETS = 8 distribution. Exercises the upper bound on distribution
+    ///      iteration and validates indicative quotes for a multi-bucket shape.
     function test_quoteFidelity_maxBuckets() public {
         _depositAsOperator(10_000e18);
 
@@ -1475,7 +1469,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({
+            pricing: SmartPoolBase.PricingState({
                 bidFeePips: BID_FEE_PIPS,
                 askFeePips: ASK_FEE_PIPS,
                 live: true
@@ -1631,7 +1625,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.expectRevert(SmartPoolHook.VaultAssetMismatch.selector);
         hook.initializePool(key, SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(wrongVault)),
@@ -1646,7 +1640,7 @@ contract SmartPoolHookTest is Test, Deployers {
         SmartPoolHook.LiquidityBucket[] memory bad = new SmartPoolHook.LiquidityBucket[](1);
         bad[0] = SmartPoolHook.LiquidityBucket({tickLower: belowMin, tickUpper: 10, weightBps: 10_000});
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.InvalidTickRange.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidTickRange()")));
         hook.setDistribution(testPoolKey, bad);
 
         // tickUpper above MAX_TICK.
@@ -1654,7 +1648,7 @@ contract SmartPoolHookTest is Test, Deployers {
         SmartPoolHook.LiquidityBucket[] memory bad2 = new SmartPoolHook.LiquidityBucket[](1);
         bad2[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: aboveMax, weightBps: 10_000});
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.InvalidTickRange.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidTickRange()")));
         hook.setDistribution(testPoolKey, bad2);
     }
 }

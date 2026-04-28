@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.26;
+
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ImmutableState} from "@uniswap/v4-periphery/src/base/ImmutableState.sol";
+import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
+import {IALFHook} from "../interfaces/IALFHook.sol";
+
+/// @title SmartPoolBase
+/// @author Uniswap Labs
+/// @notice Minimal ALF/v4 base for SmartPoolHook.
+/// @dev Deliberately avoids BaseALFHook/SpreadQuoterBase because SmartPool does not use
+///      signed hookData updates, attestation resolution, EIP-712, or active-tick LPs.
+/// @custom:security-contact security@uniswap.org
+abstract contract SmartPoolBase is DeltaResolver, IALFHook {
+    using PoolIdLibrary for PoolKey;
+
+    /// @notice Pricing state per pool. Bid is the fee for zeroForOne swaps, ask is for oneForZero.
+    /// @param bidFeePips Fee override (in pips, max `LPFeeLibrary.MAX_LP_FEE`) for zeroForOne swaps.
+    /// @param askFeePips Fee override (in pips, max `LPFeeLibrary.MAX_LP_FEE`) for oneForZero swaps.
+    /// @param live       Whether the pool currently quotes and executes swaps.
+    struct PricingState {
+        uint24 bidFeePips;
+        uint24 askFeePips;
+        bool live;
+    }
+
+    /// @dev Gas budget declared for `getIndicativeQuote` staticcalls. Returned by `maxGas()`.
+    uint32 private immutable _maxGas;
+    /// @dev One-step contract owner. Authorized for pricing updates and other admin paths.
+    address private immutable _owner;
+
+    /// @notice Pricing state for each pool managed by this hook.
+    mapping(PoolId => PricingState) public pricingState;
+
+    /// @notice Emitted whenever a pool's pricing state is committed via `_commitPricingState`.
+    /// @param poolId The pool whose pricing was updated.
+    /// @param state  The full new pricing state (post-validation).
+    event PricingStateUpdated(PoolId indexed poolId, PricingState state);
+
+    /// @notice Emitted once at construction recording the initial owner. Provided for parity with
+    ///         OZ's Ownable; SmartPoolBase exposes a single immutable owner so no subsequent
+    ///         transfer event is ever emitted.
+    /// @param previousOwner Always `address(0)` (constructor only).
+    /// @param newOwner      The initial owner set in the constructor.
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    /// @dev Caller is not the owner, or the operation is not permitted in the current state.
+    error Unauthorized();
+    /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
+    ///      not aligned to the pool's tickSpacing).
+    error InvalidTickRange();
+    /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE`. Without this guard,
+    ///      fees > 100% break v4 swap math (denominator underflow).
+    error FeeOutOfBounds();
+
+    /// @param manager The Uniswap v4 PoolManager.
+    /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
+    /// @param owner_  Initial (and immutable) contract owner.
+    constructor(IPoolManager manager, uint32 maxGas_, address owner_)
+        ImmutableState(manager)
+    {
+        Hooks.validateHookPermissions(IHooks(address(this)), _hookPermissions());
+        _maxGas = maxGas_;
+        _owner = owner_;
+        emit OwnershipTransferred(address(0), owner_);
+    }
+
+    /// @dev Restricts access to the immutable owner. Reverts with {Unauthorized} otherwise.
+    modifier onlyOwner() {
+        if (msg.sender != _owner) revert Unauthorized();
+        _;
+    }
+
+    /// @dev Subclasses MUST declare the v4 hook flags they require.
+    function _hookPermissions() internal pure virtual returns (Hooks.Permissions memory);
+
+    /// @inheritdoc IALFHook
+    function maxGas() external view override returns (uint32) {
+        return _maxGas;
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev Always reports live; hook-level liveness is per-pool via `pricingState[poolId].live`.
+    ///      Routers call this to reject offline hooks; this hook is always reachable, but
+    ///      individual pools may pause via {SmartPoolHook.setPoolLive}.
+    function isLive() external pure override returns (bool) {
+        return true;
+    }
+
+    /// @notice The immutable contract owner.
+    /// @return The owner address set at construction.
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev SmartPool's deployable single-contract build does not include the heavy virtual
+    ///      multi-range tick-walking quoter. Returning 0 is the IALFHook unsupported-quote path.
+    function getIndicativeQuote(PoolKey calldata, bool, int256, bytes calldata)
+        external
+        view
+        virtual
+        override
+        returns (uint256)
+    {
+        return 0;
+    }
+
+    /// @inheritdoc IALFHook
+    function getReserves(PoolKey calldata) external view virtual override returns (uint256, uint256) {
+        return (0, 0);
+    }
+
+    /// @inheritdoc IALFHook
+    function getEffectiveLiquidity(PoolKey calldata) external view virtual override returns (uint256, uint256) {
+        return (0, 0);
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev Same unsupported-simulation policy as `getIndicativeQuote`.
+    function swapToPrice(PoolKey calldata, bool, int256, uint160, bytes calldata)
+        external
+        view
+        virtual
+        override
+        returns (uint256, uint256)
+    {
+        return (0, 0);
+    }
+
+    /// @notice v4 PoolManager callback dispatched by `Hooks.beforeInitialize`.
+    /// @dev    Delegates to `_beforeInitialize` after asserting the caller is the PoolManager.
+    function beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96)
+        external
+        onlyPoolManager
+        returns (bytes4)
+    {
+        return _beforeInitialize(sender, key, sqrtPriceX96);
+    }
+
+    /// @notice v4 PoolManager callback dispatched by `Hooks.beforeAddLiquidity`.
+    /// @dev    Delegates to `_beforeAddLiquidity` after asserting the caller is the PoolManager.
+    function beforeAddLiquidity(
+        address sender,
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) external onlyPoolManager returns (bytes4) {
+        return _beforeAddLiquidity(sender, key, params, hookData);
+    }
+
+    /// @notice v4 PoolManager callback dispatched by `Hooks.beforeRemoveLiquidity`.
+    /// @dev    Delegates to `_beforeRemoveLiquidity` after asserting the caller is the PoolManager.
+    function beforeRemoveLiquidity(
+        address sender,
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) external onlyPoolManager returns (bytes4) {
+        return _beforeRemoveLiquidity(sender, key, params, hookData);
+    }
+
+    /// @notice v4 PoolManager callback dispatched by `Hooks.beforeSwap`.
+    /// @dev    Delegates to `_beforeSwap` after asserting the caller is the PoolManager.
+    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        external
+        onlyPoolManager
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
+        return _beforeSwap(sender, key, params, hookData);
+    }
+
+    /// @notice v4 PoolManager callback dispatched by `Hooks.afterSwap`.
+    /// @dev    Delegates to `_afterSwap` after asserting the caller is the PoolManager.
+    function afterSwap(
+        address sender,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        BalanceDelta delta,
+        bytes calldata hookData
+    ) external onlyPoolManager returns (bytes4, int128) {
+        return _afterSwap(sender, key, params, delta, hookData);
+    }
+
+    /// @notice Update the pricing state for a pool.
+    /// @dev    Routes through `_commitPricingState`: validates fee bounds, writes storage, syncs
+    ///         the PM's stored dynamic LP fee, and emits {PricingStateUpdated}. The pool MUST be
+    ///         initialized. Subclasses MAY override to add an in-flight-JIT guard.
+    /// @param key   The pool to update.
+    /// @param state The new pricing state.
+    function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
+        _commitPricingState(key, state);
+    }
+
+    /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
+    ///      storage, syncs the PM's stored dynamic LP fee to `max(bid, ask)` (or 0 when paused),
+    ///      and emits {PricingStateUpdated}. Per-swap pricing remains direction-aware via the
+    ///      override returned from `_beforeSwap`. The pool MUST already be initialized.
+    /// @param key   The pool to update.
+    /// @param state The validated state to commit.
+    function _commitPricingState(PoolKey calldata key, PricingState memory state) internal {
+        _validateFeeBounds(state);
+        PoolId poolId = key.toId();
+        pricingState[poolId] = state;
+
+        uint24 representativeFee = state.live
+            ? (state.bidFeePips > state.askFeePips ? state.bidFeePips : state.askFeePips)
+            : 0;
+        poolManager.updateDynamicLPFee(key, representativeFee);
+
+        emit PricingStateUpdated(poolId, state);
+    }
+
+    /// @dev Validate that bid/ask fees are within v4's `[0, MAX_LP_FEE]` range. Reverts with
+    ///      {FeeOutOfBounds} if either bound is exceeded.
+    function _validateFeeBounds(PricingState memory state) internal pure {
+        if (state.bidFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+        if (state.askFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+    }
+
+    /// @dev Subclass-implemented `beforeInitialize` body. Concrete hooks SHOULD revert here
+    ///      to force callers through their guarded `initializePool` entry point.
+    function _beforeInitialize(address, PoolKey calldata, uint160) internal virtual returns (bytes4);
+
+    /// @dev Subclass-implemented `beforeAddLiquidity` body. Typically restricts callers to
+    ///      the hook itself so external addresses cannot bypass the JIT lifecycle.
+    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        virtual
+        returns (bytes4);
+
+    /// @dev Subclass-implemented `beforeRemoveLiquidity` body. Mirrors `_beforeAddLiquidity` —
+    ///      typically restricted to the hook itself.
+    function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        virtual
+        returns (bytes4);
+
+    /// @dev Subclass-implemented `beforeSwap` body. Returns the override fee in pips (with the
+    ///      `LPFeeLibrary.OVERRIDE_FEE_FLAG` set) and any `BeforeSwapDelta`.
+    function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+        internal
+        virtual
+        returns (bytes4, BeforeSwapDelta, uint24);
+
+    /// @dev Subclass-implemented `afterSwap` body. Resolves accumulated deltas, redeposits to
+    ///      vaults, and clears any transient locks set in `_beforeSwap`.
+    function _afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
+        internal
+        virtual
+        returns (bytes4, int128);
+
+    /// @inheritdoc DeltaResolver
+    /// @dev Settles a hook-owed delta by transferring `amount` of `token` directly to the
+    ///      PoolManager. The `payer` argument is unused because settlement is always from
+    ///      the hook's own balance.
+    function _pay(Currency token, address, uint256 amount) internal override {
+        token.transfer(address(poolManager), amount);
+    }
+}

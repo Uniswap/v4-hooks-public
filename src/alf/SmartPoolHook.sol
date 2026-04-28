@@ -15,18 +15,18 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
-import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
-import {SwapSimulator} from "./libraries/SwapSimulator.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
+import {SmartPoolBase} from "./base/SmartPoolBase.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 
 /// @title SmartPoolHook
+/// @author Uniswap Labs
 /// @notice JIT spread quoter with ERC4626 vault rehypothecation and multi-range liquidity
 ///         distribution.
 ///
@@ -58,11 +58,10 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///
 ///         ## Pricing
 ///
-///         Bid/ask spreads are set via SpreadQuoterBase's PricingState and applied as a v4
+///         Bid/ask spreads are set via SmartPoolBase's PricingState and applied as a v4
 ///         dynamic fee override. The owner updates spreads through `updatePricingState`. This
 ///         hook intentionally **ignores hookData on swaps** — pricing is fully owner-controlled.
-///         The signed-curve-update infrastructure inherited from `SpreadQuoterBase` is therefore
-///         dormant for SmartPoolHook pools.
+///         The hook does not include signed curve updates or EIP-712 attestation machinery.
 ///
 ///         ## Share Accounting
 ///
@@ -79,24 +78,23 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///         are not eligible for that guard (no fresh entry point), so they manage a separate
 ///         `JIT_LOCK` transient slot and the LP entries reject calls while it is set. This
 ///         blocks an owner-configured ERC4626 vault from re-entering LP entry points mid-JIT.
-contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient {
+/// @custom:security-contact security@uniswap.org
+contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
-    using SafeCast for uint256;
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
     using SafeERC20 for IERC20;
-
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
-    bytes32 public constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
+    bytes32 private constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
 
     /// @notice Maximum number of buckets per pool. Bounds gas cost of the JIT cycle:
     ///         each bucket requires one modifyLiquidity call to deploy and one to remove,
     ///         so gas scales linearly with bucket count.
-    uint8 public constant MAX_BUCKETS = 8;
+    uint8 private constant MAX_BUCKETS = 8;
 
     /// @dev Transient namespace for per-pool JIT locks. The slot for `poolId` is
     ///      `keccak256(abi.encode(_JIT_LOCK_NAMESPACE, poolId))`. Per-pool scoping is required
@@ -158,9 +156,6 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @notice Whether non-owner addresses may deposit into a pool.
     mapping(PoolId => bool) public externalDepositsEnabled;
 
-    /// @dev Stored pool keys for multi-pool support.
-    mapping(PoolId => PoolKey) internal _poolKeys;
-
     /// @dev Liquidity distribution per pool. Each entry defines a tick range and its weight.
     ///      Set at initialization via `initializePool`, updatable via `setDistribution`.
     mapping(PoolId => LiquidityBucket[]) internal _distribution;
@@ -188,9 +183,6 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     /// @dev The PoolKey's fee must use DYNAMIC_FEE_FLAG for fee override pricing.
     error MustUseDynamicFee();
-
-    /// @dev Caller is not authorized (not owner, or external deposits disabled).
-    error Unauthorized();
 
     /// @dev Distribution is invalid: empty, exceeds MAX_BUCKETS, weights don't sum to 10_000,
     ///      or a bucket has zero weight.
@@ -231,7 +223,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         IPoolManager _pm,
         uint32 maxGas_,
         address owner_
-    ) SpreadQuoterBase(_pm, maxGas_, owner_, "SmartPoolHook") {}
+    ) SmartPoolBase(_pm, maxGas_, owner_) {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              MODIFIERS
@@ -279,7 +271,6 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         _requireVaultMatchesCurrency(config.vault1, key.currency1);
 
         PoolId poolId = key.toId();
-        _poolKeys[poolId] = key;
         externalDepositsEnabled[poolId] = config.allowExternalDeposits;
         vaults[poolId][key.currency0] = config.vault0;
         vaults[poolId][key.currency1] = config.vault1;
@@ -411,13 +402,10 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @notice Refresh the max-approval the hook grants to a pool's ERC-4626 vault.
-    /// @dev    Recovery path for vaults whose `deposit` decrements `type(uint256).max`
-    ///         allowance (non-spec but observable on certain proxy upgrades), or for tokens
-    ///         that zero allowances on governance events. Without this, a one-time
-    ///         `forceApprove` at `initializePool` would silently brick the pool.
-    ///
-    ///         Zero-out-then-max via `forceApprove` to remain USDT-safe.
-    /// @param key      The pool to refresh approval for.
+    /// @dev    Recovery path for vaults whose allowance is unexpectedly consumed or reset.
+    ///         Zeroes the existing allowance first (USDT-safe) before re-approving to
+    ///         `type(uint256).max`. No-op if the pool has no vault configured for `currency`.
+    /// @param key      The pool whose vault allowance should be refreshed.
     /// @param currency Which side (currency0 or currency1) to refresh.
     function refreshVaultApproval(PoolKey calldata key, Currency currency)
         external
@@ -432,11 +420,8 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @notice Enable or disable external (non-owner) deposits for a pool.
-    /// @dev    Reverts during an active JIT cycle (any pool) — gated for defence-in-depth so a
-    ///         vault-as-owner callback cannot flip deposit auth mid-cycle to combine with later
-    ///         reentry.
-    /// @param key     The pool to update.
-    /// @param enabled True to allow any address to call `addLiquidity`.
+    /// @param key     The pool to configure.
+    /// @param enabled True to permit non-owner `addLiquidity`, false for owner-only.
     function setExternalDeposits(PoolKey calldata key, bool enabled)
         external
         onlyOwner
@@ -445,16 +430,15 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         externalDepositsEnabled[key.toId()] = enabled;
     }
 
-    /// @notice Disabled — SmartPoolHook deploys multi-bucket distributions, not single-tick LP.
-    /// @dev    `activeLowerTick` is inherited from `SpreadQuoterBase` for the single-tick LP
-    ///         model used by other subclasses. SmartPoolHook ignores it entirely, so allowing
-    ///         the owner to "set" it would be a footgun (no behavioral effect, but visible state
-    ///         change). Always reverts.
-    function setActiveTick(PoolKey calldata, int24) external view override onlyOwner {
+    /// @notice Disabled: SmartPool uses distribution buckets instead of one active LP tick.
+    /// @dev    Always reverts with {Unauthorized}. The function exists only to satisfy interface
+    ///         expectations from sibling spread-quoter hooks; SmartPool routes liquidity through
+    ///         {setDistribution} instead.
+    function setActiveTick(PoolKey calldata, int24) external view onlyOwner {
         revert Unauthorized();
     }
 
-    /// @inheritdoc SpreadQuoterBase
+    /// @inheritdoc SmartPoolBase
     /// @dev    Overridden to gate on `whenJITNotInProgress`. A vault-as-owner
     ///         callback inside an in-flight JIT cycle cannot mutate pricing state mid-flight.
     function updatePricingState(PoolKey calldata key, PricingState calldata state)
@@ -466,105 +450,70 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         _commitPricingState(key, state);
     }
 
-    /// @inheritdoc SpreadQuoterBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress`.
+    /// @notice Enable or disable pool liveness while preserving the configured bid/ask fees.
+    /// @dev    When toggled to false, `_beforeSwap` returns early without deploying JIT
+    ///         liquidity, effectively pausing the pool for swaps. Stored bid/ask fees are
+    ///         retained, so re-enabling restores prior pricing without reconfiguration.
+    /// @param key  The pool to toggle.
+    /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
     function setPoolLive(PoolKey calldata key, bool live)
         external
-        override
         onlyOwner
         whenJITNotInProgress
     {
         PricingState memory state = pricingState[key.toId()];
         state.live = live;
         _commitPricingState(key, state);
-        emit PoolLivenessUpdated(key.toId(), live);
-    }
-
-    /// @inheritdoc SpreadQuoterBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress`. Dormant on
-    ///         SmartPoolHook today (hookData ignored) but guarded for defence-in-depth so a
-    ///         future subclass that re-enables hookData paths inherits the protection.
-    function setPriceSigner(address _priceSigner) external override onlyOwner whenJITNotInProgress {
-        priceSigner = _priceSigner;
-        emit PriceSignerUpdated(_priceSigner);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        EXTERNAL: IALFHook OVERRIDES
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Indicative quote against hypothetical multi-range JIT liquidity.
-    /// @dev    Aggregates liquidity across all distribution buckets and runs a virtual
-    ///         tick-walk simulation. **Ignores hookData entirely** — pricing is fully
-    ///         determined by the stored `pricingState` set via owner / `updatePricingState`.
-    ///         This intentionally diverges from the parent `SpreadQuoterBase`, which would
-    ///         apply unsigned hookData pricing to the quote.
-    /// @param key              The pool to quote for.
-    /// @param zeroForOne       Swap direction (true = token0 → token1).
-    /// @param amountSpecified  Swap amount (negative = exact input, positive = exact output).
-    /// @return outputAmount    For exact input: estimated output. For exact output: required input.
-    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata)
-        external
-        view
-        override
-        returns (uint256 outputAmount)
-    {
-        return _price(key, zeroForOne, amountSpecified, false, address(0));
-    }
-
-    /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
-    /// @dev    Same hookData-ignoring policy as `getIndicativeQuote`.
-    /// @param key                The pool to simulate.
-    /// @param zeroForOne         Swap direction.
-    /// @param amountSpecified    Swap amount (negative = exact input).
-    /// @param sqrtPriceLimitX96  Target price (Q64.96). Swap stops when reached.
-    /// @return amountIn          Total input consumed (including fees).
-    /// @return amountOut         Total output received.
-    function swapToPrice(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata)
-        external
-        view
-        override
-        returns (uint256 amountIn, uint256 amountOut)
-    {
-        return _swapToPrice(key, zeroForOne, amountSpecified, sqrtPriceLimitX96);
     }
 
     /// @notice Total reserves managed by this hook for the given pool.
     /// @dev    Includes ERC-20, ERC-6909 claims, and ERC4626 vault balances.
-    /// @param key    The pool to query.
-    /// @return token0 Total currency0 under management.
-    /// @return token1 Total currency1 under management.
     function getReserves(PoolKey calldata key) external view override returns (uint256 token0, uint256 token1) {
         return _totalAssets(key);
     }
 
     /// @notice Assets available for immediate swapping.
     /// @dev    Caps vault-side balance at `vault.maxWithdraw(this)` so paused, capped, or
-    ///         utilization-constrained vaults are reflected. Routers using this for split-fill
-    ///         sizing see only what the JIT cycle can actually deploy without reverting at
-    ///         settlement. Equal to `getReserves` when the vault is healthy and unconstrained.
-    /// @param key    The pool to query.
-    /// @return token0 Immediately deployable currency0.
-    /// @return token1 Immediately deployable currency1.
+    ///         utilization-constrained vaults are reflected.
     function getEffectiveLiquidity(PoolKey calldata key) external view override returns (uint256 token0, uint256 token1) {
         return _effectiveAssets(key);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        EXTERNAL: VIEW
-    // ═══════════════════════════════════════════════════════════════════════════
+    /// @notice Indicative quote against hypothetical SmartPool JIT liquidity.
+    /// @dev    Uses current active distribution-bucket liquidity for a compact view quote.
+    ///         Ignores hookData; pricing is determined by stored PricingState.
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata)
+        external
+        view
+        override
+        returns (uint256 outputAmount)
+    {
+        uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        (uint256 amountIn, uint256 amountOut) = _simulateIndicative(key, zeroForOne, amountSpecified, limit);
+        outputAmount = amountSpecified < 0 ? amountOut : amountIn;
+    }
+
+    /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
+    function swapToPrice(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata)
+        external
+        view
+        override
+        returns (uint256 amountIn, uint256 amountOut)
+    {
+        return _simulateIndicative(key, zeroForOne, amountSpecified, sqrtPriceLimitX96);
+    }
 
     /// @notice Returns the share balance of `user` for the given pool.
-    /// @param key  The pool to query.
-    /// @param user The address to check.
-    /// @return     The number of shares held by `user`.
+    /// @param key  The pool whose share balance to read.
+    /// @param user The address whose shares to look up.
+    /// @return The number of pool shares held by `user`.
     function sharesOf(PoolKey calldata key, address user) external view returns (uint256) {
         return userShares[key.toId()][user];
     }
 
     /// @notice Returns the current liquidity distribution for a pool.
     /// @param poolId The pool to query.
-    /// @return       Array of liquidity buckets with their tick ranges and weights.
+    /// @return The active list of liquidity buckets (tick ranges + weights).
     function getDistribution(PoolId poolId) external view returns (LiquidityBucket[] memory) {
         return _distribution[poolId];
     }
@@ -575,14 +524,13 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     /// @dev Required v4 hook flags:
     ///      - beforeInitialize: block direct init (force initializePool)
-    ///      - afterInitialize: inherited from SpreadQuoterBase (active tick setup)
     ///      - beforeAddLiquidity / beforeRemoveLiquidity: restrict to hook-only LP
     ///      - beforeSwap: JIT deployment + fee override
     ///      - afterSwap: JIT teardown + delta resolution
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+    function _hookPermissions() internal pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
-            afterInitialize: true,
+            afterInitialize: false,
             beforeAddLiquidity: true,
             beforeRemoveLiquidity: true,
             afterAddLiquidity: false,
@@ -863,7 +811,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         for (uint256 i; i < n; i++) {
             if (buckets[i].tickLower >= buckets[i].tickUpper) revert InvalidTickRange();
             // Reject ticks outside the v4 representable range — `TickMath.getSqrtPriceAtTick`
-            // would otherwise revert later from inside `_computeAllocations`/`_buildTickSchedule`,
+            // would otherwise revert later from inside allocation or quote paths,
             // bricking quotes and swaps for any pool with a misconfigured distribution.
             if (buckets[i].tickLower < TickMath.MIN_TICK || buckets[i].tickUpper > TickMath.MAX_TICK) {
                 revert InvalidTickRange();
@@ -887,79 +835,22 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     //                        INTERNAL: PRICING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Indicative output using hypothetical multi-range JIT liquidity. Builds a virtual
-    ///      tick schedule from the distribution and simulates a full multi-step tick walk.
-    /// @param key              The pool to simulate.
-    /// @param zeroForOne       Swap direction.
-    /// @param amountSpecified  Swap amount (negative = exact input).
-    /// @return outputAmount    Estimated output for exact-in, or required input for exact-out.
-    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool, address)
-        internal view override returns (uint256 outputAmount)
-    {
-        uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
-        (uint256 amountIn, uint256 amountOut) = _simulateVirtual(key, zeroForOne, amountSpecified, limit);
-        // IALFHook contract: exact-input (`amountSpecified < 0`) returns expected output;
-        // exact-output (`amountSpecified > 0`) returns required input. Returning amountOut
-        // for exact-output silently lies to the caller (≈ requested output, not input cost).
-        outputAmount = amountSpecified < 0 ? amountOut : amountIn;
-    }
-
-    /// @dev Price-bounded swap simulation using virtual tick walk.
-    /// @param key                The pool to simulate.
-    /// @param zeroForOne         Swap direction.
-    /// @param amountSpecified    Swap amount (negative = exact input).
-    /// @param sqrtPriceLimitX96  Target price limit (Q64.96).
-    /// @return amountIn          Total input consumed (including fees).
-    /// @return amountOut         Total output received.
-    function _swapToPrice(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
-        internal view returns (uint256 amountIn, uint256 amountOut)
-    {
-        return _simulateVirtual(key, zeroForOne, amountSpecified, sqrtPriceLimitX96);
-    }
-
-    /// @dev Build the virtual tick schedule from the distribution buckets and run a full
-    ///      multi-step swap simulation via SwapSimulator.simulateSwapVirtual.
-    ///
-    ///      The tick schedule is constructed by computing each bucket's weighted liquidity
-    ///      (same allocation as _deployJIT) and emitting +liquidityDelta at tickLower and
-    ///      -liquidityDelta at tickUpper. The schedule is then sorted and passed to the
-    ///      virtual simulator, which walks ticks exactly as Pool.sol would.
-    ///
-    /// @param key                The pool to simulate.
-    /// @param zeroForOne         Swap direction.
-    /// @param amountSpecified    Swap amount (negative = exact input).
-    /// @param sqrtPriceLimitX96  Price limit for the simulation.
-    /// @return amountIn          Total input consumed.
-    /// @return amountOut         Total output received.
-    function _simulateVirtual(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
-        internal view returns (uint256 amountIn, uint256 amountOut)
+    function _simulateIndicative(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
+        internal
+        view
+        returns (uint256 amountIn, uint256 amountOut)
     {
         PoolId poolId = key.toId();
 
-        uint24 feePips;
-        {
-            PricingState memory state = pricingState[poolId];
-            if (!state.live) return (0, 0);
-            feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
-        }
+        PricingState memory state = pricingState[poolId];
+        if (!state.live) return (0, 0);
+        uint24 feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
 
-        return _runVirtualSim(poolId, key, zeroForOne, amountSpecified, feePips, sqrtPriceLimitX96);
-    }
-
-    /// @dev Extracted to manage stack depth. Builds tick schedule and calls simulateSwapVirtual.
-    ///      Combines the LP fee with the pool's directional protocol fee (if any) so the quote
-    ///      matches `Pool.swap`'s effective swap fee.
-    function _runVirtualSim(
-        PoolId poolId, PoolKey calldata key, bool zeroForOne,
-        int256 amountSpecified, uint24 feePips, uint160 sqrtPriceLimitX96
-    ) private view returns (uint256 amountIn, uint256 amountOut) {
         (uint256 bal0, uint256 bal1) = _totalAssets(key);
         if (bal0 == 0 && bal1 == 0) return (0, 0);
 
         uint160 sqrtPriceX96;
         int24 currentTick;
-        // Inner block: read slot0 and combine fees here so the protocolFee local does not
-        // contribute to outer stack pressure during _buildTickSchedule.
         {
             uint24 protocolFee;
             (sqrtPriceX96, currentTick, protocolFee,) = poolManager.getSlot0(poolId);
@@ -967,19 +858,15 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
             feePips = _composeEffectiveFee(feePips, protocolFee, zeroForOne);
         }
 
-        (SwapSimulator.TickDelta[] memory sorted, uint128 liqAtTick) =
-            _buildTickSchedule(poolId, sqrtPriceX96, currentTick, bal0, bal1);
-        if (sorted.length == 0) return (0, 0);
+        uint128 liquidity = _activeIndicativeLiquidity(poolId, sqrtPriceX96, currentTick, bal0, bal1);
+        if (liquidity == 0 || amountSpecified == 0) return (0, 0);
 
-        return SwapSimulator.simulateSwapVirtual(
-            sqrtPriceX96, currentTick, liqAtTick,
-            zeroForOne, amountSpecified, feePips, sqrtPriceLimitX96, sorted
-        );
+        (, uint256 stepIn, uint256 stepOut, uint256 feeAmount) =
+            SwapMath.computeSwapStep(sqrtPriceX96, sqrtPriceLimitX96, liquidity, amountSpecified, feePips);
+        amountIn = stepIn + feeAmount;
+        amountOut = stepOut;
     }
 
-    /// @dev Mirror `Pool.swap`'s fee composition: combine LP fee with the directional protocol
-    ///      fee. Without this combination, quotes over-state output whenever governance enables
-    ///      a protocol fee on the pool.
     function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne)
         private
         pure
@@ -989,86 +876,25 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         return directional == 0 ? lpFee : directional.calculateSwapFee(lpFee);
     }
 
-    /// @dev Build a sorted, merged tick schedule from the distribution for virtual simulation.
-    /// @param poolId      The pool to build for.
-    /// @param sqrtPriceX96 Current pool sqrt price.
-    /// @param currentTick  Current pool tick.
-    /// @param bal0         Available currency0.
-    /// @param bal1         Available currency1.
-    /// @return sorted                  Sorted, merged tick deltas.
-    /// @return liquidityAtCurrentTick  Sum of liquidity from buckets active at currentTick.
-    function _buildTickSchedule(PoolId poolId, uint160 sqrtPriceX96, int24 currentTick, uint256 bal0, uint256 bal1)
-        internal view returns (SwapSimulator.TickDelta[] memory sorted, uint128 liquidityAtCurrentTick)
+    function _activeIndicativeLiquidity(PoolId poolId, uint160 sqrtPriceX96, int24 currentTick, uint256 bal0, uint256 bal1)
+        internal
+        view
+        returns (uint128 liquidity)
     {
         LiquidityBucket[] storage dist = _distribution[poolId];
         uint256 n = dist.length;
-        if (n == 0) return (sorted, 0);
-
-        SwapSimulator.TickDelta[] memory ticks = new SwapSimulator.TickDelta[](n * 2);
-        uint256 count;
 
         for (uint256 i; i < n; i++) {
+            if (currentTick < dist[i].tickLower || currentTick >= dist[i].tickUpper) continue;
             uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
                 sqrtPriceX96,
                 TickMath.getSqrtPriceAtTick(dist[i].tickLower),
                 TickMath.getSqrtPriceAtTick(dist[i].tickUpper),
-                bal0, bal1
+                bal0,
+                bal1
             );
             uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
-            if (liq == 0) continue;
-
-            // SafeCast: revert if `liq > type(int128).max` (~1.7e38). The naive `int128(liq)`
-            // cast would silently wrap to negative for `liq >= 2^127`, corrupting the virtual
-            // sim while the real JIT deploy path (`_deployBuckets`, casts via int256) stays
-            // correct — producing quote/execution divergence.
-            int128 liqSigned = uint256(liq).toInt128();
-            ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickLower, liquidityNet: liqSigned});
-            ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickUpper, liquidityNet: -liqSigned});
-
-            if (currentTick >= dist[i].tickLower && currentTick < dist[i].tickUpper) {
-                liquidityAtCurrentTick += liq;
-            }
-        }
-
-        if (count == 0) return (sorted, 0);
-        sorted = _sortAndMergeTicks(ticks, count);
-    }
-
-    /// @dev Sort tick deltas ascending and merge entries at the same tick.
-    /// @dev Sort tick deltas ascending by tick, merge same-tick entries, return trimmed array.
-    ///      Insertion sort in Solidity (correct, auditable), assembly only for the final copy.
-    /// @param ticks Raw tick deltas (modified in place during sort/merge).
-    /// @param count Number of valid entries.
-    /// @return result Sorted, merged array trimmed to final size.
-    function _sortAndMergeTicks(SwapSimulator.TickDelta[] memory ticks, uint256 count)
-        internal pure returns (SwapSimulator.TickDelta[] memory result)
-    {
-        // Phase 1: insertion sort in-place (bounded by 2 * MAX_BUCKETS = 16).
-        for (uint256 i = 1; i < count; ++i) {
-            SwapSimulator.TickDelta memory tmp = ticks[i];
-            uint256 j = i;
-            while (j > 0 && ticks[j - 1].tick > tmp.tick) {
-                ticks[j] = ticks[j - 1];
-                --j;
-            }
-            ticks[j] = tmp;
-        }
-
-        // Phase 2: in-place merge — write pointer stays <= read pointer.
-        uint256 w;
-        for (uint256 r; r < count; ++r) {
-            if (w > 0 && ticks[w - 1].tick == ticks[r].tick) {
-                ticks[w - 1].liquidityNet += ticks[r].liquidityNet;
-            } else {
-                if (r != w) ticks[w] = ticks[r];
-                ++w;
-            }
-        }
-
-        // Phase 3: allocate trimmed result.
-        result = new SwapSimulator.TickDelta[](w);
-        for (uint256 i; i < w; ++i) {
-            result[i] = ticks[i];
+            liquidity += liq;
         }
     }
 
