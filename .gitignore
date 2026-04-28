@@ -8,6 +8,7 @@ lcov.info
 .DS_Store
 .env
 .vscode
+.cursor
 .password
 
 broadcast/*/31337
