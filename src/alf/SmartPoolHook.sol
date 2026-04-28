@@ -207,6 +207,19 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     ///      via `vault.deposit` / `vault.withdraw` callbacks during `_beforeSwap` / `_afterSwap`.
     error JITInProgress();
 
+    /// @dev Configured ERC-4626 vault's `asset()` does not match the pool's currency. Vault
+    ///      addresses are immutable post-init, so this fails fast instead of producing a
+    ///      pool that silently mis-accounts.
+    error VaultAssetMismatch();
+
+    /// @dev `block.timestamp` exceeded the caller-supplied `deadline` for an LP operation.
+    error DeadlineExpired();
+
+    /// @dev `addLiquidity` would have transferred more than `maxAmount0`/`maxAmount1` from the
+    ///      caller, or `removeLiquidity` would have transferred less than
+    ///      `minAmount0`/`minAmount1` to the caller. Caller's slippage bounds were violated.
+    error SlippageExceeded();
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
@@ -259,6 +272,13 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         // Fail-fast on bad pricing before any state writes or the (gas-heavy) PM initialize call.
         _validateFeeBounds(config.pricing);
 
+        // Vaults are immutable per (pool, currency) post-init. Verify the configured ERC-4626
+        // vault wraps the same underlying as the currency before storing — a mismatch would
+        // otherwise brick bootstrap/deposit/swap silently or, worse, account shares against an
+        // unexpected underlying.
+        _requireVaultMatchesCurrency(config.vault0, key.currency0);
+        _requireVaultMatchesCurrency(config.vault1, key.currency1);
+
         PoolId poolId = key.toId();
         _poolKeys[poolId] = key;
         externalDepositsEnabled[poolId] = config.allowExternalDeposits;
@@ -308,18 +328,35 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @dev    Requires owner or external deposits enabled. Pool must be bootstrapped first.
     ///         Records the depositor's deposit block; `removeLiquidity` reverts in the same
     ///         block to defend against atomic deposit-swap-withdraw fee/yield sniping (H-03).
+    ///
+    ///         Slippage bounds are enforced after the actual transfers so callers cap exposure
+    ///         to swaps, vault share-price moves, or MEV between off-chain `previewDeposit` and
+    ///         on-chain inclusion. `deadline` MUST be `>= block.timestamp` or the call reverts.
+    ///         Use `type(uint256).max` for unbounded values, but production callers SHOULD set
+    ///         tight bounds.
     /// @param key          The pool to deposit into.
     /// @param sharesToMint Number of shares to mint. Use `previewDeposit` to see required amounts.
+    /// @param maxAmount0   Maximum currency0 the caller is willing to spend. Reverts if exceeded.
+    /// @param maxAmount1   Maximum currency1 the caller is willing to spend. Reverts if exceeded.
+    /// @param deadline     Unix timestamp after which the call reverts.
     /// @return amount0     Actual currency0 transferred from the caller.
     /// @return amount1     Actual currency1 transferred from the caller.
-    function addLiquidity(PoolKey calldata key, uint256 sharesToMint)
+    function addLiquidity(
+        PoolKey calldata key,
+        uint256 sharesToMint,
+        uint256 maxAmount0,
+        uint256 maxAmount1,
+        uint256 deadline
+    )
         external
         nonReentrant
         whenJITNotInProgress
         returns (uint256 amount0, uint256 amount1)
     {
+        if (block.timestamp > deadline) revert DeadlineExpired();
         _requireDepositAuth(key.toId());
-        return _deposit(key, msg.sender, msg.sender, sharesToMint);
+        (amount0, amount1) = _deposit(key, msg.sender, msg.sender, sharesToMint);
+        if (amount0 > maxAmount0 || amount1 > maxAmount1) revert SlippageExceeded();
     }
 
     /// @notice Burn shares and receive proportional token0 + token1.
@@ -327,17 +364,32 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     ///         from vaults via `vault.withdraw` (exact assets) if the pool's tracked ERC-20
     ///         is insufficient. Reverts in the same block as the depositor's last deposit
     ///         (anti-fee-sniping, H-03).
+    ///
+    ///         Slippage bounds are enforced after the actual transfers so callers floor
+    ///         received amounts against pool ratio moves between preview and inclusion.
+    ///         `deadline` MUST be `>= block.timestamp` or the call reverts.
     /// @param key          The pool to withdraw from.
     /// @param sharesToBurn Number of shares to burn. Use `previewWithdraw` to see return amounts.
+    /// @param minAmount0   Minimum currency0 the caller will accept. Reverts if not met.
+    /// @param minAmount1   Minimum currency1 the caller will accept. Reverts if not met.
+    /// @param deadline     Unix timestamp after which the call reverts.
     /// @return amount0     Actual currency0 transferred to the caller.
     /// @return amount1     Actual currency1 transferred to the caller.
-    function removeLiquidity(PoolKey calldata key, uint256 sharesToBurn)
+    function removeLiquidity(
+        PoolKey calldata key,
+        uint256 sharesToBurn,
+        uint256 minAmount0,
+        uint256 minAmount1,
+        uint256 deadline
+    )
         external
         nonReentrant
         whenJITNotInProgress
         returns (uint256 amount0, uint256 amount1)
     {
-        return _withdraw(key, msg.sender, msg.sender, sharesToBurn);
+        if (block.timestamp > deadline) revert DeadlineExpired();
+        (amount0, amount1) = _withdraw(key, msg.sender, msg.sender, sharesToBurn);
+        if (amount0 < minAmount0 || amount1 < minAmount1) revert SlippageExceeded();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -489,13 +541,15 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @notice Assets available for immediate swapping.
-    /// @dev    For JIT hooks, effective liquidity equals reserves since all assets are
-    ///         deployable. Would differ for vaults with withdrawal delays or caps.
+    /// @dev    Caps vault-side balance at `vault.maxWithdraw(this)` so paused, capped, or
+    ///         utilization-constrained vaults are reflected. Routers using this for split-fill
+    ///         sizing see only what the JIT cycle can actually deploy without reverting at
+    ///         settlement. Equal to `getReserves` when the vault is healthy and unconstrained.
     /// @param key    The pool to query.
     /// @return token0 Immediately deployable currency0.
     /// @return token1 Immediately deployable currency1.
     function getEffectiveLiquidity(PoolKey calldata key) external view override returns (uint256 token0, uint256 token1) {
-        return _totalAssets(key);
+        return _effectiveAssets(key);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -810,6 +864,12 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         uint256 totalWeight;
         for (uint256 i; i < n; i++) {
             if (buckets[i].tickLower >= buckets[i].tickUpper) revert InvalidTickRange();
+            // Reject ticks outside the v4 representable range — `TickMath.getSqrtPriceAtTick`
+            // would otherwise revert later from inside `_computeAllocations`/`_buildTickSchedule`,
+            // bricking quotes and swaps for any pool with a misconfigured distribution.
+            if (buckets[i].tickLower < TickMath.MIN_TICK || buckets[i].tickUpper > TickMath.MAX_TICK) {
+                revert InvalidTickRange();
+            }
             if (buckets[i].tickLower % tickSpacing != 0 || buckets[i].tickUpper % tickSpacing != 0) {
                 revert InvalidTickRange();
             }
@@ -839,7 +899,11 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         internal view override returns (uint256 outputAmount)
     {
         uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
-        (, outputAmount) = _simulateVirtual(key, zeroForOne, amountSpecified, limit);
+        (uint256 amountIn, uint256 amountOut) = _simulateVirtual(key, zeroForOne, amountSpecified, limit);
+        // IALFHook contract: exact-input (`amountSpecified < 0`) returns expected output;
+        // exact-output (`amountSpecified > 0`) returns required input. Returning amountOut
+        // for exact-output silently lies to the caller (≈ requested output, not input cost).
+        outputAmount = amountSpecified < 0 ? amountOut : amountIn;
     }
 
     /// @dev Price-bounded swap simulation using virtual tick walk.
@@ -1020,6 +1084,14 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
         if (msg.sender == owner()) return;
         if (externalDepositsEnabled[poolId]) return;
         revert Unauthorized();
+    }
+
+    /// @dev Verify that the ERC-4626 vault's `asset()` matches the pool's currency. Skipped
+    ///      for `address(0)` (no vault — currency held as raw ERC-20). Called only at
+    ///      `initializePool` since the vault address is immutable thereafter.
+    function _requireVaultMatchesCurrency(IERC4626 vault, Currency currency) internal view {
+        if (address(vault) == address(0)) return;
+        if (vault.asset() != Currency.unwrap(currency)) revert VaultAssetMismatch();
     }
 
     /// @dev Provides PoolVault access to the PoolManager for claim operations (burn/take).

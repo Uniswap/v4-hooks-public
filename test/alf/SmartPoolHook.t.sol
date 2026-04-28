@@ -129,7 +129,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(owner);
         token0.approve(address(hook), need0);
         token1.approve(address(hook), need1);
-        hook.addLiquidity(testPoolKey, amount);
+        hook.addLiquidity(testPoolKey, amount, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
         vm.roll(block.number + 1);
     }
@@ -183,7 +183,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(user);
         token0.approve(address(hook), need0);
         token1.approve(address(hook), need1);
-        hook.addLiquidity(key, amount);
+        hook.addLiquidity(key, amount, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
         vm.roll(block.number + 1);
     }
@@ -220,19 +220,27 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.setDistribution(testPoolKey, dist);
     }
 
-    /// @dev Compares `getIndicativeQuote` output to actual swap output. The hook is
+    /// @dev Compares `getIndicativeQuote` output to actual swap execution. The hook is
     ///      designed so the virtual tick walk matches the CLAMM exactly within 1 wei.
+    ///
+    ///      Per IALFHook: for exact-input (amountSpecified < 0), the quote returns the
+    ///      *output* side. For exact-output (amountSpecified > 0), the quote returns the
+    ///      *required input* — assert against the input leg accordingly.
     function _assertQuoteFidelity(bool zeroForOne, int256 amountSpecified) internal {
         uint256 quoted = hook.getIndicativeQuote(testPoolKey, zeroForOne, amountSpecified, "");
         assertGt(quoted, 0, "Quote should be non-zero");
 
         BalanceDelta delta = swap(testPoolKey, zeroForOne, amountSpecified, "");
 
-        // For both exact-input (amountSpecified < 0) and exact-output (amountSpecified > 0),
-        // the quote returns the OUTPUT side. Deployers.swap returns deltas from the swapper:
+        // Deployers.swap returns deltas from the swapper:
         //   zeroForOne: amount0 < 0 (input), amount1 > 0 (output)
         //   oneForZero: amount1 < 0 (input), amount0 > 0 (output)
-        uint256 actual = zeroForOne ? uint256(int256(delta.amount1())) : uint256(int256(delta.amount0()));
+        uint256 actual;
+        if (amountSpecified < 0) {
+            actual = zeroForOne ? uint256(int256(delta.amount1())) : uint256(int256(delta.amount0()));
+        } else {
+            actual = zeroForOne ? uint256(-int256(delta.amount0())) : uint256(-int256(delta.amount1()));
+        }
 
         assertApproxEqAbs(quoted, actual, ABS_TOLERANCE, "Quote/execution mismatch");
     }
@@ -410,7 +418,7 @@ contract SmartPoolHookTest is Test, Deployers {
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
         vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
-        hook.addLiquidity(key, 100e18);
+        hook.addLiquidity(key, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
     }
 
@@ -467,7 +475,7 @@ contract SmartPoolHookTest is Test, Deployers {
         token0.approve(address(hook), 1_000e18);
         token1.approve(address(hook), 1_000e18);
         vm.expectRevert(SmartPoolHook.Unauthorized.selector);
-        hook.addLiquidity(testPoolKey, 1_000e18);
+        hook.addLiquidity(testPoolKey, 1_000e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
     }
 
@@ -482,7 +490,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 1_000e18);
         token1.approve(address(hook), 1_000e18);
-        hook.addLiquidity(testPoolKey, 1_000e18);
+        hook.addLiquidity(testPoolKey, 1_000e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
 
         assertEq(hook.userShares(testPoolId, alice), 1_000e18);
@@ -496,7 +504,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 ownerSharesBefore = hook.userShares(testPoolId, owner);
 
         vm.prank(owner);
-        hook.removeLiquidity(testPoolKey, 500e18);
+        hook.removeLiquidity(testPoolKey, 500e18, 0, 0, block.timestamp);
 
         assertEq(hook.userShares(testPoolId, owner), ownerSharesBefore - 500e18);
         assertEq(hook.totalShares(testPoolId), 1_000e18 - 500e18);
@@ -509,7 +517,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         vm.prank(owner);
         vm.expectRevert(PoolVault.InsufficientShares.selector);
-        hook.removeLiquidity(testPoolKey, 2_000e18);
+        hook.removeLiquidity(testPoolKey, 2_000e18, 0, 0, block.timestamp);
     }
 
     /// @dev Atomic deposit-then-withdraw in the same block is rejected — defends against
@@ -524,10 +532,10 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(bob);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        hook.addLiquidity(testPoolKey, 100e18);
+        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
 
         vm.expectRevert(PoolVault.SameBlockWithdraw.selector);
-        hook.removeLiquidity(testPoolKey, 100e18);
+        hook.removeLiquidity(testPoolKey, 100e18, 0, 0, block.timestamp);
         vm.stopPrank();
     }
 
@@ -541,12 +549,12 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(bob);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        hook.addLiquidity(testPoolKey, 100e18);
+        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
 
         vm.roll(block.number + 1);
         vm.prank(bob);
-        hook.removeLiquidity(testPoolKey, 100e18);
+        hook.removeLiquidity(testPoolKey, 100e18, 0, 0, block.timestamp);
     }
 
     /// @dev External actors cannot touch v4 LP positions directly — only the hook may.
@@ -775,7 +783,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0Before = token0.balanceOf(user);
         uint256 t1Before = token1.balanceOf(user);
         vm.prank(user);
-        hook.removeLiquidity(testPoolKey, shares);
+        hook.removeLiquidity(testPoolKey, shares, 0, 0, block.timestamp);
         vm.roll(block.number + 1);
         out0 = token0.balanceOf(user) - t0Before;
         out1 = token1.balanceOf(user) - t1Before;
@@ -824,7 +832,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        hook.addLiquidity(keyB, 100e18);
+        hook.addLiquidity(keyB, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
         vm.roll(block.number + 1);
 
@@ -837,7 +845,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0_before = token0.balanceOf(alice);
         uint256 t1_before = token1.balanceOf(alice);
         vm.prank(alice);
-        hook.removeLiquidity(keyB, aliceShares);
+        hook.removeLiquidity(keyB, aliceShares, 0, 0, block.timestamp);
         assertGt(token0.balanceOf(alice), t0_before);
         assertGt(token1.balanceOf(alice), t1_before);
     }
@@ -947,7 +955,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0_before = token0.balanceOf(user);
         uint256 t1_before = token1.balanceOf(user);
         vm.prank(user);
-        hook.removeLiquidity(key, shares / divisor);
+        hook.removeLiquidity(key, shares / divisor, 0, 0, block.timestamp);
         vm.roll(block.number + 1);
         assertGt(token0.balanceOf(user), t0_before, "partial-exit returned currency0");
         assertGt(token1.balanceOf(user), t1_before, "partial-exit returned currency1");
@@ -959,7 +967,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0_before = token0.balanceOf(user);
         uint256 t1_before = token1.balanceOf(user);
         vm.prank(user);
-        hook.removeLiquidity(key, shares);
+        hook.removeLiquidity(key, shares, 0, 0, block.timestamp);
         vm.roll(block.number + 1);
         assertGt(token0.balanceOf(user), t0_before, "full-exit returned currency0");
         assertGt(token1.balanceOf(user), t1_before, "full-exit returned currency1");
@@ -1000,7 +1008,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0_bobBefore = token0.balanceOf(bob);
         uint256 t1_bobBefore = token1.balanceOf(bob);
         vm.prank(bob);
-        hook.removeLiquidity(keyB, bobShares_B);
+        hook.removeLiquidity(keyB, bobShares_B, 0, 0, block.timestamp);
         vm.roll(block.number + 1);
         assertGt(token0.balanceOf(bob), t0_bobBefore);
         assertGt(token1.balanceOf(bob), t1_bobBefore);
@@ -1031,7 +1039,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 aliceShares = hook.userShares(testPoolId, alice);
         uint256 t0_aliceBefore = token0.balanceOf(alice);
         vm.prank(alice);
-        hook.removeLiquidity(testPoolKey, aliceShares);
+        hook.removeLiquidity(testPoolKey, aliceShares, 0, 0, block.timestamp);
         vm.roll(block.number + 1);
         assertGt(token0.balanceOf(alice), t0_aliceBefore, "alice received currency0");
 
@@ -1086,7 +1094,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 t0Before = usdt0.balanceOf(owner);
         uint256 t1Before = usdt1.balanceOf(owner);
         vm.prank(owner);
-        hook.removeLiquidity(keyU, ownerShares / 2);
+        hook.removeLiquidity(keyU, ownerShares / 2, 0, 0, block.timestamp);
         assertGt(usdt0.balanceOf(owner), t0Before, "USDT-like currency0 returned");
         assertGt(usdt1.balanceOf(owner), t1Before, "USDT-like currency1 returned");
     }
@@ -1122,7 +1130,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 ownerShares = hook.userShares(testPoolId, owner);
         vm.prank(owner);
         vm.expectRevert();
-        hook.removeLiquidity(testPoolKey, ownerShares);
+        hook.removeLiquidity(testPoolKey, ownerShares, 0, 0, block.timestamp);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1516,6 +1524,139 @@ contract SmartPoolHookTest is Test, Deployers {
 
         assertApproxEqAbs(quoted, actual, ABS_TOLERANCE, "asymmetric-decimal quote/exec mismatch");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                  QUOTE / SLIPPAGE / VALIDATION GUARDS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev For exact-output, `getIndicativeQuote` returns required INPUT, not output.
+    function test_exactOutputQuote_returnsRequiredInput() public {
+        _depositAsOperator(10_000e18);
+
+        int256 amountSpecified = 100e18; // exact output
+        uint256 quoted = hook.getIndicativeQuote(testPoolKey, true, amountSpecified, "");
+        BalanceDelta delta = swap(testPoolKey, true, amountSpecified, "");
+
+        uint256 actualInput = uint256(-int256(delta.amount0()));
+        uint256 actualOutput = uint256(int256(delta.amount1()));
+
+        assertApproxEqAbs(quoted, actualInput, ABS_TOLERANCE, "exact-output quote should equal input");
+        assertGt(actualInput, actualOutput, "input should exceed output (fees + spread)");
+    }
+
+    /// @dev `getEffectiveLiquidity` caps vault contribution at `maxWithdraw`; `getReserves` does not.
+    function test_effectiveLiquidity_capsAtMaxWithdraw() public {
+        _depositAsOperator(10_000e18);
+
+        // With healthy vault: effective == reserves.
+        (uint256 r0, uint256 r1) = hook.getReserves(testPoolKey);
+        (uint256 e0, uint256 e1) = hook.getEffectiveLiquidity(testPoolKey);
+        assertEq(e0, r0, "healthy vault: effective0 == reserves0");
+        assertEq(e1, r1, "healthy vault: effective1 == reserves1");
+
+        // Swap a CappedVault in for vault0 — caps maxWithdraw at 1e18 while convertToAssets
+        // still reports the full balance. Effective should drop, reserves should not.
+        CappedVault capped = new CappedVault(ERC20(address(token0)), 1e18);
+        vm.etch(address(vault0), address(capped).code);
+        // Re-store the cap variable in the etched contract.
+        CappedVault(address(vault0)).setCap(1e18);
+
+        (uint256 r0_after,) = hook.getReserves(testPoolKey);
+        (uint256 e0_after,) = hook.getEffectiveLiquidity(testPoolKey);
+        assertEq(r0_after, r0, "reserves unaffected by maxWithdraw cap");
+        assertLt(e0_after, r0, "effective should be capped below reserves");
+    }
+
+    /// @dev `addLiquidity` reverts when actual amount exceeds `maxAmount{0,1}` bound.
+    function test_addLiquidity_revertsOnSlippageExceeded() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        (uint256 want0, uint256 want1) = hook.previewDeposit(testPoolKey, 100e18);
+        token0.mint(alice, want0);
+        token1.mint(alice, want1);
+        vm.startPrank(alice);
+        token0.approve(address(hook), want0);
+        token1.approve(address(hook), want1);
+        // Set max < actual required → revert.
+        vm.expectRevert(SmartPoolHook.SlippageExceeded.selector);
+        hook.addLiquidity(testPoolKey, 100e18, want0 - 1, want1, block.timestamp);
+        vm.stopPrank();
+    }
+
+    /// @dev `addLiquidity` reverts when `block.timestamp > deadline`.
+    function test_addLiquidity_revertsOnDeadlineExpired() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        token0.mint(alice, 100e18);
+        token1.mint(alice, 100e18);
+        vm.startPrank(alice);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        vm.expectRevert(SmartPoolHook.DeadlineExpired.selector);
+        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    /// @dev `removeLiquidity` reverts when actual amount falls below `minAmount{0,1}` bound.
+    function test_removeLiquidity_revertsOnSlippageExceeded() public {
+        _depositAsOperator(1_000e18);
+        uint256 ownerShares = hook.sharesOf(testPoolKey, owner);
+        (uint256 expect0, uint256 expect1) = hook.previewWithdraw(testPoolKey, ownerShares);
+
+        vm.prank(owner);
+        // Require strictly more than will be returned → revert.
+        vm.expectRevert(SmartPoolHook.SlippageExceeded.selector);
+        hook.removeLiquidity(testPoolKey, ownerShares, expect0 + 1, expect1, block.timestamp);
+    }
+
+    /// @dev `initializePool` reverts if `vault.asset() != currency`.
+    function test_initializePool_revertsOnVaultAssetMismatch() public {
+        // Vault wrapping token1 paired with currency0 — mismatch.
+        MockERC4626 wrongVault = new MockERC4626(ERC20(address(token1)));
+        PoolKey memory key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolHook.VaultAssetMismatch.selector);
+        hook.initializePool(key, SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(wrongVault)),
+            vault1: IERC4626(address(vault1))
+        }));
+    }
+
+    /// @dev `setDistribution` reverts when a tick is outside `[MIN_TICK, MAX_TICK]`.
+    function test_setDistribution_revertsOnTickOutOfRange() public {
+        // tickLower below MIN_TICK with valid spacing alignment.
+        int24 belowMin = ((TickMath.MIN_TICK - 100) / 10) * 10; // aligned to tickSpacing 10
+        SmartPoolHook.LiquidityBucket[] memory bad = new SmartPoolHook.LiquidityBucket[](1);
+        bad[0] = SmartPoolHook.LiquidityBucket({tickLower: belowMin, tickUpper: 10, weightBps: 10_000});
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.InvalidTickRange.selector);
+        hook.setDistribution(testPoolKey, bad);
+
+        // tickUpper above MAX_TICK.
+        int24 aboveMax = ((TickMath.MAX_TICK + 100) / 10) * 10;
+        SmartPoolHook.LiquidityBucket[] memory bad2 = new SmartPoolHook.LiquidityBucket[](1);
+        bad2[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: aboveMax, weightBps: 10_000});
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.InvalidTickRange.selector);
+        hook.setDistribution(testPoolKey, bad2);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1628,7 +1769,7 @@ contract ReentrantVault {
 
     function deposit(uint256, address) external returns (uint256) {
         if (mode == 0xaaaaaaaa) {
-            SmartPoolHook(targetHook).addLiquidity(targetKey, 1);
+            SmartPoolHook(targetHook).addLiquidity(targetKey, 1, type(uint256).max, type(uint256).max, type(uint256).max);
         } else if (mode == 0xbbbbbbbb) {
             SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
             dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
@@ -1659,5 +1800,55 @@ contract ReentrantVault {
 
     function convertToAssets(uint256 s) external pure returns (uint256) {
         return s;
+    }
+}
+
+/// @dev ERC-4626-like mock that reports a fixed `maxWithdraw` cap regardless of share balance.
+///      Used to validate that `getEffectiveLiquidity` is bounded by `maxWithdraw` while
+///      `getReserves` reports the full `convertToAssets` total.
+contract CappedVault {
+    ERC20 public asset;
+    uint256 public cap;
+    mapping(address => uint256) public balanceOf;
+
+    constructor(ERC20 _asset, uint256 _cap) {
+        asset = _asset;
+        cap = _cap;
+    }
+
+    function setCap(uint256 _cap) external {
+        cap = _cap;
+    }
+
+    function maxWithdraw(address) external view returns (uint256) {
+        return cap;
+    }
+
+    function maxRedeem(address owner_) external view returns (uint256) {
+        return balanceOf[owner_];
+    }
+
+    function convertToAssets(uint256 s) external pure returns (uint256) {
+        return s;
+    }
+
+    function convertToShares(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function previewWithdraw(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function deposit(uint256, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function withdraw(uint256, address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function redeem(uint256, address, address) external pure returns (uint256) {
+        return 0;
     }
 }

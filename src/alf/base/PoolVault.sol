@@ -480,6 +480,41 @@ abstract contract PoolVault is BlockNumberish {
         }
     }
 
+    /// @dev Liquidity-ready balance for a single (pool, currency) pair. Same composition as
+    ///      `_assetBalance`, but caps the vault contribution at `vault.maxWithdraw(this)` so
+    ///      callers requesting "what can be deployed right now" see the truth even when the
+    ///      vault is paused, capped, or utilization-constrained. Used by routers and aggregators
+    ///      to size split fills.
+    ///
+    ///      Distinction from `_assetBalance` is intentional: share math (`_convertToAmounts`)
+    ///      must use the un-capped balance so an LP's pro-rata claim is computed against the
+    ///      pool's TRUE economic stake, not the momentarily-withdrawable subset. Capping share
+    ///      math would let early withdrawers consume liquidity that later LPs are owed.
+    function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
+        CurrencyState storage s = _state[poolId][currency];
+        bal = uint256(s.erc20) + uint256(s.claims);
+        IERC4626 vault = vaults[poolId][currency];
+        if (address(vault) != address(0)) {
+            uint256 shares = _vaultShares[poolId][currency];
+            if (shares > 0) {
+                uint256 byConvert = vault.convertToAssets(shares);
+                uint256 byMaxWithdraw = vault.maxWithdraw(address(this));
+                bal += byConvert < byMaxWithdraw ? byConvert : byMaxWithdraw;
+            }
+        }
+    }
+
+    /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
+    function _effectiveAssets(PoolKey calldata key)
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        PoolId poolId = key.toId();
+        amount0 = _effectiveBalance(poolId, key.currency0);
+        amount1 = _effectiveBalance(poolId, key.currency1);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          INTERNAL: VAULT OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════════
