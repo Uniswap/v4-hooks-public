@@ -62,6 +62,10 @@ contract MockERC4626 is ERC20 {
         return balanceOf[owner_];
     }
 
+    function maxWithdraw(address owner_) external view returns (uint256) {
+        return convertToAssets(balanceOf[owner_]);
+    }
+
     function previewWithdraw(uint256 assets) external view returns (uint256) {
         return convertToShares(assets);
     }
