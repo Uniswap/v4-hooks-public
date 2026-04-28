@@ -24,10 +24,10 @@ All ALF code lives under `src/alf/`. Components are split into shared bases (inh
 | `PoolVault` | Abstract contract | `src/alf/base/PoolVault.sol` | Per-pool share math + asset tracking | Extended by rehypothecating hooks |
 | `SwapSimulator` | Library | `src/alf/libraries/SwapSimulator.sol` | — | Linked into hooks |
 | `PairLib` | Library | `src/alf/libraries/PairLib.sol` | — | Linked into hooks |
-| `ALFProtocolFees` | Abstract contract | `src/alf/base/ALFProtocolFees.sol` | — | Extended by `ALFAuctionHook` |
+| `ALFProtocolFees` | Abstract contract | `src/alf/base/ALFProtocolFees.sol` | — | Extended by `ALFMultiplexer` |
 | `SimpleSpreadQuoterHook` | Contract (reference) | `src/alf/SimpleSpreadQuoterHook.sol` | Per-pool `PricingState`, `authorizedLPs` | One per quoter per pair |
 | `SmartPoolHook` | Contract (reference) | `src/alf/SmartPoolHook.sol` | Per-pool `PoolState`, `PoolVault` storage | One per quoter per pair |
-| `ALFAuctionHook` | Contract | `src/alf/ALFAuctionHook.sol` | Stateless | One per chain |
+| `ALFMultiplexer` | Contract | `src/alf/ALFMultiplexer.sol` | Stateless | One per chain |
 | `AuctionTypes` | Structs | `src/alf/types/AuctionTypes.sol` | — | — |
 
 `AttestationRegistry` is **not** part of the system. Attestation handling is a per-hook concern — see [Attestation Extension Point](#attestation-extension-point).
@@ -491,14 +491,14 @@ _afterSwap:
 
 **Use case:** primary strategy hook for the upcoming external audit. Exercises the full ALF surface — `IALFHook`, `BaseALFHook`, `SpreadQuoterBase`, `PoolVault`, `SwapSimulator`, JIT settlement under reentrancy constraints.
 
-# ALFAuctionHook
+# ALFMultiplexer
 
 Stateless atomic auction hook deployed on a virtual (zero-liquidity) pool. The router supplies a targeted set of quoters via `hookData` and the auction executes a greedy split fill or a router-supplied pre-planned split, applying the v4 protocol fee on the unspecified side.
 
 ## Inheritance
 
 ```solidity
-contract ALFAuctionHook is BaseHook, ALFProtocolFees;
+contract ALFMultiplexer is BaseHook, ALFProtocolFees;
 ```
 
 ## Hook permissions
@@ -643,7 +643,7 @@ adjustedOutput = indicatedOutput × (1 + fidelity[quoter]) − gasCost;
 
 ## Auction hook routing
 
-The router MAY route through `ALFAuctionHook` instead of routing directly. The decision is a routing-level concern based on:
+The router MAY route through `ALFMultiplexer` instead of routing directly. The decision is a routing-level concern based on:
 
 - **Quoter count for the pair.** If small (≤ 5), the auction's exhaustive comparison is affordable.
 - **Swap size.** Larger swaps benefit more from fairness guarantees.
@@ -739,7 +739,7 @@ There is no governance-managed allowlist of quoters or attesters at the protocol
 | `IALFHook.swapToPrice` (`SpreadQuoterBase`) | ~30,000–200,000 | Same loop with price-bounded termination |
 | `SmartPoolHook` JIT cycle (single bucket) | ~250,000–350,000 | beforeSwap + LP deploy + afterSwap + redistribute |
 | `SmartPoolHook` JIT cycle (multi-bucket, e.g. 3) | ~400,000–600,000 | Linear in bucket count |
-| `ALFAuctionHook.beforeSwap` (autonomous, 5 targets) | ~500,000–900,000 | 5× indicative + sort + greedy fill across winners |
-| `ALFAuctionHook.beforeSwap` (pre-planned, 2 targets) | ~250,000–400,000 | Skips indicatives + sorting |
+| `ALFMultiplexer.beforeSwap` (autonomous, 5 targets) | ~500,000–900,000 | 5× indicative + sort + greedy fill across winners |
+| `ALFMultiplexer.beforeSwap` (pre-planned, 2 targets) | ~250,000–400,000 | Skips indicatives + sorting |
 
 These are rough estimates intended only for sizing and routing decisions. Actual gas varies with the underlying strategy hooks (fee/liquidity range, vault implementations) and tick-bitmap depth on the swap path.

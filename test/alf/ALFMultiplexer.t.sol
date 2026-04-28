@@ -18,17 +18,17 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {ALFAuctionHook} from "../../src/alf/ALFAuctionHook.sol";
+import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 import {AuctionHookData, TargetedQuoter} from "../../src/alf/types/AuctionTypes.sol";
 
-contract ALFAuctionHookTest is Test, Deployers {
+contract ALFMultiplexerTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    ALFAuctionHook public auctionHook;
+    ALFMultiplexer public auctionHook;
 
     SimpleSpreadQuoterHook public quoterA;
     SimpleSpreadQuoterHook public quoterB;
@@ -48,8 +48,8 @@ contract ALFAuctionHookTest is Test, Deployers {
         uint160 auctionFlags =
             uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
         auctionHook =
-            ALFAuctionHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags)));
-        deployCodeTo("ALFAuctionHook", abi.encode(manager, address(this)), address(auctionHook));
+            ALFMultiplexer(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags)));
+        deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(auctionHook));
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
@@ -211,7 +211,7 @@ contract ALFAuctionHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(auctionHook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ALFAuctionHook.NoValidQuotes.selector),
+                abi.encodeWithSelector(ALFMultiplexer.NoValidQuotes.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -226,7 +226,7 @@ contract ALFAuctionHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(auctionHook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ALFAuctionHook.TargetsRequired.selector),
+                abi.encodeWithSelector(ALFMultiplexer.TargetsRequired.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -273,7 +273,7 @@ contract ALFAuctionHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(auctionHook),
                 IHooks.beforeAddLiquidity.selector,
-                abi.encodeWithSelector(ALFAuctionHook.LiquidityNotAllowed.selector),
+                abi.encodeWithSelector(ALFMultiplexer.LiquidityNotAllowed.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -287,7 +287,7 @@ contract ALFAuctionHookTest is Test, Deployers {
     function test_emitsAuctionExecuted() public {
         // B wins with lower bidFee (1%) for zeroForOne
         vm.expectEmit(true, false, false, false); // only check winner address
-        emit ALFAuctionHook.AuctionExecuted(address(quoterB), true, -1e18, 0);
+        emit ALFMultiplexer.AuctionExecuted(address(quoterB), true, -1e18, 0);
         swap(auctionPoolKey, true, -1e18, _buildBothTargets());
     }
 
@@ -357,7 +357,7 @@ contract ALFAuctionHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(auctionHook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ALFAuctionHook.NoValidQuotes.selector),
+                abi.encodeWithSelector(ALFMultiplexer.NoValidQuotes.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -476,7 +476,7 @@ contract ALFAuctionHookTest is Test, Deployers {
 
         // B wins with lower bidFee (1%) for zeroForOne
         vm.expectEmit(true, false, false, false);
-        emit ALFAuctionHook.AuctionExecuted(address(quoterB), true, -1e18, 0);
+        emit ALFMultiplexer.AuctionExecuted(address(quoterB), true, -1e18, 0);
         swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
     }
 
@@ -589,7 +589,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, false);
 
-        vm.expectRevert(ALFAuctionHook.NoValidQuotes.selector);
+        vm.expectRevert(ALFMultiplexer.NoValidQuotes.selector);
         auctionHook.quote(true, -1e18, _buildBothTargets());
     }
 
@@ -628,7 +628,7 @@ contract ALFAuctionHookTest is Test, Deployers {
         auctionHook.transferOwnership(newOwner);
         assertEq(auctionHook.owner(), newOwner);
 
-        vm.expectRevert(ALFAuctionHook.Unauthorized.selector);
+        vm.expectRevert(ALFMultiplexer.Unauthorized.selector);
         auctionHook.transferOwnership(address(this));
     }
 }

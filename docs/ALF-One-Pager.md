@@ -102,7 +102,7 @@ Are dynamic fee overrides and liquidity positioning sufficient to express your s
 | `IALFHook` | Standard interface: indicative quotes, liveness, gas budgets, reserve reporting |
 | `BaseALFHook` | Abstract base; implements `IALFHook`, attestation resolution, standard hook lifecycle |
 | `SpreadQuoterBase` | Bid/ask spread pricing via fee overrides and concentrated LP; SwapSimulator for precise quoting |
-| `ALFAuctionHook` | Stateless onchain competitive auction, one per chain |
+| `ALFMultiplexer` | Stateless onchain competitive auction, one per chain |
 | `SimpleSpreadQuoterHook` | Reference: spread quoter with maker-only LP |
 | `AaveRehypothecatingSpreadQuoterHook` | Reference: spread quoter with auto-repositioning LP and Aave-sourced yield on idle capital |
 

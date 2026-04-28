@@ -13,19 +13,20 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {toBeforeSwapDelta, BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseHook} from "../base/BaseHook.sol";
+import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
 import {ALFProtocolFees} from "./base/ALFProtocolFees.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
 import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 
-/// @title ALFAuctionHook
+/// @title ALFMultiplexer
 /// @author Uniswap Labs
 ///
 /// @notice Stateless atomic auction hook deployed on a virtual (zero-liquidity) pool.
 ///
 ///         The auction hook provides onchain competitive execution across multiple ALF quoter
-///         hooks. It receives a set of targeted quoters from the router via hookData, queries
-///         each for an indicative quote, and executes a **greedy split fill** that distributes
-///         swap flow across candidates in order of indicative quality.
+///         hooks. It receives a set of targeted quoters from the router via hookData, simulates
+///         each candidate through the real v4 swap path, and executes a **greedy split fill**
+///         that distributes swap flow across candidates in order of indicative quality.
 ///
 ///         ## Execution Model: Greedy Split Fill
 ///
@@ -67,8 +68,8 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///
 ///         ```
 ///         Router → poolManager.swap(auctionPool, hookData=[targets])
-///           → ALFAuctionHook._beforeSwap()
-///             → _prepareCandidates(): query all targets, sort by indicative
+///           → ALFMultiplexer._beforeSwap()
+///             → _prepareCandidates(): simulate all targets, sort by indicative
 ///             → _executeFills(): for each candidate (best to worst):
 ///                 → poolManager.swap(candidate.pool, remaining, sqrtPriceLimit=next.price)
 ///                   → CandidateHook._beforeSwap() [curve update, fee override]
@@ -86,10 +87,12 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///         `targets` array. Each target specifies a quoter's PoolKey and optional per-quoter
 ///         curve update data. The auction constructs per-quoter ALFHookData that pairs the
 ///         shared attestation with each quoter's curve update.
-contract ALFAuctionHook is BaseHook, ALFProtocolFees {
+/// @custom:security-contact security@uniswap.org
+contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
+    using QuoterRevert for uint256;
 
     /// @notice Contract owner. Can transfer ownership.
     address public owner;
@@ -124,6 +127,9 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
 
     /// @dev Caller is not the contract owner.
     error Unauthorized();
+
+    /// @dev Quote helper may only be called through an external self-call.
+    error NotSelf();
 
     /// @dev hookData was empty or contained no targets. The auction requires at least one
     ///      targeted quoter to execute.
@@ -206,6 +212,42 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
     {
         return _auction(zeroForOne, amountSpecified, hookData);
+    }
+
+    /// @dev External self-call target used to quote a candidate through the real v4 swap path.
+    ///      The outer caller catches the deliberate `QuoteSwap` revert. Reverting here rolls
+    ///      back the simulated candidate swap, including hook state, PoolManager state, ERC-20
+    ///      transfers, vault calls, and transient deltas. Reverts with {NotSelf} if invoked by
+    ///      any caller other than this contract.
+    /// @param poolKey        The candidate quoter's pool key.
+    /// @param zeroForOne     The swap direction.
+    /// @param amountSpecified The swap amount (negative = exact input, positive = exact output).
+    /// @param hookData        ABI-encoded ALFHookData for the candidate.
+    /// @return Always reverts before returning (function always reverts via {QuoterRevert.QuoteSwap}).
+    function quoteTargetBySwap(PoolKey calldata poolKey, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        returns (uint256)
+    {
+        if (msg.sender != address(this)) revert NotSelf();
+
+        BalanceDelta delta = poolManager.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: amountSpecified,
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            hookData
+        );
+
+        uint256 quoteAmount;
+        if (amountSpecified < 0) {
+            quoteAmount = zeroForOne ? uint256(int256(delta.amount1())) : uint256(int256(delta.amount0()));
+        } else {
+            quoteAmount = zeroForOne ? uint256(int256(-delta.amount0())) : uint256(int256(-delta.amount1()));
+        }
+
+        quoteAmount.revertQuote();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -331,8 +373,8 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Iterate targets and return the single best quoter. Used by `quote()` for the
-    ///      offchain view path. Each target is queried via `_queryTarget`; the best indicative
-    ///      wins (highest output for exact-in, lowest input for exact-out).
+    ///      offchain view path. Each target is queried via `_queryTargetView`; the best
+    ///      indicative wins (highest output for exact-in, lowest input for exact-out).
     function _runTargeted(
         bool zeroForOne,
         int256 amountSpecified,
@@ -348,7 +390,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
 
         for (uint256 i = 0; i < targets.length; i++) {
             (uint256 q, bytes memory quoterHookData) =
-                _queryTarget(targets[i], attestationData, zeroForOne, amountSpecified);
+                _queryTargetView(targets[i], attestationData, zeroForOne, amountSpecified);
 
             if (q == 0) continue;
 
@@ -382,7 +424,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     /// @param amountSpecified The swap amount.
     /// @return q              The indicative quote (0 if invalid/failed).
     /// @return quoterHookData The constructed ALFHookData for nested execution.
-    function _queryTarget(
+    function _queryTargetView(
         TargetedQuoter memory target,
         bytes memory attestationData,
         bool zeroForOne,
@@ -416,6 +458,38 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
         ) {
             q = indicative;
         } catch {}
+    }
+
+    /// @dev Query a single target by simulating its real v4 swap path in a reverting self-call.
+    ///      This is non-view and intended for the auction execution path, where the PoolManager
+    ///      is already unlocked. It supports hooks that do not carry their own on-chain quote
+    ///      simulator, such as SmartPoolHook.
+    function _queryTargetBySwap(
+        TargetedQuoter memory target,
+        bytes memory attestationData,
+        bool zeroForOne,
+        int256 amountSpecified
+    ) internal returns (uint256 q, bytes memory quoterHookData) {
+        (q, quoterHookData) = _queryTargetView(target, attestationData, zeroForOne, amountSpecified);
+        if (q == 0) return (0, "");
+
+        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (uint256) {
+            // quoteTargetBySwap always reverts with QuoteSwap on success.
+        } catch (bytes memory reason) {
+            q = _parseQuoteOrZero(reason);
+        }
+    }
+
+    function _parseQuoteOrZero(bytes memory reason) internal pure returns (uint256 quoteAmount) {
+        if (reason.length != 36) return 0;
+
+        bytes4 selector;
+        assembly ("memory-safe") {
+            selector := mload(add(reason, 0x20))
+            quoteAmount := mload(add(reason, 0x24))
+        }
+
+        if (selector != QuoterRevert.QuoteSwap.selector) return 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -465,12 +539,11 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     ///      Used by pre-planned mode only when tolerance enforcement is enabled.
     function _queryBestIndicative(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
-        view
         returns (uint256 best)
     {
         bool exactInput = swapAmount < 0;
         for (uint256 i = 0; i < ahd.targets.length; i++) {
-            (uint256 q,) = _queryTarget(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
+            (uint256 q,) = _queryTargetBySwap(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
             if (q == 0) continue;
             if (best == 0 || (exactInput ? q > best : q < best)) {
                 best = q;
@@ -522,7 +595,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     /// @dev Phase 1 of autonomous split fill: build and sort the candidate array.
     ///
     ///      For each target in the AuctionHookData:
-    ///        - Query the quoter for an indicative quote (via _queryTarget)
+    ///        - Simulate the quoter's real swap path for an indicative quote
     ///        - Read the quoter's pool sqrtPriceX96 (for price limit computation)
     ///        - If valid (non-zero indicative), add to the candidates array
     ///
@@ -543,7 +616,6 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     /// @return bestIndividual The best individual indicative quote (tolerance baseline).
     function _prepareCandidates(bool zeroForOne, int256 swapAmount, AuctionHookData memory ahd)
         internal
-        view
         returns (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual)
     {
         bool isExactInput = swapAmount < 0;
@@ -551,7 +623,7 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
 
         for (uint256 i = 0; i < ahd.targets.length; i++) {
             (uint256 q, bytes memory quoterHookData) =
-                _queryTarget(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
+                _queryTargetBySwap(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
             if (q == 0) continue;
 
             // Read the quoter's current pool price for price limit computation during fills.
@@ -739,6 +811,9 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Resolve and cache the token jar address from the v4 fee adapter.
+    /// @dev    Refreshes `tokenJar` from the PoolManager's protocol fee controller. Permissionless —
+    ///         anyone may call to refresh the cache after the controller updates its jar address.
+    /// @return The current token jar address (may be `address(0)` if no controller is configured).
     function pollTokenJar() public override returns (address) {
         address newTokenJar = _getTokenJar(poolManager);
         if (tokenJar != newTokenJar) {
@@ -752,6 +827,9 @@ contract ALFAuctionHook is BaseHook, ALFProtocolFees {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Transfer ownership of the auction hook.
+    /// @dev    One-step transfer; the new owner takes effect immediately. Reverts with
+    ///         {Unauthorized} if the caller is not the current owner. Setting `newOwner` to
+    ///         `address(0)` permanently renounces ownership.
     /// @param newOwner The new owner address.
     function transferOwnership(address newOwner) external {
         if (msg.sender != owner) revert Unauthorized();

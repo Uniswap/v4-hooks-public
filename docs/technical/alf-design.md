@@ -110,7 +110,7 @@ Extending `BaseALFHook` (or one of its subclasses) gives quoters a few things fo
 
 ## **Layer 1b: Atomic Auction Hook**
 
-The auction hook (`ALFAuctionHook`) provides atomic onchain competitive execution as an alternative to direct router routing. It is a **stateless** v4 hook deployed on a virtual (zero-liquidity) pool that exists solely as a dispatch mechanism. The router provides a targeted set of quoters to the auction hook via `hookData` — the auction hook does not discover quoters on its own.
+The auction hook (`ALFMultiplexer`) provides atomic onchain competitive execution as an alternative to direct router routing. It is a **stateless** v4 hook deployed on a virtual (zero-liquidity) pool that exists solely as a dispatch mechanism. The router provides a targeted set of quoters to the auction hook via `hookData` — the auction hook does not discover quoters on its own.
 
 The router decides per-swap whether to route directly or through the auction hook. This is a pure routing-level decision. Quoter hooks see the same `beforeSwap` invocation regardless of which path the router chose. The `sender` will differ (router vs. auction hook), but hooks should not gate on sender identity.
 
@@ -266,7 +266,7 @@ The list below tracks what is in scope for the upcoming external audit (P0), wha
 - ✅ **`PoolVault` abstract base.** Multi-asset share math (vault shares + ERC-6909 claims + per-pool ERC-20) with V2-style mint and locked `MINIMUM_SHARES`. Used by `SmartPoolHook`.
 - ✅ **`SmartPoolHook` strategy hook.** Multi-range JIT spread quoter with ERC4626 vault rehypothecation. Audit deliverable for this branch.
 - ✅ **`SimpleSpreadQuoterHook` baseline strategy.** Owner-restricted LP, single-tick concentration. Used as the auction hook's primary integration fixture.
-- ✅ **`ALFAuctionHook`.** Stateless onchain auction with greedy split fill, autonomous + pre-planned execution modes, tolerance enforcement, and v4 protocol fee handling via `ALFProtocolFees`. Nested swap correctness exercised under v4's unlock model in the test suite.
+- ✅ **`ALFMultiplexer`.** Stateless onchain auction with greedy split fill, autonomous + pre-planned execution modes, tolerance enforcement, and v4 protocol fee handling via `ALFProtocolFees`. Nested swap correctness exercised under v4's unlock model in the test suite.
 
 ### P1 (fast-follows, separate audit cycles)
 
