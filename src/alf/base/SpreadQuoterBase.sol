@@ -98,7 +98,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ) external view virtual override returns (uint256 amountIn, uint256 amountOut) {
         uint24 feePips;
         {
-            (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
+            (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
 
             PricingState memory state = pricingState[key.toId()];
             if (curveUpdateData.length > 0) {
