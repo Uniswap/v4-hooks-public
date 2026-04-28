@@ -15,31 +15,57 @@ import {BaseALFHook} from "./BaseALFHook.sol";
 import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 
 /// @title SpreadQuoterBase
+/// @author Uniswap Labs
 /// @notice Abstract base for bid/ask spread quoters using native v4 LP with fee overrides.
 ///         Provides pricing via SwapSimulator, EIP-712 signed curve updates with
 ///         one-update-per-block enforcement, and single-tick LP concentration.
 ///         Concrete hooks define LP access control and hook permissions.
+/// @custom:security-contact security@uniswap.org
 abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     using PoolIdLibrary for PoolKey;
 
+    /// @notice Pricing state per pool. Bid is the fee for zeroForOne swaps, ask is for oneForZero.
+    /// @param bidFeePips Fee override for zeroForOne swaps (pips, max `LPFeeLibrary.MAX_LP_FEE`).
+    /// @param askFeePips Fee override for oneForZero swaps (pips, max `LPFeeLibrary.MAX_LP_FEE`).
+    /// @param live       Whether the pool currently quotes and executes swaps.
     struct PricingState {
-        uint24 bidFeePips; // Fee override for zeroForOne swaps (pips, max 1_000_000 = 100%)
-        uint24 askFeePips; // Fee override for oneForZero swaps (pips, max 1_000_000 = 100%)
+        uint24 bidFeePips;
+        uint24 askFeePips;
         bool live;
     }
 
+    /// @dev EIP-712 type hash for `PricingUpdate` curve-update messages.
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
         "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
     );
 
+    /// @notice Pricing state for each pool managed by this hook.
     mapping(PoolId => PricingState) public pricingState;
+
+    /// @notice Lower tick of the single permitted LP range per pool. LP add liquidity calls
+    ///         must use exactly `[activeLowerTick, activeLowerTick + tickSpacing]`.
     mapping(PoolId => int24) public activeLowerTick;
 
+    /// @notice Emitted whenever a pool's pricing state is committed via `_commitPricingState`.
+    /// @param poolId The pool whose pricing was updated.
+    /// @param state  The full new pricing state (post-validation).
     event PricingStateUpdated(PoolId indexed poolId, PricingState state);
+
+    /// @notice Emitted when a pool's liveness flag is toggled via `setPoolLive`.
+    /// @param poolId The pool whose liveness changed.
+    /// @param isLive The new liveness state.
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
+
+    /// @notice Emitted when the active lower tick is changed via `setActiveTick` or
+    ///         `_afterInitialize`.
+    /// @param poolId           The pool whose active range changed.
+    /// @param activeLowerTick  The new lower tick (always aligned to `tickSpacing`).
     event ActiveTickUpdated(PoolId indexed poolId, int24 activeLowerTick);
 
+    /// @dev LP add-liquidity range is malformed (lower >= upper, not aligned to `tickSpacing`,
+    ///      or the range width does not equal one tickSpacing).
     error InvalidTickRange();
+    /// @dev LP add-liquidity range is correctly shaped but not at the configured `activeLowerTick`.
     error WrongActiveTick();
 
     /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%).
@@ -47,6 +73,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ///      enable an owner / compromised priceSigner to brick or extract from the pool.
     error FeeOutOfBounds();
 
+    /// @param _poolManager The Uniswap v4 PoolManager.
+    /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
+    /// @param owner_       Initial owner (Ownable2Step). Owner can rotate `priceSigner` and
+    ///                     update pricing/active-tick state.
+    /// @param eip712Name   Domain name for EIP-712 typed-data signing of curve updates.
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_, string memory eip712Name)
         BaseALFHook(_poolManager, maxGas_)
         EIP712(eip712Name, "1")
@@ -55,6 +86,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     // ──── IALFHook ────
 
+    /// @notice Always reports live; per-pool liveness is gated by `pricingState[poolId].live`.
+    /// @dev    See {IALFHook.isLive}. Routers SHOULD also consult per-pool pricing state to
+    ///         determine effective liveness for swaps.
     function isLive() external pure override returns (bool) {
         return true;
     }
@@ -117,6 +151,10 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     // ──── Hook Lifecycle ────
 
+    /// @dev Auto-derive the active lower tick from the initial pool tick at initialization.
+    ///      Floor-aligns to `tickSpacing` so the resulting LP range satisfies `_enforceActiveTick`
+    ///      without any owner intervention. Emits no event — `setActiveTick` is the canonical
+    ///      source for `ActiveTickUpdated` events post-init.
     function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick) internal override returns (bytes4) {
         // Auto-set active tick aligned to tickSpacing (floor division)
         int24 compressed = tick / key.tickSpacing;
@@ -126,6 +164,8 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         return IHooks.afterInitialize.selector;
     }
 
+    /// @dev Apply any signed curve update from `hookData`, then return the directional fee
+    ///      override for the swap. Returns a zero override (no fee) if the pool is not live.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         internal
         virtual
@@ -226,6 +266,12 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     // ──── Curve Update Logic ────
 
+    /// @dev Decode the curve update payload, validate metadata, and (if novel for this block)
+    ///      verify its signature and commit the new pricing state. Replays of an already-applied
+    ///      update for the same `(poolId, block.number)` short-circuit as no-ops; conflicting
+    ///      payloads in the same block revert from `_checkAndMarkCurveUpdate`.
+    /// @param key             The pool the update targets.
+    /// @param curveUpdateData ABI-encoded `(PricingState, PoolId, uint256 deadline, bytes sig)`.
     function _applyCurveUpdate(PoolKey calldata key, bytes memory curveUpdateData) internal {
         (PricingState memory newState, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
@@ -239,6 +285,8 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         }
     }
 
+    /// @dev Recover the EIP-712 signer over the `PricingUpdate` typed data and require it to
+    ///      match the configured `priceSigner`. Reverts with {InvalidPriceSigner} on mismatch.
     function _verifySignature(PricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)
         internal
         virtual

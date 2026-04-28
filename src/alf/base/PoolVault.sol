@@ -82,6 +82,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 ///         keyed by Currency. This two-level mapping cannot be packed into a struct, but the
 ///         scalar per-pool fields (`totalShares`) can be co-located with hook-specific state
 ///         in subclasses for storage slot packing.
+/// @custom:security-contact security@uniswap.org
 abstract contract PoolVault is BlockNumberish {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;

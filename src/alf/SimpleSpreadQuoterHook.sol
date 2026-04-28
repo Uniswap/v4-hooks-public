@@ -9,23 +9,37 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 
 /// @title SimpleSpreadQuoterHook
+/// @author Uniswap Labs
 /// @notice Bid/ask spread quoter with owner-restricted LP. Only authorized addresses
 ///         can add or remove liquidity, and all LP must be concentrated in a single
 ///         tick spacing at the active tick. Owner controls pricing via fee overrides
 ///         and signed hookData curve updates.
+/// @custom:security-contact security@uniswap.org
 contract SimpleSpreadQuoterHook is SpreadQuoterBase {
+    /// @notice Whether an address is authorized to add or remove pool liquidity.
     mapping(address => bool) public authorizedLPs;
 
+    /// @notice Emitted when an LP's authorization is granted or revoked by the owner.
+    /// @param lp         The LP address whose authorization changed.
+    /// @param authorized True if the LP can now add/remove liquidity, false if revoked.
     event AuthorizedLPUpdated(address indexed lp, bool authorized);
 
+    /// @dev Caller is not in the `authorizedLPs` allowlist.
     error UnauthorizedLP();
 
+    /// @param _poolManager The Uniswap v4 PoolManager.
+    /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
+    /// @param owner_       Initial contract owner (Ownable2Step).
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
         SpreadQuoterBase(_poolManager, maxGas_, owner_, "SimpleSpreadQuoterHook")
     {}
 
     // ──── Hook Permissions ────
 
+    /// @notice The v4 hook permissions for this contract.
+    /// @dev    `afterInitialize` registers the active tick; `beforeAddLiquidity` /
+    ///         `beforeRemoveLiquidity` enforce the LP allowlist; `beforeSwap` applies
+    ///         the directional fee override and applies any signed curve updates.
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: false,
@@ -71,6 +85,9 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     // ──── Owner Functions ────
 
     /// @notice Authorize or revoke an address for LP operations.
+    /// @dev    Only the owner may toggle authorization. Emits {AuthorizedLPUpdated}.
+    /// @param lp         The address to authorize or revoke.
+    /// @param authorized True to grant LP access, false to revoke.
     function setAuthorizedLP(address lp, bool authorized) external onlyOwner {
         authorizedLPs[lp] = authorized;
         emit AuthorizedLPUpdated(lp, authorized);

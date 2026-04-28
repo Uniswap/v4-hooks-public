@@ -12,10 +12,12 @@ struct ALFHookData {
 }
 
 /// @title IALFHook
+/// @author Uniswap Labs
 /// @notice Standard interface implemented by ALF hooks on top of the v4 hook interface.
 /// @dev Provides a uniform way for the router and auction hook to query indicative quotes
 ///      and hook metadata. Hooks expose their own capabilities directly rather than
 ///      relying on a separate registry contract.
+/// @custom:security-contact security@uniswap.org
 interface IALFHook {
     /// @notice Get an indicative quote for routing purposes.
     /// @dev MUST be a view function. Callers invoke via staticcall.

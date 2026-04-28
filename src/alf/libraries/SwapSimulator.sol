@@ -11,9 +11,11 @@ import {BitMath} from "@uniswap/v4-core/src/libraries/BitMath.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 
 /// @title SwapSimulator
+/// @author Uniswap Labs
 /// @notice View-only library that replicates Pool.sol's tick-walking swap loop using
 ///         external state reads via StateLibrary.extsload(). Produces indicative quotes
 ///         that closely match actual swap execution for a given fee override.
+/// @custom:security-contact security@uniswap.org
 library SwapSimulator {
     using StateLibrary for IPoolManager;
     using ProtocolFeeLibrary for uint24;

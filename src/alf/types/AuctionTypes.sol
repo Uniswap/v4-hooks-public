@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
+/// @title AuctionTypes
+/// @author Uniswap Labs
 /// @notice hookData encoding for the ALF auction hook.
 /// @dev Callers encode hookData as `abi.encode(AuctionHookData(...))`.
 ///

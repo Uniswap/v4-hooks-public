@@ -12,26 +12,49 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 
 /// @title ALFProtocolFees
+/// @author Uniswap Labs
 /// @notice Protocol fee compliance for ALF hooks that bypass v4's native fee mechanism.
 /// @dev    Mirrors aggregator-hooks/ProtocolFees.sol but avoids importing IV4FeeAdapter
 ///         (pinned to ^0.8.29 in the protocol-fees submodule), which is incompatible with
 ///         v4-core's =0.8.26 PoolManager. Uses raw staticcall for TOKEN_JAR() instead.
 ///         If the protocol-fees lib relaxes its pragma, this can be replaced with direct
 ///         inheritance from ProtocolFees.
+/// @custom:security-contact security@uniswap.org
 abstract contract ALFProtocolFees {
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
+    /// @notice Cached token-jar address resolved from the v4 protocol fee controller. Refreshed
+    ///         lazily on the first fee collection or explicitly via {pollTokenJar}.
     address public tokenJar;
 
+    /// @notice Emitted each time protocol fee is taken to the token jar.
+    /// @param recipient The token-jar address that received the fee.
+    /// @param currency  The currency the fee was paid in.
+    /// @param amount    The fee amount taken to the jar.
     event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
+
+    /// @notice Emitted when {pollTokenJar} updates the cached jar address.
+    /// @param newTokenJar The newly resolved jar address.
     event TokenJarUpdated(address indexed newTokenJar);
 
     /// @notice Resolve and cache the token jar from the v4 fee adapter.
+    /// @dev    Subclasses MUST implement to refresh `tokenJar` from
+    ///         `poolManager.protocolFeeController().TOKEN_JAR()` and emit {TokenJarUpdated} on
+    ///         change. Permissionless — anyone can refresh.
+    /// @return The (newly cached) token jar address.
     function pollTokenJar() public virtual returns (address);
 
+    /// @dev Take the v4 protocol fee on the unspecified-side delta to the cached token jar.
+    ///      No-op if the protocol fee for the swap direction is zero or no jar is configured.
+    ///      Lazily polls the jar on first use.
+    /// @param poolManager     The PoolManager (caller's `poolManager`).
+    /// @param key             The swap's pool key.
+    /// @param params          The swap params (used for direction and exact-input/output sense).
+    /// @param unspecifiedDelta The unspecified-side delta of the swap (signed).
+    /// @return feeAmount The amount taken to the jar (as a positive int128).
     function _applyProtocolFee(
         IPoolManager poolManager,
         PoolKey calldata key,
