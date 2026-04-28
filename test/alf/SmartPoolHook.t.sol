@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
@@ -11,20 +11,28 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
+
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
+import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
+/// @title SmartPoolHookTest
+/// @notice End-to-end tests for SmartPoolHook covering pool lifecycle, JIT execution,
+///         token compatibility, multi-pool isolation, reentrancy, pricing-state syncing,
+///         and quote-vs-execution fidelity.
 contract SmartPoolHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     SmartPoolHook public hook;
 
@@ -33,6 +41,8 @@ contract SmartPoolHookTest is Test, Deployers {
 
     address owner = makeAddr("owner");
     address alice = makeAddr("alice");
+    address bob = makeAddr("bob");
+    address charlie = makeAddr("charlie");
 
     PoolKey testPoolKey;
     PoolId testPoolId;
@@ -40,8 +50,12 @@ contract SmartPoolHookTest is Test, Deployers {
     MockERC20 token0;
     MockERC20 token1;
 
-    uint24 constant BID_FEE_PIPS = 10_000; // 1%
-    uint24 constant ASK_FEE_PIPS = 10_000; // 1%
+    uint24 constant BID_FEE_PIPS = 1_000; // 0.1%
+    uint24 constant ASK_FEE_PIPS = 1_000;
+
+    /// @dev Quote-fidelity tolerance. The virtual tick walk mirrors v4 Pool.sol exactly,
+    ///      so quote/execution should match to the wei.
+    uint256 constant ABS_TOLERANCE = 1;
 
     function setUp() public {
         deployFreshManagerAndRouters();
@@ -50,11 +64,10 @@ contract SmartPoolHookTest is Test, Deployers {
         token0 = MockERC20(Currency.unwrap(currency0));
         token1 = MockERC20(Currency.unwrap(currency1));
 
-        // Deploy mock ERC4626 vaults
         vault0 = new MockERC4626(ERC20(address(token0)));
         vault1 = new MockERC4626(ERC20(address(token1)));
 
-        // Deploy hook at flag-mined address
+        // Deploy hook at flag-mined address.
         uint160 flags = uint160(
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
@@ -62,7 +75,6 @@ contract SmartPoolHookTest is Test, Deployers {
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
 
-        // Initialize pool through hook
         testPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -71,14 +83,15 @@ contract SmartPoolHookTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
-        vm.startPrank(owner);
+        vm.prank(owner);
         hook.initializePool(testPoolKey, _defaultConfig());
-        vm.stopPrank();
 
         testPoolId = testPoolKey.toId();
     }
 
-    // ──── Config Helpers ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function _defaultConfig() internal view returns (SmartPoolHook.PoolConfig memory) {
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
@@ -93,11 +106,23 @@ contract SmartPoolHookTest is Test, Deployers {
         });
     }
 
-    // ──── Helpers ────
-
+    /// @dev Bootstrap-or-deposit. Bootstraps with `(amount, amount)` if the pool is empty;
+    ///      otherwise mints `amount` shares proportionally. Advances one block at the end so
+    ///      the same-block-withdraw guard does not block immediate `removeLiquidity` in tests.
     function _depositAsOperator(uint256 amount) internal {
-        // For first deposit: shares = amount, requires (amount, amount) of each token.
-        // For subsequent deposits: shares convert proportionally.
+        if (hook.totalShares(testPoolId) == 0) {
+            // sqrt(amount * amount) = amount → matching-amount bootstrap shares == amount.
+            // MINIMUM_SHARES is locked at address(0); the rest goes to the owner.
+            token0.mint(owner, amount);
+            token1.mint(owner, amount);
+            vm.startPrank(owner);
+            token0.approve(address(hook), amount);
+            token1.approve(address(hook), amount);
+            hook.bootstrap(testPoolKey, amount, amount);
+            vm.stopPrank();
+            vm.roll(block.number + 1);
+            return;
+        }
         (uint256 need0, uint256 need1) = hook.previewDeposit(testPoolKey, amount);
         token0.mint(owner, need0);
         token1.mint(owner, need1);
@@ -106,9 +131,115 @@ contract SmartPoolHookTest is Test, Deployers {
         token1.approve(address(hook), need1);
         hook.addLiquidity(testPoolKey, amount);
         vm.stopPrank();
+        vm.roll(block.number + 1);
     }
 
-    // ──── Pool Initialization ────
+    /// @dev Initialize a second pool sharing the same currencies but with a different
+    ///      tickSpacing (so it has a distinct PoolId). Used by cross-pool isolation tests.
+    function _initSecondaryPool(bool vaulted, uint256 bootstrapAmount)
+        internal
+        returns (PoolKey memory key, PoolId id)
+    {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(hook))
+        });
+        id = key.toId();
+
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: true,
+            vault0: vaulted ? IERC4626(address(vault0)) : IERC4626(address(0)),
+            vault1: vaulted ? IERC4626(address(vault1)) : IERC4626(address(0))
+        });
+        vm.prank(owner);
+        hook.initializePool(key, cfg);
+
+        if (bootstrapAmount > 0) {
+            token0.mint(owner, bootstrapAmount);
+            token1.mint(owner, bootstrapAmount);
+            vm.startPrank(owner);
+            token0.approve(address(hook), bootstrapAmount);
+            token1.approve(address(hook), bootstrapAmount);
+            hook.bootstrap(key, bootstrapAmount, bootstrapAmount);
+            vm.stopPrank();
+            vm.roll(block.number + 1);
+        }
+    }
+
+    /// @dev Mint `amount` shares to `user` on `key`. Requires the pool to be bootstrapped and
+    ///      `externalDepositsEnabled` (or `user == owner`). Advances one block at the end.
+    function _externalDeposit(PoolKey memory key, address user, uint256 amount) internal {
+        (uint256 need0, uint256 need1) = hook.previewDeposit(key, amount);
+        token0.mint(user, need0);
+        token1.mint(user, need1);
+        vm.startPrank(user);
+        token0.approve(address(hook), need0);
+        token1.approve(address(hook), need1);
+        hook.addLiquidity(key, amount);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+    }
+
+    /// @dev Per-pool reserves match what the pool can actually pay out, AND the sum across
+    ///      pools never exceeds the contract's physical backing. Captures both "pool A is
+    ///      solvent on its own" and "pool A and pool B are jointly solvent" invariants.
+    ///
+    ///      Backing = raw ERC-20 balance + ERC4626 vault assets + ERC-6909 claims on PM.
+    ///      Claims are part of backing because positive JIT deltas mint them via PM, and they
+    ///      become ERC-20 again on the next swap's `_redeemPoolClaims`.
+    function _assertCrossPoolSolvency(PoolKey memory keyA, PoolKey memory keyB) internal view {
+        (uint256 a0, uint256 a1) = hook.getReserves(keyA);
+        (uint256 b0, uint256 b1) = hook.getReserves(keyB);
+        uint256 backing0 = token0.balanceOf(address(hook))
+            + vault0.convertToAssets(vault0.balanceOf(address(hook)))
+            + manager.balanceOf(address(hook), currency0.toId());
+        uint256 backing1 = token1.balanceOf(address(hook))
+            + vault1.convertToAssets(vault1.balanceOf(address(hook)))
+            + manager.balanceOf(address(hook), currency1.toId());
+
+        assertLe(a0 + b0, backing0, "currency0 solvency: pools claim more than backed");
+        assertLe(a1 + b1, backing1, "currency1 solvency: pools claim more than backed");
+    }
+
+    /// @dev Replace the pool's distribution with the canonical 3-bucket fixture used by
+    ///      quote-fidelity tests: 75% tight, 15% medium, 10% wide — all symmetric around 0.
+    function _useMultiBucketDistribution() internal {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7500});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1500});
+        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1000});
+        vm.prank(owner);
+        hook.setDistribution(testPoolKey, dist);
+    }
+
+    /// @dev Compares `getIndicativeQuote` output to actual swap output. The hook is
+    ///      designed so the virtual tick walk matches the CLAMM exactly within 1 wei.
+    function _assertQuoteFidelity(bool zeroForOne, int256 amountSpecified) internal {
+        uint256 quoted = hook.getIndicativeQuote(testPoolKey, zeroForOne, amountSpecified, "");
+        assertGt(quoted, 0, "Quote should be non-zero");
+
+        BalanceDelta delta = swap(testPoolKey, zeroForOne, amountSpecified, "");
+
+        // For both exact-input (amountSpecified < 0) and exact-output (amountSpecified > 0),
+        // the quote returns the OUTPUT side. Deployers.swap returns deltas from the swapper:
+        //   zeroForOne: amount0 < 0 (input), amount1 > 0 (output)
+        //   oneForZero: amount1 < 0 (input), amount0 > 0 (output)
+        uint256 actual = zeroForOne ? uint256(int256(delta.amount1())) : uint256(int256(delta.amount0()));
+
+        assertApproxEqAbs(quoted, actual, ABS_TOLERANCE, "Quote/execution mismatch");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          POOL INITIALIZATION
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_initializePool_setsConfig() public view {
         assertFalse(hook.externalDepositsEnabled(testPoolId));
@@ -131,22 +262,196 @@ contract SmartPoolHookTest is Test, Deployers {
         manager.initialize(key2, TickMath.getSqrtPriceAtTick(0));
     }
 
-    // ──── Vault Configuration ────
+    function test_initializePool_onlyOwner() public {
+        PoolKey memory key2 = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 20,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
+
+        vm.prank(alice);
+        vm.expectRevert();
+        hook.initializePool(
+            key2,
+            SmartPoolHook.PoolConfig({
+                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
+                distribution: dist,
+                allowExternalDeposits: false,
+                vault0: IERC4626(address(vault0)),
+                vault1: IERC4626(address(vault1))
+            })
+        );
+    }
+
+    function test_initializePool_revertsOnNativeCurrency0() public {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+
+        PoolKey memory nativeKey = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 10,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(0)),
+            vault1: IERC4626(address(0))
+        });
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
+        hook.initializePool(nativeKey, cfg);
+    }
+
+    /// @dev Ordering normally puts native ETH at currency0; we test currency1=native defensively.
+    function test_initializePool_revertsOnNativeCurrency1() public {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+
+        PoolKey memory weirdKey = PoolKey({
+            currency0: currency0,
+            currency1: Currency.wrap(address(0)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 10,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(0)),
+            vault1: IERC4626(address(0))
+        });
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
+        hook.initializePool(weirdKey, cfg);
+    }
+
+    function test_initializePool_revertsAboveMaxLPFee() public {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory key2 = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory bad = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({
+                bidFeePips: LPFeeLibrary.MAX_LP_FEE + 1,
+                askFeePips: BID_FEE_PIPS,
+                live: true
+            }),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(0)),
+            vault1: IERC4626(address(0))
+        });
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        hook.initializePool(key2, bad);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          VAULT CONFIGURATION
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_vaultsConfiguredAtInit() public view {
         assertEq(address(hook.vaults(testPoolId, currency0)), address(vault0));
         assertEq(address(hook.vaults(testPoolId, currency1)), address(vault1));
     }
 
-    // ──── LP Deposits & Withdrawals ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              BOOTSTRAP
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_bootstrap_onlyOwner() public {
+        token0.mint(alice, 1_000e18);
+        token1.mint(alice, 1_000e18);
+        vm.startPrank(alice);
+        token0.approve(address(hook), 1_000e18);
+        token1.approve(address(hook), 1_000e18);
+        vm.expectRevert();
+        hook.bootstrap(testPoolKey, 1_000e18, 1_000e18);
+        vm.stopPrank();
+    }
+
+    function test_bootstrap_rejectsAmountsBelowMinimumShares() public {
+        // sqrt(1 * 1) = 1, well below MINIMUM_SHARES (1000).
+        token0.mint(owner, 1);
+        token1.mint(owner, 1);
+        vm.startPrank(owner);
+        token0.approve(address(hook), 1);
+        token1.approve(address(hook), 1);
+        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        hook.bootstrap(testPoolKey, 1, 1);
+        vm.stopPrank();
+    }
+
+    function test_addLiquidity_revertsBeforeBootstrap() public {
+        // Use a fresh pool that isn't bootstrapped yet.
+        (PoolKey memory key,) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
+
+        token0.mint(alice, 100e18);
+        token1.mint(alice, 100e18);
+        vm.startPrank(alice);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        hook.addLiquidity(key, 100e18);
+        vm.stopPrank();
+    }
+
+    function test_bootstrap_supportsAsymmetricAmounts() public {
+        // Fresh unvaulted pool; bootstrap with mismatched scales (think USDC-6dp vs WETH-18dp).
+        (PoolKey memory key, PoolId id) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
+
+        uint256 a0 = 2000e6; // pretend 6dp
+        uint256 a1 = 1e18; // pretend 18dp
+        token0.mint(owner, a0);
+        token1.mint(owner, a1);
+        vm.startPrank(owner);
+        token0.approve(address(hook), a0);
+        token1.approve(address(hook), a1);
+        uint256 shares = hook.bootstrap(key, a0, a1);
+        vm.stopPrank();
+
+        // sqrt(2000e6 * 1e18) ≈ 4.47e13; bootstrap shares are independent of decimal scale.
+        assertGt(shares, hook.MINIMUM_SHARES());
+        assertEq(hook.totalShares(id), shares);
+        assertEq(hook.userShares(id, address(0)), hook.MINIMUM_SHARES());
+        // Initial ratio reflects what the owner deposited, not 1:1.
+        (uint256 r0, uint256 r1) = hook.getReserves(key);
+        assertEq(r0, a0);
+        assertEq(r1, a1);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                       LP DEPOSITS & WITHDRAWALS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_addLiquidity_ownerCanDeposit() public {
         _depositAsOperator(1_000e18);
 
+        // Bootstrap: total shares == sqrt(1000e18 * 1000e18) == 1000e18.
+        // MINIMUM_SHARES locked at address(0), the rest credited to the owner.
         assertEq(hook.totalShares(testPoolId), 1_000e18);
-        assertEq(hook.userShares(testPoolId, owner), 1_000e18);
+        assertEq(hook.userShares(testPoolId, owner), 1_000e18 - hook.MINIMUM_SHARES());
+        assertEq(hook.userShares(testPoolId, address(0)), hook.MINIMUM_SHARES());
 
-        // Tokens should be in vaults, not in hook
+        // Tokens routed into vaults.
         assertEq(token0.balanceOf(address(hook)), 0);
         assertEq(token1.balanceOf(address(hook)), 0);
         assertGt(vault0.balanceOf(address(hook)), 0);
@@ -154,6 +459,8 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     function test_addLiquidity_externalUserBlocked() public {
+        _depositAsOperator(1_000e18);
+
         token0.mint(alice, 1_000e18);
         token1.mint(alice, 1_000e18);
         vm.startPrank(alice);
@@ -165,6 +472,8 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     function test_addLiquidity_externalUserAllowedWhenEnabled() public {
+        _depositAsOperator(1_000e18);
+
         vm.prank(owner);
         hook.setExternalDeposits(testPoolKey, true);
 
@@ -184,12 +493,13 @@ contract SmartPoolHookTest is Test, Deployers {
 
         uint256 balBefore0 = token0.balanceOf(owner);
         uint256 balBefore1 = token1.balanceOf(owner);
+        uint256 ownerSharesBefore = hook.userShares(testPoolId, owner);
 
         vm.prank(owner);
         hook.removeLiquidity(testPoolKey, 500e18);
 
-        assertEq(hook.userShares(testPoolId, owner), 500e18);
-        assertEq(hook.totalShares(testPoolId), 500e18);
+        assertEq(hook.userShares(testPoolId, owner), ownerSharesBefore - 500e18);
+        assertEq(hook.totalShares(testPoolId), 1_000e18 - 500e18);
         assertEq(token0.balanceOf(owner) - balBefore0, 500e18);
         assertEq(token1.balanceOf(owner) - balBefore1, 500e18);
     }
@@ -202,8 +512,44 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.removeLiquidity(testPoolKey, 2_000e18);
     }
 
-    // ──── External LP Blocked ────
+    /// @dev Atomic deposit-then-withdraw in the same block is rejected — defends against
+    ///      atomic JIT-fee/yield sniping.
+    function test_removeLiquidity_revertsInSameBlockAsDeposit() public {
+        _depositAsOperator(1_000e18); // bootstrap (advances block)
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
 
+        token0.mint(bob, 100e18);
+        token1.mint(bob, 100e18);
+        vm.startPrank(bob);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        hook.addLiquidity(testPoolKey, 100e18);
+
+        vm.expectRevert(PoolVault.SameBlockWithdraw.selector);
+        hook.removeLiquidity(testPoolKey, 100e18);
+        vm.stopPrank();
+    }
+
+    function test_removeLiquidity_succeedsNextBlock() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        token0.mint(bob, 100e18);
+        token1.mint(bob, 100e18);
+        vm.startPrank(bob);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        hook.addLiquidity(testPoolKey, 100e18);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+        vm.prank(bob);
+        hook.removeLiquidity(testPoolKey, 100e18);
+    }
+
+    /// @dev External actors cannot touch v4 LP positions directly — only the hook may.
     function test_externalLP_addBlocked() public {
         vm.expectRevert();
         modifyLiquidityRouter.modifyLiquidity(
@@ -213,26 +559,24 @@ contract SmartPoolHookTest is Test, Deployers {
         );
     }
 
-    // ──── JIT Swap Cycle ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          JIT SWAP CYCLE
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_swap_executesJITCycle() public {
         _depositAsOperator(10_000e18);
 
-        // Verify no LP in pool before swap
-        (uint128 liquidityBefore) = manager.getLiquidity(testPoolId);
+        // No LP in the v4 pool before the swap.
+        uint128 liquidityBefore = manager.getLiquidity(testPoolId);
         assertEq(liquidityBefore, 0);
 
-        // Execute a swap (zeroForOne)
-        bool zeroForOne = true;
-        int256 amountSpecified = -100e18; // exact input
+        swap(testPoolKey, true, -100e18, "");
 
-        swap(testPoolKey, zeroForOne, amountSpecified, "");
-
-        // Verify no LP remains in pool after swap
-        (uint128 liquidityAfter) = manager.getLiquidity(testPoolId);
+        // No LP after the swap either — JIT positions were torn down.
+        uint128 liquidityAfter = manager.getLiquidity(testPoolId);
         assertEq(liquidityAfter, 0);
 
-        // Hook should still have assets (slightly rebalanced after swap)
+        // Hook still has assets (slightly rebalanced).
         (uint256 reserves0, uint256 reserves1) = hook.getReserves(testPoolKey);
         assertGt(reserves0 + reserves1, 0);
     }
@@ -241,26 +585,23 @@ contract SmartPoolHookTest is Test, Deployers {
         _depositAsOperator(10_000e18);
 
         (, int24 tickBefore,,) = manager.getSlot0(testPoolId);
-
-        // Swap to move price
         swap(testPoolKey, true, -1_000e18, "");
-
         (, int24 tickAfter,,) = manager.getSlot0(testPoolId);
 
-        // Price should have moved (tick decreased for zeroForOne)
-        assertLt(tickAfter, tickBefore);
+        assertLt(tickAfter, tickBefore, "zeroForOne should drop tick");
     }
 
     function test_swap_noopWithoutDeposits() public {
-        // Swap on empty pool should not revert
+        // No bootstrap → swap must not revert (just produces no output).
         swap(testPoolKey, true, -100e18, "");
     }
 
-    // ──── IHookStats ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        RESERVES & QUOTE VIEWS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_getReserves_returnsVaultBalances() public {
         _depositAsOperator(5_000e18);
-
         (uint256 r0, uint256 r1) = hook.getReserves(testPoolKey);
         assertEq(r0, 5_000e18);
         assertEq(r1, 5_000e18);
@@ -268,18 +609,14 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_getEffectiveLiquidity_matchesReserves() public {
         _depositAsOperator(5_000e18);
-
         (uint256 r0, uint256 r1) = hook.getReserves(testPoolKey);
         (uint256 e0, uint256 e1) = hook.getEffectiveLiquidity(testPoolKey);
         assertEq(r0, e0);
         assertEq(r1, e1);
     }
 
-    // ──── Indicative Quotes ────
-
     function test_indicativeQuote_returnsNonZero() public {
         _depositAsOperator(10_000e18);
-
         uint256 quote = hook.getIndicativeQuote(testPoolKey, true, -100e18, "");
         assertGt(quote, 0);
     }
@@ -289,61 +626,1038 @@ contract SmartPoolHookTest is Test, Deployers {
         assertEq(quote, 0);
     }
 
-    // ──── Yield Accrual ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //              hookData IGNORED BY SmartPoolHook (BY DESIGN)
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  SmartPoolHook overrides `_beforeSwap`, `getIndicativeQuote`, and `swapToPrice`
+    //  to ignore hookData entirely — pricing is fully owner-controlled. The signed
+    //  curve-update infrastructure inherited from SpreadQuoterBase is dormant for
+    //  this hook. These tests pin that behavior.
+
+    function test_swap_ignoresHookDataCurveUpdate() public {
+        _depositAsOperator(10_000e18);
+
+        SpreadQuoterBase.PricingState memory bogus = SpreadQuoterBase.PricingState({
+            bidFeePips: 999_000, // ~99.9% — would be catastrophic if applied
+            askFeePips: 999_000,
+            live: true
+        });
+        bytes memory curveUpdateData = abi.encode(bogus, testPoolId, block.timestamp + 1, bytes(""));
+        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes(""), curveUpdateData: curveUpdateData}));
+
+        (uint24 storedBidBefore, uint24 storedAskBefore, bool storedLiveBefore) = hook.pricingState(testPoolId);
+        swap(testPoolKey, true, -1e18, hookData);
+        (uint24 storedBidAfter, uint24 storedAskAfter, bool storedLiveAfter) = hook.pricingState(testPoolId);
+
+        assertEq(storedBidAfter, storedBidBefore, "stored bid unchanged");
+        assertEq(storedAskAfter, storedAskBefore, "stored ask unchanged");
+        assertEq(storedLiveAfter, storedLiveBefore, "stored live unchanged");
+    }
+
+    function test_indicativeQuote_ignoresHookData() public {
+        _depositAsOperator(10_000e18);
+
+        SpreadQuoterBase.PricingState memory bogus = SpreadQuoterBase.PricingState({
+            bidFeePips: 999_000,
+            askFeePips: 999_000,
+            live: true
+        });
+        bytes memory curveUpdateData = abi.encode(bogus, testPoolId, block.timestamp + 1, bytes(""));
+        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes(""), curveUpdateData: curveUpdateData}));
+
+        uint256 quoteWithBogus = hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
+        uint256 quoteWithEmpty = hook.getIndicativeQuote(testPoolKey, true, -1e18, "");
+        assertEq(quoteWithBogus, quoteWithEmpty, "hookData has no effect on quote");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          YIELD ACCRUAL
+    // ═══════════════════════════════════════════════════════════════════════════
 
     function test_yieldAccrual_increasesShareValue() public {
         _depositAsOperator(1_000e18);
 
-        // Simulate yield in vaults
         vault0.simulateYield(100e18);
         vault1.simulateYield(100e18);
 
-        // Preview withdrawal should show more than deposited
         (uint256 amount0, uint256 amount1) = hook.previewWithdraw(testPoolKey, 1_000e18);
         assertEq(amount0, 1_100e18);
         assertEq(amount1, 1_100e18);
     }
 
-    // ──── Access Control ────
+    /// @dev Late entrants must not extract yield that accrued before they joined. Bob deposits
+    ///      AFTER a yield event; he pays the post-yield (higher) share price; when he withdraws
+    ///      at the same price he should break even (modulo wei-level integer rounding). Alice,
+    ///      who deposited before the yield, captures her proportional share.
+    function test_yield_lateEntrantBreaksEven() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
 
-    function test_initializePool_onlyOwner() public {
-        PoolKey memory key2 = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
+        // Alice deposits BEFORE yield (1:1 share price).
+        _externalDeposit(testPoolKey, alice, 1_000e18);
+
+        // Yield accrues — pool is now (2100, 2100) at supply 2000.
+        vault0.simulateYield(100e18);
+        vault1.simulateYield(100e18);
+
+        // Bob deposits AFTER yield, paying the higher share price (~1050 each).
+        (uint256 bobPaid0, uint256 bobPaid1) = hook.previewDeposit(testPoolKey, 1_000e18);
+        assertApproxEqAbs(bobPaid0, 1_050e18, 1, "bob pays post-yield share price");
+        assertEq(bobPaid0, bobPaid1);
+        _externalDeposit(testPoolKey, bob, 1_000e18);
+
+        (uint256 aliceOut0, uint256 aliceOut1) = _exitAll(alice);
+        (uint256 bobOut0, uint256 bobOut1) = _exitAll(bob);
+
+        // Alice's slice of yield: 1000 / (1000 + 1000) = 50% → ~50e18 profit per side.
+        assertGt(aliceOut0, 1_000e18, "alice profited on currency0");
+        assertGt(aliceOut1, 1_000e18, "alice profited on currency1");
+        assertApproxEqAbs(aliceOut0 - 1_000e18, 50e18, 1, "alice captured half of currency0 yield");
+        assertApproxEqAbs(aliceOut1 - 1_000e18, 50e18, 1, "alice captured half of currency1 yield");
+
+        // Bob breaks even within rounding (deposit rounds up + withdraw rounds down → 1-2 wei).
+        assertApproxEqAbs(bobOut0, bobPaid0, 10, "bob breaks even on currency0");
+        assertApproxEqAbs(bobOut1, bobPaid1, 10, "bob breaks even on currency1");
+    }
+
+    /// @dev Three depositors enter at three different times, with yield accruing between each.
+    ///      Each captures yield proportional to how long they were a shareholder during yield
+    ///      events. With same share size for all three:
+    ///        alice in -> yield Y1 -> bob in -> yield Y2 -> charlie in (no yield) -> all exit
+    ///      Expected ordering: profit(alice) > profit(bob) > profit(charlie) ~ 0.
+    function test_yield_proportionalToTimeOfDeposit() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        // Alice in at 1:1.
+        _externalDeposit(testPoolKey, alice, 1_000e18);
+
+        // Yield Y1 — only alice + owner share it.
+        vault0.simulateYield(100e18);
+        vault1.simulateYield(100e18);
+
+        // Bob in at the post-Y1 price.
+        (uint256 bobPaid0,) = hook.previewDeposit(testPoolKey, 1_000e18);
+        _externalDeposit(testPoolKey, bob, 1_000e18);
+
+        // Yield Y2 — alice + bob + owner all share.
+        vault0.simulateYield(100e18);
+        vault1.simulateYield(100e18);
+
+        // Charlie in at the post-Y2 price.
+        (uint256 charliePaid0,) = hook.previewDeposit(testPoolKey, 1_000e18);
+        _externalDeposit(testPoolKey, charlie, 1_000e18);
+
+        // No further yield — charlie holds during zero yield events.
+
+        (uint256 aliceOut0,) = _exitAll(alice);
+        (uint256 bobOut0,) = _exitAll(bob);
+        (uint256 charlieOut0,) = _exitAll(charlie);
+
+        uint256 aliceProfit = aliceOut0 - 1_000e18;
+        uint256 bobProfit = bobOut0 - bobPaid0;
+
+        // Profits ordered by time-held during yield events: alice > bob > charlie ~ 0.
+        assertApproxEqAbs(charlieOut0, charliePaid0, 10, "charlie breaks even (held no yield)");
+        assertGt(aliceProfit, bobProfit, "alice (held longer) profits more than bob");
+        assertGt(bobProfit, 10, "bob captured part of Y2");
+        assertGt(aliceProfit, 50e18, "alice captured part of Y1 + Y2 (>=50e18 from Y1 alone)");
+    }
+
+    /// @dev Helper: `user` removes ALL their `testPoolKey` shares. Returns (currency0, currency1)
+    ///      received this call. Advances one block to satisfy the same-block-withdraw guard so
+    ///      callers can chain further deposits/withdrawals in the same test.
+    function _exitAll(address user) internal returns (uint256 out0, uint256 out1) {
+        uint256 shares = hook.userShares(testPoolId, user);
+        uint256 t0Before = token0.balanceOf(user);
+        uint256 t1Before = token1.balanceOf(user);
+        vm.prank(user);
+        hook.removeLiquidity(testPoolKey, shares);
+        vm.roll(block.number + 1);
+        out0 = token0.balanceOf(user) - t0Before;
+        out1 = token1.balanceOf(user) - t1Before;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                       CROSS-POOL ISOLATION
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  Two pools sharing currency0/currency1 must not contaminate each other.
+    //  The test exercises the worst case: one pool vaulted, the other unvaulted —
+    //  the unvaulted pool's tokens physically sit in the hook contract.
+
+    function test_crossPool_swapDoesNotConsumeOtherPoolsUnvaultedERC20() public {
+        // Bootstrap the primary (vaulted) pool — its tokens are in the vault, not the hook.
+        _depositAsOperator(1_000e18);
+
+        // A second unvaulted pool with 500e18 of each currency parked in the hook.
+        (PoolKey memory keyB,) = _initSecondaryPool({vaulted: false, bootstrapAmount: 500e18});
+
+        // Pool B's untracked-by-vault ERC-20 sits in the hook.
+        assertEq(token0.balanceOf(address(hook)), 500e18);
+        assertEq(token1.balanceOf(address(hook)), 500e18);
+        (uint256 b0_before, uint256 b1_before) = hook.getReserves(keyB);
+        assertEq(b0_before, 500e18);
+        assertEq(b1_before, 500e18);
+
+        // Swap on the primary pool. afterSwap → _depositAllToVaults must NOT sweep pool B's tokens.
+        swap(testPoolKey, true, -10e18, "");
+
+        (uint256 b0_after, uint256 b1_after) = hook.getReserves(keyB);
+        assertEq(b0_after, 500e18, "Pool B currency0 untouched");
+        assertEq(b1_after, 500e18, "Pool B currency1 untouched");
+        assertEq(token0.balanceOf(address(hook)), 500e18, "Pool B's currency0 still in hook");
+        assertEq(token1.balanceOf(address(hook)), 500e18, "Pool B's currency1 still in hook");
+    }
+
+    function test_crossPool_unvaultedPoolCanStillWithdrawAfterOtherPoolsSwap() public {
+        _depositAsOperator(1_000e18);
+
+        (PoolKey memory keyB, PoolId idB) = _initSecondaryPool({vaulted: false, bootstrapAmount: 500e18});
+
+        // External LP into pool B.
+        token0.mint(alice, 100e18);
+        token1.mint(alice, 100e18);
+        vm.startPrank(alice);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        hook.addLiquidity(keyB, 100e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // Swap on primary pool.
+        swap(testPoolKey, true, -10e18, "");
+
+        // Alice withdraws fully from pool B at proportional value.
+        uint256 aliceShares = hook.userShares(idB, alice);
+        assertEq(aliceShares, 100e18);
+        uint256 t0_before = token0.balanceOf(alice);
+        uint256 t1_before = token1.balanceOf(alice);
+        vm.prank(alice);
+        hook.removeLiquidity(keyB, aliceShares);
+        assertGt(token0.balanceOf(alice), t0_before);
+        assertGt(token1.balanceOf(alice), t1_before);
+    }
+
+    /// @dev Worst-case interleaving: pool A is vaulted, pool B is unvaulted, both share
+    ///      currency0 and currency1. Pool B's tokens physically sit in the hook contract
+    ///      while pool A's are in the vault — the exact configuration where any global
+    ///      `balanceOf` read in the hook would have leaked B's funds into A. This test
+    ///      sequences ~12 deposits, swaps, yield events, and withdrawals across both
+    ///      pools and asserts solvency after every state-changing op.
+    function test_crossPool_interleavedOperations_oneVaultedOneUnvaulted() public {
+        _depositAsOperator(1_000e18); // pool A (vaulted)
+        (PoolKey memory keyB, PoolId idB) = _initSecondaryPool({vaulted: false, bootstrapAmount: 500e18});
+
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+        // Hook holds only pool B's unvaulted tokens; pool A's are all in the vault.
+        assertEq(token0.balanceOf(address(hook)), 500e18);
+        assertEq(token1.balanceOf(address(hook)), 500e18);
+
+        _externalDeposit(testPoolKey, alice, 200e18);
+        _externalDeposit(keyB, bob, 100e18);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+        // Hook now holds 600e18 of each (500 bootstrap + 100 bob).
+        assertEq(token0.balanceOf(address(hook)), 600e18);
+        assertEq(token1.balanceOf(address(hook)), 600e18);
+
+        // Each swap must leave the OTHER pool's reserves untouched.
+        _swapAndAssertOtherPoolUnchanged(testPoolKey, keyB, true, -50e18);
+        _swapAndAssertOtherPoolUnchanged(keyB, testPoolKey, false, -30e18);
+
+        // Yield on the shared vault — pool B is unvaulted, so it must NOT bleed in.
+        _accrueVaultYieldAndAssertOnlyPoolACaptures(keyB);
+
+        // Mid-life: another deposit, then alice partially exits.
+        _externalDeposit(testPoolKey, charlie, 100e18);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+        _partialExit(testPoolKey, alice, 2);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // Two swaps on B in opposite directions.
+        swap(keyB, true, -10e18, "");
+        swap(keyB, false, -10e18, "");
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // Full exits.
+        _fullExit(keyB, bob);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+        _fullExit(testPoolKey, charlie);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // One more swap on A, then alice exits her remainder.
+        swap(testPoolKey, false, -25e18, "");
+        _fullExit(testPoolKey, alice);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // After everyone except owner + dead shares has exited:
+        //   pool A shares == owner_A + MINIMUM_SHARES
+        //   pool B shares == owner_B + MINIMUM_SHARES
+        assertEq(
+            hook.totalShares(testPoolId),
+            hook.userShares(testPoolId, owner) + hook.MINIMUM_SHARES(),
+            "pool A share supply matches owner + dead shares"
+        );
+        assertEq(
+            hook.totalShares(idB),
+            hook.userShares(idB, owner) + hook.MINIMUM_SHARES(),
+            "pool B share supply matches owner + dead shares"
+        );
+    }
+
+    /// @dev Helper: swap on `subject`, assert `bystander`'s reserves are unchanged.
+    function _swapAndAssertOtherPoolUnchanged(
+        PoolKey memory subject,
+        PoolKey memory bystander,
+        bool zeroForOne,
+        int256 amountSpecified
+    ) internal {
+        (uint256 b0_pre, uint256 b1_pre) = hook.getReserves(bystander);
+        swap(subject, zeroForOne, amountSpecified, "");
+        (uint256 b0_post, uint256 b1_post) = hook.getReserves(bystander);
+        assertEq(b0_post, b0_pre, "bystander pool currency0 untouched");
+        assertEq(b1_post, b1_pre, "bystander pool currency1 untouched");
+        _assertCrossPoolSolvency(subject, bystander);
+    }
+
+    /// @dev Helper: accrue yield on the shared vault; assert pool A grew, unvaulted pool B didn't.
+    function _accrueVaultYieldAndAssertOnlyPoolACaptures(PoolKey memory keyB) internal {
+        (uint256 a0_pre, uint256 a1_pre) = hook.getReserves(testPoolKey);
+        (uint256 b0_pre, uint256 b1_pre) = hook.getReserves(keyB);
+        vault0.simulateYield(50e18);
+        vault1.simulateYield(50e18);
+        (uint256 a0_post, uint256 a1_post) = hook.getReserves(testPoolKey);
+        (uint256 b0_post, uint256 b1_post) = hook.getReserves(keyB);
+        assertGt(a0_post, a0_pre, "pool A captured currency0 yield");
+        assertGt(a1_post, a1_pre, "pool A captured currency1 yield");
+        assertEq(b0_post, b0_pre, "vault yield must not credit pool B");
+        assertEq(b1_post, b1_pre, "vault yield must not credit pool B");
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+    }
+
+    /// @dev Helper: `user` removes `1/divisor` of their shares from `key`. Asserts both
+    ///      tokens flowed back to the user.
+    function _partialExit(PoolKey memory key, address user, uint256 divisor) internal {
+        uint256 shares = hook.userShares(key.toId(), user);
+        uint256 t0_before = token0.balanceOf(user);
+        uint256 t1_before = token1.balanceOf(user);
+        vm.prank(user);
+        hook.removeLiquidity(key, shares / divisor);
+        vm.roll(block.number + 1);
+        assertGt(token0.balanceOf(user), t0_before, "partial-exit returned currency0");
+        assertGt(token1.balanceOf(user), t1_before, "partial-exit returned currency1");
+    }
+
+    /// @dev Helper: `user` removes ALL their shares from `key`. Asserts both tokens flowed back.
+    function _fullExit(PoolKey memory key, address user) internal {
+        uint256 shares = hook.userShares(key.toId(), user);
+        uint256 t0_before = token0.balanceOf(user);
+        uint256 t1_before = token1.balanceOf(user);
+        vm.prank(user);
+        hook.removeLiquidity(key, shares);
+        vm.roll(block.number + 1);
+        assertGt(token0.balanceOf(user), t0_before, "full-exit returned currency0");
+        assertGt(token1.balanceOf(user), t1_before, "full-exit returned currency1");
+    }
+
+    /// @dev Both pools share the SAME ERC4626 vault contracts. Tests that `_vaultShares`
+    ///      isolation prevents one pool from redeeming another pool's vault stake even
+    ///      though they sit in a single underlying ERC4626 supply.
+    function test_crossPool_interleavedOperations_sharedVault() public {
+        _depositAsOperator(1_000e18); // pool A (vaulted)
+        (PoolKey memory keyB, PoolId idB) = _initSecondaryPool({vaulted: true, bootstrapAmount: 500e18});
+
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+        // No raw ERC-20 in the hook — both pools' tokens are in the shared vault.
+        assertEq(token0.balanceOf(address(hook)), 0);
+        assertEq(token1.balanceOf(address(hook)), 0);
+
+        // ─── Interleaved deposits + swaps ────────────────────────────────────────
+        _externalDeposit(testPoolKey, alice, 300e18);
+        _externalDeposit(keyB, bob, 200e18);
+        swap(testPoolKey, true, -100e18, "");
+        swap(keyB, false, -75e18, "");
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // ─── Yield on shared vault — both pools must grow ────────────────────────
+        _assertSharedVaultYieldDistributesToBothPools(keyB);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // ─── Alice exits A — must NOT eat into pool B's vault stake ──────────────
+        _exitAndAssertNoCrossContamination(keyB);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+
+        // ─── Bob exits B fully — must succeed despite the shared vault ───────────
+        uint256 bobShares_B = hook.userShares(idB, bob);
+        uint256 t0_bobBefore = token0.balanceOf(bob);
+        uint256 t1_bobBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        hook.removeLiquidity(keyB, bobShares_B);
+        vm.roll(block.number + 1);
+        assertGt(token0.balanceOf(bob), t0_bobBefore);
+        assertGt(token1.balanceOf(bob), t1_bobBefore);
+        _assertCrossPoolSolvency(testPoolKey, keyB);
+    }
+
+    /// @dev Helper extracted from the shared-vault test to keep the stack shallow:
+    ///      simulate yield on the shared vault, assert both pools' reserves grew.
+    function _assertSharedVaultYieldDistributesToBothPools(PoolKey memory keyB) internal {
+        (uint256 a0_pre, uint256 a1_pre) = hook.getReserves(testPoolKey);
+        (uint256 b0_pre, uint256 b1_pre) = hook.getReserves(keyB);
+        vault0.simulateYield(100e18);
+        vault1.simulateYield(100e18);
+        (uint256 a0_post, uint256 a1_post) = hook.getReserves(testPoolKey);
+        (uint256 b0_post, uint256 b1_post) = hook.getReserves(keyB);
+        assertGt(a0_post, a0_pre, "pool A captured currency0 yield");
+        assertGt(a1_post, a1_pre, "pool A captured currency1 yield");
+        assertGt(b0_post, b0_pre, "pool B captured currency0 yield");
+        assertGt(b1_post, b1_pre, "pool B captured currency1 yield");
+    }
+
+    /// @dev Helper: alice exits her pool A position; assert pool B's vault stake is intact.
+    ///      Allows up to 1 wei downward rounding from `convertToAssets` integer division
+    ///      after the vault's total supply/assets change — that's not contamination, just
+    ///      ERC4626 share-price rounding noise.
+    function _exitAndAssertNoCrossContamination(PoolKey memory keyB) internal {
+        (uint256 b0_pre, uint256 b1_pre) = hook.getReserves(keyB);
+        uint256 aliceShares = hook.userShares(testPoolId, alice);
+        uint256 t0_aliceBefore = token0.balanceOf(alice);
+        vm.prank(alice);
+        hook.removeLiquidity(testPoolKey, aliceShares);
+        vm.roll(block.number + 1);
+        assertGt(token0.balanceOf(alice), t0_aliceBefore, "alice received currency0");
+
+        (uint256 b0_post, uint256 b1_post) = hook.getReserves(keyB);
+        assertApproxEqAbs(b0_post, b0_pre, 1, "pool B currency0 reserves not materially eroded");
+        assertApproxEqAbs(b1_post, b1_pre, 1, "pool B currency1 reserves not materially eroded");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                       TOKEN COMPATIBILITY
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Inbound transfers go through `SafeERC20.safeTransferFrom`; outbound through
+    ///      `Currency.transfer`. Both tolerate USDT-style tokens that don't return a bool.
+    ///      Routed through an unvaulted pool — vault implementations vary in their own
+    ///      USDT compatibility (vault-selection concern, not the hook's).
+    function test_supportsTokensWithNoReturnData_USDTLike() public {
+        NoReturnToken usdt0 = new NoReturnToken();
+        NoReturnToken usdt1 = new NoReturnToken();
+        if (address(usdt0) > address(usdt1)) (usdt0, usdt1) = (usdt1, usdt0);
+
+        PoolKey memory keyU = PoolKey({
+            currency0: Currency.wrap(address(usdt0)),
+            currency1: Currency.wrap(address(usdt1)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
-            tickSpacing: 20,
+            tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
 
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(0)),
+            vault1: IERC4626(address(0))
+        });
 
-        vm.prank(alice);
-        vm.expectRevert();
-        hook.initializePool(
-            key2,
-            SmartPoolHook.PoolConfig({
-                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-                pricing: SpreadQuoterBase.PricingState({bidFeePips: 100, askFeePips: 100, live: true}),
-                distribution: dist,
-                allowExternalDeposits: false,
-                vault0: IERC4626(address(vault0)),
-                vault1: IERC4626(address(vault1))
-            })
-        );
+        vm.startPrank(owner);
+        hook.initializePool(keyU, cfg);
+        usdt0.mint(owner, 1000e18);
+        usdt1.mint(owner, 1000e18);
+        usdt0.approve(address(hook), 1000e18);
+        usdt1.approve(address(hook), 1000e18);
+        hook.bootstrap(keyU, 1000e18, 1000e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        uint256 ownerShares = hook.userShares(keyU.toId(), owner);
+        uint256 t0Before = usdt0.balanceOf(owner);
+        uint256 t1Before = usdt1.balanceOf(owner);
+        vm.prank(owner);
+        hook.removeLiquidity(keyU, ownerShares / 2);
+        assertGt(usdt0.balanceOf(owner), t0Before, "USDT-like currency0 returned");
+        assertGt(usdt1.balanceOf(owner), t1Before, "USDT-like currency1 returned");
     }
 
-    // ──── View Functions ────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          VAULT OUTAGE
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  Pool uptime depends on vault uptime. When the vault rejects deposits or
+    //  withdrawals, swaps and `removeLiquidity` revert. This is a documented
+    //  operational tradeoff — the hook delegates to the vault and surfaces the
+    //  failure cleanly rather than silently degrading.
 
-    function test_previewAddLiquidity_firstDeposit() public view {
+    function test_vaultRevertOnDeposit_swapFails() public {
+        _depositAsOperator(1_000e18);
+
+        PausableVault paused = new PausableVault();
+        vm.etch(address(vault0), address(paused).code);
+        PausableVault(address(vault0)).pause();
+
+        // afterSwap → _depositAllToVault(currency0) → vault.deposit reverts → swap reverts.
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
+    }
+
+    function test_vaultRevertOnWithdraw_removeLiquidityFails() public {
+        _depositAsOperator(1_000e18);
+
+        PausableVault paused = new PausableVault();
+        vm.etch(address(vault0), address(paused).code);
+        PausableVault(address(vault0)).pause();
+
+        uint256 ownerShares = hook.userShares(testPoolId, owner);
+        vm.prank(owner);
+        vm.expectRevert();
+        hook.removeLiquidity(testPoolKey, ownerShares);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                      REENTRANCY VIA VAULT
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  An owner-configured ERC4626 vault is an external dependency. If a malicious
+    //  vault re-enters the hook from inside `vault.deposit` (called during JIT
+    //  teardown), the JIT lock prevents the inner LP entry-point from succeeding.
+
+    function test_vaultReentryIntoAddLiquidity_rejected() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        ReentrantVault evil = new ReentrantVault();
+        vm.etch(address(vault0), address(evil).code);
+        ReentrantVault(address(vault0)).configure(address(hook), testPoolKey);
+
+        // Swap → afterSwap → vault.deposit → reentrant addLiquidity → JIT lock revert.
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
+    }
+
+    function test_vaultReentryIntoSetDistribution_rejected() public {
+        _depositAsOperator(1_000e18);
+
+        ReentrantVault evil = new ReentrantVault();
+        vm.etch(address(vault0), address(evil).code);
+        ReentrantVault(address(vault0)).configureSetDistribution(address(hook), testPoolKey);
+
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                   PRICING STATE & FEE BOUNDS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_updatePricingState_revertsAboveMaxLPFee() public {
+        SpreadQuoterBase.PricingState memory bad = SpreadQuoterBase.PricingState({
+            bidFeePips: LPFeeLibrary.MAX_LP_FEE + 1,
+            askFeePips: BID_FEE_PIPS,
+            live: true
+        });
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        hook.updatePricingState(testPoolKey, bad);
+
+        // Symmetric for askFeePips.
+        bad.bidFeePips = BID_FEE_PIPS;
+        bad.askFeePips = LPFeeLibrary.MAX_LP_FEE + 1;
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.FeeOutOfBounds.selector);
+        hook.updatePricingState(testPoolKey, bad);
+    }
+
+    function test_updatePricingState_atMaxIsAccepted() public {
+        SpreadQuoterBase.PricingState memory edge = SpreadQuoterBase.PricingState({
+            bidFeePips: LPFeeLibrary.MAX_LP_FEE,
+            askFeePips: LPFeeLibrary.MAX_LP_FEE,
+            live: true
+        });
+        vm.prank(owner);
+        hook.updatePricingState(testPoolKey, edge);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                       PM DYNAMIC FEE SYNC
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  Every write to `pricingState` flows through `_commitPricingState`, which
+    //  syncs the PM's stored dynamic LP fee to `max(bidFeePips, askFeePips)` when
+    //  live, or 0 when not live. The actual per-swap fee is still set via the
+    //  `_beforeSwap` override (direction-aware). The stored value is for off-chain
+    //  consumers reading `getSlot0`.
+
+    function test_pmFeeSync_initializePool_setsRepresentativeFee() public view {
+        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
+        assertEq(lpFee, BID_FEE_PIPS, "PM fee == max(bid, ask) after init");
+    }
+
+    function test_pmFeeSync_updatePricingState_updatesPMFee() public {
+        SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
+            bidFeePips: 250,
+            askFeePips: 5_000,
+            live: true
+        });
+        vm.prank(owner);
+        hook.updatePricingState(testPoolKey, newState);
+        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
+        assertEq(lpFee, 5_000, "PM fee tracks max(bid, ask)");
+    }
+
+    function test_pmFeeSync_setPoolLiveFalse_zeroesPMFee() public {
+        vm.prank(owner);
+        hook.setPoolLive(testPoolKey, false);
+        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
+        assertEq(lpFee, 0, "PM fee == 0 when pool not live");
+    }
+
+    function test_pmFeeSync_setPoolLiveTrue_restoresRepresentativeFee() public {
+        vm.startPrank(owner);
+        hook.setPoolLive(testPoolKey, false);
+        hook.setPoolLive(testPoolKey, true);
+        vm.stopPrank();
+        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
+        assertEq(lpFee, BID_FEE_PIPS, "PM fee restored when live again");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                    setActiveTick DISABLED
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev `activeLowerTick` is inherited from SpreadQuoterBase for single-tick LP
+    ///      subclasses. SmartPoolHook deploys multi-bucket distributions and ignores it
+    ///      entirely, so the setter is overridden to revert.
+    function test_setActiveTick_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
+        hook.setActiveTick(testPoolKey, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                          VIEW FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_previewAddLiquidity_revertsBeforeBootstrap() public {
+        // Fresh pool that hasn't been bootstrapped.
+        (PoolKey memory key,) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
+        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        hook.previewDeposit(key, 500e18);
+    }
+
+    function test_previewAddLiquidity_proportionalAfterBootstrap() public {
+        _depositAsOperator(1_000e18);
         (uint256 a0, uint256 a1) = hook.previewDeposit(testPoolKey, 500e18);
+        // total0 = total1 = 1000e18, supply = 1000e18 → 500e18 shares costs 500e18 of each.
         assertEq(a0, 500e18);
         assertEq(a1, 500e18);
     }
 
     function test_sharesOf() public {
         _depositAsOperator(1_000e18);
-        assertEq(hook.sharesOf(testPoolKey, owner), 1_000e18);
+        assertEq(hook.sharesOf(testPoolKey, owner), 1_000e18 - hook.MINIMUM_SHARES());
         assertEq(hook.sharesOf(testPoolKey, alice), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                   QUOTE / EXECUTION FIDELITY
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  Validates `getIndicativeQuote` matches actual swap execution across multi-
+    //  range distributions, both directions, exact-input vs exact-output, and after
+    //  price movements. The virtual tick walk in SwapSimulator mirrors v4 Pool.sol
+    //  exactly, so quotes should match to 1 wei.
+
+    function test_quoteFidelity_smallSwap_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(true, -100e18);
+    }
+
+    function test_quoteFidelity_mediumSwap_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(true, -3_000e18);
+    }
+
+    function test_quoteFidelity_largeSwap_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(true, -8_000e18);
+    }
+
+    function test_quoteFidelity_veryLargeSwap_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(true, -9_500e18);
+    }
+
+    function test_quoteFidelity_smallSwap_oneForZero() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(false, -100e18);
+    }
+
+    function test_quoteFidelity_mediumSwap_oneForZero() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(false, -3_000e18);
+    }
+
+    function test_quoteFidelity_exactOutput_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(true, 100e18);
+    }
+
+    function test_quoteFidelity_exactOutput_oneForZero() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+        _assertQuoteFidelity(false, 100e18);
+    }
+
+    /// @dev Asymmetric distribution: 50% in [-60,-10], 30% in [-10,10], 20% in [10,60].
+    function test_quoteFidelity_asymmetricDistribution() public {
+        _depositAsOperator(10_000e18);
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -10, weightBps: 5000});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3000});
+        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: 10, tickUpper: 60, weightBps: 2000});
+        vm.prank(owner);
+        hook.setDistribution(testPoolKey, dist);
+
+        uint256 snap = vm.snapshotState();
+
+        _assertQuoteFidelity(true, -100e18);
+        vm.revertToState(snap);
+
+        _assertQuoteFidelity(true, -3_000e18);
+        vm.revertToState(snap);
+
+        _assertQuoteFidelity(false, -100e18);
+        vm.revertToState(snap);
+
+        _assertQuoteFidelity(false, -3_000e18);
+    }
+
+    function test_quoteFidelity_afterPriceMovement() public {
+        _depositAsOperator(10_000e18);
+        _useMultiBucketDistribution();
+
+        // Move price with a large zeroForOne swap.
+        swap(testPoolKey, true, -5_000e18, "");
+        (, int24 tickAfter,,) = manager.getSlot0(testPoolId);
+        assertLt(tickAfter, -5, "price should have moved");
+
+        uint256 snap = vm.snapshotState();
+        _assertQuoteFidelity(true, -500e18);
+        vm.revertToState(snap);
+        _assertQuoteFidelity(false, -500e18);
+    }
+
+    /// @dev Single-bucket distribution — the simplest possible JIT shape. Validates that
+    ///      quote/execution fidelity is preserved for the degenerate case where the virtual
+    ///      tick schedule has only two entries (tickLower and tickUpper). EC-03 follow-up.
+    function test_quoteFidelity_singleBucket_zeroForOne() public {
+        _depositAsOperator(10_000e18);
+        // Default config is already a single bucket [-10, 10] @ 10_000 bps; no setDistribution.
+        _assertQuoteFidelity(true, -100e18);
+    }
+
+    function test_quoteFidelity_singleBucket_oneForZero() public {
+        _depositAsOperator(10_000e18);
+        _assertQuoteFidelity(false, -100e18);
+    }
+
+    /// @dev Adjacent buckets sharing a tick boundary — the merge step in `_sortAndMergeTicks`
+    ///      must sum `liquidityNet` for both buckets at the shared tick. A bug here would
+    ///      mis-report liquidity at the boundary tick and diverge from execution. EC-03 follow-up.
+    function test_quoteFidelity_tickBoundary_sharedAtZero() public {
+        _depositAsOperator(10_000e18);
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](2);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 0, weightBps: 5000});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 10, weightBps: 5000});
+        vm.prank(owner);
+        hook.setDistribution(testPoolKey, dist);
+
+        uint256 snap = vm.snapshotState();
+        // Small swap (stays well inside the bucket): exercises base case.
+        _assertQuoteFidelity(true, -100e18);
+        vm.revertToState(snap);
+
+        // Large swap that crosses the shared tick boundary at 0 — engages the merged tickNet
+        // entry during the tick walk. zeroForOne moves price down, so the upper bucket's
+        // tickUpper=10 is the first encountered; tickBoundary=0 is the merged transition point.
+        _assertQuoteFidelity(true, -2_000e18);
+        vm.revertToState(snap);
+
+        _assertQuoteFidelity(false, -2_000e18);
+    }
+
+    /// @dev MAX_BUCKETS = 8 distribution. Stresses the insertion sort and merge in
+    ///      `_sortAndMergeTicks` (16 raw entries before merge), exercises the upper bound on
+    ///      iteration in `_computeAllocations` / `_buildTickSchedule`, and validates fidelity
+    ///      across a swap that traverses multiple buckets. EC-03 follow-up.
+    function test_quoteFidelity_maxBuckets() public {
+        _depositAsOperator(10_000e18);
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](8);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -80, tickUpper: -60, weightBps: 1250});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -40, weightBps: 1250});
+        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -40, tickUpper: -20, weightBps: 1250});
+        dist[3] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 0, weightBps: 1250});
+        dist[4] = SmartPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 20, weightBps: 1250});
+        dist[5] = SmartPoolHook.LiquidityBucket({tickLower: 20, tickUpper: 40, weightBps: 1250});
+        dist[6] = SmartPoolHook.LiquidityBucket({tickLower: 40, tickUpper: 60, weightBps: 1250});
+        dist[7] = SmartPoolHook.LiquidityBucket({tickLower: 60, tickUpper: 80, weightBps: 1250});
+        vm.prank(owner);
+        hook.setDistribution(testPoolKey, dist);
+
+        uint256 snap = vm.snapshotState();
+        _assertQuoteFidelity(true, -100e18); // small, stays inside bucket [0, 20]
+        vm.revertToState(snap);
+        _assertQuoteFidelity(true, -3_000e18); // medium, crosses several boundaries
+        vm.revertToState(snap);
+        _assertQuoteFidelity(false, -100e18);
+        vm.revertToState(snap);
+        _assertQuoteFidelity(false, -3_000e18);
+    }
+
+    /// @dev Asymmetric-decimal pair (6-decimal USDC-like + 18-decimal WETH-like). The bootstrap
+    ///      math (`sqrt(amount0 * amount1)`), `_convertToAmounts` (Solady `fullMulDiv`), and the
+    ///      tick-schedule allocation are all unit-agnostic — verify they remain so under
+    ///      realistic decimal asymmetry. EC-03 follow-up; complements EC-04 bootstrap analysis.
+    function test_quoteFidelity_asymmetricDecimals() public {
+        // Deploy USDC-like (6 decimals) and WETH-like (18 decimals); order by address so they
+        // map to currency0/currency1 cleanly without fighting PoolKey ordering rules.
+        MockERC20 stable = new MockERC20("USDC", "USDC", 6);
+        MockERC20 weth = new MockERC20("WETH", "WETH", 18);
+
+        (Currency c0, Currency c1, MockERC20 t0, MockERC20 t1) = address(stable) < address(weth)
+            ? (Currency.wrap(address(stable)), Currency.wrap(address(weth)), stable, weth)
+            : (Currency.wrap(address(weth)), Currency.wrap(address(stable)), weth, stable);
+
+        MockERC4626 v0 = new MockERC4626(ERC20(address(t0)));
+        MockERC4626 v1 = new MockERC4626(ERC20(address(t1)));
+
+        PoolKey memory key = PoolKey({
+            currency0: c0,
+            currency1: c1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 10,
+            hooks: IHooks(address(hook))
+        });
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SpreadQuoterBase.PricingState({
+                bidFeePips: BID_FEE_PIPS,
+                askFeePips: ASK_FEE_PIPS,
+                live: true
+            }),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(v0)),
+            vault1: IERC4626(address(v1))
+        });
+
+        vm.prank(owner);
+        hook.initializePool(key, cfg);
+
+        // Bootstrap with realistic units. Whichever currency is t0/t1 by address, deposit
+        // enough decimal-equivalent value on each side so liquidity is non-degenerate.
+        // 1_000 stable @ 1e6 = 1e9 ; 1 WETH @ 1e18 = 1e18 ; sqrt(1e27) ~ 3.16e13 >> MINIMUM_SHARES.
+        uint256 amtStable = 1_000e6;
+        uint256 amtWeth = 1e18;
+        (uint256 amt0, uint256 amt1) = address(t0) == address(stable) ? (amtStable, amtWeth) : (amtWeth, amtStable);
+
+        t0.mint(owner, amt0);
+        t1.mint(owner, amt1);
+        vm.startPrank(owner);
+        t0.approve(address(hook), amt0);
+        t1.approve(address(hook), amt1);
+        hook.bootstrap(key, amt0, amt1);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // Approve swap router for the new tokens (deployed by Deployers in setUp).
+        t0.mint(address(this), 1e18);
+        t1.mint(address(this), 1e18);
+        t0.approve(address(swapRouter), type(uint256).max);
+        t1.approve(address(swapRouter), type(uint256).max);
+
+        // Direct fidelity assertion — `_assertQuoteFidelity` is hard-coded to `testPoolKey`,
+        // so this test inlines the comparison for the asymmetric-decimal pool.
+        // Use a tiny exact-input swap so the swap stays well inside the [-10, 10] bucket
+        // regardless of which side has 6 vs 18 decimals.
+        int256 amountSpecified = -1e6;
+        uint256 quoted = hook.getIndicativeQuote(key, true, amountSpecified, "");
+        assertGt(quoted, 0, "Quote should be non-zero for asymmetric-decimal pool");
+
+        BalanceDelta delta = swap(key, true, amountSpecified, "");
+        uint256 actual = uint256(int256(delta.amount1()));
+
+        assertApproxEqAbs(quoted, actual, ABS_TOLERANCE, "asymmetric-decimal quote/exec mismatch");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                                  MOCKS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// @dev USDT-style ERC-20 — `transfer`, `transferFrom`, `approve` return nothing.
+///      Standard `IERC20` callers fail to ABI-decode the empty returndata; SafeERC20
+///      tolerates it.
+contract NoReturnToken {
+    string public name = "No Return USDT-like";
+    string public symbol = "NRT";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    event Transfer(address indexed from, address indexed to, uint256 amount);
+    event Approval(address indexed owner, address indexed spender, uint256 amount);
+
+    function mint(address to, uint256 amount) external {
+        totalSupply += amount;
+        balanceOf[to] += amount;
+        emit Transfer(address(0), to, amount);
+    }
+
+    function transfer(address to, uint256 amount) external {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(msg.sender, to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external {
+        uint256 a = allowance[from][msg.sender];
+        if (a != type(uint256).max) allowance[from][msg.sender] = a - amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
+    }
+
+    function approve(address spender, uint256 amount) external {
+        allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+    }
+}
+
+/// @dev ERC4626-shaped vault that always reverts when paused. Used to simulate vault
+///      outage scenarios (deposit/withdraw failures bricking the pool).
+contract PausableVault {
+    bool public paused;
+
+    function pause() external {
+        paused = true;
+    }
+
+    function deposit(uint256, address) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function withdraw(uint256, address, address) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function redeem(uint256, address, address) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function maxWithdraw(address) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function maxRedeem(address) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function previewWithdraw(uint256) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function convertToAssets(uint256) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+}
+
+/// @dev ERC4626-shaped vault that re-enters the hook from inside `deposit`. Configurable
+///      to call `addLiquidity` or `setDistribution` for testing the JIT lock.
+contract ReentrantVault {
+    address public targetHook;
+    PoolKey public targetKey;
+    bytes4 public mode; // 0xaaaaaaaa = addLiquidity, 0xbbbbbbbb = setDistribution
+
+    function configure(address hook, PoolKey calldata key) external {
+        targetHook = hook;
+        targetKey = key;
+        mode = 0xaaaaaaaa;
+    }
+
+    function configureSetDistribution(address hook, PoolKey calldata key) external {
+        targetHook = hook;
+        targetKey = key;
+        mode = 0xbbbbbbbb;
+    }
+
+    function deposit(uint256, address) external returns (uint256) {
+        if (mode == 0xaaaaaaaa) {
+            SmartPoolHook(targetHook).addLiquidity(targetKey, 1);
+        } else if (mode == 0xbbbbbbbb) {
+            SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+            dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+            SmartPoolHook(targetHook).setDistribution(targetKey, dist);
+        }
+        return 0;
+    }
+
+    function withdraw(uint256, address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function redeem(uint256, address, address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function maxWithdraw(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxRedeem(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function previewWithdraw(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function convertToAssets(uint256 s) external pure returns (uint256) {
+        return s;
     }
 }
