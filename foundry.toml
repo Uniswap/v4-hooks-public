@@ -1,8 +1,8 @@
 [profile.default]
 out = 'foundry-out'
 auto_detect_solc = true
-optimizer_runs = 44444444
-via_ir = false
+optimizer_runs = 200
+via_ir = true
 ffi = true
 fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read-write", path = "docs/" }, { access = "read", path = "test/stable/data/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }]
 evm_version = "cancun"
