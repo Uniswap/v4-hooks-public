@@ -24,7 +24,7 @@
     }
   },
   "lib/protocol-fees": {
-    "rev": "ad2652055170010d875a991acc88ba037fce8c65"
+    "rev": "e9262fb5e3553f83ad1fc009183f3455b16e85dd"
   },
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
