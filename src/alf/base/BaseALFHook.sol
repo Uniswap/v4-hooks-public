@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.26;
 
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -90,21 +90,6 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     ///      using the hook's EIP-712 infrastructure and priceSigner.
     function _resolveAttestation(bytes memory) internal view virtual returns (bool isAttested, address attester) {
         return (false, address(0));
-    }
-
-    // ──── Internal: Settlement ────
-
-    /// @dev Settle an amount to the PoolManager, preferring ERC-6909 claim burns over ERC-20.
-    function _settleWithClaimPriority(Currency currency, uint256 amount) internal {
-        uint256 claimBal = poolManager.balanceOf(address(this), currency.toId());
-        if (claimBal >= amount) {
-            poolManager.burn(address(this), currency.toId(), amount);
-        } else if (claimBal > 0) {
-            poolManager.burn(address(this), currency.toId(), claimBal);
-            _settle(currency, address(this), amount - claimBal);
-        } else {
-            _settle(currency, address(this), amount);
-        }
     }
 
     // ──── Internal: Signed Curve Updates ────
