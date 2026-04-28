@@ -1,36 +1,45 @@
 # ALF: Formal Specification
 
-**Version:** 0.2.0-draft
+**Version:** 0.3.0-draft
 **Authors:** Uniswap Labs Protocols Team
 **Status:** Draft
-**Last Updated:** February 2026
+**Last Updated:** April 2026
 
 ---
 
 # Overview
 
-This document species the interfaces, contracts, behaviors and invariants of the ALF system. It is intended as an implementation reference. For motivation, rationale and product context, see [ALF: Composable Quoter Model](https://www.notion.so/ALF-Composable-Quoter-Model-30cc52b2548b80518c92c3ae4a0e10fa?pvs=21).
+This document specifies the interfaces, contracts, behaviors, and invariants of the ALF system as implemented on this branch. It is intended as an implementation reference. For motivation, rationale, and product context, see `alf-design.md`.
 
 ## System Components
 
-| Component | Type | Mutability | Deployment |
-| --- | --- | --- | --- |
-| `IAttestationRegistry` | Interface | — | — |
-| `AttestationRegistry` | Contract | State: attester whitelist | One per chain |
-| `IALFHook` | Interface | — | — |
-| `BaseALFHook` | Abstract contract | — | Extended by quoters |
-| `StorageQuoterHook` | Contract (reference) | State: per-pool pricing config | One per quoter per pair |
-| `Permit2JITQuoterHook` | Contract (reference) | State: per-pool JIT config | One per quoter per pair |
-| Quoter hooks (custom) | Contracts | State: per-quoter pricing | One per quoter per pair |
-| `ALFAuctionHook` | Contract | Stateless | One per chain |
+All ALF code lives under `src/alf/`. Components are split into shared bases (inherited by every quoter), reference quoter strategies, and the auction hook.
+
+| Component | Type | Path | Mutability | Deployment |
+| --- | --- | --- | --- | --- |
+| `IALFHook` | Interface | `src/alf/interfaces/IALFHook.sol` | — | — |
+| `ALFHookData` | Struct | `src/alf/interfaces/IALFHook.sol` | — | — |
+| `BaseALFHook` | Abstract contract | `src/alf/base/BaseALFHook.sol` | Per-pool curve-update hash; `priceSigner` (settable) | Extended by quoter hooks |
+| `SpreadQuoterBase` | Abstract contract | `src/alf/base/SpreadQuoterBase.sol` | Per-pool `PricingState`, `activeLowerTick` | Extended by spread quoters |
+| `PoolVault` | Abstract contract | `src/alf/base/PoolVault.sol` | Per-pool share math + asset tracking | Extended by rehypothecating hooks |
+| `SwapSimulator` | Library | `src/alf/libraries/SwapSimulator.sol` | — | Linked into hooks |
+| `PairLib` | Library | `src/alf/libraries/PairLib.sol` | — | Linked into hooks |
+| `ALFProtocolFees` | Abstract contract | `src/alf/base/ALFProtocolFees.sol` | — | Extended by `ALFAuctionHook` |
+| `SimpleSpreadQuoterHook` | Contract (reference) | `src/alf/SimpleSpreadQuoterHook.sol` | Per-pool `PricingState`, `authorizedLPs` | One per quoter per pair |
+| `SmartPoolHook` | Contract (reference) | `src/alf/SmartPoolHook.sol` | Per-pool `PoolState`, `PoolVault` storage | One per quoter per pair |
+| `ALFAuctionHook` | Contract | `src/alf/ALFAuctionHook.sol` | Stateless | One per chain |
+| `AuctionTypes` | Structs | `src/alf/types/AuctionTypes.sol` | — | — |
+
+`AttestationRegistry` is **not** part of the system. Attestation handling is a per-hook concern — see [Attestation Extension Point](#attestation-extension-point).
 
 ## Dependencies
 
 - Uniswap v4 PoolManager
-- Uniswap v4 BaseHook
+- Uniswap v4 BaseHook (`src/base/BaseHook.sol` in this repo)
 - Uniswap v4 DeltaResolver (via v4-periphery)
 - Uniswap v4 core types (`PoolKey`, `PoolId`, `Currency`, `BalanceDelta`, `BeforeSwapDelta`)
-- Permit2 `IAllowanceTransfer` (for JIT quoter)
+- v4-periphery `LiquidityAmounts`
+- OpenZeppelin: `IERC4626`, `IERC20`, `SafeERC20`, `ReentrancyGuardTransient`, `Ownable2Step`, `EIP712`, `ECDSA` (used by `SmartPoolHook` and `SpreadQuoterBase`)
 
 ## Conventions
 
@@ -38,175 +47,93 @@ This document species the interfaces, contracts, behaviors and invariants of the
 - "Pair" refers to an unordered `(Currency, Currency)` tuple. "Pool" refers to a specific `PoolKey` which includes the pair, fee, tick spacing, and hook address.
 - Gas values are specified as `uint32`, supporting up to ~4.29 billion gas units. This should be more than sufficient for all current use cases and future-proof for the foreseeable future of typical EVMs.
 - All view functions called for quoting purposes MUST be invoked via `staticcall`.
+- All curve-update signatures use EIP-712 typed data; the verifying contract is the quoter hook itself.
 
-# AttestationRegistry
+# Standard hookData Envelope
 
-The AttestationRegistry manages attestation keys and verifies flow attestations. It is read by quoter hooks to determine whether a swap originates from an attested source (e.g., the Uniswap frontend or TAPI). It does not enforce how quoters use attestation data. Additionally, this registry is not intended to serve as an exclusive authority list; individual quoters may choose to ignore, augment or fully rely on this registry to make informed decisions about attestation validity.
-
-## **Types**
+ALF hooks accept a uniform hookData shape so that routers, the auction hook, and quoter hooks all decode the same payload:
 
 ```solidity
-struct Attestation {
-    address attester;    // The attesting interface
-    address swapper;     // The user initiating the swap
-    uint256 deadline;    // Attestation expiry timestamp
-    bytes32 swapHash;    // keccak256(abi.encode(currency0, currency1, zeroForOne, amountSpecified))
+struct ALFHookData {
+    bytes attestationData; // ABI-encoded attestation payload, or empty
+    bytes curveUpdateData; // ABI-encoded signed curve update, or empty
 }
 ```
 
-## Interface
+Callers MUST encode hookData as `abi.encode(ALFHookData(...))` for any swap that needs to forward attestation or curve-update payloads. Empty `hookData` (`bytes("")`) is also valid and means "no attestation, no curve update."
+
+`BaseALFHook._resolveHookData(bytes calldata hookData)` decodes this envelope and resolves attestation in one step, returning `(bytes curveUpdateData, bool isAttested, address attester)`.
+
+# Attestation Extension Point
+
+Attestation verification is delegated to each hook via a virtual on `BaseALFHook`:
 
 ```solidity
-interface IAttestationRegistry {
-    // ──── Events ────
-
-    event AttesterAdded(address indexed attester);
-    event AttesterRemoved(address indexed attester);
-
-    // ──── Mutations (Governance controlled) ────
-
-    /// @notice Add an authorized attester.
-    /// @dev MUST be restricted to governance.
-    /// @dev MUST emit AttesterAdded.
-    /// @dev MUST revert if attester is already authorized.
-    function addAttester(address attester) external;
-
-    /// @notice Remove an authorized attester.
-    /// @dev MUST be restricted to governance.
-    /// @dev MUST emit AttesterRemoved.
-    /// @dev MUST revert if attester is not authorized.
-    function removeAttester(address attester) external;
-
-    // ──── Views ────
-
-    /// @notice Verify an attestation signature.
-    /// @dev MUST NOT revert on invalid attestation. Returns isValid = false instead.
-    /// @dev MUST return isValid = false if:
-    ///      - The signature is invalid
-    ///      - The recovered attester is not authorized
-    ///      - block.timestamp > attestation.deadline
-    /// @dev MUST NOT check swapHash (this is the caller's responsibility).
-    /// @param attestationData ABI-encoded (Attestation, bytes signature).
-    /// @return attestation The parsed attestation struct.
-    /// @return isValid Whether the attestation is valid.
-    function verify(
-        bytes calldata attestationData
-    ) external view returns (Attestation memory attestation, bool isValid);
-
-    /// @notice Check if an address is an authorized attester.
-    function isAuthorizedAttester(address attester) external view returns (bool);
-}
+function _resolveAttestation(bytes memory attestationData)
+    internal view virtual returns (bool isAttested, address attester);
 ```
 
-## Attestation Format
+The base implementation returns `(false, address(0))`. Subclasses that want to consume attestation override this method and verify the payload using whatever trust model fits the maker's strategy (typically EIP-712 against an owner-managed signer, often the same `priceSigner` used for signed curve updates).
 
-```solidity
-attestationData = abi.encode(
-    Attestation({
-        attester: <attester address>,
-        swapper: <user address>,
-        deadline: <block.timestamp expiry>,
-        swapHash: keccak256(abi.encode(currency0, currency1, zeroForOne, amountSpecified))
-    }),
-    <bytes signature>
-)
-```
+There is **no shared registry contract**. Makers choose:
 
-The signature is an EIP-712 typed signature over the `Attestation` struct, signed by the attester's private key.
+- Their own attester set (no governance coordination).
+- Their own EIP-712 domain.
+- What checks to layer on top (e.g., binding to `swapHash`, deadline enforcement, swapper match).
 
-## Invariants
-
-- **Non-reverting.** `verify()` MUST NOT revert regardless of input. Malformed input MUST return `isValid = false`.
-- **No state mutation.** `verify()` is a view function. No state changes occur during attestation verification.
-- **Time-bounded.** Attestations with `deadline < block.timestamp` MUST return `isValid = false`; `deadline >= block.timestamp` with a valid signature MUST return `isValid = true`
-- **Attester authorization.** Attestations signed by non-authorized attesters MUST return `isValid = false`.
-- **swapHash is caller-verified.** The registry verifies the signature and expiry but does NOT verify that the `swapHash` matches the current swap parameters. The calling hook SHOULD perform this check if it wants to bind the attestation to specific swap parameters.
-
-## EIP-712 Domain
-
-<aside>
-🚧
-
-**Note:** The EIP-712 domain and type hash are preliminary. Final specification pending study of Jupiter's attestation model and feedback from stakeholders.
-
-</aside>
-
-```solidity
-EIP712Domain({
-    name: "Attestation",
-    version: "1",
-    chainId: block.chainid,
-    verifyingContract: <AttestationRegistry address>
-})
-```
-
-**Type Hash:**
-
-```solidity
-bytes32 constant ATTESTATION_TYPEHASH = keccak256(
-    "Attestation(address attester,address swapper,uint256 deadline,bytes32 swapHash)"
-);
-```
+The base only handles decoding the envelope and routing the raw `attestationData` bytes to the override. Hooks that don't override `_resolveAttestation` see all flow as unattested.
 
 # IALFHook
 
-A standard interface implemented by ALF hooks on top of the v4 hook interface. Provides a uniform way for the router and auction hook to query indicative quotes from any quoter.
+A standard interface implemented by ALF hooks on top of the v4 hook interface. Provides a uniform way for the router and auction hook to query indicative quotes, simulate price-bounded fills, and read hook metadata.
 
 ## Interface
 
 ```solidity
 interface IALFHook {
-    /// @notice Get an indicative quote for routing purposes.
-    /// @dev MUST be a view function. Callers invoke via staticcall.
-    /// @dev MUST NOT revert under normal conditions. If the quoter cannot
-    ///      price the requested swap, it SHOULD return 0.
-    /// @dev The returned value is non-binding. The actual execution price
-    ///      is determined by the hook's beforeSwap implementation.
-    /// @param key The pool key for this quoter's pool.
-    /// @param zeroForOne The swap direction.
-    /// @param amountSpecified The swap amount. Negative = exact input.
-    /// @param attestationData ABI-encoded attestation payload, or empty bytes
-    ///        if no attestation is available.
-    /// @return outputAmount The indicative number of output tokens.
-    ///         For exact input swaps, this is the expected output.
-    ///         For exact output swaps, this is the required input.
     function getIndicativeQuote(
         PoolKey calldata key,
         bool zeroForOne,
         int256 amountSpecified,
-        bytes calldata attestationData
+        bytes calldata hookData
     ) external view returns (uint256 outputAmount);
 
-    /// @notice Whether this quoter is currently live and accepting swaps.
-    /// @dev Quoters SHOULD return true if the current curve is not stale.
-    /// @dev Consumers SHOULD validate against observed behavior.
-    function isLive() external view returns (bool);
+    function swapToPrice(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata hookData
+    ) external view returns (uint256 amountIn, uint256 amountOut);
 
-    /// @notice The declared maximum gas for getIndicativeQuote execution.
-    /// @dev Callers use this to set gas limits on staticcall invocations.
-    /// @dev Quoters that exceed their declared maxGas will have their
-    ///      getIndicativeQuote calls fail, resulting in router deprioritization.
+    function isLive() external view returns (bool);
     function maxGas() external view returns (uint32);
+
+    function getReserves(PoolKey calldata key)
+        external view returns (uint256 token0, uint256 token1);
+    function getEffectiveLiquidity(PoolKey calldata key)
+        external view returns (uint256 token0, uint256 token1);
 }
 ```
 
+`hookData` is the standard `ALFHookData` envelope (or empty bytes). Hooks that ignore hookData on indicatives (e.g., `SmartPoolHook`) still accept the parameter for ABI uniformity.
+
 ## Behavioral Requirements
 
-- **View-only.** `getIndicativeQuote` MUST be callable via `staticcall`. It MUST NOT modify state.
-- **Non-reverting.** `getIndicativeQuote` SHOULD NOT revert. If the quoter cannot price a swap (insufficient liquidity, unsupported direction, etc.), it SHOULD return `0`. Quoters that revert will be deprioritized by the router's reputation model.
+- **View-only.** All `IALFHook` methods MUST be callable via `staticcall`. They MUST NOT modify state.
+- **Non-reverting.** `getIndicativeQuote` and `swapToPrice` SHOULD NOT revert. If the quoter cannot price a swap (insufficient liquidity, unsupported direction, hook not live, etc.), it SHOULD return `0` (or `(0, 0)` for `swapToPrice`). Quoters that revert will be deprioritized by the router's reputation model and skipped by the auction hook.
 - **Gas-bounded.** `getIndicativeQuote` MUST execute within the gas limit declared by `maxGas()`. Consumers will call with `{gas: maxGas}` and treat OOG conditions as a failure.
-- **Attestation handling.** If `attestationData` is empty, the quoter MUST return a quote for unattested flow. If `attestationData` is non-empty, the quoter MAY offer preferential pricing. The quoter is responsible for calling `AttestationRegistry.verify()` if it wants to validate the attestation (this is automatically handled by the abstract `BaseALFHook`).
-- **Consistency.** The indicative quote SHOULD be consistent with the price that `beforeSwap` would produce given the same parameters in the same block. Persistent divergence between indicative and executed prices will cause router deprioritization. (See PRD: Quote Fidelity & Reputation Model.)
+- **Attestation handling.** If `attestationData` (within the `ALFHookData` envelope) is non-empty, the quoter MAY offer preferential pricing by overriding `_resolveAttestation`. The base default is no-op, so hooks that don't override see all flow as unattested.
+- **Consistency.** The indicative quote SHOULD be consistent with the price `beforeSwap` would produce given the same parameters in the same block. Persistent divergence between indicative and executed prices will cause router deprioritization and may trigger auction-hook tolerance checks (see `strictTolerancePips`).
+- **Reserve reporting.** `getReserves` reports total assets under management (vault deposits, ERC-6909 claims, ERC-20 balances tracked by the hook); `getEffectiveLiquidity` reports the subset that's immediately available for swap settlement (e.g., excluding vault assets that can't be redeemed at current utilization). Hooks with no off-pool reserves return `(0, 0)` for both.
 
 # BaseALFHook
 
-An abstract base contract that quoter hooks MAY extend. Provides attestation resolution, the `IALFHook` implementation (with sensible defaults for `getReserves` and `getEffectiveLiquidity`), and delta settlement helpers via `DeltaResolver`. Quoters extend this and implement `_price()` with their proprietary pricing logic. Use is encouraged but not required.
+Abstract base contract that quoter hooks SHOULD extend. Provides hookData decoding, the `IALFHook` defaults, signed-curve-update bookkeeping, and `DeltaResolver` settlement helpers.
 
 ## Inheritance
 
-`BaseALFHook` inherits from both `BaseHook` and `DeltaResolver`. This dual-inheritance pattern (mirroring `BaseTokenWrapperHook` in v4-periphery) gives quoter hooks access to `_settle()` and `_take()` for delta resolution during swap lifecycle hooks.
-
-The `_pay()` function required by `DeltaResolver` is implemented to transfer tokens directly to the PoolManager:
+`BaseALFHook` inherits from both `BaseHook` and `DeltaResolver`. This dual-inheritance pattern (mirroring `BaseTokenWrapperHook` in v4-periphery) gives quoter hooks access to `_settle()` and `_take()` for delta resolution during swap lifecycle hooks. The required `_pay()` is implemented to transfer tokens directly to the PoolManager:
 
 ```solidity
 function _pay(Currency token, address, uint256 amount) internal override {
@@ -214,122 +141,216 @@ function _pay(Currency token, address, uint256 amount) internal override {
 }
 ```
 
-## Abstract Interface
+## Surface
 
 ```solidity
 abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
-    IAttestationRegistry public immutable attestationRegistry;
     uint32 private immutable _maxGas;
 
-    constructor(
-        IPoolManager _poolManager,
-        IAttestationRegistry _attestationRegistry,
-        uint32 maxGas_
-    ) BaseHook(_poolManager) {
-        attestationRegistry = _attestationRegistry;
-        _maxGas = maxGas_;
-    }
+    address public priceSigner; // Settable by subclass-provided owner controls
+    mapping(PoolId => mapping(uint256 => bytes32)) internal _curveUpdateHash;
 
-    // ──── IALFHook ────
+    error ExpiredUpdate();
+    error PoolMismatch();
+    error ConflictingCurveUpdate();
+    error InvalidPriceSigner();
 
-    function maxGas() external view override returns (uint32) {
-        return _maxGas;
-    }
+    event PriceSignerUpdated(address indexed newSigner);
 
-    function getIndicativeQuote(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bytes calldata hookData
-    ) external view virtual override returns (uint256 outputAmount) {
-        bytes memory attestationData;
-        if (hookData.length > 0) {
-            ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
-            attestationData = hd.attestationData;
-        }
-        (bool isAttested, address attester) = _resolveAttestation(attestationData);
-        return _price(key, zeroForOne, amountSpecified, isAttested, attester);
-    }
+    constructor(IPoolManager _poolManager, uint32 maxGas_) BaseHook(_poolManager);
 
-    function isLive() external view virtual override returns (bool);
+    // ──── IALFHook defaults ────
+    function maxGas() external view override returns (uint32);
+    function getIndicativeQuote(PoolKey, bool, int256, bytes calldata)
+        external view virtual override returns (uint256);
+    function isLive() external view virtual override returns (bool); // abstract
+    function getReserves(PoolKey) external view virtual override returns (uint256, uint256);          // (0, 0)
+    function getEffectiveLiquidity(PoolKey) external view virtual override returns (uint256, uint256); // (0, 0)
+    function swapToPrice(PoolKey, bool, int256, uint160, bytes calldata)
+        external view virtual override returns (uint256, uint256);                                     // (0, 0)
 
-    /// @dev Default returns (0, 0). Override for hooks with off-pool reserves.
-    function getReserves(PoolKey calldata) external view virtual override returns (uint256, uint256) {
-        return (0, 0);
-    }
+    // ──── HookData / attestation ────
+    function _resolveHookData(bytes calldata hookData)
+        internal view returns (bytes memory curveUpdateData, bool isAttested, address attester);
+    function _resolveAttestation(bytes memory attestationData)
+        internal view virtual returns (bool isAttested, address attester);
 
-    /// @dev Default returns (0, 0). Override for hooks with off-pool reserves.
-    function getEffectiveLiquidity(PoolKey calldata) external view virtual override returns (uint256, uint256) {
-        return (0, 0);
-    }
+    // ──── Curve-update bookkeeping ────
+    function _validateCurveUpdateMeta(PoolId poolId, PoolId updatePoolId, uint256 deadline) internal view;
+    function _checkAndMarkCurveUpdate(PoolId poolId, bytes memory curveUpdateData) internal returns (bool isNew);
 
-    // ──── Internal: Attestation ────
-
-    /// @dev Parse and verify attestation from raw bytes.
-    /// @return isAttested Whether a valid attestation was provided.
-    /// @return attester The attester address (zero if not attested).
-    function _resolveAttestation(
-        bytes memory attestationData
-    ) internal view returns (bool isAttested, address attester) {
-        if (attestationData.length == 0) return (false, address(0));
-        (Attestation memory att, bool valid) =
-            attestationRegistry.verify(attestationData);
-        return (valid, valid ? att.attester : address(0));
-    }
-
-    // ──── Abstract: Pricing ────
-
-    /// @dev Subclasses MUST implement pricing logic.
-    /// @param key The pool key.
-    /// @param zeroForOne The swap direction.
-    /// @param amountSpecified The swap amount. Negative = exact input.
-    /// @param isAttested Whether the swap has a valid attestation.
-    /// @param attester The attester address (zero if not attested).
-    /// @return outputAmount The quoted output.
-    function _price(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool isAttested,
-        address attester
-    ) internal view virtual returns (uint256 outputAmount);
+    // ──── Pricing (abstract) ────
+    function _price(PoolKey, bool, int256, bool isAttested, address attester)
+        internal view virtual returns (uint256);
 }
 ```
 
-## Implementation Requirements
+## Behavior
 
-Implementations MUST:
+- **`getIndicativeQuote` default:** decodes `ALFHookData`, resolves attestation, calls `_price(...)` with `(isAttested, attester)`. Subclasses overriding `getIndicativeQuote` MUST preserve the no-revert behavior described above.
+- **`_resolveHookData`:** returns empty curve update + `(false, 0)` attestation when `hookData` is empty; otherwise decodes the envelope and routes `attestationData` through `_resolveAttestation`.
+- **`_validateCurveUpdateMeta`:** reverts `PoolMismatch` if the update's `poolId` doesn't match the swap's pool, and `ExpiredUpdate` if `block.timestamp > deadline`.
+- **`_checkAndMarkCurveUpdate`:** records the first `keccak256(curveUpdateData)` seen for a given `(poolId, block.number)`. Returns `true` if this is the first call in the block (caller should apply the update); returns `false` if the same hash is replayed; reverts `ConflictingCurveUpdate` if a different hash is submitted in the same block.
+- **`isLive`:** abstract — subclass MUST implement.
 
-- Implement `_price()` with their proprietary pricing logic.
-- Implement `isLive()` from `IALFHook`.
-- Implement `_beforeSwap()` to control execution behavior. The implementation depends on the chosen settlement model (see [Settlement Models](#settlement-models)).
+## Invariants
 
-Implementations SHOULD:
+- **No registry coupling.** `BaseALFHook` does not depend on any external registry contract.
+- **No-op attestation default.** Without subclass override, every swap is treated as unattested (`isAttested = false`, `attester = address(0)`).
+- **One curve update per pool per block.** Once a curve update is committed for `(poolId, block.number)`, only the same payload may be re-submitted in that block.
 
-- Ensure that the output of `_price()` is approximately consistent with the actual swap output for the same parameters. Divergence degrades the quoter's reputation score.
-- Override `getReserves()` and `getEffectiveLiquidity()` if the hook manages off-pool reserves (e.g., rehypothecation, vault-backed liquidity).
-- Verify `swapHash` in `beforeSwap` if using attestation-dependent pricing, since the `AttestationRegistry` does not perform this check.
+# SpreadQuoterBase
+
+Abstract base for bid/ask spread quoters. Builds on `BaseALFHook` with EIP-712 signed curve updates, fee-override execution, and single-tick LP enforcement.
+
+## Inheritance
+
+`SpreadQuoterBase` inherits from `BaseALFHook`, `EIP712`, and `Ownable2Step`. The owner manages `priceSigner` and pricing state.
+
+## State
+
+```solidity
+struct PricingState {
+    uint24 bidFeePips; // Fee override for zeroForOne swaps (pips, max 1_000_000)
+    uint24 askFeePips; // Fee override for oneForZero swaps (pips, max 1_000_000)
+    bool live;
+}
+
+mapping(PoolId => PricingState) public pricingState;
+mapping(PoolId => int24) public activeLowerTick;
+```
+
+## Curve update payload
+
+```solidity
+abi.encode(
+    PricingState newState,
+    PoolId poolId,
+    uint256 deadline,
+    bytes signature
+)
+```
+
+The signature is EIP-712 over:
+
+```solidity
+bytes32 PRICING_UPDATE_TYPEHASH = keccak256(
+    "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
+);
+```
+
+verified against `priceSigner`.
+
+## beforeSwap behavior
+
+1. Decode `ALFHookData` and resolve any curve update.
+2. If a curve update is present and is the first for `(poolId, block.number)`, validate metadata + signature, then commit the new `PricingState` via `_commitPricingState`.
+3. If `state.live == false`, return `(selector, ZERO_DELTA, 0)` — no override, swap executes at the pool's stored fee.
+4. Otherwise, return `(selector, ZERO_DELTA, feePips | OVERRIDE_FEE_FLAG)` where `feePips = state.bidFeePips` (zeroForOne) or `state.askFeePips` (oneForZero).
+
+## Indicative quote behavior
+
+`getIndicativeQuote` overlays any unsigned hookData curve update on top of stored state for simulation only (no signature verification, no storage writes), then delegates to `SwapSimulator.simulateSwap` against the pool's current state with the effective fee. The unsigned overlay is documented as a non-binding caveat — production aggregators SHOULD override `getIndicativeQuote` to verify signatures or ignore hookData entirely if the quoter is trust-sensitive.
+
+`swapToPrice` follows the same pattern but delegates to `SwapSimulator.simulateSwapToPrice` with the supplied price limit.
+
+## LP enforcement
+
+Subclasses opt into single-tick LP enforcement by calling `_enforceActiveTick(key, params)` from `_beforeAddLiquidity`. The check rejects positions whose width is not exactly `tickSpacing` and whose lower tick doesn't match `activeLowerTick[poolId]`. The active tick is auto-set to the floor-aligned current tick on `_afterInitialize` and may be updated by the owner via `setActiveTick`.
+
+## Owner functions
+
+- `updatePricingState(PoolKey, PricingState)` — commit new pricing (validates fee bounds, syncs the PM's stored dynamic LP fee).
+- `setPoolLive(PoolKey, bool)` — toggle liveness; sets the PM's stored fee to 0 when going offline.
+- `setPriceSigner(address)` — authorize the EIP-712 signer for hookData curve updates. Setting to `address(0)` is permitted and disables signed updates.
+- `setActiveTick(PoolKey, int24)` — relocate the LP concentration tick.
+
+## Invariants
+
+- **Fee bounds.** Every commit of `PricingState` validates `bidFeePips ≤ MAX_LP_FEE` and `askFeePips ≤ MAX_LP_FEE` (1_000_000 = 100%). Without this, fees > 100% break v4's swap math (denominator underflow) and could let an owner / compromised priceSigner brick or extract from the pool.
+- **Direction-aware fees.** Bid and ask fees are independent and applied per swap direction.
+- **Stored fee is informational.** The PM's stored dynamic LP fee tracks `max(bidFeePips, askFeePips)` for offchain consumers. Per-swap pricing comes from the override returned in `_beforeSwap`.
+
+# PoolVault
+
+Abstract base for hooks that rehypothecate idle inventory into ERC4626 vaults and account for LP positions as proportional shares.
+
+## State
+
+PoolVault tracks per-pool:
+
+- ERC4626 vault shares for each token (vault deposits earning yield).
+- ERC-6909 claims held in the PoolManager.
+- Per-pool ERC-20 balances swept into the hook between swaps.
+- Total share supply, plus the locked `MINIMUM_SHARES` at `address(0)` (V2-style inflation defense).
+
+## Surface
+
+`PoolVault` exposes read-only views plus internal primitives that subclasses wrap as entry points:
+
+- **Views:** `totalAssets(key)`, `previewDeposit(key, shares)`, `previewWithdraw(key, shares)`.
+- **Internal primitives:** `_bootstrap(key, from, to, amount0, amount1)`, `_deposit(key, from, to, shares)`, `_withdraw(key, from, to, shares)`.
+- **Errors:** `PoolNotBootstrapped`, `PoolAlreadyBootstrapped`, `InsufficientBootstrap`, `InsufficientShares`, `InsufficientPoolBalance`, `SameBlockWithdraw`, `VaultLiquidityShortfall`, `CrossPoolShareLeak`.
+
+Subclasses expose user-facing entry points by wrapping the primitives (with their own access control and reentrancy guards). `SmartPoolHook` exposes `bootstrap`, `addLiquidity`, and `removeLiquidity` this way, all carrying OZ's transient `nonReentrant` guard.
+
+## Invariants
+
+- **Share-asset proportionality.** After any successful `addLiquidity` or `removeLiquidity`, `shares[user] / totalShares ≈ user's claim on (vault0 + claims0 + erc20_0)` and likewise for token1, subject to standard rounding.
+- **Locked MINIMUM_SHARES.** Bootstrap permanently locks `MINIMUM_SHARES` at `address(0)`. These shares can never be redeemed.
+- **No share inflation.** The first depositor cannot inflate share price arbitrarily because `bootstrap` mints by `sqrt(amount0 * amount1)` and locks the minimum.
+
+# SwapSimulator
+
+A library that replicates v4's tick-walking swap loop to produce indicative quotes and price-bounded fill plans without modifying state.
+
+## Public functions
+
+```solidity
+library SwapSimulator {
+    function simulateSwap(
+        IPoolManager poolManager,
+        PoolId poolId,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint24 feePips,
+        int24 tickSpacing
+    ) internal view returns (uint256 outputAmount);
+
+    function simulateSwapToPrice(
+        IPoolManager poolManager,
+        PoolId poolId,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint24 feePips,
+        int24 tickSpacing,
+        uint160 sqrtPriceLimitX96
+    ) internal view returns (uint256 amountIn, uint256 amountOut);
+}
+```
+
+`simulateSwap` returns the output for an exact-input swap (or required input for exact-output) given the supplied fee. `simulateSwapToPrice` runs the same loop but terminates when the running sqrtPrice reaches `sqrtPriceLimitX96`, returning both consumed input and produced output. Both walk the pool's current tick bitmap and read live `getSlot0` / `getLiquidity` state via `StateLibrary`.
+
+Quote-vs-execution fidelity for `simulateSwap` is exercised by the test suite across multi-range pools.
 
 # Quoter Hook Specifications
 
-This section specifies behavioral requirements for quoter hooks regardless of whether they extend `BaseALFHook`.
+This section specifies behavioral requirements that apply to any hook implementing `IALFHook` regardless of inheritance.
 
-## Hook Flags
+## Hook flags
 
 All ALF quoter hooks MUST set the `beforeSwap` flag. Additional flags depend on the chosen settlement model:
 
 | Settlement Model | Required Flags | Optional Flags |
 | --- | --- | --- |
-| Native LP (fee override) | `afterInitialize`, `beforeSwap` | — |
-| JIT LP | `afterInitialize`, `beforeSwap`, `afterSwap` | — |
+| Native LP (fee override) | `afterInitialize`, `beforeSwap` | `beforeAddLiquidity`, `beforeRemoveLiquidity` (gating) |
+| JIT LP | `afterInitialize`, `beforeSwap`, `afterSwap` | `beforeInitialize`, `beforeAddLiquidity`, `beforeRemoveLiquidity` |
 | Delta override | `beforeSwap`, `beforeSwapReturnDelta` | `afterSwap` |
 
-All other flags (`beforeAddLiquidity`, `afterRemoveLiquidity`, `beforeDonate`, etc.) are OPTIONAL and at the quoter's discretion.
+`SimpleSpreadQuoterHook` uses Native LP; `SmartPoolHook` uses JIT LP. No delta-override quoter ships in this branch.
 
 <a id="settlement-models"></a>
 ## Settlement Models
-
-Quoter hooks can use one of three settlement models for swap execution. All three are compatible with the `IALFHook` interface and the auction hook. The choice of settlement model is orthogonal to the update mode (storage-based, hookData-based, external).
 
 ### Native LP (Fee Override)
 
@@ -337,32 +358,28 @@ The maker maintains persistent v4 LP positions in the quoter's pool via standard
 
 **Requirements:**
 
-- The pool MUST be initialized with `fee = LPFeeLibrary.DYNAMIC_FEE_FLAG` (`0x800000`). Fee overrides are only applied for dynamic fee pools (see `Hooks.sol:263`).
+- The pool MUST be initialized with `fee = LPFeeLibrary.DYNAMIC_FEE_FLAG` (`0x800000`). Fee overrides are only applied for dynamic fee pools.
 - `_beforeSwap` returns `(selector, ZERO_DELTA, feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG)`.
 - `beforeSwapReturnDelta` MUST be `false` — the hook does not manipulate deltas.
 - The hook does not need `afterSwap`.
 
-**Tradeoffs:** Simplest model. The hook is stateless during swap execution. Pricing granularity is limited to the fee override mechanism (pips precision). Actual execution price depends on LP distribution and pool state.
-
-**Reference implementation:** `StorageQuoterHook`
+**Reference implementation:** `SimpleSpreadQuoterHook`.
 
 ### JIT LP (Just-in-Time Liquidity)
 
-The hook pulls tokens from the maker's wallet (via Permit2 or other mechanism), adds concentrated LP in `beforeSwap`, lets the AMM execute against it, then removes the LP in `afterSwap` and returns tokens to the maker.
+The hook deploys liquidity in `_beforeSwap`, lets the AMM execute against it, then removes the liquidity in `_afterSwap`. Capital can come from the maker's wallet, ERC4626 vaults, or any other source the hook chooses.
 
 **Requirements:**
 
 - The pool MUST be initialized with `fee = LPFeeLibrary.DYNAMIC_FEE_FLAG`.
-- `_beforeSwap` adds LP via `poolManager.modifyLiquidity()` (skips hook callbacks via `noSelfCall`), settles the LP delta, stores position info in transient storage, and returns a fee override.
-- `_afterSwap` removes the LP, resolves the resulting delta (typically via `poolManager.mint()` to issue ERC-6909 claims to the maker), and clears transient storage.
+- `_beforeSwap` deploys LP via `poolManager.modifyLiquidity()` (skipping hook callbacks via `noSelfCall`), settles the LP delta, stores per-position info in transient storage, and returns a fee override.
+- `_afterSwap` removes the LP, resolves the resulting delta (typically minting ERC-6909 claims to the hook for retained inventory), and clears transient storage.
 - `beforeSwapReturnDelta` MUST be `false`.
-- The hook MUST use transient storage (Cancun EVM) to pass position parameters between `beforeSwap` and `afterSwap`.
+- The hook MUST use transient storage to pass position parameters between `_beforeSwap` and `_afterSwap`.
 
-**Note on afterSwap settlement:** During `afterSwap`, the PoolManager may not yet hold sufficient ERC-20 balance to satisfy `take()` calls (the swapper's settlement occurs after the swap function returns). Hooks MUST use `poolManager.mint()` to issue ERC-6909 claims to the maker instead of `_take()` for the LP removal delta.
+**Note on afterSwap settlement:** During `afterSwap`, the PoolManager may not yet hold sufficient ERC-20 balance to satisfy `take()` calls (the swapper's settlement occurs after the swap function returns). Hooks SHOULD use `poolManager.mint()` to issue ERC-6909 claims for the LP removal delta.
 
-**Tradeoffs:** More complex but allows zero standing liquidity — maker capital is only deployed for the duration of a single swap. Combines fee override pricing with JIT capital efficiency.
-
-**Reference implementation:** `Permit2JITQuoterHook`
+**Reference implementation:** `SmartPoolHook`.
 
 ### Delta Override
 
@@ -373,334 +390,207 @@ The hook directly computes and returns swap deltas from `beforeSwap`, bypassing 
 - `beforeSwapReturnDelta` MUST be `true`.
 - `_beforeSwap` returns a `BeforeSwapDelta` that fully specifies the swap amounts.
 - The hook MUST settle all token movements (pull input, deliver output) within the `beforeSwap` call.
+- The hook MUST itself apply any v4 protocol fee — the PoolManager only enforces protocol fees against its native swap math, which is bypassed in this model.
 - The pool does not require `DYNAMIC_FEE_FLAG` since the AMM is not used for pricing.
 
-**Tradeoffs:** Maximum pricing flexibility — the hook has full control over exact amounts. More complex to implement correctly (delta accounting, settlement). The pool's native CPMM state is unused.
+No delta-override quoter ships in this branch. The auction hook itself uses `beforeSwapReturnDelta` to forward nested-swap deltas, but it is not a quoter.
 
-**Note:** This was the only settlement model in spec v0.1. It remains valid for quoters that need full control over swap amounts, but the native LP and JIT LP models are preferred for most use cases as they leverage v4's native AMM execution.
+## beforeSwap requirements
 
-## beforeSwap Specification
+1. **Execution control.** The hook controls swap execution via the chosen settlement model. For Native LP and JIT LP, the hook returns `ZERO_DELTA` and a fee override. For Delta Override, the hook returns a `BeforeSwapDelta` that fully specifies the swap amounts.
+2. **Sender agnosticism.** The hook SHOULD NOT execute differently based on `sender`. The sender will typically be the router (direct routing), the auction hook (auction-mediated swaps), or end users (in which case `_resolveAttestation` decides whether they get attested pricing). All are valid callers.
+3. **HookData parsing.** Hooks that consume curve updates or attestation MUST parse the standard `ALFHookData` envelope via `BaseALFHook._resolveHookData`.
+4. **State updates.** The hook MAY update internal state during `_beforeSwap` (pricing coefficients, accumulators, inventory tracking, JIT lock setup, etc.). `SmartPoolHook` is the canonical example.
 
-```solidity
-function beforeSwap(
-    address sender,
-    PoolKey calldata key,
-    IPoolManager.SwapParams calldata params,
-    bytes calldata hookData
-) external override returns (bytes4, BeforeSwapDelta, uint24);
-```
+## hookData-based update mode
 
-**Requirements:**
+Quoters using the hookData-based update mode accept signed curve parameters via `hookData.curveUpdateData`. The standard mechanism is:
 
-1. **Execution control.** The hook controls swap execution via the chosen settlement model. For native LP and JIT LP models, the hook returns `ZERO_DELTA` and a fee override. For the delta override model, the hook returns a `BeforeSwapDelta` that fully specifies the swap amounts.
-2. **Sender agnosticism.** The hook SHOULD NOT execute differently based on `sender`. The sender will typically be either the router (for direct routing) or the auction hook (for pure onchain routing). Both are valid callers.
-3. **Attestation parsing.** If the hook supports preferential pricing for attested flow, it MUST parse attestation data from `hookData`. The format is [described above](https://www.notion.so/ALF-Formal-Spec-311c52b2548b80589834cd397c8f6ab7?pvs=21).
-4. **State updates.** The hook MAY update internal state (pricing coefficients, accumulators, inventory tracking) during `beforeSwap`. This is the designated state mutation point.
+1. Caller submits hookData containing a curve update.
+2. `_beforeSwap` calls `_resolveHookData`, then `_validateCurveUpdateMeta`, then `_checkAndMarkCurveUpdate`.
+3. On the first matching call in the block, the subclass verifies the EIP-712 signature against `priceSigner` and commits the new state.
+4. Subsequent calls in the same block must submit the same `keccak256(curveUpdateData)` or revert `ConflictingCurveUpdate`.
 
-## hookData-based Update Mode
-
-Quoters using the hookData-based update mode accept signed curve parameters via `hookData`. The following constraints apply:
-
-### One Update Per Block
-
-```solidity
-mapping(PoolId => mapping(uint256 => bytes32)) internal blockCurveHash;
-```
-
-- On the first swap in a block for a given `PoolId`, the hook SHOULD verify the curve signature, cache the curve hash at `blockCurveHash[poolId][block.number]`, and store the curve parameters.
-- On subsequent swaps in the same block for the same `PoolId`, the hook MAY require that the submitted curve hash matches the cached hash. If it does not match, the hook MAY revert.
-
-### Signature Verification
-
-Curve updates MUST be signed by an authorized key for the quoter. The authorization mechanism is quoter-specific (e.g., an owner-controlled key registry within the hook). This is distinct from the flow attestation validation.
-
-### hookData encoding for hookData-based quoters
-
-When both attestation data and curve parameters are present in `hookData`, e.g.:
-
-```solidity
-hookData = abi.encode(
-    bytes attestationData,      // Attestation payload (may be empty)
-    bytes curveUpdateData       // ABI-encoded (CurveParams, bytes signature)
-)
-```
-
-The hook MUST handle the case where `attestationData` is empty (no attestation) ***and*** the case where `curveUpdateData` is empty (use cached/stored curve).
-
-## External ALF Wrapper Hooks
-
-Wrapper hooks that wrap external ALF contracts MUST:
-
-- Implement `IALFHook`.
-- In `beforeSwap`, call the external ALF's swap function and translate the result into a `BeforeSwapDelta`.
-- Perform an **invariant check** after the external swap: verify that the output received matches the expected output within an acceptable tolerance.
-- If the external swap fails or the invariant check fails, the hook MUST revert.
-- Implement `getIndicativeQuote` by reading the external ALF's quote function (if available) or by simulating the swap.
-
-Wrapper hooks MAY impose a Uniswap governance-controlled fee configuration which MAY be used by the router to prioritize governance-aligned wrappers of external ALFs.
+The first-in-block update is committed to storage and applies to all subsequent swaps in the block. Subclasses that don't accept hookData updates (e.g., `SmartPoolHook`) ignore the curve-update path entirely.
 
 # Reference Implementations
 
-## StorageQuoterHook (Native LP)
+## SimpleSpreadQuoterHook (Native LP)
 
-A storage-based quoter using the native LP settlement model. The maker maintains persistent v4 LP positions in the quoter's pool. The hook controls effective pricing via fee overrides and provides coefficient-based indicative quotes.
+A minimal `SpreadQuoterBase` subclass with owner-restricted LP and single-tick concentration.
 
-**Settlement model:** Native LP (fee override)
+**Settlement model:** Native LP (fee override).
 
-**Hook flags:** `afterInitialize`, `beforeSwap`
+**Hook flags:** `afterInitialize`, `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`.
 
-**State:**
-
-```solidity
-struct PricingState {
-    uint128 bidCoefficient;     // Indicative quote coefficient for zeroForOne (1e18 scaled)
-    uint128 askCoefficient;     // Indicative quote coefficient for oneForZero (1e18 scaled)
-    uint24 bidFeePips;          // Fee override for zeroForOne swaps (pips, max 1_000_000)
-    uint24 askFeePips;          // Fee override for oneForZero swaps (pips, max 1_000_000)
-    uint16 attestedDiscountBps; // Discount for attested flow in indicative quotes (bps)
-    bool live;
-}
-mapping(PoolId => PricingState) public pricingState;
-```
-
-**`_beforeSwap` behavior:**
-
-1. If not live, returns `(selector, ZERO_DELTA, 0)` — no fee override, swap executes at default fee.
-2. Otherwise, returns `(selector, ZERO_DELTA, feePips | OVERRIDE_FEE_FLAG)` where `feePips` is `bidFeePips` or `askFeePips` depending on direction.
-
-**`_price` behavior:** Returns `(|amountSpecified| × coefficient) / 1e18`, with an additional multiplicative discount of `(10000 + attestedDiscountBps) / 10000` for attested flow.
-
-**Owner functions:** `updatePricingState(key, state)`, `setPoolLive(key, live)`.
-
-## Permit2JITQuoterHook (JIT LP)
-
-A JIT liquidity quoter using the JIT LP settlement model. Pulls tokens from a maker's wallet via Permit2 `IAllowanceTransfer`, adds concentrated LP in `beforeSwap`, lets the AMM execute against it, then removes the LP in `afterSwap` and returns tokens to the maker as ERC-6909 claims.
-
-**Settlement model:** JIT LP
-
-**Hook flags:** `afterInitialize`, `beforeSwap`, `afterSwap`
-
-**State:**
+**State (additional to inherited):**
 
 ```solidity
-struct JITConfig {
-    address maker;              // Wallet holding capital (has Permit2 approval → this hook)
-    uint128 bidCoefficient;     // Indicative quote coefficient for zeroForOne (1e18)
-    uint128 askCoefficient;     // Indicative quote coefficient for oneForZero (1e18)
-    uint24 bidFeePips;          // Fee override for zeroForOne swaps
-    uint24 askFeePips;          // Fee override for oneForZero swaps
-    int24 tickWidth;            // Half-width for JIT LP range (in ticks, before alignment)
-    uint128 liquidity;          // Liquidity units to add per swap
-    uint16 attestedDiscountBps; // Discount for attested indicative quotes
-    bool live;
-}
-mapping(PoolId => JITConfig) public jitConfig;
+mapping(address => bool) public authorizedLPs;
 ```
 
-**Transient storage:** The hook uses Cancun EVM transient storage (`tstore`/`tload`) to pass JIT position parameters (tickLower, tickUpper, liquidity) between `beforeSwap` and `afterSwap`.
+**Behavior:**
 
-**`_beforeSwap` behavior:**
+- `_beforeAddLiquidity`: requires `authorizedLPs[sender] == true`, then enforces `tickWidth == tickSpacing` and `tickLower == activeLowerTick[poolId]`.
+- `_beforeRemoveLiquidity`: requires `authorizedLPs[sender] == true`.
+- `_beforeSwap`: inherits `SpreadQuoterBase` behavior (curve update + fee override).
 
-1. If not live or liquidity is zero, returns `(selector, ZERO_DELTA, 0)`.
-2. Reads current tick via `StateLibrary.getSlot0()`.
-3. Computes tick range centered on current tick, aligned to `tickSpacing`.
-4. Adds LP via `poolManager.modifyLiquidity()` (callbacks skipped via `noSelfCall`).
-5. Pulls exact delta amounts from maker via `permit2.transferFrom()` and settles to PM.
-6. Stores position in transient storage.
-7. Returns `(selector, ZERO_DELTA, feePips | OVERRIDE_FEE_FLAG)`.
+**Owner functions (in addition to `SpreadQuoterBase`):**
 
-**`_afterSwap` behavior:**
+- `setAuthorizedLP(address lp, bool authorized)` — toggle LP authorization.
 
-1. Loads JIT position from transient storage. If no position, returns early.
-2. Removes LP via `poolManager.modifyLiquidity()` with negative `liquidityDelta`.
-3. Mints ERC-6909 claims to the maker for the resulting positive delta (NOT `take()`).
-4. Clears transient storage.
+**Use case:** baseline strategy for the auction hook test fixtures and a minimal example for makers exploring the integration path.
 
-**Maker setup:**
+## SmartPoolHook (JIT LP + Rehypothecation)
 
-1. Maker approves ERC-20 tokens to the Permit2 contract.
-2. Maker grants Permit2 allowance to the hook contract via `permit2.approve(token, hook, amount, expiration)`.
+JIT spread quoter with multi-range liquidity distribution and ERC4626 vault rehypothecation. Inherits `SpreadQuoterBase`, `PoolVault`, and `ReentrancyGuardTransient`.
 
-**Owner functions:** `updateJITConfig(key, config)`, `setPoolLive(key, live)`.
+**Settlement model:** JIT LP.
+
+**Hook flags:** `beforeInitialize`, `afterInitialize`, `beforeAddLiquidity`, `beforeRemoveLiquidity`, `beforeSwap`, `afterSwap`.
+
+**Per-pool config:** owner-supplied `PoolConfig` (token vaults, bucket weights, max bucket count, tick widths) is committed via `initializePool`. The hook bounds bucket count to `MAX_BUCKETS = 8` and uses `LP_SALT = bytes32(uint256(0x534D5254)) /* "SMRT" */` to namespace its positions in the PoolManager.
+
+**Per-pool state:** `PoolState` packs scalars (active range bookkeeping, in-flight JIT counters, vault references, etc.); `PoolVault` storage tracks share supply and per-asset balances.
+
+**JIT lifecycle:**
+
+```
+_beforeSwap:
+  1. Set the per-pool JIT lock (and increment global lock counter).
+  2. Compute per-bucket liquidity from current per-pool assets and weights.
+  3. Compute exact token0/token1 needed via SqrtPriceMath at the current price.
+  4. Redeem outstanding ERC-6909 claims first; withdraw only the shortfall from vaults.
+  5. Deploy each bucket as a concentrated v4 LP position via poolManager.modifyLiquidity (noSelfCall).
+  6. Settle all incoming LP deltas; return (selector, ZERO_DELTA, feeOverride).
+
+[pool executes the swap against the deployed LP under the fee override]
+
+_afterSwap:
+  1. Remove all bucket positions.
+  2. Settle net deltas: negative → ERC-20 to PM (sweeping per-pool ERC-20 tracking),
+     positive → mint ERC-6909 claims to the hook.
+  3. Re-deposit any remaining per-pool ERC-20 to the vaults.
+  4. Clear the per-pool JIT lock and decrement the global counter.
+```
+
+**Pricing:** owner-controlled via inherited `pricingState`. The hook **intentionally ignores** `hookData` on swaps — pricing is never updated through swap-time payloads. The signed-curve-update infrastructure inherited from `SpreadQuoterBase` is therefore dormant for `SmartPoolHook` pools. `getIndicativeQuote` and `swapToPrice` use stored pricing only.
+
+**Slippage protection:** maker-supplied tolerance bounds applied to vault redemption and JIT execution to defuse adversarial vault behavior.
+
+**Reentrancy:** user-facing entry points (`bootstrap`, `addLiquidity`, `removeLiquidity`) carry OZ's `nonReentrant` guard. PM-driven callbacks (`_beforeSwap`, `_afterSwap`) manage a separate per-pool transient `JIT_LOCK` and a global counter so that an owner-configured ERC4626 vault cannot reenter LP entry points mid-JIT (cross-pool path included).
+
+**Owner functions (in addition to `SpreadQuoterBase`):**
+
+- `initializePool(PoolKey key, PoolConfig config)` — commit initial vault references and bucket distribution before any swap or LP activity.
+- `setDistribution(PoolKey key, LiquidityBucket[] buckets)` — update the per-bucket tick widths and weights.
+- `setExternalDeposits(PoolKey key, bool enabled)` — toggle whether non-owner addresses can call `addLiquidity`.
+- `setPoolLive(PoolKey key, bool live)` — toggle pool liveness (also syncs the PM's stored dynamic LP fee).
+- `setActiveTick(PoolKey, int24)` — overridden to revert; `SmartPoolHook` derives the active tick from pool state during each JIT cycle and does not support manual override.
+- All mutators are gated by `whenJITNotInProgress` to prevent reentry from an owner-configured ERC4626 vault during a swap callback.
+
+**Use case:** primary strategy hook for the upcoming external audit. Exercises the full ALF surface — `IALFHook`, `BaseALFHook`, `SpreadQuoterBase`, `PoolVault`, `SwapSimulator`, JIT settlement under reentrancy constraints.
 
 # ALFAuctionHook
 
-The ALFAuctionHook provides atomic onchain competitive quoting as a routing strategy. It is a stateless v4 hook deployed on a virtual (i.e., zero-liquidity) pool. The router chooses whether to route through the auction hook on a per-swap basis. Quoters SHOULD be agnostic to the use of the auction hook.
+Stateless atomic auction hook deployed on a virtual (zero-liquidity) pool. The router supplies a targeted set of quoters via `hookData` and the auction executes a greedy split fill or a router-supplied pre-planned split, applying the v4 protocol fee on the unspecified side.
 
-<aside>
-🚧
-
-It is imperative that individual quoter hooks are deployed to a CREATE2 mined address which encodes the correct flags. This is an inherited v4 constraint. See the [Hook Deployment](https://docs.uniswap.org/contracts/v4/guides/hooks/hook-deployment) section of the v4 docs for context.
-
-</aside>
-
-## Properties
-
-- **Stateless.** The auction hook holds no quoter-specific state. The quoter set is provided by the router via `hookData`.
-- **Transparent to quoters.** The winning quoter's `beforeSwap` is invoked via a nested `poolManager.swap`. The quoter's hook cannot distinguish between a direct router swap and an auction-mediated swap (except by inspecting `sender`, which is discouraged but not explicitly disallowed).
-- **Targeted comparison.** The auction hook queries all quoters provided in the `hookData`. The router controls the candidate set using its reputation model.
-- **Atomic.** The indicative quoting round, winner selection, and execution all occur within a single `beforeSwap` invocation.
-
-## Interface
+## Inheritance
 
 ```solidity
-contract ALFAuctionHook is BaseHook {
-    error NoValidQuotes();
-    error LiquidityNotAllowed();
+contract ALFAuctionHook is BaseHook, ALFProtocolFees;
+```
 
-    event AuctionExecuted(
-        address indexed winner,
-        bool zeroForOne,
-        int256 amountSpecified,
-        uint256 bestQuote
-    );
+## Hook permissions
 
-    /// @dev Hook flags: beforeAddLiquidity (block LP), beforeSwap, beforeSwapReturnsDelta
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
-        return Hooks.Permissions({
-            beforeInitialize: false,
-            afterInitialize: false,
-            beforeAddLiquidity: true,  // block liquidity on virtual pool
-            beforeRemoveLiquidity: false,
-            afterAddLiquidity: false,
-            afterRemoveLiquidity: false,
-            beforeSwap: true,          // core auction logic
-            afterSwap: false,
-            beforeDonate: false,
-            afterDonate: false,
-            beforeSwapReturnDelta: true, // forward winner's delta
-            afterSwapReturnDelta: false,
-            afterAddLiquidityReturnDelta: false,
-            afterRemoveLiquidityReturnDelta: false
-        });
-    }
-
-    function _beforeAddLiquidity(...) internal pure override returns (bytes4) {
-        revert LiquidityNotAllowed();
-    }
-
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
-        // 1. Run auction: discover quoters and pick the best
-        (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote) =
-            _runAuction(key.currency0, key.currency1, params, hookData);
-
-        // 2. Execute nested swap on winner's pool (with unlimited price limit)
-        BalanceDelta nestedDelta = poolManager.swap(
-            winnerPoolKey,
-            SwapParams({
-                zeroForOne: params.zeroForOne,
-                amountSpecified: params.amountSpecified,
-                sqrtPriceLimitX96: params.zeroForOne
-                    ? TickMath.MIN_SQRT_PRICE + 1
-                    : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            hookData
-        );
-
-        // 3. Convert BalanceDelta → BeforeSwapDelta
-        //    Negate to offset the hook's nested delta against the outer pool.
-        //    Mapping (amount0, amount1) → (specified, unspecified) depends on direction.
-        BeforeSwapDelta bsd = _toBeforeSwapDelta(nestedDelta, params);
-
-        emit AuctionExecuted(winner, params.zeroForOne, params.amountSpecified, bestQuote);
-
-        return (IHooks.beforeSwap.selector, bsd, 0);
-    }
-
-    /// @dev Query targeted quoters from hookData, return the best one.
-    ///      For exact input: highest output wins.
-    ///      For exact output: lowest required input wins.
-    function _runAuction(
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) internal view returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote) {
-        TargetedQuoter[] memory targets = abi.decode(hookData, (TargetedQuoter[]));
-        bool isExactInput = params.amountSpecified < 0;
-        bool foundValid;
-
-        for (uint256 i = 0; i < targets.length; i++) {
-            address hook = targets[i].poolKey.hooks;
-            try IALFHook(hook).isLive() returns (bool live) {
-                if (!live) continue;
-            } catch { continue; }
-
-            uint32 gas = IALFHook(hook).maxGas();
-
-            try IALFHook(hook).getIndicativeQuote{gas: gas}(
-                targets[i].poolKey, params.zeroForOne, params.amountSpecified, targets[i].hookData
-            ) returns (uint256 quote) {
-                if (quote == 0) continue;
-
-                bool isBetter = !foundValid
-                    || (isExactInput ? quote > bestQuote : quote < bestQuote);
-
-                if (isBetter) {
-                    bestQuote = quote;
-                    winnerPoolKey = targets[i].poolKey;
-                    winner = hook;
-                    foundValid = true;
-                }
-            } catch {}
-        }
-
-        if (!foundValid) revert NoValidQuotes();
-    }
-
-    /// @dev Negate the nested swap's BalanceDelta into a BeforeSwapDelta.
-    function _toBeforeSwapDelta(BalanceDelta nestedDelta, SwapParams calldata params)
-        internal pure returns (BeforeSwapDelta)
-    {
-        bool isExactInput = params.amountSpecified < 0;
-        int128 specified;
-        int128 unspecified;
-
-        if (isExactInput == params.zeroForOne) {
-            specified = -nestedDelta.amount0();
-            unspecified = -nestedDelta.amount1();
-        } else {
-            specified = -nestedDelta.amount1();
-            unspecified = -nestedDelta.amount0();
-        }
-
-        return toBeforeSwapDelta(specified, unspecified);
-    }
+```solidity
+function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+    return Hooks.Permissions({
+        beforeInitialize: false,
+        afterInitialize: false,
+        beforeAddLiquidity: true,        // block LP on virtual pool
+        beforeRemoveLiquidity: false,
+        afterAddLiquidity: false,
+        afterRemoveLiquidity: false,
+        beforeSwap: true,                // core auction logic
+        afterSwap: false,
+        beforeDonate: false,
+        afterDonate: false,
+        beforeSwapReturnDelta: true,     // forward aggregate nested-swap delta
+        afterSwapReturnDelta: false,
+        afterAddLiquidityReturnDelta: false,
+        afterRemoveLiquidityReturnDelta: false
+    });
 }
 ```
 
-**Note on `sqrtPriceLimitX96`:** The auction hook passes `MIN_SQRT_PRICE + 1` (zeroForOne) or `MAX_SQRT_PRICE - 1` (oneForZero) as the price limit for the nested swap, rather than forwarding the caller's limit. This ensures the nested swap executes fully against the winner's pool. The outer pool's price limit (if any) is enforced by the PoolManager on the auction pool's virtual swap.
+`_beforeAddLiquidity` always reverts `LiquidityNotAllowed()`.
+
+## hookData payload
+
+```solidity
+struct AuctionHookData {
+    bytes attestationData;        // Shared across all targets, may be empty
+    TargetedQuoter[] targets;     // Must be non-empty
+    uint24 strictTolerancePips;   // 0 = no check; >0 = max relative deviation (ppm) per target
+}
+
+struct TargetedQuoter {
+    PoolKey poolKey;              // Quoter's pool (hook address embedded in poolKey.hooks)
+    bytes curveUpdateData;        // Quoter-specific signed curve update, or empty
+    int256 amountSpecified;       // 0 = autonomous; nonzero = pre-planned amount for this target
+}
+```
+
+The auction passes the per-target `curveUpdateData` and shared `attestationData` through to each nested swap by re-encoding them as `ALFHookData` in the order the target sees.
+
+## Execution modes
+
+The mode is selected implicitly by the `targets[]` array contents:
+
+- **Autonomous mode** — every `targets[i].amountSpecified == 0`. The auction:
+  1. Queries each target's `getIndicativeQuote{gas: maxGas}` (skips on revert / zero / OOG).
+  2. Sorts targets by quote quality (highest output for exact-input, lowest input for exact-output).
+  3. Runs the greedy split fill: for each target in sorted order, calls `poolManager.swap` on the target's pool with `sqrtPriceLimitX96` set to the next target's current pool price (or the default min/max for the last target). The v4 swap loop terminates when the marginal price worsens to the next candidate's level, naturally handing flow off.
+- **Pre-planned mode** — any `targets[i].amountSpecified != 0`. The auction skips indicative queries and sorting and executes targets in supplied order using each target's `amountSpecified`. A target with `amountSpecified == 0` mops up the remainder of the swap.
+
+In both modes, `strictTolerancePips > 0` enforces `|executed − indicative| / indicative ≤ strictTolerancePips / 1_000_000` per target; a violation reverts the entire swap.
+
+## Protocol fee
+
+After the split fill, the auction reads slot0's protocol fee on its own virtual pool and applies it to the unspecified delta via `poolManager.take()` to the protocol fee jar. Fees on the specified side are not separately collected (the specified amount is swap-defined).
+
+## Delta forwarding
+
+The auction's virtual pool has zero liquidity. The accumulated `BalanceDelta` from the nested swaps is negated into a `BeforeSwapDelta` that offsets the virtual pool's swap, so the hook's net position with the PoolManager is zero. Mapping `(amount0, amount1) → (specified, unspecified)` depends on swap direction.
 
 ## Invariants
 
-- **No quoter state.** The auction hook MUST NOT maintain any per-quoter state (no participant mappings, no registration, no allowlists, etc.).
-- **No liquidity.** The auction hook's virtual pool MUST NOT accept liquidity. `beforeAddLiquidity` reverts with `LiquidityNotAllowed()`.
-- **Hookdata-derived.** The quoter set MUST be derived from the `TargetedQuoter[]` provided in `hookData`.
-- **Staticcall isolation.** All `getIndicativeQuote` calls MUST be made via `staticcall` (implicitly enforced by the function being `view`). Quoters cannot observe each other's indicative quotes or modify state during the quoting round.
-- **Soft fail per quoter.** A failing quoter MUST NOT cause the entire auction to revert. Failed `getIndicativeQuote` calls are caught and the quoter is skipped. Zero-value quotes are also skipped.
-- **Hard fail on zero quotes.** If no quoter returns a valid quote, the auction hook MUST revert with `NoValidQuotes()`.
-- **Direction-aware comparison.** For exact input swaps, the highest output wins. For exact output swaps, the lowest required input wins.
+- **No quoter state.** The hook MUST NOT maintain any per-quoter state (no participant mappings, no registration, no allowlists, etc.). The candidate set is supplied by the caller.
+- **No liquidity.** The auction's virtual pool MUST NOT accept liquidity. `beforeAddLiquidity` reverts `LiquidityNotAllowed()`.
+- **Hookdata-derived candidate set.** Targets MUST come from the `AuctionHookData` decoded from `hookData`.
+- **Staticcall isolation for indicatives.** All `getIndicativeQuote` calls MUST be made via `staticcall` (implicit because the function is `view`). Targets cannot observe each other's indicative quotes or modify state during the quoting round.
+- **Soft fail per quoter.** A failing target (revert, zero quote, OOG) MUST NOT abort the entire auction in autonomous mode; it is skipped.
+- **Hard fail on no quotes.** If autonomous mode produces no valid candidate, the hook reverts `NoValidQuotes`.
+- **Direction-aware comparison.** For exact-input swaps, the highest output wins. For exact-output swaps, the lowest required input wins.
+- **Tolerance binding.** When `strictTolerancePips > 0`, every target that fills MUST satisfy the per-target deviation bound or the entire swap reverts.
 
-## Call Flow
+## Call flow
 
-The auction hook performs a nested `poolManager.swap()` from within its own `beforeSwap()`. This creates the following call stack:
-
-```solidity
+```
 Router → poolManager.swap(auctionPool)
-  → AuctionHook.beforeSwap()
-    → [staticcall] QuoterHook.getIndicativeQuote()  (× N quoters)
-    → poolManager.swap(winnerPool)
-      → WinnerHook.beforeSwap()
-      ← BalanceDelta
-    ← BalanceDelta
-  ← BeforeSwapDelta
+  → AuctionHook._beforeSwap()
+    → [staticcall] target_i.getIndicativeQuote()  // autonomous mode only
+    → [for each target in fill order]
+        poolManager.swap(target.poolKey)
+          → target.beforeSwap()
+          ← BalanceDelta_i
+    → poolManager.take(unspecifiedToken, FEE_JAR, protocolFeeAmount)
+  ← BeforeSwapDelta (negated aggregate)
 ← BalanceDelta
 ```
 
-This is explicitly allowed by v4 and closely mirrors the standard pattern for multi-hop swaps. The only correctness requirement is that the `BeforeSwapDelta` returned by the auction hook for its virtual pool must accurately reflect the `BalanceDelta` produced by the winning quoter's pool. All deltas accumulate in transient storage during the unlock and must net to zero before `lock()` is called. Incorrect delta forwarding will cause the transaction to revert with `CurrencyNotSettled`.
+This call pattern is explicitly supported by v4 and mirrors multi-hop swap routing. Correctness requires that the negated `BeforeSwapDelta` matches the aggregate of the nested-swap `BalanceDelta`s plus the protocol fee taken — incorrect forwarding causes `CurrencyNotSettled` at unlock.
 
 # Router Integration Specification
 
@@ -710,141 +600,112 @@ The router is an offchain system. This section specifies the interface between t
 
 The router maintains its own internal registry of known ALF hooks, populated through:
 
-- **Onchain event monitoring:** Pool creation events, hook deployment events.
+- **Onchain event monitoring:** pool creation events, hook deployment events.
 - **Manual registration:** API endpoints for makers to register their hooks.
-- **Partner integrations:** Direct hook address exchange during onboarding.
+- **Partner integrations:** direct hook address exchange during onboarding.
 
-For each known hook, the router queries `IALFHook` methods directly (`isLive()`, `maxGas()`, `getIndicativeQuote()`). The router SHOULD cache liveness and gas data and refresh periodically (recommended: ≤ 1 block on the target chain).
+For each known hook, the router queries `IALFHook` methods directly (`isLive()`, `maxGas()`, `getIndicativeQuote()`, `swapToPrice()`). The router SHOULD cache liveness and gas data and refresh periodically (recommended: ≤ 1 block on the target chain).
 
-## Indicative Quoting
+## Indicative quoting
 
-For each quoter the router considers, it calls:
+For each candidate the router considers:
 
 ```solidity
 output = IALFHook(hook).getIndicativeQuote{gas: maxGas}(
-		poolKey,
-		zeroForOne,
-		amountSpecified,
-		attestationData
-)
+    poolKey, zeroForOne, amountSpecified, hookData
+);
 ```
 
-This call MUST be a `staticcall`. The router MUST respect the quoter's declared `maxGas`.
+This call MUST be a `staticcall`. The router MUST respect the quoter's declared `maxGas`. `hookData` is the standard `ALFHookData` envelope, with `attestationData` populated when the swap originates from an attested source.
 
-## Reputation Model
+## Reputation model
 
-The router MUST maintain a reputation model for each quoter. The model tracks the following metrics:
+The router MUST maintain a reputation model per quoter, tracking:
 
-### Quote Fidelity
+- **Quote fidelity:** rolling mean of `(actualOutput − indicatedOutput) / indicatedOutput`.
+- **Fill rate:** rolling mean of `successfulSwaps / attemptedSwaps`. Quoters with `fillRate < threshold` (recommended: 0.95) are deprioritized.
+- **Revert tracking:** consecutive `_beforeSwap` reverts trigger temporary or extended exclusion.
+- **Gas accuracy:** rolling mean of `actualGas / declaredMaxGas`. Quoters that consistently OOG are penalized.
+
+For routing decisions:
 
 ```solidity
-fidelity[quoter] = rollingMean(
-    (actualOutput - indicatedOutput) / indicatedOutput
-)
+adjustedOutput = indicatedOutput × (1 + fidelity[quoter]) − gasCost;
 ```
 
-Computed over a rolling window (implementation-defined, recommended: last 100 fills or 24 hours, whichever is larger).
+## Dispatch strategy
 
-**Usage:** The router computes a fidelity-adjusted output for routing decisions:
+- **Candidate selection:** filter known hooks by `isLive() == true` and reputation thresholds.
+- **EV-based ordering:** sort by `adjustedOutput`.
+- **Marginal EV cutoff:** stop calling additional candidates when the marginal expected improvement falls below the gas cost of the call.
+- **Explore budget:** reserve a configurable fraction of swaps (recommended 5-10%) for unproven quoters to maintain model freshness.
+- **Vanilla fallback:** always include at least one vanilla v4 pool (if one exists) in the candidate set as the baseline.
 
-```solidity
-adjustedOutput = indicatedOutput × (1 + fidelity[quoter]) - gasCost
-```
+## Auction hook routing
 
-The router SHOULD consider this fidelity in comparing indicatives among competing quoters. For example, a quoter with fidelity = -0.002 (implying it consistently delivers 0.2% less at execution than indicated) has its indicative discounted by 0.2%.
+The router MAY route through `ALFAuctionHook` instead of routing directly. The decision is a routing-level concern based on:
 
-### **Fill Rate**
-
-```solidity
-fillRate[quoter] = rollingMean(successfulSwaps / attemptedSwaps)
-```
-
-Quoters with `fillRate < threshold` (implementation-defined, recommended: 0.95) are deprioritized.
-
-### **Revert Tracking**
-
-Each `beforeSwap` revert after the router routes to a quoter is recorded. Quoters with persistent reverts are excluded from routing after a configurable number of consecutive failures (recommended: 3 consecutive reverts triggers temporary exclusion; 10 in a rolling window triggers extended exclusion).
-
-### Gas Accuracy
-
-```solidity
-gasAccuracy[quoter] = rollingMean(actualGas / declaredMaxGas)
-```
-
-Quoters that consistently use gas close to their declared maximum are appropriately priced. Quoters that significantly underestimate (as observed by OOG failures) are penalized.
-
-## Dispatch Strategy
-
-The router MUST implement the following dispatch logic:
-
-- **Candidate selection.** From the known hook set, select quoters where `isLive() == true` and further filter based on reputation model (e.g., `fillRate > exclusionThreshold` and other factors that may place the quoter in a temporary exclusion state).
-- **EV-based ordering.** Order candidates by `adjustedOutput` (fidelity-adjusted indicative minus gas cost).
-- **Marginal EV cutoff.** Stop calling additional quoters when the marginal expected improvement from the next quoter is less than the gas cost of the call.
-- **Explore budget.** Reserve a configurable fraction of swaps (recommended: 5-10%) for calling quoters outside the top-N, including new quoters with no history, to maintain model freshness.
-- **Fallback inclusion.** Always include at least one vanilla v4 pool (if one exists for the pair) in the candidate set.
-
-## Auction Hook Routing
-
-The router MAY route through the auction hook instead of routing directly. The decision is a pure routing-level concern based on:
-
-- **Quoter count for the pair.** If the quoter count is small (≤ 5), the auction hook's exhaustive comparison is affordable.
+- **Quoter count for the pair.** If small (≤ 5), the auction's exhaustive comparison is affordable.
 - **Swap size.** Larger swaps benefit more from fairness guarantees.
-- **Chain characteristics.** On chains with adversarial sequencers or high MEV, the auction hook's atomicity is more valuable.
-- **Router confidence.** If the router's reputation model is well-calibrated for a pair, direct routing is preferred. If the model is uncertain (new pair, new quoters), the auction hook provides a safer default.
+- **Chain characteristics.** On chains with adversarial sequencers or high MEV, the auction's atomicity is more valuable.
+- **Router confidence.** If the router's reputation model is well-calibrated for a pair, direct routing is preferred. If the model is uncertain, the auction provides a safer default.
 
-When routing through the auction hook, the router submits a swap to the auction hook's virtual pool. The auction hook handles quoter selection and execution.
+When routing through the auction hook, the router submits a swap to the auction's virtual pool with an `AuctionHookData` payload encoding the candidate set and (optionally) a pre-planned split.
 
 # Cross-cutting Concerns
 
 ## Token Accounting
 
-All native (i.e., not wrapped external) ALF quoter hooks SHOULD operate within v4's singleton PoolManager. Token accounting depends on the settlement model:
+Token accounting depends on the settlement model:
 
-**Native LP model:**
+**Native LP model (`SimpleSpreadQuoterHook`):**
 - The maker holds v4 LP positions in the quoter's pool. The AMM handles all token accounting during swaps. The hook itself never touches tokens.
 
-**JIT LP model:**
-- In `beforeSwap`, the hook adds LP via `poolManager.modifyLiquidity()` (which skips hook callbacks via `noSelfCall`). The LP delta is settled by pulling tokens from the maker (e.g., via Permit2) and calling `_settle()`.
-- In `afterSwap`, the hook removes LP. The resulting positive delta is resolved via `poolManager.mint()` to issue ERC-6909 claims to the maker. **Important:** `_take()` MUST NOT be used in `afterSwap` because the PoolManager may not hold sufficient ERC-20 balance at that point (the swapper's settlement occurs after the swap function returns).
-- Makers can redeem ERC-6909 claims to ERC-20 via `poolManager.burn()` in a separate transaction.
+**JIT LP model (`SmartPoolHook`):**
+- Per-pool inventory is tracked across three buckets: ERC4626 vault shares, ERC-6909 claims held in the PoolManager, and per-pool ERC-20 balances swept into the hook between cycles.
+- In `_beforeSwap`, the hook adds LP via `poolManager.modifyLiquidity()` (skipping hook callbacks via `noSelfCall`). Claims are redeemed first, then vault shortfalls are withdrawn, then per-pool ERC-20 covers the rest. LP deltas are settled via `_settle()`.
+- In `_afterSwap`, the hook removes LP. Negative deltas are paid in ERC-20 from the per-pool sweep (debiting the tracker); positive deltas mint ERC-6909 claims to the hook for the next cycle. **`_take()` is NOT used in `_afterSwap`** — the PoolManager may not hold sufficient ERC-20 balance at that point.
+- LP-account share math is handled by `PoolVault` (see [PoolVault](#poolvault)).
 
-**Delta override model:**
-- The hook's `beforeSwap` returns a `BeforeSwapDelta` that specifies the exact token amounts.
-- The PoolManager settles balances via `take()` and `settle()` within the `unlock` context.
-- Quoter hooks that hold liquidity within the PoolManager (as claims) interact via `mint()` and `burn()`.
-- Quoter hooks that hold liquidity externally MUST inject sufficient liquidity during settlement.
+**Auction hook (delta forwarding):**
+- The auction's virtual pool holds no liquidity. All token movement happens through nested `poolManager.swap` calls on the candidates' real pools. The auction's only direct PM interaction is `poolManager.take()` for the protocol fee.
 
 ## Pool Initialization
 
 Each quoter hook requires a pool to be initialized in the PoolManager:
 
 ```solidity
-poolManager.initialize(poolKey, sqrtPriceX96, hookData);
+poolManager.initialize(poolKey, sqrtPriceX96);
 ```
 
-**Dynamic fee requirement:** Quoter hooks using the native LP or JIT LP settlement models MUST initialize their pool with `fee = LPFeeLibrary.DYNAMIC_FEE_FLAG` (`0x800000`). This is required because the fee override mechanism in `Hooks.sol` only parses the fee return value from `beforeSwap` when the pool's fee is dynamic (`key.fee.isDynamicFee()`). Pools initialized with a static fee will silently ignore the hook's fee override.
+**Dynamic fee requirement:** Quoter hooks using the Native LP or JIT LP settlement models MUST initialize their pool with `fee = LPFeeLibrary.DYNAMIC_FEE_FLAG` (`0x800000`). The fee override mechanism in `Hooks.sol` only parses the fee return value from `beforeSwap` when the pool's fee is dynamic. Pools initialized with a static fee will silently ignore the hook's fee override.
 
-The auction hook's virtual pool does NOT require `DYNAMIC_FEE_FLAG` (it uses delta override, not fee override). It can be initialized with `fee: 0` and `tickSpacing: 1`.
+The auction hook's virtual pool does NOT require `DYNAMIC_FEE_FLAG` — it uses delta override, not fee override. It can be initialized with `fee: 0` and `tickSpacing: 1`.
 
-The `sqrtPriceX96` and tick spacing are quoter-defined. For native LP and JIT LP models, the pool's CPMM state is used for swap execution, so the initial price and tick spacing are meaningful. For the delta override model, the pool's native pricing is bypassed.
+`SmartPoolHook` follows up on `_afterInitialize` with its own `initializePool(key, PoolConfig)` call to commit vault references and bucket configuration before any swap or LP activity. Until that runs, swaps on a SmartPoolHook pool see `state.live == false` and execute at the pool's stored fee.
 
-Quoter hooks SHOULD use the `afterInitialize` callback for any initialization logic (e.g., setting active tick for LP positioning).
+Quoter hooks SHOULD use the `afterInitialize` callback for any initialization logic (e.g., setting `activeLowerTick` for LP positioning).
 
 ## Upgradeability
 
-- **AttestationRegistry:** Governance-upgradeable (attester whitelist only). The verification logic is immutable.
 - **Quoter hooks:** Immutable per deployment. Quoters upgrade by deploying a new hook, notifying the router, and migrating liquidity. The router's reputation model starts fresh for the new hook.
 - **Auction hook:** Immutable. New versions are deployed independently.
+- **Configuration mutability:** Owner-managed parameters (`pricingState`, `priceSigner`, `authorizedLPs`, `PoolConfig`, bucket weights) are mutable through owner-gated functions. Curve updates from `priceSigner` are mutable per-block via the signed-update path.
 
 ## Governance
 
 | Parameter | Controlled By | Mechanism |
 | --- | --- | --- |
-| Attester whitelist | Governance | `AttestationRegistry.addAttester/removeAttester` |
-| Internal ALF fees | Governance | Handled indirectly via v4 fee config (likely the default fee) |
-| External ALF fees | Governance | Wrapper hook parameter |
+| Per-quoter pricing state | Hook owner | `SpreadQuoterBase.updatePricingState`, signed `priceSigner` updates |
+| Per-quoter `priceSigner` | Hook owner | `SpreadQuoterBase.setPriceSigner` |
+| LP authorization (`SimpleSpreadQuoterHook`) | Hook owner | `setAuthorizedLP` |
+| `SmartPoolHook` config (vaults, weights) | Hook owner | `initializePool`, weight mutators |
+| v4 protocol fee on quoter pools | v4 governance | Standard v4 protocol fee path (collected by PoolManager during swap) |
+| v4 protocol fee on auction-routed swaps | v4 governance | `ALFProtocolFees` reads slot0 and forwards to the protocol fee jar |
 | Router dispatch parameters | Router operator | Offchain configuration |
 | Hook blocklist | Router operator | Offchain configuration; handled by router reputation model |
+
+There is no governance-managed allowlist of quoters or attesters at the protocol level — both are per-maker decisions.
 
 ## Error Conditions
 
@@ -853,24 +714,32 @@ Quoter hooks SHOULD use the `afterInitialize` callback for any initialization lo
 | Quoter `getIndicativeQuote` reverts | Router / Auction Hook | Quoter is skipped for this swap. Router records revert for reputation. |
 | Quoter `getIndicativeQuote` exceeds `maxGas` | Router / Auction Hook | Call fails due to gas limit. Same as revert. |
 | Quoter `getIndicativeQuote` returns 0 | Router / Auction Hook | Quoter is skipped (treated as unable to price). |
-| Quoter `beforeSwap` reverts after being selected | Router | Swap fails. Router retries with next-best candidate. Records revert for reputation. |
-| No quoters return valid quotes (auction hook) | Auction Hook | `beforeSwap` reverts with `NoValidQuotes()`. |
-| Liquidity added to auction hook's virtual pool | Auction Hook | `beforeAddLiquidity` reverts with `LiquidityNotAllowed()`. |
+| Quoter `_beforeSwap` reverts after being selected | Router | Swap fails. Router retries with next-best candidate. Records revert for reputation. |
+| Auction autonomous mode produces no valid quote | Auction Hook | `_beforeSwap` reverts with `NoValidQuotes()`. |
+| Auction tolerance violated for any target | Auction Hook | Entire swap reverts. |
+| Liquidity added to auction's virtual pool | Auction Hook | `_beforeAddLiquidity` reverts with `LiquidityNotAllowed()`. |
 | No known quoters for pair | Router | Pair is routed through non-ALF pools only. |
-| Attestation is invalid or expired | Quoter Hook | Quoter prices swap as unattested flow. No revert. |
-| Conflicting curve update in same block | hookData-based quoter | `beforeSwap` reverts. |
-| JIT LP hook calls `take()` in `afterSwap` | JIT Quoter Hook | ERC-20 underflow. MUST use `poolManager.mint()` instead. |
-| Quoter pool initialized without `DYNAMIC_FEE_FLAG` | Fee override quoter | Fee override silently ignored; swaps execute at default fee. |
+| Conflicting curve update in same block | `BaseALFHook` | `_checkAndMarkCurveUpdate` reverts `ConflictingCurveUpdate`. |
+| Curve update past deadline | `BaseALFHook` | `_validateCurveUpdateMeta` reverts `ExpiredUpdate`. |
+| Curve update for wrong pool | `BaseALFHook` | `_validateCurveUpdateMeta` reverts `PoolMismatch`. |
+| Invalid `priceSigner` signature | `SpreadQuoterBase` | `_verifySignature` reverts `InvalidPriceSigner`. |
+| Pricing state with `bidFeePips` or `askFeePips` > `MAX_LP_FEE` | `SpreadQuoterBase` | `_validateFeeBounds` reverts `FeeOutOfBounds`. |
+| LP add/remove on `SmartPoolHook` mid-JIT | `SmartPoolHook` | Per-pool/global JIT lock rejects entry; `whenJITNotInProgress` modifier reverts. |
+| Quoter pool initialized without `DYNAMIC_FEE_FLAG` | Native/JIT LP quoter | Fee override silently ignored; swaps execute at the pool's stored static fee. |
+| Unauthorized LP on `SimpleSpreadQuoterHook` | `SimpleSpreadQuoterHook` | `_beforeAddLiquidity` / `_beforeRemoveLiquidity` reverts `UnauthorizedLP`. |
+| Wrong active tick on `SimpleSpreadQuoterHook` | `SimpleSpreadQuoterHook` | `_enforceActiveTick` reverts `WrongActiveTick` or `InvalidTickRange`. |
 
 ## Gas Estimates
 
 | Operation | Estimated Gas | Notes |
 | --- | --- | --- |
-| `IALFHook.getIndicativeQuote` | ~5,000–100,000 | Depends on curve complexity |
 | `IALFHook.isLive` | ~2,500–5,000 | Simple view call |
 | `IALFHook.maxGas` | ~2,500 | Immutable read |
-| `ALFAuctionHook.beforeSwap` (5 quoters) | ~50,000–700,000 | 5× (isLive + maxGas + indicative) + 1× swap |
-| Direct routing: single quoter swap | ~100,000–200,000 | Standard v4 swap with hook |
-| `AttestationRegistry.verify` | ~5,000–10,000 | ECDSA recovery + storage read |
+| `IALFHook.getIndicativeQuote` (`SpreadQuoterBase`) | ~30,000–150,000 | Tick-walking simulation depends on range crossed |
+| `IALFHook.swapToPrice` (`SpreadQuoterBase`) | ~30,000–200,000 | Same loop with price-bounded termination |
+| `SmartPoolHook` JIT cycle (single bucket) | ~250,000–350,000 | beforeSwap + LP deploy + afterSwap + redistribute |
+| `SmartPoolHook` JIT cycle (multi-bucket, e.g. 3) | ~400,000–600,000 | Linear in bucket count |
+| `ALFAuctionHook.beforeSwap` (autonomous, 5 targets) | ~500,000–900,000 | 5× indicative + sort + greedy fill across winners |
+| `ALFAuctionHook.beforeSwap` (pre-planned, 2 targets) | ~250,000–400,000 | Skips indicatives + sorting |
 
-Note that these are very rough estimates intended only for reasoning. Actual gas will vary based on quoter implementation and various optimization efforts.
+These are rough estimates intended only for sizing and routing decisions. Actual gas varies with the underlying strategy hooks (fee/liquidity range, vault implementations) and tick-bitmap depth on the swap path.

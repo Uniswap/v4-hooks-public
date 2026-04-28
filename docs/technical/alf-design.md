@@ -4,7 +4,7 @@
 
 # Introduction
 
-The Composable ALF concept described here is a layered hook architecture that enables proprietary market makers to operate custom AMMs within the Uniswap v4 ecosystem. Each quoter deploys its own v4 hook with full hook lifecycle access, shared infrastructure contracts handle cross-cutting concerns like attestation and discoverability, and the router drives intelligent dispatch through a statistical reputation model.
+The Composable ALF concept described here is a layered hook architecture that enables proprietary market makers to operate custom AMMs within the Uniswap v4 ecosystem. Each quoter deploys its own v4 hook with full hook lifecycle access, a shared `IALFHook` interface and abstract `BaseALFHook` standardize how the router and auction hook query indicative quotes, and the router drives intelligent dispatch through a statistical reputation model.
 
 The proposal is largely motivated by the rapid growth of ALF volume on Base (from ~10% to ~40% of aggregator volume in ~2 months), coupled with our broader desire to enable more sophisticated proprietary trading strategies for LPs. On Base, ALF share of aggregator volume has grown from roughly 10-12% in late December/early January to approximately 40% and climbing. While aggregators are still a small percentage of total Base DEX volume (on the order of 5-6%), this trajectory represents a significant risk to Uniswap's market positioning on Base if we don't offer a competitive ALF product within the v4 ecosystem.
 
@@ -12,15 +12,15 @@ The core design is centered around router-driven discovery and dispatch with rep
 
 # Design Philosophy
 
-The original ALF proposal concentrates registry management, competitive dispatch, fallback comparison, flow attestation, and liquidity provisioning into a single monolithic hook. This revised design decomposes those concerns into independent, composable layers that align more closely with v4's native primitives. 
+The original ALF proposal concentrates registry management, competitive dispatch, fallback comparison, flow attestation, and liquidity provisioning into a single monolithic hook. This revised design decomposes those concerns into independent, composable layers that align more closely with v4's native primitives.
 
-Rather than re-implementing core AMM logic modified for competitive quoting inside a hook, we push competition to the router layer and give each quoter the full hook lifecycle to work with. Shared concerns (attestation, flow-quality signals) live in thin infrastructure contracts that any hook can read from, while hook metadata (indicative quotes, liveness, gas budgets, reserves) is exposed directly by each hook via the `IALFHook` interface. This model scales to an arbitrary number of quoters, imposes minimal constraints on quoter architecture and complexity, and requires no coordination for introducing new quoter types.
+Rather than re-implementing core AMM logic modified for competitive quoting inside a hook, we push competition to the router layer and give each quoter the full hook lifecycle to work with. Cross-cutting concerns like flow attestation are exposed as virtual extension points on the shared `BaseALFHook` (default no-op), letting each maker decide how to verify attestation payloads against their own trust model — there is no shared registry contract. Hook metadata (indicative quotes, liveness, gas budgets, reserves, price-bounded simulation) is exposed directly by each hook via the `IALFHook` interface. This model scales to an arbitrary number of quoters, imposes minimal constraints on quoter architecture and complexity, and requires no coordination for introducing new quoter types.
 
 The architecture is shaped by several key assumptions:
 
 - **Quoter flexibility is the whole point.** The complexity of proprietary market making is such that no single interface or curve model could cover the range of optimizations makers need to compete effectively. Quoters need access to the full v4 hook lifecycle (e.g., `afterSwap` for post-trade analytics, dynamic fees, custom curve logic, arbitrary state management), not a tightly constrained quoting API.
 - **Dispatch intelligence belongs in the router.** The router has access to historical data, statistical models, and per-quoter reputation tracking that cannot be efficiently replicated onchain. Putting dispatch logic inside a hook means calling every quoter exhaustively and picking the best, which is the least efficient selection strategy and doesn't scale as the quoter set grows.
-- **Each component should have a small, independent audit surface.** Shared infrastructure (index, attestation) is thin and static. Quoter hooks are independently deployed and independently auditable. A bug in one quoter's pricing logic cannot affect other quoters.
+- **Each component should have a small, independent audit surface.** The shared base contracts (`BaseALFHook`, `SpreadQuoterBase`, `PoolVault`, `SwapSimulator`, `ALFProtocolFees`) are thin and stateless beyond what curve-update bookkeeping and share math require. Quoter hooks are independently deployed and independently auditable. A bug in one quoter's pricing logic cannot affect other quoters.
 - **v4's native pool composition is the right building block.** Each quoter gets its own pool. Competition happens across pools, either at the router level or onchain through the auction hook. This uses the platform as intended rather than reimplementing exchange infrastructure inside a single hook.
 
 The result is a design where:
@@ -37,41 +37,52 @@ There are four layers in this system:
 
 | Layer | Component | Responsibility |
 | --- | --- | --- |
-| 0 | Shared Infrastructure | Attestation (AttestationRegistry), standard interfaces (IALFHook), base implementation (BaseALFHook) |
+| 0 | Shared Base Contracts | Standard interface (`IALFHook`), abstract base (`BaseALFHook`), spread-quoter scaffolding (`SpreadQuoterBase`), share-math base (`PoolVault`), tick-walking simulator (`SwapSimulator`), auction protocol-fee base (`ALFProtocolFees`). No standalone deployments — these are libraries and abstract contracts inherited by quoter and auction hooks. |
 | 1a | Quoter Hooks | Individual v4 hooks per market maker. Full hook lifecycle, custom pricing, independent deployment. Each hook exposes its own metadata via `IALFHook`. |
-| 1b | Auction Hook | Stateless atomic competitive round. Receives targeted quoter set via `hookData`, queries indicative quotes, routes to best quoter. |
+| 1b | Auction Hook | Stateless onchain auction. Receives a targeted quoter set via `hookData`, queries indicative quotes, executes a greedy split fill across candidates (or a router-supplied pre-planned split), and applies the v4 protocol fee on the unspecified side. |
 | 2 | Router | Primary dispatch. EV-based quoter selection, reputation model, quote fidelity tracking, fallback management. |
 
-Information flows downward: the router queries quoter hooks directly (via `IALFHook`) and routes to the best pool. Quoter hooks read shared infrastructure (attestation registry) but are otherwise independent. The auction hook is a transparent intermediary; quoters see the same `beforeSwap` invocation regardless of whether the swap was initiated by the router directly or through the auction hook.
+Information flows downward: the router queries quoter hooks directly (via `IALFHook`) and routes to the best pool. Quoter hooks are entirely self-contained — they consult no shared registry contract. The auction hook is a transparent intermediary; quoters see the same `beforeSwap` invocation regardless of whether the swap was initiated by the router directly or through the auction hook.
 
-## **Layer 0: Shared Infrastructure**
+## **Layer 0: Shared Base Contracts**
 
-These are supporting contracts that any hook or router can query. No execution logic.
+These are abstract contracts and libraries inherited by quoter and auction hooks. None are deployed standalone.
 
-### Self-Describing Hooks (IALFHook)
+### Self-Describing Hooks (`IALFHook`)
 
 Each ALF hook exposes its own metadata directly via the `IALFHook` interface. There is no shared onchain registry — hooks are self-describing. The router discovers hooks through its own tracking and queries them directly.
 
+The interface surfaces five view methods:
+
+- `getIndicativeQuote(key, zeroForOne, amountSpecified, hookData)` — the indicative output (or required input for exact-output) for a given swap. The router and auction hook invoke this via `staticcall`.
+- `swapToPrice(key, zeroForOne, amountSpecified, sqrtPriceLimitX96, hookData)` — price-bounded simulation. Used by the auction hook and router for split-fill planning.
+- `isLive()` — quoter-reported liveness hint.
+- `maxGas()` — declared gas budget for `getIndicativeQuote`. Callers cap their `staticcall` gas to this value.
+- `getReserves(key)` and `getEffectiveLiquidity(key)` — true TVL and immediately swappable liquidity, including off-pool reserves (vault deposits, ERC-6909 claims).
+
+`BaseALFHook` provides default implementations for all five (`isLive` is abstract; `getReserves`, `getEffectiveLiquidity`, and `swapToPrice` default to `(0, 0)`).
+
 **Design Notes**
 
-- **No coordination required:** Deploying a new hook doesn’t require registering with any shared contract. The router discovers hooks and builds its candidate set independently.
+- **No coordination required:** Deploying a new hook doesn't require registering with any shared contract. The router discovers hooks and builds its candidate set independently.
 - **Liveness:** Self-reported by the hook via `isLive()`. Routers treat this as a hint and validate against observed behavior.
-- **Metadata:** `maxGas()` declares the gas budget for indicative quoting. `getReserves()` and `getEffectiveLiquidity()` report TVL and immediately available liquidity.
-- **Simplicity:** Removing the registry eliminates a coordination point and a potential governance surface. Spam resistance is handled entirely at the router layer via the reputation model.
+- **Spam resistance:** Handled entirely at the router layer via the reputation model — there is no governance-gated allowlist.
 
-### **AttestationRegistry**
+### Attestation Extension Point
 
-A shared registry of attestation keys. Any ALF hook can verify flow attestation against this registry, which decouples attestations from individual hooks.
+Attestation handling is a per-hook concern, not a shared registry concern. `BaseALFHook` decodes the standard `ALFHookData` envelope (`{attestationData, curveUpdateData}`) and exposes a virtual `_resolveAttestation(bytes attestationData)` that returns `(bool isAttested, address attester)`. The default returns `(false, address(0))`. Subclasses that want preferential pricing for attested flow override `_resolveAttestation` and verify the payload against their own signer (typically via the hook's existing EIP-712 infrastructure and `priceSigner`).
 
-**Design Notes**
+This pushes the attestation trust model into each maker's hook, which lets makers:
 
-- **Scope:** Attestations are scoped per-swap via `swapHash` and time-bounded via `deadline`. This prevents replay.
-- **Read-only from hooks:** The registry only verifies. Each quoter independently decides how to use attestation data (e.g., preferential pricing for attested flow).
-    - Hooks can call `verifyAttestation` in their `beforeSwap` if attestation is present in `hookData` which will verify it against the registry. This can be used for delivering preferential/predefined pricing which can take precedent over whatever the ALF would have otherwise returned at the time of execution. If no attestation is present, the quoter should fall back to its default behavior.
-- **Reference model:** Jupiter's attestation model was reviewed in the process of designing the signature scheme and payload format.
-- **Governance-controlled attester list:** Keys can be registered for e.g. trading-api or other systems that receive and process quotes from makers which are attested and delivered with swap payloads.
+- Choose their own attester set without coordinating with governance.
+- Bind attestation verification to the same EIP-712 domain they use for signed curve updates.
+- Layer additional checks (e.g., `swapHash` binding, deadline enforcement) without subclassing a registry interface.
 
-See the [relevant formal spec section](https://www.notion.so/ALF-Formal-Spec-311c52b2548b80589834cd397c8f6ab7?pvs=21) for interface and implementation details.
+The router and frontends are still responsible for distributing attestation payloads alongside swaps; the hook just chooses how to interpret them.
+
+### Signed Curve Updates
+
+`BaseALFHook` implements one-curve-update-per-block enforcement generically: `_curveUpdateHash[poolId][block.number]` records the first curve hash seen in a block, and subsequent swaps in the same block must either submit the matching hash or pass through with no curve update. `SpreadQuoterBase` builds on this with EIP-712 verification of `(PricingState, PoolId, deadline)` against an owner-managed `priceSigner`, and only commits the new state on the first matching swap of the block.
 
 ## **Layer 1a: Quoter Hooks**
 
@@ -83,129 +94,58 @@ Each market maker deploys its own v4 hook controlling a pool for the pair it quo
 | --- | --- | --- | --- |
 | Storage-based | Hook reads coefficients from its own storage | Maker writes via standalone transactions (keeper, oracle, manual, block builder) | Major pairs on cheap-gas chains where per-block updates are affordable, or curves robust to staleness |
 | hookData-based | Caller submits signed parameters via `hookData` at swap time | Written to storage on first swap per block; subsequent swaps reuse cached params | Mainnet (expensive updates), lower-volume pairs, long-tail tokens, makers needing sub-block pricing freshness |
-| External (wrapped) | Thin v4 hook wrapping an external ALF contract | Implementation-specific | Existing ALFs (Tessera, ElFomoFi) |
 
-A single hook can support both modes: read from `hookData` when fresh signed parameters are provided, fall back to stored coefficients when they aren't. The router tracks quoter behavior patterns (update frequency, parameter staleness) as part of its reputation model, not via a registry metadata field.
+`SpreadQuoterBase` supports both modes simultaneously: it reads owner-committed pricing from storage and overlays signed curve updates from `hookData` on top. The router tracks quoter behavior patterns (update frequency, parameter staleness) as part of its reputation model.
 
-Hooks using hookData-based updates enforce the one-curve-update-per-block invariant via a per-block hash mapping. Storage-based and hookData-based modes are best kept as separate hook deployments when the maker wants clean separation, but this is a maker operational decision, not an architectural requirement.
+The one-curve-update-per-block invariant is implemented generically in `BaseALFHook._checkAndMarkCurveUpdate` (see Layer 0).
 
-Extending the base hook gives quoters a few things for free: attestation verification (attestation is validated and passed to the internal quoting function, quoters decide what to do with it… discount, no-op, etc.), one-curve-per-block enforcement (off-chain quoters can submit updated signed curves and ensure consistency within a block), clean separation of pricing and state mutation (e.g. a `_price` function returns the delta, `_postSwap` handles any state changes). They still control their curve and all parameters, how they respond to attested/unattested flow, inventory/risk management, whether to support off-chain curve updates at all, and any other hook lifecycle stuff they want. It benefits hook developers to extend the base, however this is not a hard requirement.
+Extending `BaseALFHook` (or one of its subclasses) gives quoters a few things for free: standard `ALFHookData` decoding, a virtual attestation extension point (default no-op — subclasses verify against their own signer), one-curve-per-block enforcement for any signed curve updates, default implementations of the `IALFHook` view methods, and `DeltaResolver` settlement helpers. Subclasses still control their curve and all parameters, how they respond to attested/unattested flow, inventory/risk management, whether to support hookData-based curve updates at all, and any other hook lifecycle behavior. Extending the base is encouraged but not required.
 
-- Examples (rough sketches, WIP):
-    - **Storage-based Quoter**
-        
-        ```solidity
-        contract WintermuteALF is BaseALFHook {
-            mapping(PoolId => PricingState) internal state;
-        
-            function _price(
-                PoolKey calldata key,
-                bool zeroForOne,
-                int256 amountSpecified,
-                bool isAttested,
-                address attester
-            ) internal view override returns (uint256 outputAmount) {
-                PricingState memory s = state[key.toId()];
-                uint256 baseOutput = _computeCurve(s, zeroForOne, amountSpecified);
-        
-                // Offer better pricing for attested (non-toxic) flow
-                if (isAttested) {
-                    baseOutput = baseOutput * 10005 / 10000; // 1/2 bps discount
-                }
-        
-                return baseOutput;
-            }
-        
-            function beforeSwap(
-                address sender,
-                PoolKey calldata key,
-                IPoolManager.SwapParams calldata params,
-                bytes calldata hookData
-            ) external override returns (bytes4, BeforeSwapDelta, uint24) {
-                (IAttestationRegistry.Attestation memory att, bool valid) =
-                    _parseAttestation(hookData);
-        
-                uint256 output = _price(
-                    key, params.zeroForOne, params.amountSpecified, valid, att.attester
-                );
-        
-                _updateState(key, params, output);
-        
-                return (this.beforeSwap.selector, _toDelta(params, output), 0);
-            }
-        }
-        ```
-        
-    - **`hookData` Based Quoter**
-        
-        ```solidity
-        contract OffchainALF is BaseALFHook {
-            mapping(PoolId => mapping(uint256 => bytes32)) internal blockCurveHash;
-            mapping(PoolId => CurveParams) internal currentCurve;
-        
-            function beforeSwap(
-                address sender,
-                PoolKey calldata key,
-                IPoolManager.SwapParams calldata params,
-                bytes calldata hookData
-            ) external override returns (bytes4, BeforeSwapDelta, uint24) {
-                (CurveParams memory curve, bytes memory sig) =
-                    abi.decode(hookData, (CurveParams, bytes));
-        
-                PoolId pid = key.toId();
-                bytes32 curveHash = keccak256(abi.encode(curve));
-        
-                if (blockCurveHash[pid][block.number] == bytes32(0)) {
-                    _verifyCurveSignature(curve, sig);
-                    blockCurveHash[pid][block.number] = curveHash;
-                    currentCurve[pid] = curve;
-                } else {
-                    require(
-                        blockCurveHash[pid][block.number] == curveHash,
-                        "conflicting curve update"
-                    );
-                }
-        
-                uint256 output = _priceFromCurve(currentCurve[pid], params);
-                return (this.beforeSwap.selector, _toDelta(params, output), 0);
-            }
-        
-            function quoteEndpoint() external view returns (string memory) {
-                return "wss://quotes.maker.com/v1/stream";
-            }
-        }
-        
-        ```
-        
+**Reference implementations in this branch:**
 
-### External ALF Integration
+- `SimpleSpreadQuoterHook` — minimal `SpreadQuoterBase` subclass with owner-restricted LP and single-tick concentration. Used as the baseline strategy and as a fixture for the auction hook tests.
+- `SmartPoolHook` — multi-range JIT spread quoter with ERC4626 vault rehypothecation. Idle inventory earns yield in vaults between swaps; the hook withdraws only the shortfall during each JIT cycle, deploys liquidity across owner-configured tick buckets, lets v4 execute against it, then re-deposits leftovers. LP shares are share-based via `PoolVault` (V2-style `sqrt(amount0 * amount1)` mint with locked `MINIMUM_SHARES`). Pricing is owner-controlled — the hook intentionally ignores `hookData` on swaps, so the signed-curve-update infrastructure inherited from `SpreadQuoterBase` is dormant.
 
-External ALFs (Tessera, ElFomoFi, etc.) are handled via two non-exclusive paths:
-
-- **Wrapper hook:** Brings them into the v4 ecosystem, implementing `IALFHook` to enable router discoverability and (optionally) attestation system integration.
-- **Router-level integration:** The router handles them as external liquidity venues alongside Uniswap v2/v3 pools, requiring no onchain wrapping.
-
-A governance-configurable fee on external ALFs can be implemented in wrapper hooks (simple but easily forked without the fee) or as a router-level surcharge (more flexible). Needs legal opinion.
+`SmartPoolHook` is the strategy targeted for the upcoming external audit; the other reference quoters (open LP, Permit2 JIT, repositioning JIT) are tracked in follow-up work and will land as their own audit deliverables.
 
 ## **Layer 1b: Atomic Auction Hook**
 
-The auction hook provides atomic onchain competitive quoting as an alternative execution strategy. It is a **stateless** v4 hook deployed on a virtual pool that exists solely as a dispatch mechanism. The router provides a targeted set of quoters to the auction hook via `hookData` — the auction hook does not discover quoters on its own.
+The auction hook (`ALFAuctionHook`) provides atomic onchain competitive execution as an alternative to direct router routing. It is a **stateless** v4 hook deployed on a virtual (zero-liquidity) pool that exists solely as a dispatch mechanism. The router provides a targeted set of quoters to the auction hook via `hookData` — the auction hook does not discover quoters on its own.
 
 The router decides per-swap whether to route directly or through the auction hook. This is a pure routing-level decision. Quoter hooks see the same `beforeSwap` invocation regardless of which path the router chose. The `sender` will differ (router vs. auction hook), but hooks should not gate on sender identity.
 
-The auction hook calls `getIndicativeQuote` on the targeted quoters via `staticcall` within its `beforeSwap`, selects the best quote, and executes the swap on the winning quoter's pool via a nested `poolManager.swap` call.
+### Execution Model: Greedy Split Fill
 
-**Scalability constraint:** Gas cost scales with the number of targeted quoters. The router controls this by selecting a reasonable candidate set. The hook has no statistical model and cannot perform intelligent dispatch — it evaluates all provided quoters exhaustively.
+Rather than picking a single winner, the auction fills targeted quoters sequentially from best to worst indicative. Each candidate receives the full remaining swap amount with a `sqrtPriceLimitX96` derived from the next candidate's current pool price. This causes the v4 swap loop to terminate when the current candidate's marginal price worsens to the next candidate's entry level, at which point remaining flow cascades to the next candidate. The result is an approximately optimal split that:
 
-**Delta forwarding:** The auction hook’s `BeforeSwapDelta` must correctly reflect the `BalanceDelta` from the nested swap on the winning quoter’s pool.
+- Fills the best-priced quoter first until price impact equalizes with the next.
+- Naturally handles quoters with different fee overrides and liquidity depths.
+- Degenerates to single-quoter execution when only one target is provided.
+- Works identically for exact-input and exact-output swaps.
 
-**Notes:**
+### Execution Modes
 
-- Intuitively I think this would be optimal for mainnet and other slow or potentially adversarial builder environments, while direct routing is optimal for cheap gas and trusted sequencer setups like Base.
-- It might be prudent to only allow quoters that extend the `BaseALFHook` to considered for routing. This allows us to enforce on-chain compliance with their indicatives; if the execution output is different from the indicative quote by more than a bp or two, revert and mark up that quoter’s indicatives for future rounds by a decaying amount based on the delta.
+`AuctionHookData` supports two modes, selected implicitly by the contents of the `targets[]` array:
+
+- **Autonomous mode** (all targets carry `amountSpecified == 0`): the auction queries each target for an indicative quote, sorts by quote quality, and runs the greedy split fill described above. Fully self-contained — no offchain planning required.
+- **Pre-planned mode** (any target carries `amountSpecified != 0`): the router has pre-computed the optimal split (e.g., using `swapToPrice` offchain). The auction executes targets in the supplied order with their specified amounts; a target with `amountSpecified == 0` mops up whatever remains. Skips indicative queries and sorting for lower gas at the cost of router-controlled execution.
+
+Both modes support tolerance enforcement via `strictTolerancePips` and forward per-quoter `curveUpdateData` and shared `attestationData` to the nested swaps.
+
+### Protocol Fee
+
+The auction hook reads the v4 protocol fee from the virtual pool's slot0 and applies it to the unspecified delta after the split fill completes. Fees are taken directly to the protocol fee jar via `poolManager.take()`, mirroring the same mechanism used by aggregator hooks.
+
+### Delta Forwarding
+
+The auction hook's virtual pool has zero liquidity — all execution happens via nested `poolManager.swap()` calls on the candidates' real pools. The accumulated `BalanceDelta` from all fills is negated into a `BeforeSwapDelta` that offsets the virtual pool's swap, ensuring the auction hook's net position is zero. The outer caller receives the aggregate execution as their swap result.
+
+### Notes
+
+- Intuitively the auction hook is most valuable on mainnet and other slow or potentially adversarial builder environments, while direct routing is optimal for cheap gas and trusted sequencer setups like Base.
+- Tolerance enforcement (`strictTolerancePips`) lets the router cap how far the executed price can drift from the indicative inside the auction transaction, providing an onchain backstop on top of the router's offchain reputation model.
 - Some metrics to weigh when deciding to use the auction hook vs direct routing:
-    
-    
+
     | **Property** | **Direct Routing** | **Auction Hook** |
     | --- | --- | --- |
     | Trust model | trusts the router to fairly route all trades | provides an on-chain fairness guarantee |
@@ -269,31 +209,31 @@ The router routes to the quoter with the highest adjusted output, subject to an 
 
 ## Liquidity Provisioning
 
-With per-quoter pools, liquidity provisioning becomes a quoter-level concern rather than a hook-level concern. Each quoter manages their own liquidity, whether native to V4 (i.e. existing LP positions) or external.
+With per-quoter pools, liquidity provisioning becomes a quoter-level concern rather than a hook-level concern. Each quoter manages their own liquidity model. Two patterns are exercised by the reference hooks shipped here:
 
-### For “native” ALFs (liquidity flows via V4 core)
+### Native v4 LP with fee override
 
-The quoter’s hook controls how liquidity is deposited, withdrawn and accounted for in their pool. This could include depositing on-demand into the pool via `modifyLiquidity` just-in-time for swaps and/or maintaining some stable base of liquidity in the pool generally.
+`SimpleSpreadQuoterHook` is the reference for this pattern. The maker holds standard v4 LP positions in the quoter's pool and the hook controls execution price by returning a per-direction fee override from `_beforeSwap`. The hook itself never touches tokens. LP additions are gated by an authorized-LP allowlist and constrained to a single tick-spacing range at the active tick.
 
-### For external ALFs (ex-V4 liquidity sources)
+### JIT LP with rehypothecation
 
-External ALFs like Tessera or ElFomoFi can be wrapped with an adapter that doesn’t technically need a pool of its own (but could have one with “virtual liquidity” like @Eric Sanchirico’s aggregator hook model). This would basically be the minimum viable integration, and it carries the same tradeoffs noted in the original proposal (double execution, invariant checks, higher gas), but it’s cleanly isolated in its own adapter rather than adding complexity to a shared hook. From the router’s perspective, there’s no real difference.
+`SmartPoolHook` is the reference for this pattern. Idle inventory is held in ERC4626 vaults (vault shares + ERC-6909 claims + per-pool ERC-20 sweep) between swaps. Each `_beforeSwap` redeems claims, withdraws only the shortfall from vaults, and deploys liquidity across multiple owner-configured tick buckets. `_afterSwap` removes the positions, settles the net deltas, and re-deposits leftovers. LP accounting is share-based via `PoolVault`, with V2-style `sqrt(amount0 * amount1)` mint and locked `MINIMUM_SHARES` to defuse share-price inflation attacks.
 
 ### Cross-pair inventory
 
-The original proposal raised the question of dedicated allocation per-pair vs shared pools. With per-quoter hooks, this is a quoter implementation decision. A maker who wants isolation might deploy separate hooks, each with its own liquidity, curve, etc., while a maker who wants shared inventory can deploy a single hook that can handle multiple pairs and attach that one hook to multiple pools, managing cross-pair risk controls internally. The registry supports both because it’s indexed by pair, and a single hook address can support multiple pairs. This is strictly more flexible than either Option 1 or Option 2 from the original proposal, because it doesn't force a single model on all quoters.
+A maker who wants isolation can deploy separate hooks, each with its own liquidity, curve, and pool. A maker who wants shared inventory can deploy a single hook that handles multiple pools, managing cross-pair risk controls internally. Neither pattern requires coordination with anyone else — pool registration is an entirely v4-native concern (`poolManager.initialize`).
 
 ## Security Considerations
 
 ### Quoter Isolation
 
-Each quoter operates in its own pool with its own hook. A bug or exploit in one quoter cannot affect other quoters, the PoolManager, or the shared infrastructure contracts. Another benefit of the per-quoter design is that it offers a similar guarantee to what the monolithic approach aimed for without relying on a strict `staticcall` paradigm. Quoters (particularly off-chain streaming quoters, but this applies to continuous quoters to an extent as well) are effectively able to avoid surfacing same-block pricing to competitors because there is no state update in the quoting process that competitors can leverage for insights.
+Each quoter operates in its own pool with its own hook. A bug or exploit in one quoter cannot affect other quoters, the PoolManager, or the shared base contracts. Another benefit of the per-quoter design is that it offers a similar guarantee to what the monolithic approach aimed for without relying on a strict `staticcall` paradigm. Quoters (particularly off-chain streaming quoters, but this applies to continuous quoters to an extent as well) are effectively able to avoid surfacing same-block pricing to competitors because there is no state update in the quoting process that competitors can leverage for insights.
 
 ### Off-chain Curve Manipulation
 
-The one-curve-per-block enforcement prevents a maker from submitting different curve parameters to different swappers within the same block (optional, maker chooses). 
+The one-curve-per-block enforcement prevents a maker from submitting different curve parameters to different swappers within the same block.
 
-The `BaseALFHook` implements this generically; signed curve params include a timestamp, and stale curves are rejected. The first curve seen in any given block would be essentially committed for all future swaps in the same block. Makers can choose to override this base logic to support more sophisticated decisioning if desired.
+`BaseALFHook` implements this generically; signed curve updates are scoped by `(poolId, deadline)` and stale curves are rejected. The first curve seen in any given block is committed for all subsequent swaps in the same block. Makers can choose to override this base logic to support more sophisticated decisioning if desired.
 
 ### Router Trust
 
@@ -311,31 +251,30 @@ Mitigations:
 
 ### Governance Fee Enforcement
 
-If governance wants to charge a fee on ALF swaps:
-
-- For native quoters, the fee can be enforced directly via the standard V4 swap flow. Typical pool-level protocol fees can be applied here by taking a cut of the delta the way it normally would.
-- For external quoters routed through adapters (not via v4 pools), the adapter can impose the fee and the router can enforce it by excluding unaligned adapters.
+For native quoters using v4's swap path (any hook that doesn't return a `BeforeSwapDelta`), v4's standard pool-level protocol fee applies and is collected by the PoolManager. The auction hook explicitly reads slot0's protocol fee via `ALFProtocolFees` and forwards it to the protocol fee jar after each split fill. Quoter hooks that intentionally bypass v4's swap math (e.g., a future delta-override quoter) would need to apply the protocol fee themselves; none of the hooks in this branch follow that pattern.
 
 ## Requirements
 
-### P0 (must have for v1):
+The list below tracks what is in scope for the upcoming external audit (P0), what is queued to follow (P1), and what remains aspirational (P2). Items marked with ✅ are landed on this branch.
 
-- **AttestationRegistry contract.** Governance-managed attester whitelist. Per-swap scoped attestation verification. Read-only from hooks.
-- **IALFHook interface specification.** Published as an EIP-style interface with `getIndicativeQuote`, `isLive`, `maxGas`, `getReserves`, and `getEffectiveLiquidity`.
-- **BaseALFHook reference implementation.** Attestation parsing, `IALFHook` defaults, standard hook lifecycle. Audited.
-- **At least one reference quoter hook.** A storage-based onchain quoter extending `BaseALFHook`, demonstrating the full integration path. Used for internal testing and as onboarding documentation for makers.
+### P0 (audit scope)
+
+- ✅ **`IALFHook` interface.** `getIndicativeQuote`, `swapToPrice`, `isLive`, `maxGas`, `getReserves`, `getEffectiveLiquidity`. Standard `ALFHookData` envelope (`{attestationData, curveUpdateData}`).
+- ✅ **`BaseALFHook` abstract base.** Standard hookData decoding, virtual `_resolveAttestation` extension point (default no-op), generic one-curve-per-block enforcement, default implementations of the read-only `IALFHook` methods, and `DeltaResolver` integration for settlement.
+- ✅ **`SpreadQuoterBase` abstract base.** Bid/ask fee override scaffolding, EIP-712 signed curve updates against an owner-managed `priceSigner`, single-tick LP enforcement, `swapToPrice` powered by `SwapSimulator`.
+- ✅ **`SwapSimulator` library.** Tick-walking swap simulation for indicative quotes and price-bounded planning. Quote-vs-execution fidelity is exercised by the test suite.
+- ✅ **`PoolVault` abstract base.** Multi-asset share math (vault shares + ERC-6909 claims + per-pool ERC-20) with V2-style mint and locked `MINIMUM_SHARES`. Used by `SmartPoolHook`.
+- ✅ **`SmartPoolHook` strategy hook.** Multi-range JIT spread quoter with ERC4626 vault rehypothecation. Audit deliverable for this branch.
+- ✅ **`SimpleSpreadQuoterHook` baseline strategy.** Owner-restricted LP, single-tick concentration. Used as the auction hook's primary integration fixture.
+- ✅ **`ALFAuctionHook`.** Stateless onchain auction with greedy split fill, autonomous + pre-planned execution modes, tolerance enforcement, and v4 protocol fee handling via `ALFProtocolFees`. Nested swap correctness exercised under v4's unlock model in the test suite.
+
+### P1 (fast-follows, separate audit cycles)
+
+- **Additional reference quoters.** Open LP, Permit2 JIT, and repositioning JIT variants are tracked in follow-up branches and will land as independent audit deliverables once `SmartPoolHook` is signed off.
 - **Router integration: hook discovery.** The router discovers ALF hooks through onchain event monitoring and manual registration, then queries them directly via `IALFHook`.
-- **Router integration: indicative quoting.** The router calls `getIndicativeQuote` on ALF hooks during routing and uses the results in its route selection.
-- **Router integration: basic reputation tracking.** The router tracks indicative-vs-actual divergence and fill rate per quoter. Quoters with persistently poor fidelity are deprioritized. The model can be simple (rolling averages) for v1; sophistication comes later.
-- **External ALF wrapper hook for Tessera and ElFomoFi.** Thin wrappers that bring existing external ALFs into the v4 ecosystem via `IALFHook`. Validates that the architecture works with real production quoters.
-- **Auction hook.** Stateless atomic onchain competitive quoting for mainnet deployment. Receives targeted quoter set from router via `hookData`. Nested swap confirmed safe under v4 unlock model; delta forwarding correctness requires audit.
-
-### P1 (should haves, fast-follows)
-
-- **hookData-based quoter hook reference implementation.** Demonstrates signed curve updates, one-update-per-block enforcement, and `quoteEndpoint` exposure.
+- **Router integration: indicative quoting + reputation tracking.** The router calls `getIndicativeQuote` (and `swapToPrice` where helpful) on ALF hooks during routing and tracks indicative-vs-actual divergence and fill rate per quoter. Quoters with persistently poor fidelity are deprioritized.
 - **Router: full EV-based dispatch model.** Marginal expected value calculation incorporating fidelity scores, win rates, gas costs, and historical dispersion. Explore/exploit strategy with configurable budget.
-- **Governance fee on external ALFs.** Implemented in wrapper hooks. Fee level configurable by governance.
-- **Attestation system finalization.** Signature scheme, payload format, and integration with Jupiter's model. End-to-end flow from Uniswap frontend attestation to quoter preferential pricing.
+- **Attestation reference flow.** End-to-end demonstration from a Uniswap-frontend-issued attestation to a quoter's `_resolveAttestation` override consuming it for preferential pricing. The shared `BaseALFHook` envelope is in place; the producer side (signer infrastructure, distribution) is the open work.
 - **Router: cross-pair state awareness.** Router tracks which quoters share state across pairs and factors large fills on one pair into EV estimates for related pairs.
 
 ### P2 (nice to haves, future)
