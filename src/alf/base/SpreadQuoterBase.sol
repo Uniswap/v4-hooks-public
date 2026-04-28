@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.26;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -42,6 +42,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     error InvalidTickRange();
     error WrongActiveTick();
 
+    /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%).
+    ///      Without this guard, fees > 100% break v4's swap math (denominator underflow) and
+    ///      enable an owner / compromised priceSigner to brick or extract from the pool (H-04).
+    error FeeOutOfBounds();
+
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_, string memory eip712Name)
         BaseALFHook(_poolManager, maxGas_)
         EIP712(eip712Name, "1")
@@ -57,6 +62,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     /// @notice Indicative quote with hookData-aware pricing.
     /// @dev If hookData contains a curve update, the new pricing is used for the simulation
     ///      without modifying storage (view function).
+    /// @dev WARNING: This base implementation applies the hookData-supplied pricing without
+    ///      verifying the signature. Quotes are non-binding by design; the actual swap path
+    ///      verifies signatures separately. Subclasses serving production traffic SHOULD
+    ///      override this to verify signatures (or ignore hookData entirely) so that aggregator
+    ///      routers cannot be misled by unsigned quote payloads.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
         view
@@ -78,6 +88,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     /// @notice Simulate a swap up to a target price, returning both amounts.
     /// @dev Resolves hookData (curve updates, attestation) the same way as getIndicativeQuote,
     ///      then delegates to SwapSimulator.simulateSwapToPrice with the effective fee.
+    /// @dev Same caveat as `getIndicativeQuote` regarding unsigned hookData pricing.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
@@ -121,10 +132,10 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        (bytes memory curveUpdateData, bool isAttested,) = _resolveHookData(hookData);
+        (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
 
         if (curveUpdateData.length > 0) {
-            _applyCurveUpdate(key.toId(), curveUpdateData);
+            _applyCurveUpdate(key, curveUpdateData);
         }
 
         PricingState memory state = pricingState[key.toId()];
@@ -154,7 +165,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         PoolKey calldata key,
         bool zeroForOne,
         int256 amountSpecified,
-        bool isAttested,
+        bool,
         address,
         PricingState memory state
     ) internal view returns (uint256 outputAmount) {
@@ -175,18 +186,56 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
     }
 
+    /// @dev Validate that bid/ask fees are within v4's `[0, MAX_LP_FEE]` range. Used by
+    ///      `_commitPricingState` for every write to `pricingState`.
+    function _validateFeeBounds(PricingState memory state) internal pure {
+        if (state.bidFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+        if (state.askFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+    }
+
+    /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
+    ///      storage, syncs the PM's stored dynamic LP fee, and emits the event.
+    ///
+    ///      The PM's stored LP fee is set to `max(bidFeePips, askFeePips)` when the pool is
+    ///      live, or `0` when not live. Per-swap pricing is still controlled by the override
+    ///      returned from `_beforeSwap`, which is direction-aware (bid vs ask). The stored
+    ///      value is informational — useful for off-chain consumers that read `getSlot0` to
+    ///      estimate slippage and want a conservative upper bound on the current LP fee.
+    ///      Callers that need the directional fee should read `pricingState[poolId]` directly.
+    ///
+    ///      `poolManager.updateDynamicLPFee` requires the pool to be initialized; subclass
+    ///      init flows MUST call this AFTER `poolManager.initialize(key, …)`.
+    ///
+    ///      Safe to call inside a v4 unlock callback — `updateDynamicLPFee` does not require
+    ///      unlock and the per-swap override (set in `_beforeSwap`) takes precedence over the
+    ///      stored fee for the in-flight swap.
+    /// @param key   The pool to update.
+    /// @param state The new pricing state (validated for fee bounds).
+    function _commitPricingState(PoolKey calldata key, PricingState memory state) internal {
+        _validateFeeBounds(state);
+        PoolId poolId = key.toId();
+        pricingState[poolId] = state;
+
+        uint24 representativeFee = state.live
+            ? (state.bidFeePips > state.askFeePips ? state.bidFeePips : state.askFeePips)
+            : 0;
+        poolManager.updateDynamicLPFee(key, representativeFee);
+
+        emit PricingStateUpdated(poolId, state);
+    }
+
     // ──── Curve Update Logic ────
 
-    function _applyCurveUpdate(PoolId poolId, bytes memory curveUpdateData) internal {
+    function _applyCurveUpdate(PoolKey calldata key, bytes memory curveUpdateData) internal {
         (PricingState memory newState, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
             abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
 
+        PoolId poolId = key.toId();
         _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
         if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
             _verifySignature(newState, poolId, deadline, sig);
-            pricingState[poolId] = newState;
-            emit PricingStateUpdated(poolId, newState);
+            _commitPricingState(key, newState);
         }
     }
 
@@ -221,19 +270,30 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     // ──── Owner Functions ────
 
     /// @notice Update the pricing state for a pool.
-    function updatePricingState(PoolKey calldata key, PricingState calldata state) external onlyOwner {
-        pricingState[key.toId()] = state;
-        emit PricingStateUpdated(key.toId(), state);
+    /// @dev Routes through `_commitPricingState` — validates fee bounds, writes storage, and
+    ///      syncs the PM's stored dynamic LP fee. Reverts if `bidFeePips` or `askFeePips`
+    ///      exceeds `LPFeeLibrary.MAX_LP_FEE` (H-04). The pool MUST already be initialized.
+    function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
+        _commitPricingState(key, state);
     }
 
     /// @notice Toggle liveness for a pool.
-    function setPoolLive(PoolKey calldata key, bool live) external onlyOwner {
-        pricingState[key.toId()].live = live;
+    /// @dev Reads the existing `pricingState`, mutates `live`, and routes through
+    ///      `_commitPricingState`. When toggling to `false`, the PM's stored dynamic LP fee
+    ///      is set to 0 to reflect that no swap fee will be charged on this pool.
+    function setPoolLive(PoolKey calldata key, bool live) external virtual onlyOwner {
+        PricingState memory state = pricingState[key.toId()];
+        state.live = live;
+        _commitPricingState(key, state);
         emit PoolLivenessUpdated(key.toId(), live);
     }
 
     /// @notice Set the authorized price signer for hookData curve updates.
-    function setPriceSigner(address _priceSigner) external onlyOwner {
+    /// @dev Setting to `address(0)` is permitted (intentional disable of signed updates).
+    ///      ECDSA.recover from a malformed sig reverts; from a well-formed sig it returns
+    ///      a non-zero address that won't match `address(0)`. Either way, signed updates
+    ///      become non-applicable.
+    function setPriceSigner(address _priceSigner) external virtual onlyOwner {
         priceSigner = _priceSigner;
         emit PriceSignerUpdated(_priceSigner);
     }
