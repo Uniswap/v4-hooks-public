@@ -44,7 +44,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%).
     ///      Without this guard, fees > 100% break v4's swap math (denominator underflow) and
-    ///      enable an owner / compromised priceSigner to brick or extract from the pool (H-04).
+    ///      enable an owner / compromised priceSigner to brick or extract from the pool.
     error FeeOutOfBounds();
 
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_, string memory eip712Name)
@@ -272,7 +272,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     /// @notice Update the pricing state for a pool.
     /// @dev Routes through `_commitPricingState` — validates fee bounds, writes storage, and
     ///      syncs the PM's stored dynamic LP fee. Reverts if `bidFeePips` or `askFeePips`
-    ///      exceeds `LPFeeLibrary.MAX_LP_FEE` (H-04). The pool MUST already be initialized.
+    ///      exceeds `LPFeeLibrary.MAX_LP_FEE`. The pool MUST already be initialized.
     function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
         _commitPricingState(key, state);
     }

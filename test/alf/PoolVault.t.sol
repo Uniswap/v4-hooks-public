@@ -308,7 +308,7 @@ contract PoolVaultTest is Test, Deployers {
         vault.withdraw(poolKeyA, alice, alice, aliceShares + 1);
     }
 
-    function test_withdraw_revertsInSameBlockAsDeposit_H03() public {
+    function test_withdraw_revertsInSameBlockAsDeposit() public {
         _bootstrap(alice, 1000e18);
         // Bob deposits subsequent shares, attempts withdraw same block.
         (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
@@ -324,7 +324,7 @@ contract PoolVaultTest is Test, Deployers {
         vm.stopPrank();
     }
 
-    function test_withdraw_succeedsNextBlock_H03() public {
+    function test_withdraw_succeedsNextBlock() public {
         _bootstrap(alice, 1000e18);
         (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
         token0.mint(bob, need0);
@@ -369,12 +369,12 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  CROSS-POOL ISOLATION (C-01)
+    //  CROSS-POOL ISOLATION
     // ══════════════════════════════════════════════════════════
 
-    /// @notice Confirms the C-01 fix: a swap-cycle's `_depositAllToVault` on Pool A no longer
-    ///         sweeps Pool B's unvaulted ERC-20.
-    function test_C01_depositAllToVault_doesNotSweepOtherPoolsERC20() public {
+    /// @notice Confirms a swap-cycle's `_depositAllToVault` on Pool A does not sweep Pool B's
+    ///         unvaulted ERC-20.
+    function test_depositAllToVault_doesNotSweepOtherPoolsERC20() public {
         // Pool B (unvaulted) holds 500 of token0
         _bootstrapPool(poolKeyB, bob, 500e18);
         assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18);
@@ -386,8 +386,7 @@ contract PoolVaultTest is Test, Deployers {
         assertEq(token0.balanceOf(address(vault)), 500e18);
 
         // Trigger pool A's `_depositAllToVault` for currency0.
-        // BEFORE FIX: this would sweep Pool B's 500e18 into Pool A's vault.
-        // AFTER FIX: it reads `_erc20[A][token0] == 0` and is a no-op.
+        // It reads `_erc20[A][token0] == 0` and is a no-op.
         uint256 aSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
         vault.depositAllToVault(poolIdA, poolKeyA.currency0);
         uint256 aSharesAfter = vault.getVaultShares(poolIdA, poolKeyA.currency0);
@@ -397,14 +396,13 @@ contract PoolVaultTest is Test, Deployers {
         assertEq(token0.balanceOf(address(vault)), 500e18, "Pool B's tokens still in hook");
     }
 
-    /// @notice Confirms C-01: `_ensureERC20` no longer short-circuits using another pool's ERC-20.
-    function test_C01_ensureERC20_doesNotConsumeOtherPoolsERC20() public {
+    /// @notice Confirms `_ensureERC20` does not short-circuit using another pool's ERC-20.
+    function test_ensureERC20_doesNotConsumeOtherPoolsERC20() public {
         _bootstrap(alice, 1000e18); // vaulted, _erc20[A] = 0
         _bootstrapPool(poolKeyB, bob, 500e18); // unvaulted, _erc20[B] = 500
 
         // Pool A needs 100 — should redeem from vault A, not consume pool B's 500e18.
-        // BEFORE FIX: ensureERC20 saw global balance=500 ≥ 100 and skipped redeem.
-        // AFTER FIX: it sees `_erc20[A] == 0`, redeems 100 from vault A.
+        // It sees `_erc20[A] == 0`, so it redeems 100 from vault A.
         uint256 aVaultSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
         vault.ensureERC20(poolIdA, poolKeyA.currency0, 100e18);
         uint256 aVaultSharesAfter = vault.getVaultShares(poolIdA, poolKeyA.currency0);
@@ -413,7 +411,7 @@ contract PoolVaultTest is Test, Deployers {
         assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18, "Pool B unaffected");
     }
 
-    function test_C01_assetSolvency_acrossTwoPoolsSharingCurrency() public {
+    function test_assetSolvency_acrossTwoPoolsSharingCurrency() public {
         _bootstrap(alice, 1000e18);
         _bootstrapPool(poolKeyB, bob, 500e18);
 

@@ -1378,7 +1378,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     /// @dev Single-bucket distribution — the simplest possible JIT shape. Validates that
     ///      quote/execution fidelity is preserved for the degenerate case where the virtual
-    ///      tick schedule has only two entries (tickLower and tickUpper). EC-03 follow-up.
+    ///      tick schedule has only two entries (tickLower and tickUpper).
     function test_quoteFidelity_singleBucket_zeroForOne() public {
         _depositAsOperator(10_000e18);
         // Default config is already a single bucket [-10, 10] @ 10_000 bps; no setDistribution.
@@ -1392,7 +1392,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     /// @dev Adjacent buckets sharing a tick boundary — the merge step in `_sortAndMergeTicks`
     ///      must sum `liquidityNet` for both buckets at the shared tick. A bug here would
-    ///      mis-report liquidity at the boundary tick and diverge from execution. EC-03 follow-up.
+    ///      mis-report liquidity at the boundary tick and diverge from execution.
     function test_quoteFidelity_tickBoundary_sharedAtZero() public {
         _depositAsOperator(10_000e18);
 
@@ -1419,7 +1419,7 @@ contract SmartPoolHookTest is Test, Deployers {
     /// @dev MAX_BUCKETS = 8 distribution. Stresses the insertion sort and merge in
     ///      `_sortAndMergeTicks` (16 raw entries before merge), exercises the upper bound on
     ///      iteration in `_computeAllocations` / `_buildTickSchedule`, and validates fidelity
-    ///      across a swap that traverses multiple buckets. EC-03 follow-up.
+    ///      across a swap that traverses multiple buckets.
     function test_quoteFidelity_maxBuckets() public {
         _depositAsOperator(10_000e18);
 
@@ -1448,7 +1448,7 @@ contract SmartPoolHookTest is Test, Deployers {
     /// @dev Asymmetric-decimal pair (6-decimal USDC-like + 18-decimal WETH-like). The bootstrap
     ///      math (`sqrt(amount0 * amount1)`), `_convertToAmounts` (Solady `fullMulDiv`), and the
     ///      tick-schedule allocation are all unit-agnostic — verify they remain so under
-    ///      realistic decimal asymmetry. EC-03 follow-up; complements EC-04 bootstrap analysis.
+    ///      realistic decimal asymmetry.
     function test_quoteFidelity_asymmetricDecimals() public {
         // Deploy USDC-like (6 decimals) and WETH-like (18 decimals); order by address so they
         // map to currency0/currency1 cleanly without fighting PoolKey ordering rules.

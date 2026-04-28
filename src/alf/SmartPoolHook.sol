@@ -237,11 +237,10 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     //                              MODIFIERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Reverts if ANY pool's JIT cycle is currently in flight (M-01). Reads the global
+    /// @dev Reverts if ANY pool's JIT cycle is currently in flight. Reads the global
     ///      counter rather than a per-pool slot so cross-pool reentry is rejected: a vault
     ///      callback during pool A's cycle cannot enter `addLiquidity(B)` (or `bootstrap(B)`,
-    ///      `setDistribution(B)`, etc.) even though pool B is not itself locked. Audit fix
-    ///      for C-01 / S-01.
+    ///      `setDistribution(B)`, etc.) even though pool B is not itself locked.
     modifier whenJITNotInProgress() {
         if (_isAnyJITInProgress()) revert JITInProgress();
         _;
@@ -327,7 +326,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @notice Deposit token0 and token1 proportional to the pool's current asset ratio.
     /// @dev    Requires owner or external deposits enabled. Pool must be bootstrapped first.
     ///         Records the depositor's deposit block; `removeLiquidity` reverts in the same
-    ///         block to defend against atomic deposit-swap-withdraw fee/yield sniping (H-03).
+    ///         block to defend against atomic deposit-swap-withdraw fee/yield sniping.
     ///
     ///         Slippage bounds are enforced after the actual transfers so callers cap exposure
     ///         to swaps, vault share-price moves, or MEV between off-chain `previewDeposit` and
@@ -363,7 +362,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @dev    Amounts are rounded down to prevent over-withdrawal. Tokens are withdrawn
     ///         from vaults via `vault.withdraw` (exact assets) if the pool's tracked ERC-20
     ///         is insufficient. Reverts in the same block as the depositor's last deposit
-    ///         (anti-fee-sniping, H-03).
+    ///         (anti-fee-sniping).
     ///
     ///         Slippage bounds are enforced after the actual transfers so callers floor
     ///         received amounts against pool ratio moves between preview and inclusion.
@@ -415,8 +414,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @dev    Recovery path for vaults whose `deposit` decrements `type(uint256).max`
     ///         allowance (non-spec but observable on certain proxy upgrades), or for tokens
     ///         that zero allowances on governance events. Without this, a one-time
-    ///         `forceApprove` at `initializePool` would silently brick the pool. Audit fix
-    ///         for F-04 / M-03.
+    ///         `forceApprove` at `initializePool` would silently brick the pool.
     ///
     ///         Zero-out-then-max via `forceApprove` to remain USDT-safe.
     /// @param key      The pool to refresh approval for.
@@ -436,7 +434,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     /// @notice Enable or disable external (non-owner) deposits for a pool.
     /// @dev    Reverts during an active JIT cycle (any pool) — gated for defence-in-depth so a
     ///         vault-as-owner callback cannot flip deposit auth mid-cycle to combine with later
-    ///         reentry. Audit fix for H-02.
+    ///         reentry.
     /// @param key     The pool to update.
     /// @param enabled True to allow any address to call `addLiquidity`.
     function setExternalDeposits(PoolKey calldata key, bool enabled)
@@ -457,7 +455,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @inheritdoc SpreadQuoterBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress` (audit fix for H-02). A vault-as-owner
+    /// @dev    Overridden to gate on `whenJITNotInProgress`. A vault-as-owner
     ///         callback inside an in-flight JIT cycle cannot mutate pricing state mid-flight.
     function updatePricingState(PoolKey calldata key, PricingState calldata state)
         external
@@ -469,7 +467,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @inheritdoc SpreadQuoterBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress` (audit fix for H-02).
+    /// @dev    Overridden to gate on `whenJITNotInProgress`.
     function setPoolLive(PoolKey calldata key, bool live)
         external
         override
@@ -483,7 +481,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @inheritdoc SpreadQuoterBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress` (audit fix for H-02). Dormant on
+    /// @dev    Overridden to gate on `whenJITNotInProgress`. Dormant on
     ///         SmartPoolHook today (hookData ignored) but guarded for defence-in-depth so a
     ///         future subclass that re-enables hookData paths inherits the protection.
     function setPriceSigner(address _priceSigner) external override onlyOwner whenJITNotInProgress {
@@ -680,7 +678,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     ///           Unneeded capital stays in the vault earning yield during the swap window.
     ///           Phase 2 reads the pool's `_erc20[poolId][currency]` tracker rather than the
     ///           hook's global `IERC20.balanceOf` — preserving cross-pool isolation when the
-    ///           hook serves multiple pools sharing a currency (C-01).
+    ///           hook serves multiple pools sharing a currency.
     ///        3. **Deploy**: add each bucket as a concentrated LP position.
     ///
     /// @param poolId The pool to deploy for.
@@ -828,7 +826,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     /// @dev Resolve the hook's net delta for a single currency. Updates per-pool ERC-20
     ///      tracking on settle so that `_erc20[poolId][currency]` continues to reflect the
-    ///      pool's share of the hook's actual token balance (C-01 invariant).
+    ///      pool's share of the hook's actual token balance.
     /// @param poolId   The pool (for per-pool claim recording).
     /// @param currency The currency to resolve.
     function _resolveNetDeltaCurrency(PoolId poolId, Currency currency) internal {
@@ -950,7 +948,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
 
     /// @dev Extracted to manage stack depth. Builds tick schedule and calls simulateSwapVirtual.
     ///      Combines the LP fee with the pool's directional protocol fee (if any) so the quote
-    ///      matches `Pool.swap`'s effective swap fee. Audit fix for EC-01.
+    ///      matches `Pool.swap`'s effective swap fee.
     function _runVirtualSim(
         PoolId poolId, PoolKey calldata key, bool zeroForOne,
         int256 amountSpecified, uint24 feePips, uint160 sqrtPriceLimitX96
@@ -1022,7 +1020,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
             // SafeCast: revert if `liq > type(int128).max` (~1.7e38). The naive `int128(liq)`
             // cast would silently wrap to negative for `liq >= 2^127`, corrupting the virtual
             // sim while the real JIT deploy path (`_deployBuckets`, casts via int256) stays
-            // correct — producing quote/execution divergence. Audit fix for EC-02.
+            // correct — producing quote/execution divergence.
             int128 liqSigned = uint256(liq).toInt128();
             ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickLower, liquidityNet: liqSigned});
             ticks[count++] = SwapSimulator.TickDelta({tick: dist[i].tickUpper, liquidityNet: -liqSigned});
@@ -1137,8 +1135,7 @@ contract SmartPoolHook is SpreadQuoterBase, PoolVault, ReentrancyGuardTransient 
     }
 
     /// @dev Returns whether ANY pool served by this hook has a JIT cycle in flight. Used by
-    ///      `whenJITNotInProgress` to reject cross-pool reentry from a vault callback (audit
-    ///      finding C-01 / S-01).
+    ///      `whenJITNotInProgress` to reject cross-pool reentry from a vault callback.
     function _isAnyJITInProgress() private view returns (bool inProgress) {
         bytes32 slot = _JIT_GLOBAL_COUNTER_SLOT;
         assembly ("memory-safe") {

@@ -162,7 +162,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      the L1 block number (~12s cadence) and many sequencer transactions share the same
     ///      L1 block, defeating the same-block lock. `_getBlockNumberish` returns the Arbitrum
     ///      L2 block number there (and falls back to `block.number` on chains where the two
-    ///      coincide). Audit fix EC-08.
+    ///      coincide).
     mapping(PoolId => mapping(address => uint256)) internal _lastDepositBlock;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -298,7 +298,7 @@ abstract contract PoolVault is BlockNumberish {
         // Reconcile actual transferred amount against requested. For standard ERC-20s, received
         // == requested. For fee-on-transfer / rebasing tokens, the contract receives less; share
         // math must use the real receipt to avoid silently inflating share value at the depositor's
-        // expense and diluting later LPs. Audit fix for F-01.
+        // expense and diluting later LPs.
         uint256 received0 = _safeTransferFromAndMeasure(key.currency0, from, amount0);
         uint256 received1 = _safeTransferFromAndMeasure(key.currency1, from, amount1);
         if (received0 == 0 || received1 == 0) revert InsufficientBootstrap();
@@ -354,7 +354,7 @@ abstract contract PoolVault is BlockNumberish {
 
         // Reconcile fee-on-transfer / rebasing currencies — share math must reflect what was
         // actually received, not what the depositor sent. The depositor pays slightly more for
-        // a given share count but receives no silent dilution of existing LPs. Audit fix F-01.
+        // a given share count but receives no silent dilution of existing LPs.
         amount0 = want0 > 0 ? _safeTransferFromAndMeasure(key.currency0, from, want0) : 0;
         amount1 = want1 > 0 ? _safeTransferFromAndMeasure(key.currency1, from, want1) : 0;
 
@@ -556,7 +556,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      pool's own `_erc20[poolId][currency]`, never the hook's global balance.
     ///      Assumes the vault is already approved (subclasses approve at pool init).
     ///
-    ///      ## Read-only reentrancy mitigation (audit fix H-01)
+    ///      ## Read-only reentrancy mitigation
     ///
     ///      A vault callback fired from inside `vault.deposit` would otherwise observe
     ///      `s.erc20 = 0` while the new vault shares haven't been credited yet — view callers
@@ -602,7 +602,7 @@ abstract contract PoolVault is BlockNumberish {
     ///
     ///      Uses ERC4626 `withdraw(assets, ...)` (returns shares burned) rather than
     ///      `redeem(previewWithdraw(assets), ...)` so the asset amount delivered is exact —
-    ///      no off-by-one rounding shortfall (M-03).
+    ///      no off-by-one rounding shortfall.
     ///
     /// @param poolId   The pool to withdraw for.
     /// @param currency The currency to withdraw.
@@ -670,7 +670,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      amount received (post fee-on-transfer or rebase). Standard ERC-20s satisfy
     ///      `received == want`; for FoT / rebasing tokens the contract sees less. Used by
     ///      `_bootstrap` and `_deposit` so share math reflects real inflow rather than the
-    ///      requested-but-not-received amount. Audit fix F-01.
+    ///      requested-but-not-received amount.
     function _safeTransferFromAndMeasure(Currency currency, address from, uint256 want)
         internal
         returns (uint256 received)
