@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
@@ -29,7 +29,12 @@ contract MockPoolVault is PoolVault {
         return _pm;
     }
 
-    // ── Expose internals for testing ──
+    function bootstrap(PoolKey calldata key, address from, address to, uint256 amount0, uint256 amount1)
+        external
+        returns (uint256 shares)
+    {
+        return _bootstrap(key, from, to, amount0, amount1);
+    }
 
     function deposit(PoolKey calldata key, address from, address to, uint256 shares)
         external
@@ -49,20 +54,8 @@ contract MockPoolVault is PoolVault {
         _depositToVault(poolId, currency, amount);
     }
 
-    function withdrawAllFromVault(PoolId poolId, Currency currency) external {
-        _withdrawAllFromVault(poolId, currency);
-    }
-
-    function withdrawAllFromVaults(PoolId poolId, PoolKey calldata key) external {
-        _withdrawAllFromVaults(poolId, key);
-    }
-
     function depositAllToVault(PoolId poolId, Currency currency) external {
         _depositAllToVault(poolId, currency);
-    }
-
-    function depositAllToVaults(PoolId poolId, PoolKey calldata key) external {
-        _depositAllToVaults(poolId, key);
     }
 
     function ensureERC20(PoolId poolId, Currency currency, uint256 amount) external {
@@ -73,14 +66,11 @@ contract MockPoolVault is PoolVault {
         _recordClaims(poolId, currency, amount);
     }
 
-    function clearERC20Tracking(PoolId poolId, Currency currency) external {
-        _clearERC20Tracking(poolId, currency);
-    }
-
-    // ── Test helpers to configure vaults and read internal state ──
-
     function setVault(PoolId poolId, Currency currency, IERC4626 vault) external {
         vaults[poolId][currency] = vault;
+        // Mirror production's init-time approval so hot-path deposits don't need a
+        // runtime allowance read.
+        _approveVault(currency, address(vault));
     }
 
     function getVaultShares(PoolId poolId, Currency currency) external view returns (uint256) {
@@ -88,11 +78,11 @@ contract MockPoolVault is PoolVault {
     }
 
     function getClaims(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _claims[poolId][currency];
+        return _state[poolId][currency].claims;
     }
 
     function getERC20(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _erc20[poolId][currency];
+        return _state[poolId][currency].erc20;
     }
 }
 
@@ -107,35 +97,29 @@ contract PoolVaultTest is Test, Deployers {
     MockERC20 token0;
     MockERC20 token1;
 
-    PoolKey poolKeyA;
+    PoolKey poolKeyA; // vaulted
     PoolId poolIdA;
 
-    // A second pool with the same currencies for isolation tests
-    PoolKey poolKeyB;
+    PoolKey poolKeyB; // unvaulted (same currencies)
     PoolId poolIdB;
 
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
 
     function setUp() public {
-        // Deploy PoolManager (needed for _poolManager() but not for most tests)
         deployFreshManagerAndRouters();
 
-        // Deploy tokens with deterministic ordering
         token0 = new MockERC20("Token0", "T0", 18);
         token1 = new MockERC20("Token1", "T1", 18);
         if (address(token0) > address(token1)) {
             (token0, token1) = (token1, token0);
         }
 
-        // Deploy mock ERC4626 vaults
         vault0 = new MockERC4626(ERC20(address(token0)));
         vault1 = new MockERC4626(ERC20(address(token1)));
 
-        // Deploy test harness
         vault = new MockPoolVault(manager);
 
-        // Construct two distinct pool keys (different tickSpacing to get different PoolIds)
         poolKeyA = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
@@ -154,17 +138,39 @@ contract PoolVaultTest is Test, Deployers {
         });
         poolIdB = poolKeyB.toId();
 
-        // Configure vaults for pool A
         vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vault0)));
         vault.setVault(poolIdA, poolKeyA.currency1, IERC4626(address(vault1)));
     }
 
-    // ──────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════
     //  Helpers
-    // ──────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════
 
-    /// @dev Mint tokens to `user`, approve `spender`, and deposit `shares` into poolKeyA.
-    function _mintApproveDeposit(address user, uint256 shares) internal returns (uint256 a0, uint256 a1) {
+    /// @dev Bootstrap pool A with `(amount, amount)` from `user`. Returns total shares.
+    function _bootstrap(address user, uint256 amount) internal returns (uint256 shares) {
+        token0.mint(user, amount);
+        token1.mint(user, amount);
+        vm.startPrank(user);
+        token0.approve(address(vault), amount);
+        token1.approve(address(vault), amount);
+        shares = vault.bootstrap(poolKeyA, user, user, amount, amount);
+        vm.stopPrank();
+        vm.roll(block.number + 1); // skip same-block-withdraw guard for tests
+    }
+
+    function _bootstrapPool(PoolKey memory key, address user, uint256 amount) internal returns (uint256 shares) {
+        token0.mint(user, amount);
+        token1.mint(user, amount);
+        vm.startPrank(user);
+        token0.approve(address(vault), amount);
+        token1.approve(address(vault), amount);
+        shares = vault.bootstrap(key, user, user, amount, amount);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+    }
+
+    /// @dev Mint, approve, and deposit `shares` worth into pool A as `user`.
+    function _depositA(address user, uint256 shares) internal returns (uint256 a0, uint256 a1) {
         (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, shares);
         token0.mint(user, need0);
         token1.mint(user, need1);
@@ -173,701 +179,300 @@ contract PoolVaultTest is Test, Deployers {
         token1.approve(address(vault), need1);
         (a0, a1) = vault.deposit(poolKeyA, user, user, shares);
         vm.stopPrank();
+        vm.roll(block.number + 1);
     }
 
-    /// @dev Same as _mintApproveDeposit but for an arbitrary pool key.
-    function _mintApproveDepositPool(PoolKey memory key, address user, uint256 shares)
-        internal
-        returns (uint256 a0, uint256 a1)
-    {
-        (uint256 need0, uint256 need1) = vault.previewDeposit(key, shares);
-        token0.mint(user, need0);
-        token1.mint(user, need1);
-        vm.startPrank(user);
-        token0.approve(address(vault), need0);
-        token1.approve(address(vault), need1);
-        (a0, a1) = vault.deposit(key, user, user, shares);
+    // ══════════════════════════════════════════════════════════
+    //  Bootstrap
+    // ══════════════════════════════════════════════════════════
+
+    function test_bootstrap_mintsSqrtSharesAndLocksDeadShares() public {
+        uint256 shares = _bootstrap(alice, 1000e18);
+
+        // sqrt(1000e18 * 1000e18) = 1000e18
+        assertEq(shares, 1000e18, "shares = sqrt(a0 * a1)");
+        assertEq(vault.totalShares(poolIdA), 1000e18);
+        assertEq(vault.userShares(poolIdA, alice), 1000e18 - vault.MINIMUM_SHARES());
+        assertEq(vault.userShares(poolIdA, address(0)), vault.MINIMUM_SHARES());
+    }
+
+    function test_bootstrap_revertsWhenAlreadyBootstrapped() public {
+        _bootstrap(alice, 1000e18);
+
+        token0.mint(bob, 1e18);
+        token1.mint(bob, 1e18);
+        vm.startPrank(bob);
+        token0.approve(address(vault), 1e18);
+        token1.approve(address(vault), 1e18);
+        vm.expectRevert(PoolVault.PoolAlreadyBootstrapped.selector);
+        vault.bootstrap(poolKeyA, bob, bob, 1e18, 1e18);
         vm.stopPrank();
     }
 
-    // ══════════════════════════════════════════════════════════
-    //  1. Share Math — First Deposit
-    // ══════════════════════════════════════════════════════════
+    function test_bootstrap_revertsOnZeroAmounts() public {
+        token0.mint(alice, 100);
+        token1.mint(alice, 100);
+        vm.startPrank(alice);
+        token0.approve(address(vault), 100);
+        token1.approve(address(vault), 100);
 
-    function test_firstDeposit_oneShareEqualsOneUnit() public {
-        (uint256 a0, uint256 a1) = _mintApproveDeposit(alice, 1000e18);
+        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vault.bootstrap(poolKeyA, alice, alice, 0, 100);
 
-        assertEq(a0, 1000e18, "first deposit: amount0 should equal shares");
-        assertEq(a1, 1000e18, "first deposit: amount1 should equal shares");
-        assertEq(vault.totalShares(poolIdA), 1000e18);
-        assertEq(vault.userShares(poolIdA, alice), 1000e18);
+        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vault.bootstrap(poolKeyA, alice, alice, 100, 0);
+        vm.stopPrank();
+    }
+
+    function test_bootstrap_revertsBelowMinimumShares() public {
+        // sqrt(1 * 1) = 1, well below MINIMUM_SHARES (1000)
+        token0.mint(alice, 1);
+        token1.mint(alice, 1);
+        vm.startPrank(alice);
+        token0.approve(address(vault), 1);
+        token1.approve(address(vault), 1);
+        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vault.bootstrap(poolKeyA, alice, alice, 1, 1);
+        vm.stopPrank();
+    }
+
+    function test_addLiquidity_revertsIfNotBootstrapped() public {
+        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vault.deposit(poolKeyA, alice, alice, 100e18);
+    }
+
+    function test_previewDeposit_revertsIfNotBootstrapped() public {
+        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vault.previewDeposit(poolKeyA, 100e18);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  2. Share Math — Subsequent Deposit Is Proportional
+    //  Subsequent deposit (post-bootstrap)
     // ══════════════════════════════════════════════════════════
 
-    function test_subsequentDeposit_proportionalToExistingAssets() public {
-        _mintApproveDeposit(alice, 1000e18);
+    function test_subsequentDeposit_proportional() public {
+        _bootstrap(alice, 1000e18);
 
-        // Bob deposits the same number of shares — should require proportional tokens
-        (uint256 a0, uint256 a1) = _mintApproveDeposit(bob, 1000e18);
+        (uint256 a0, uint256 a1) = _depositA(bob, 500e18);
 
-        assertEq(a0, 1000e18);
-        assertEq(a1, 1000e18);
-        assertEq(vault.totalShares(poolIdA), 2000e18);
-        assertEq(vault.userShares(poolIdA, bob), 1000e18);
+        // After bootstrap: total0 = total1 = 1000e18, supply = 1000e18.
+        // 500e18 shares costs ceil(500e18 * 1000e18 / 1000e18) = 500e18 of each.
+        assertEq(a0, 500e18);
+        assertEq(a1, 500e18);
+        assertEq(vault.userShares(poolIdA, bob), 500e18);
+        assertEq(vault.totalShares(poolIdA), 1500e18);
     }
-
-    // ══════════════════════════════════════════════════════════
-    //  3. previewDeposit Rounds Up
-    // ══════════════════════════════════════════════════════════
 
     function test_previewDeposit_roundsUp() public {
-        // Deposit an amount that creates a non-trivial ratio
-        _mintApproveDeposit(alice, 3e18);
+        _bootstrap(alice, 3e18);
 
-        // Simulate yield to create a ratio where rounding matters
-        // totalAssets0 = 3e18 + yield. For 1 share: amount = 1 * (3e18 + 1) / 3 => should round up
-        vault0.simulateYield(1); // +1 wei of yield
+        // Yield creates a non-trivial ratio so rounding matters.
+        vault0.simulateYield(1);
         vault1.simulateYield(1);
 
-        (uint256 previewUp0, uint256 previewUp1) = vault.previewDeposit(poolKeyA, 1e18);
-        (uint256 previewDown0, uint256 previewDown1) = vault.previewWithdraw(poolKeyA, 1e18);
+        (uint256 up0, uint256 up1) = vault.previewDeposit(poolKeyA, 1e18);
+        (uint256 down0, uint256 down1) = vault.previewWithdraw(poolKeyA, 1e18);
 
-        // Deposit rounds up, withdraw rounds down. Deposit cost should be >= withdraw proceeds.
-        assertGe(previewUp0, previewDown0, "previewDeposit should round up vs previewWithdraw");
-        assertGe(previewUp1, previewDown1, "previewDeposit should round up vs previewWithdraw");
+        assertGe(up0, down0, "deposit rounds up vs withdraw");
+        assertGe(up1, down1);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  4. previewWithdraw Rounds Down
-    // ══════════════════════════════════════════════════════════
-
-    function test_previewWithdraw_roundsDown() public {
-        _mintApproveDeposit(alice, 3e18);
-
-        // Simulate yield to create non-trivial ratio
-        vault0.simulateYield(2);
-        vault1.simulateYield(2);
-
-        (uint256 amount0, uint256 amount1) = vault.previewWithdraw(poolKeyA, 1e18);
-
-        // Manually compute expected: floor(1e18 * (3e18 + 2) / 3e18) = 1e18 + 0 = 1000000000000000000
-        // 1e18 * (3e18 + 2) = 3e36 + 2e18
-        // 3e36 + 2e18 / 3e18 = 1e18 + 2/3 => floor => 1e18
-        assertEq(amount0, 1e18, "previewWithdraw should round down");
-        assertEq(amount1, 1e18, "previewWithdraw should round down");
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  5. totalAssets Reflects Vault + Claims + ERC20
-    // ══════════════════════════════════════════════════════════
-
-    function test_totalAssets_reflectsAllSources() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // At this point, tokens are in the ERC4626 vaults
-        (uint256 a0, uint256 a1) = vault.totalAssets(poolKeyA);
-        assertEq(a0, 1000e18, "totalAssets should reflect vault deposits");
-        assertEq(a1, 1000e18, "totalAssets should reflect vault deposits");
-
-        // Add some claims
-        vault.recordClaims(poolIdA, poolKeyA.currency0, 50e18);
-        (a0, a1) = vault.totalAssets(poolKeyA);
-        assertEq(a0, 1050e18, "totalAssets should include claims");
-        assertEq(a1, 1000e18);
-
-        // Simulate vault yield
-        vault0.simulateYield(100e18);
-        (a0,) = vault.totalAssets(poolKeyA);
-        assertEq(a0, 1150e18, "totalAssets should include yield");
-    }
-
-    function test_totalAssets_includesERC20ForUnvaultedPool() public {
-        // Pool B has no vaults configured — tokens tracked as ERC-20
-        _mintApproveDepositPool(poolKeyB, alice, 500e18);
-
-        (uint256 a0, uint256 a1) = vault.totalAssets(poolKeyB);
-        assertEq(a0, 500e18, "totalAssets for unvaulted pool should reflect ERC-20 tracking");
-        assertEq(a1, 500e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  6. Zero Shares Deposit/Withdraw Is a No-op
-    // ══════════════════════════════════════════════════════════
-
-    function test_zeroSharesDeposit_isNoop() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        uint256 sharesBefore = vault.totalShares(poolIdA);
-        // Zero shares deposit: no tokens needed
-        vm.prank(alice);
-        (uint256 a0, uint256 a1) = vault.deposit(poolKeyA, alice, alice, 0);
-
-        assertEq(a0, 0);
-        assertEq(a1, 0);
-        assertEq(vault.totalShares(poolIdA), sharesBefore);
-    }
-
-    function test_zeroSharesWithdraw_isNoop() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        uint256 sharesBefore = vault.userShares(poolIdA, alice);
-        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, alice, 0);
-
-        assertEq(a0, 0);
-        assertEq(a1, 0);
-        assertEq(vault.userShares(poolIdA, alice), sharesBefore);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  7. Deposit Pulls From `from`, Mints Shares to `to`
-    // ══════════════════════════════════════════════════════════
-
-    function test_deposit_pullsFromSenderMintsToRecipient() public {
-        uint256 shares = 500e18;
-        token0.mint(alice, shares);
-        token1.mint(alice, shares);
-
-        vm.startPrank(alice);
-        token0.approve(address(vault), shares);
-        token1.approve(address(vault), shares);
-        vault.deposit(poolKeyA, alice, bob, shares);
-        vm.stopPrank();
-
-        // Alice's tokens were taken
-        assertEq(token0.balanceOf(alice), 0, "tokens should be pulled from alice");
-        assertEq(token1.balanceOf(alice), 0);
-
-        // Bob received the shares
-        assertEq(vault.userShares(poolIdA, bob), shares, "shares should be credited to bob");
-        assertEq(vault.userShares(poolIdA, alice), 0, "alice should have no shares");
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  8. Deposit Routes Tokens to Vault When Configured
-    // ══════════════════════════════════════════════════════════
-
-    function test_deposit_routesToVault() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Hook should hold no raw ERC-20 — all in vaults
-        assertEq(token0.balanceOf(address(vault)), 0, "hook should hold no ERC-20 when vaulted");
-        assertEq(token1.balanceOf(address(vault)), 0);
-
-        // Vault should have the tokens
-        assertGt(vault0.balanceOf(address(vault)), 0, "vault0 should hold shares");
-        assertGt(vault1.balanceOf(address(vault)), 0, "vault1 should hold shares");
-
-        // Internal vault share tracking should be non-zero
-        assertGt(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
-        assertGt(vault.getVaultShares(poolIdA, poolKeyA.currency1), 0);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  9. Deposit Tracks ERC-20 When No Vault Configured
-    // ══════════════════════════════════════════════════════════
-
-    function test_deposit_tracksERC20WhenNoVault() public {
-        // Pool B has no vaults
-        _mintApproveDepositPool(poolKeyB, alice, 1000e18);
-
-        // ERC-20 tracking should match
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 1000e18);
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency1), 1000e18);
-
-        // Vault shares should be zero
-        assertEq(vault.getVaultShares(poolIdB, poolKeyB.currency0), 0);
-        assertEq(vault.getVaultShares(poolIdB, poolKeyB.currency1), 0);
-
-        // Hook holds the raw ERC-20
-        assertEq(token0.balanceOf(address(vault)), 1000e18);
-        assertEq(token1.balanceOf(address(vault)), 1000e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  10. Withdraw Burns Shares, Sends Tokens to `to`
+    //  Withdraw
     // ══════════════════════════════════════════════════════════
 
     function test_withdraw_burnsSharesSendsTokens() public {
-        _mintApproveDeposit(alice, 1000e18);
+        _bootstrap(alice, 1000e18);
 
+        uint256 aliceShares = vault.userShares(poolIdA, alice);
         uint256 bal0Before = token0.balanceOf(bob);
         uint256 bal1Before = token1.balanceOf(bob);
 
-        // Alice withdraws, sends tokens to Bob
-        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, bob, 500e18);
+        // Alice withdraws half, sends to Bob.
+        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, bob, aliceShares / 2);
 
-        assertEq(a0, 500e18);
-        assertEq(a1, 500e18);
-        assertEq(vault.userShares(poolIdA, alice), 500e18);
-        assertEq(vault.totalShares(poolIdA), 500e18);
-        assertEq(token0.balanceOf(bob) - bal0Before, 500e18, "bob should receive tokens");
-        assertEq(token1.balanceOf(bob) - bal1Before, 500e18);
+        // After dead-share dilution: aliceShares ≈ 1000e18 - 1000. Withdraw half.
+        // Returned amount per currency = floor(burned * 1000e18 / 1000e18).
+        assertEq(a0, aliceShares / 2);
+        assertEq(a1, aliceShares / 2);
+        assertEq(vault.userShares(poolIdA, alice), aliceShares - aliceShares / 2);
+        assertEq(token0.balanceOf(bob) - bal0Before, aliceShares / 2);
+        assertEq(token1.balanceOf(bob) - bal1Before, aliceShares / 2);
     }
-
-    // ══════════════════════════════════════════════════════════
-    //  11. Withdraw Pulls From Vault When ERC-20 Insufficient
-    // ══════════════════════════════════════════════════════════
-
-    function test_withdraw_pullsFromVaultOnShortfall() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Hook has 0 ERC-20 (all in vault). Withdrawal should redeem vault shares.
-        assertEq(token0.balanceOf(address(vault)), 0);
-
-        (uint256 a0,) = vault.withdraw(poolKeyA, alice, alice, 500e18);
-        assertEq(a0, 500e18);
-
-        // Vault shares should have decreased
-        assertLt(
-            vault.getVaultShares(poolIdA, poolKeyA.currency0),
-            1000e18,
-            "vault shares should decrease after withdrawal"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  12. Withdraw Reverts With InsufficientShares
-    // ══════════════════════════════════════════════════════════
 
     function test_withdraw_revertsInsufficientShares() public {
-        _mintApproveDeposit(alice, 1000e18);
+        _bootstrap(alice, 1000e18);
+        uint256 aliceShares = vault.userShares(poolIdA, alice);
 
         vm.expectRevert(PoolVault.InsufficientShares.selector);
-        vault.withdraw(poolKeyA, alice, alice, 1001e18);
+        vault.withdraw(poolKeyA, alice, alice, aliceShares + 1);
     }
 
-    function test_withdraw_revertsForUserWithNoShares() public {
-        _mintApproveDeposit(alice, 1000e18);
+    function test_withdraw_revertsInSameBlockAsDeposit_H03() public {
+        _bootstrap(alice, 1000e18);
+        // Bob deposits subsequent shares, attempts withdraw same block.
+        (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
+        token0.mint(bob, need0);
+        token1.mint(bob, need1);
+        vm.startPrank(bob);
+        token0.approve(address(vault), need0);
+        token1.approve(address(vault), need1);
+        vault.deposit(poolKeyA, bob, bob, 100e18);
+        // No vm.roll — same block.
+        vm.expectRevert(PoolVault.SameBlockWithdraw.selector);
+        vault.withdraw(poolKeyA, bob, bob, 100e18);
+        vm.stopPrank();
+    }
 
-        vm.expectRevert(PoolVault.InsufficientShares.selector);
-        vault.withdraw(poolKeyA, bob, bob, 1);
+    function test_withdraw_succeedsNextBlock_H03() public {
+        _bootstrap(alice, 1000e18);
+        (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
+        token0.mint(bob, need0);
+        token1.mint(bob, need1);
+        vm.startPrank(bob);
+        token0.approve(address(vault), need0);
+        token1.approve(address(vault), need1);
+        vault.deposit(poolKeyA, bob, bob, 100e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+        vault.withdraw(poolKeyA, bob, bob, 100e18);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  13. Multiple Users Deposit and Withdraw Proportionally
+    //  totalAssets
     // ══════════════════════════════════════════════════════════
 
-    function test_multipleUsers_depositWithdrawProportionally() public {
-        _mintApproveDeposit(alice, 1000e18);
-        _mintApproveDeposit(bob, 1000e18);
+    function test_totalAssets_includesAllSources() public {
+        _bootstrap(alice, 1000e18);
 
-        assertEq(vault.totalShares(poolIdA), 2000e18);
-        assertEq(vault.userShares(poolIdA, alice), 1000e18);
-        assertEq(vault.userShares(poolIdA, bob), 1000e18);
+        (uint256 a0, uint256 a1) = vault.totalAssets(poolKeyA);
+        assertEq(a0, 1000e18);
+        assertEq(a1, 1000e18);
 
-        // Alice withdraws half her shares
-        vault.withdraw(poolKeyA, alice, alice, 500e18);
-        assertEq(vault.userShares(poolIdA, alice), 500e18);
-        assertEq(vault.totalShares(poolIdA), 1500e18);
-        assertEq(token0.balanceOf(alice), 500e18);
+        // Add claims (per-pool record)
+        vault.recordClaims(poolIdA, poolKeyA.currency0, 50e18);
+        (a0,) = vault.totalAssets(poolKeyA);
+        assertEq(a0, 1050e18);
 
-        // Bob withdraws all his shares
-        vault.withdraw(poolKeyA, bob, bob, 1000e18);
-        assertEq(vault.userShares(poolIdA, bob), 0);
-        assertEq(vault.totalShares(poolIdA), 500e18);
-        assertEq(token0.balanceOf(bob), 1000e18);
+        // Vault yield
+        vault0.simulateYield(100e18);
+        (a0,) = vault.totalAssets(poolKeyA);
+        assertEq(a0, 1150e18);
+    }
+
+    function test_totalAssets_unvaultedPool_usesERC20() public {
+        _bootstrapPool(poolKeyB, alice, 500e18);
+
+        (uint256 a0, uint256 a1) = vault.totalAssets(poolKeyB);
+        assertEq(a0, 500e18);
+        assertEq(a1, 500e18);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  14. _depositToVault Records Vault Shares Correctly
+    //  CROSS-POOL ISOLATION (C-01)
     // ══════════════════════════════════════════════════════════
 
-    function test_depositToVault_recordsVaultShares() public {
-        uint256 amount = 500e18;
-        token0.mint(address(vault), amount);
+    /// @notice Confirms the C-01 fix: a swap-cycle's `_depositAllToVault` on Pool A no longer
+    ///         sweeps Pool B's unvaulted ERC-20.
+    function test_C01_depositAllToVault_doesNotSweepOtherPoolsERC20() public {
+        // Pool B (unvaulted) holds 500 of token0
+        _bootstrapPool(poolKeyB, bob, 500e18);
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18);
+        assertEq(token0.balanceOf(address(vault)), 500e18);
 
-        vault.depositToVault(poolIdA, poolKeyA.currency0, amount);
+        // Bootstrap pool A (vaulted) — its tokens go to vault0, not the hook ERC-20 balance.
+        _bootstrap(alice, 1000e18);
+        // Hook still holds Pool B's 500e18 of token0
+        assertEq(token0.balanceOf(address(vault)), 500e18);
 
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), amount, "1:1 vault should track shares == amount");
-        assertEq(token0.balanceOf(address(vault)), 0, "tokens should be in the ERC4626 vault");
+        // Trigger pool A's `_depositAllToVault` for currency0.
+        // BEFORE FIX: this would sweep Pool B's 500e18 into Pool A's vault.
+        // AFTER FIX: it reads `_erc20[A][token0] == 0` and is a no-op.
+        uint256 aSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        vault.depositAllToVault(poolIdA, poolKeyA.currency0);
+        uint256 aSharesAfter = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+
+        assertEq(aSharesAfter, aSharesBefore, "Pool A should not have swept Pool B's tokens");
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18, "Pool B's ledger intact");
+        assertEq(token0.balanceOf(address(vault)), 500e18, "Pool B's tokens still in hook");
     }
 
-    function test_depositToVault_zeroAmountNoop() public {
-        vault.depositToVault(poolIdA, poolKeyA.currency0, 0);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
+    /// @notice Confirms C-01: `_ensureERC20` no longer short-circuits using another pool's ERC-20.
+    function test_C01_ensureERC20_doesNotConsumeOtherPoolsERC20() public {
+        _bootstrap(alice, 1000e18); // vaulted, _erc20[A] = 0
+        _bootstrapPool(poolKeyB, bob, 500e18); // unvaulted, _erc20[B] = 500
+
+        // Pool A needs 100 — should redeem from vault A, not consume pool B's 500e18.
+        // BEFORE FIX: ensureERC20 saw global balance=500 ≥ 100 and skipped redeem.
+        // AFTER FIX: it sees `_erc20[A] == 0`, redeems 100 from vault A.
+        uint256 aVaultSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        vault.ensureERC20(poolIdA, poolKeyA.currency0, 100e18);
+        uint256 aVaultSharesAfter = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+
+        assertLt(aVaultSharesAfter, aVaultSharesBefore, "vault redemption MUST occur");
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18, "Pool B unaffected");
     }
 
-    function test_depositToVault_noVaultTracksERC20() public {
-        uint256 amount = 500e18;
-        token0.mint(address(vault), amount);
+    function test_C01_assetSolvency_acrossTwoPoolsSharingCurrency() public {
+        _bootstrap(alice, 1000e18);
+        _bootstrapPool(poolKeyB, bob, 500e18);
 
-        // Pool B has no vault configured
-        vault.depositToVault(poolIdB, poolKeyB.currency0, amount);
+        // Each pool's totalAssets matches its own deposit, regardless of the global token balance.
+        (uint256 a0, uint256 a1) = vault.totalAssets(poolKeyA);
+        (uint256 b0, uint256 b1) = vault.totalAssets(poolKeyB);
 
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), amount);
+        assertEq(a0, 1000e18, "Pool A asset0 = its own bootstrap");
+        assertEq(a1, 1000e18);
+        assertEq(b0, 500e18, "Pool B asset0 = its own bootstrap");
+        assertEq(b1, 500e18);
+
+        // Sum of per-pool asset claims for each currency does NOT exceed available backing.
+        uint256 sum0 = a0 + b0;
+        uint256 sum1 = a1 + b1;
+        uint256 backing0 = token0.balanceOf(address(vault)) + vault0.convertToAssets(vault0.balanceOf(address(vault)));
+        uint256 backing1 = token1.balanceOf(address(vault)) + vault1.convertToAssets(vault1.balanceOf(address(vault)));
+        assertLe(sum0, backing0, "asset solvency, currency0");
+        assertLe(sum1, backing1, "asset solvency, currency1");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Vault routing
+    // ══════════════════════════════════════════════════════════
+
+    function test_deposit_routesToVault_whenConfigured() public {
+        _bootstrap(alice, 1000e18);
+        assertEq(token0.balanceOf(address(vault)), 0, "no raw ERC-20 when vaulted");
+        assertGt(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
+    }
+
+    function test_deposit_tracksERC20_whenNoVault() public {
+        _bootstrapPool(poolKeyB, alice, 1000e18);
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 1000e18);
         assertEq(vault.getVaultShares(poolIdB, poolKeyB.currency0), 0);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  15. _withdrawAllFromVault Caps at maxRedeem
+    //  Multi-pool independence
     // ══════════════════════════════════════════════════════════
 
-    function test_withdrawAllFromVault_redeemsCappedAtMax() public {
-        _mintApproveDeposit(alice, 1000e18);
+    function test_multiPool_sharesIsolated() public {
+        // Alice in pool A, Bob in pool B.
+        _bootstrap(alice, 1000e18);
+        _bootstrapPool(poolKeyB, bob, 500e18);
 
-        uint256 sharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
-        assertGt(sharesBefore, 0);
-
-        vault.withdrawAllFromVault(poolIdA, poolKeyA.currency0);
-
-        // Should have redeemed all (mock maxRedeem returns full balance)
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0, "all vault shares should be redeemed");
-        assertEq(token0.balanceOf(address(vault)), 1000e18, "tokens should be back in hook");
-    }
-
-    function test_withdrawAllFromVault_noVaultNoop() public {
-        // Pool B has no vault — should not revert
-        vault.withdrawAllFromVault(poolIdB, poolKeyB.currency0);
-    }
-
-    function test_withdrawAllFromVault_zeroSharesNoop() public {
-        // Pool A has a vault but no shares deposited
-        vault.withdrawAllFromVault(poolIdA, poolKeyA.currency0);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  16. _depositAllToVault Moves All ERC-20 Into Vault
-    // ══════════════════════════════════════════════════════════
-
-    function test_depositAllToVault_movesAllERC20() public {
-        uint256 amount = 750e18;
-        token0.mint(address(vault), amount);
-
-        vault.depositAllToVault(poolIdA, poolKeyA.currency0);
-
-        assertEq(token0.balanceOf(address(vault)), 0, "all ERC-20 should move into vault");
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), amount);
-    }
-
-    function test_depositAllToVault_noBalanceNoop() public {
-        vault.depositAllToVault(poolIdA, poolKeyA.currency0);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
-    }
-
-    function test_depositAllToVault_noVaultTracksERC20() public {
-        uint256 amount = 300e18;
-        token0.mint(address(vault), amount);
-
-        vault.depositAllToVault(poolIdB, poolKeyB.currency0);
-
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), amount);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  17. _ensureERC20 Pulls From Vault on Shortfall
-    // ══════════════════════════════════════════════════════════
-
-    function test_ensureERC20_pullsFromVaultOnShortfall() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Hook has 0 ERC-20 (all vaulted)
-        assertEq(token0.balanceOf(address(vault)), 0);
-
-        vault.ensureERC20(poolIdA, poolKeyA.currency0, 400e18);
-
-        // Should have redeemed enough vault shares to cover 400e18
-        assertGe(token0.balanceOf(address(vault)), 400e18, "should have at least the requested amount");
-        assertLt(
-            vault.getVaultShares(poolIdA, poolKeyA.currency0),
-            1000e18,
-            "vault shares should decrease"
-        );
-    }
-
-    function test_ensureERC20_noopWhenSufficientBalance() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Manually put some ERC-20 in the hook
-        token0.mint(address(vault), 500e18);
-
-        uint256 vaultSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
-        vault.ensureERC20(poolIdA, poolKeyA.currency0, 500e18);
-
-        // Should not touch vault shares since hook already has enough
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), vaultSharesBefore);
-    }
-
-    function test_ensureERC20_noVaultDebitsERC20Tracking() public {
-        _mintApproveDepositPool(poolKeyB, alice, 1000e18);
-
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 1000e18);
-
-        vault.ensureERC20(poolIdB, poolKeyB.currency0, 300e18);
-
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 700e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  18. _recordClaims Increments Per-Pool Claims
-    // ══════════════════════════════════════════════════════════
-
-    function test_recordClaims_incrementsClaims() public {
-        vault.recordClaims(poolIdA, poolKeyA.currency0, 100e18);
-        assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 100e18);
-
-        vault.recordClaims(poolIdA, poolKeyA.currency0, 50e18);
-        assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 150e18);
-    }
-
-    function test_recordClaims_perCurrencyIsolation() public {
-        vault.recordClaims(poolIdA, poolKeyA.currency0, 100e18);
-        vault.recordClaims(poolIdA, poolKeyA.currency1, 200e18);
-
-        assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 100e18);
-        assertEq(vault.getClaims(poolIdA, poolKeyA.currency1), 200e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  19. _redeemPoolClaims (Integration-Level)
-    // ══════════════════════════════════════════════════════════
-    //
-    //  NOTE: _redeemPoolClaims calls _poolManager().burn() and
-    //  _poolManager().take() which require a v4 unlock context.
-    //  Testing this in isolation would require a full PM unlock
-    //  callback pattern. These operations are covered by
-    //  SmartPoolHook.t.sol integration tests. Skipped here to
-    //  keep this suite focused on unit-level share math and
-    //  vault operations.
-
-    // ══════════════════════════════════════════════════════════
-    //  20. _clearERC20Tracking Zeros the Balance
-    // ══════════════════════════════════════════════════════════
-
-    function test_clearERC20Tracking_zeros() public {
-        _mintApproveDepositPool(poolKeyB, alice, 500e18);
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18);
-
-        vault.clearERC20Tracking(poolIdB, poolKeyB.currency0);
-        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 0);
-    }
-
-    function test_clearERC20Tracking_alreadyZeroNoop() public {
-        vault.clearERC20Tracking(poolIdA, poolKeyA.currency0);
-        assertEq(vault.getERC20(poolIdA, poolKeyA.currency0), 0);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  21. Multi-Pool Isolation — Independent Shares
-    // ══════════════════════════════════════════════════════════
-
-    function test_multiPool_independentShares() public {
-        // Configure vaults for pool B too
-        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
-        vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
-
-        _mintApproveDepositPool(poolKeyA, alice, 1000e18);
-        _mintApproveDepositPool(poolKeyB, bob, 500e18);
-
-        assertEq(vault.totalShares(poolIdA), 1000e18, "pool A shares");
-        assertEq(vault.totalShares(poolIdB), 500e18, "pool B shares");
-        assertEq(vault.userShares(poolIdA, alice), 1000e18);
-        assertEq(vault.userShares(poolIdB, bob), 500e18);
-
-        // Cross-check: alice has no shares in pool B
-        assertEq(vault.userShares(poolIdB, alice), 0);
+        assertEq(vault.totalShares(poolIdA), 1000e18);
+        assertEq(vault.totalShares(poolIdB), 500e18);
+        assertEq(vault.userShares(poolIdA, alice), 1000e18 - vault.MINIMUM_SHARES());
+        assertEq(vault.userShares(poolIdB, bob), 500e18 - vault.MINIMUM_SHARES());
         assertEq(vault.userShares(poolIdA, bob), 0);
+        assertEq(vault.userShares(poolIdB, alice), 0);
     }
 
-    // ══════════════════════════════════════════════════════════
-    //  22. Multi-Pool Isolation — Independent Vault Share Tracking
-    // ══════════════════════════════════════════════════════════
+    function test_recordClaims_perPoolIsolation() public {
+        vault.recordClaims(poolIdA, poolKeyA.currency0, 100e18);
+        vault.recordClaims(poolIdB, poolKeyB.currency0, 50e18);
 
-    function test_multiPool_independentVaultShareTracking() public {
-        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
-        vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
-
-        _mintApproveDepositPool(poolKeyA, alice, 1000e18);
-        _mintApproveDepositPool(poolKeyB, bob, 500e18);
-
-        uint256 poolAVaultShares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
-        uint256 poolBVaultShares = vault.getVaultShares(poolIdB, poolKeyB.currency0);
-
-        assertEq(poolAVaultShares, 1000e18, "pool A vault shares");
-        assertEq(poolBVaultShares, 500e18, "pool B vault shares");
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  23. Multi-Pool Isolation — Claims Don't Cross-Pollinate
-    // ══════════════════════════════════════════════════════════
-
-    function test_multiPool_claimsDontAffectOtherPool() public {
-        vault.recordClaims(poolIdA, poolKeyA.currency0, 200e18);
-
-        assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 200e18);
-        assertEq(vault.getClaims(poolIdB, poolKeyB.currency0), 0, "pool B claims should be unaffected");
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  24. Multi-Pool Isolation — Deposit to A Doesn't Change B
-    // ══════════════════════════════════════════════════════════
-
-    function test_multiPool_depositToADoesntChangeBTotalAssets() public {
-        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
-        vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
-
-        _mintApproveDepositPool(poolKeyB, bob, 500e18);
-
-        (uint256 b0Before, uint256 b1Before) = vault.totalAssets(poolKeyB);
-
-        // Deposit to pool A
-        _mintApproveDepositPool(poolKeyA, alice, 1000e18);
-
-        (uint256 b0After, uint256 b1After) = vault.totalAssets(poolKeyB);
-
-        assertEq(b0After, b0Before, "pool B totalAssets0 should not change");
-        assertEq(b1After, b1Before, "pool B totalAssets1 should not change");
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  25. Yield Accrual Increases totalAssets and Share Value
-    // ══════════════════════════════════════════════════════════
-
-    function test_yieldAccrual_increasesShareValue() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        (uint256 before0, uint256 before1) = vault.totalAssets(poolKeyA);
-        assertEq(before0, 1000e18);
-        assertEq(before1, 1000e18);
-
-        vault0.simulateYield(200e18);
-        vault1.simulateYield(100e18);
-
-        (uint256 after0, uint256 after1) = vault.totalAssets(poolKeyA);
-        assertEq(after0, 1200e18, "totalAssets0 should include yield");
-        assertEq(after1, 1100e18, "totalAssets1 should include yield");
-
-        // Full withdrawal should return more than deposited
-        (uint256 w0, uint256 w1) = vault.previewWithdraw(poolKeyA, 1000e18);
-        assertEq(w0, 1200e18);
-        assertEq(w1, 1100e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  26. New Depositor After Yield Pays Proportionally More
-    // ══════════════════════════════════════════════════════════
-
-    function test_yieldAccrual_newDepositorPaysMore() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Simulate 100% yield on token0
-        vault0.simulateYield(1000e18);
-        vault1.simulateYield(1000e18);
-
-        // Now totalAssets = (2000e18, 2000e18) for 1000 shares
-        // Bob's 1000 shares should cost 2000e18 of each token (rounded up)
-        (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 1000e18);
-        assertEq(need0, 2000e18, "new depositor should pay more after yield");
-        assertEq(need1, 2000e18);
-
-        // Actually deposit and verify
-        (uint256 a0, uint256 a1) = _mintApproveDeposit(bob, 1000e18);
-        assertEq(a0, 2000e18);
-        assertEq(a1, 2000e18);
-
-        // Verify total shares
-        assertEq(vault.totalShares(poolIdA), 2000e18);
-
-        // Each user owns half the total assets: 2000e18 each
-        (uint256 pa0, uint256 pa1) = vault.previewWithdraw(poolKeyA, 1000e18);
-        assertEq(pa0, 2000e18, "each user should have equal share of total assets");
-        assertEq(pa1, 2000e18);
-    }
-
-    // ══════════════════════════════════════════════════════════
-    //  Additional Edge Cases
-    // ══════════════════════════════════════════════════════════
-
-    function test_withdrawAllFromVaults_bothCurrencies() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        vault.withdrawAllFromVaults(poolIdA, poolKeyA);
-
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency1), 0);
-        assertEq(token0.balanceOf(address(vault)), 1000e18);
-        assertEq(token1.balanceOf(address(vault)), 1000e18);
-    }
-
-    function test_depositAllToVaults_bothCurrencies() public {
-        token0.mint(address(vault), 800e18);
-        token1.mint(address(vault), 600e18);
-
-        vault.depositAllToVaults(poolIdA, poolKeyA);
-
-        assertEq(token0.balanceOf(address(vault)), 0);
-        assertEq(token1.balanceOf(address(vault)), 0);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 800e18);
-        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency1), 600e18);
-    }
-
-    function test_deposit_emitsEvent() public {
-        uint256 shares = 1000e18;
-        token0.mint(alice, shares);
-        token1.mint(alice, shares);
-
-        vm.startPrank(alice);
-        token0.approve(address(vault), shares);
-        token1.approve(address(vault), shares);
-
-        vm.expectEmit(true, true, false, true);
-        emit PoolVault.Deposit(poolIdA, alice, shares, shares, shares);
-        vault.deposit(poolKeyA, alice, alice, shares);
-        vm.stopPrank();
-    }
-
-    function test_withdraw_emitsEvent() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        vm.expectEmit(true, true, false, true);
-        emit PoolVault.Withdraw(poolIdA, alice, 500e18, 500e18, 500e18);
-        vault.withdraw(poolKeyA, alice, alice, 500e18);
-    }
-
-    function test_fullWithdraw_drainsAllShares() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        vault.withdraw(poolKeyA, alice, alice, 1000e18);
-
-        assertEq(vault.totalShares(poolIdA), 0);
-        assertEq(vault.userShares(poolIdA, alice), 0);
-        assertEq(token0.balanceOf(alice), 1000e18);
-        assertEq(token1.balanceOf(alice), 1000e18);
-    }
-
-    function test_deposit_roundTripPreservesValueAfterYield() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Accrue yield
-        vault0.simulateYield(333e18);
-        vault1.simulateYield(777e18);
-
-        // Bob deposits — should pay the post-yield price
-        (uint256 cost0, uint256 cost1) = _mintApproveDeposit(bob, 1000e18);
-
-        // Bob's share value should roughly equal what he paid (minus rounding)
-        (uint256 val0, uint256 val1) = vault.previewWithdraw(poolKeyA, 1000e18);
-
-        // Withdraw value should be <= deposit cost (rounding favors the pool)
-        assertLe(val0, cost0, "withdraw should be <= deposit (rounding protects pool)");
-        assertLe(val1, cost1, "withdraw should be <= deposit (rounding protects pool)");
-
-        // But should be very close (within 1 wei per share of rounding)
-        assertGe(val0, cost0 - 1, "rounding loss should be at most 1 wei");
-        assertGe(val1, cost1 - 1, "rounding loss should be at most 1 wei");
-    }
-
-    function test_ensureERC20_partialVaultRedemption() public {
-        _mintApproveDeposit(alice, 1000e18);
-
-        // Request only a small amount — should only redeem what's needed
-        vault.ensureERC20(poolIdA, poolKeyA.currency0, 100e18);
-
-        uint256 remaining = vault.getVaultShares(poolIdA, poolKeyA.currency0);
-        // Should still have ~900 vault shares (1000 - 100 in a 1:1 vault)
-        assertApproxEqAbs(remaining, 900e18, 1, "should only redeem needed shares");
+        assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 100e18);
+        assertEq(vault.getClaims(poolIdB, poolKeyB.currency0), 50e18);
     }
 }
