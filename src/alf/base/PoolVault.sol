@@ -224,6 +224,19 @@ abstract contract PoolVault is BlockNumberish {
     /// @dev `_settleFromPool` was asked to pay more than the pool's tracked ERC-20 balance.
     error InsufficientPoolBalance();
 
+    /// @dev `vault.deposit` returned zero shares for a non-zero asset deposit. Either the vault
+    ///      enforces a minimum deposit threshold the pool's amount didn't meet, or the vault is
+    ///      misconfigured. Reverting fail-fast prevents asset loss into a vault that gives no
+    ///      claim back.
+    error ZeroSharesMinted();
+
+    /// @dev `safeTransferFrom` for a deposit/bootstrap delivered fewer tokens than requested
+    ///      (typically a fee-on-transfer or rebasing token). The deposit path mints shares
+    ///      against the requested amount, so accepting under-receipt would dilute existing LPs.
+    ///      Per K-13, FoT/rebasing tokens are not supported as pool currencies — operators
+    ///      should configure wrapped (non-rebasing) variants such as wstETH.
+    error TransferReceiptShortfall();
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          VIEW: ASSET ACCOUNTING
     // ═══════════════════════════════════════════════════════════════════════════
@@ -353,11 +366,12 @@ abstract contract PoolVault is BlockNumberish {
         userShares[poolId][to] += shares;
         _lastDepositBlock[poolId][to] = _getBlockNumberish();
 
-        // Reconcile fee-on-transfer / rebasing currencies — share math must reflect what was
-        // actually received, not what the depositor sent. The depositor pays slightly more for
-        // a given share count but receives no silent dilution of existing LPs.
+        // Pull tokens. Shares are minted against `want{0,1}` (rounded up), so any FoT/rebasing
+        // shortfall would dilute existing LPs by leaving the pool short on assets. Fail-fast on
+        // under-receipt — operators select non-FoT/non-rebasing currencies per K-13.
         amount0 = want0 > 0 ? _safeTransferFromAndMeasure(key.currency0, from, want0) : 0;
         amount1 = want1 > 0 ? _safeTransferFromAndMeasure(key.currency1, from, want1) : 0;
+        if (amount0 < want0 || amount1 < want1) revert TransferReceiptShortfall();
 
         _depositToVault(poolId, key.currency0, amount0);
         _depositToVault(poolId, key.currency1, amount1);
@@ -526,6 +540,17 @@ abstract contract PoolVault is BlockNumberish {
     ///      Assumes the vault is already approved (subclasses approve at pool init via
     ///      `_approveVault`). Allowance is set to `type(uint256).max` once and never decremented
     ///      by `vault.deposit`, so the runtime allowance read is unnecessary.
+    ///
+    ///      ## Vault trust model
+    ///
+    ///      The hook holds standing max allowance to each (pool, currency) vault. A compromised
+    ///      or upgradeable vault for currency X can in principle `transferFrom` the hook's full
+    ///      balance of X — including raw ERC-20 attributed to unrelated pools that share that
+    ///      currency. This is the documented vault-trust model (K-05): operators MUST select
+    ///      vaults whose security properties they understand (immutable / non-upgradeable
+    ///      preferred). The exact-per-deposit approval pattern would defuse this surface but
+    ///      adds ~15-25k gas to every JIT cycle and every LP entry — rejected as too expensive
+    ///      for a risk that is already gated by the maker's vault selection.
     /// @param poolId   The pool this deposit belongs to.
     /// @param currency The currency being deposited.
     /// @param amount   The amount to deposit (0 is a no-op).
@@ -537,8 +562,28 @@ abstract contract PoolVault is BlockNumberish {
             s.erc20 = (uint256(s.erc20) + amount).toUint128();
             return;
         }
-        uint256 shares = vault.deposit(amount, address(this));
-        _vaultShares[poolId][currency] += shares;
+
+        // Pre-credit predicted shares so view callers during a vault callback (e.g.,
+        // `getReserves`, `previewWithdraw`, `getIndicativeQuote`) observe a coherent
+        // total — same mitigation as `_depositAllToVault`. Reconciles after the call.
+        uint256 sharesPredicted = vault.convertToShares(amount);
+        _vaultShares[poolId][currency] += sharesPredicted;
+
+        uint256 sharesActual = vault.deposit(amount, address(this));
+
+        // Fail-fast on a vault that swallows assets without minting shares — silently
+        // accepting `sharesActual == 0` would lose `amount` into the vault.
+        if (sharesActual == 0) revert ZeroSharesMinted();
+
+        // Reconcile predicted-vs-actual divergence. Subtraction is safe because the
+        // pre-credit just added at least `sharesPredicted`.
+        if (sharesActual != sharesPredicted) {
+            if (sharesActual > sharesPredicted) {
+                _vaultShares[poolId][currency] += (sharesActual - sharesPredicted);
+            } else {
+                _vaultShares[poolId][currency] -= (sharesPredicted - sharesActual);
+            }
+        }
     }
 
     /// @dev Deposit all of the pool's tracked ERC-20 balance for both currencies into vaults.
@@ -585,6 +630,9 @@ abstract contract PoolVault is BlockNumberish {
         _vaultShares[poolId][currency] += sharesPredicted;
 
         uint256 sharesActual = vault.deposit(amount, address(this));
+
+        // Fail-fast on a vault that swallows assets without minting shares.
+        if (sharesActual == 0) revert ZeroSharesMinted();
 
         // Reconcile divergence between predicted and actual share return. Most ERC-4626 vaults
         // are exact (sharesActual == sharesPredicted). Fee-skimming or buggy vaults diverge.
@@ -694,6 +742,11 @@ abstract contract PoolVault is BlockNumberish {
     ///      before any vault deposit can occur. Hot-path deposit functions skip the runtime
     ///      allowance check on the assumption that init-time approval is in place — saves a
     ///      ~2.7K-gas SLOAD on the token contract on every JIT cycle.
+    ///
+    ///      The standing allowance is the documented vault-trust trade-off: a compromised vault
+    ///      for currency X can withdraw up to the hook's full X balance, including amounts
+    ///      attributed to other pools sharing that currency. Operators MUST select vaults whose
+    ///      security properties they understand (immutable / non-upgradeable preferred). See K-05.
     function _approveVault(Currency currency, address vault) internal {
         if (vault == address(0)) return;
         IERC20 token = IERC20(Currency.unwrap(currency));
