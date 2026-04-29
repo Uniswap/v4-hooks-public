@@ -52,10 +52,10 @@ For tests that fork mainnet, you need an `.env` file containing pool info for ea
 
 Fork URLs and blocks are **chain-scoped** by chain id (same `.env` can fork Ethereum and Base without mixing blocks):
 
-| Chain | RPC env | Optional pin |
-|-------|---------|----------------|
-| Ethereum mainnet (1) | `FORK_RPC_URL_1` | `FORK_BLOCK_NUMBER_1` (0 = latest) |
-| Base (8453) | `FORK_RPC_URL_8453` | `FORK_BLOCK_NUMBER_8453` |
+| Chain                | RPC env             | Optional pin                       |
+| -------------------- | ------------------- | ---------------------------------- |
+| Ethereum mainnet (1) | `FORK_RPC_URL_1`    | `FORK_BLOCK_NUMBER_1` (0 = latest) |
+| Base (8453)          | `FORK_RPC_URL_8453` | `FORK_BLOCK_NUMBER_8453`           |
 
 Fork suites read env vars only by chain id—there is no fallback to unsuffixed `FORK_RPC_URL` / `FORK_BLOCK_NUMBER`:
 
@@ -66,12 +66,12 @@ Pool-specific overrides: `UNISWAP_V3_POOL_MANAGER` / `UNISWAP_V3_QUOTER_V2` (Eth
 
 See `.env.example` for keys. Example deployments (verify before production use):
 
-| Role | Ethereum (Uni V3 fork) | Base (Slipstream fork) |
-|------|-------------------------|-------------------------|
-| PoolManager | `UNISWAP_V3_POOL_MANAGER` — e.g. `0x000000000004444c5dc75cB358380D2e3dE08A90` | `SLIPSTREAM_POOL_MANAGER` — e.g. `0x498581fF718922c3f8e6A244956aF099B2652b2b` |
-| Factory | `UNISWAP_V3_FACTORY` — `0x1F98431c8aD98523631ae4a59f267346ea31F984` | `SLIPSTREAM_FACTORY` — Slipstream **Pool factory** `0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A` (not the pool implementation) |
-| Quoter | `UNISWAP_V3_QUOTER_V2` — `0x61fFE014bA17989E743c5F6cB21bF9697530B21e` | `SLIPSTREAM_QUOTER_V2` — `0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0` |
-| External pool | `UNISWAP_V3_EXTERNAL_POOL` — e.g. WETH/USDT 0.3% `0x4e68Ccd3E89f51c3074ca5072bbac773960dFa36` (includes USDT) | `SLIPSTREAM_EXTERNAL_POOL` — any Slipstream pool, e.g. WETH/USDC `0xdbc6998296caA1652A810dc8D3BaF4A8294330f1` |
+| Role          | Ethereum (Uni V3 fork)                                                                                        | Base (Slipstream fork)                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| PoolManager   | `UNISWAP_V3_POOL_MANAGER` — e.g. `0x000000000004444c5dc75cB358380D2e3dE08A90`                                 | `SLIPSTREAM_POOL_MANAGER` — e.g. `0x498581fF718922c3f8e6A244956aF099B2652b2b`                                                 |
+| Factory       | `UNISWAP_V3_FACTORY` — `0x1F98431c8aD98523631ae4a59f267346ea31F984`                                           | `SLIPSTREAM_FACTORY` — Slipstream **Pool factory** `0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A` (not the pool implementation) |
+| Quoter        | `UNISWAP_V3_QUOTER_V2` — `0x61fFE014bA17989E743c5F6cB21bF9697530B21e`                                         | `SLIPSTREAM_QUOTER_V2` — `0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0`                                                         |
+| External pool | `UNISWAP_V3_EXTERNAL_POOL` — e.g. WETH/USDT 0.3% `0x4e68Ccd3E89f51c3074ca5072bbac773960dFa36` (includes USDT) | `SLIPSTREAM_EXTERNAL_POOL` — any Slipstream pool, e.g. WETH/USDC `0xdbc6998296caA1652A810dc8D3BaF4A8294330f1`                 |
 
 Example:
 

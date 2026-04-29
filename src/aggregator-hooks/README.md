@@ -9,7 +9,7 @@ When adding support for a new protocol, you must follow these guidelines:
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
 - Update the MineAggregatorHook script to handle mining hooks for new protocol
-- For testing requirements, see test/aggreagtor-hooks/README.md
+- For testing requirements, see test/aggregator-hooks/README.md
 
 ## ID System
 
@@ -89,9 +89,9 @@ The interface is defined based on Tempo's [official documentation](https://docs.
 
 Singleton hooks route swaps through **Uniswap V3–compatible** pools (`swap` + `uniswapV3SwapCallback`). One deployment serves many Uniswap V4 pools; each external pool is keyed by factory plus tokens plus either **fee tier** (Uniswap V3 factory) or **tick spacing** (Slipstream factory).
 
-| Pool Type       | Implementation         | Factory lookup                                                                 |
-| --------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| **Uniswap V3** | `UniswapV3Aggregator` | `getPool(tokenA, tokenB, fee)` — align `PoolKey.fee` with the external fee tier |
+| Pool Type      | Implementation         | Factory lookup                                                                                |
+| -------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Uniswap V3** | `UniswapV3Aggregator`  | `getPool(tokenA, tokenB, fee)` — align `PoolKey.fee` with the external fee tier               |
 | **Slipstream** | `SlipstreamAggregator` | `getPool(tokenA, tokenB, tickSpacing)` — align `PoolKey.tickSpacing` with the Slipstream pool |
 
 `SlipstreamAggregator` inherits `UniswapV3Aggregator` and overrides only external pool resolution (and canonical secondary key). Quotes use a chain-deployed **Quoter** compatible with `IQuoterV2`.
