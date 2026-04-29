@@ -212,13 +212,18 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///      `minAmount0`/`minAmount1` to the caller. Caller's slippage bounds were violated.
     error SlippageExceeded();
 
+    /// @dev `setActiveTick` is disabled on SmartPool. The hook routes liquidity through
+    ///      distribution buckets, not a single active tick. Use {setDistribution} instead.
+    error SetActiveTickDisabled();
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @param _pm     The Uniswap v4 PoolManager.
     /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_  Initial contract owner (Ownable2Step).
+    /// @param owner_  Immutable contract owner. Cannot be changed post-deployment;
+    ///                key loss or compromise is unrecoverable. See {SmartPoolBase}.
     constructor(
         IPoolManager _pm,
         uint32 maxGas_,
@@ -278,6 +283,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
         // Approve once at init time so JIT-cycle vault deposits can skip the runtime
         // allowance read. Allowance set to `type(uint256).max` is never decremented by
         // `vault.deposit`, so a single approval is durable for the (currency, vault) pair.
+        // Vault-trust trade-off: see PoolVault `_depositToVault` NatSpec and K-05.
         _approveVault(key.currency0, address(config.vault0));
         _approveVault(key.currency1, address(config.vault1));
 
@@ -431,11 +437,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     }
 
     /// @notice Disabled: SmartPool uses distribution buckets instead of one active LP tick.
-    /// @dev    Always reverts with {Unauthorized}. The function exists only to satisfy interface
-    ///         expectations from sibling spread-quoter hooks; SmartPool routes liquidity through
-    ///         {setDistribution} instead.
-    function setActiveTick(PoolKey calldata, int24) external view onlyOwner {
-        revert Unauthorized();
+    /// @dev    Always reverts with {SetActiveTickDisabled}. The function exists only to satisfy
+    ///         the inherited interface; SmartPool routes liquidity through {setDistribution}
+    ///         instead. Marked `pure` because no state is read or written.
+    function setActiveTick(PoolKey calldata, int24) external pure {
+        revert SetActiveTickDisabled();
     }
 
     /// @inheritdoc SmartPoolBase
@@ -632,7 +638,15 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     /// @param poolId The pool to deploy for.
     /// @param key    The pool key (for currency references and modifyLiquidity calls).
     function _deployJIT(PoolId poolId, PoolKey calldata key) internal {
-        (uint256 bal0, uint256 bal1) = _totalAssets(key);
+        // Use the cap-aware view: vaults that report more assets via `convertToAssets` than they
+        // can satisfy via `withdraw` (paused, capped, utilization-constrained) would otherwise
+        // produce `liqs[]` and `totalNeed{0,1}` sized above what `_withdrawFromVault` can deliver,
+        // and the `_deployBuckets` settle would revert mid-cycle. Sizing against `_effectiveAssets`
+        // matches both `getEffectiveLiquidity` (the routing/aggregator view) and what the JIT
+        // cycle can actually pay for at deploy time. Share math (`_convertToAmounts`) deliberately
+        // continues to use `_totalAssets` per INV-POOL-12 — LP pro-rata claims are over true
+        // economic stake, not the momentarily-withdrawable subset.
+        (uint256 bal0, uint256 bal1) = _effectiveAssets(key);
         if (bal0 == 0 && bal1 == 0) return;
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
@@ -846,7 +860,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
         if (!state.live) return (0, 0);
         uint24 feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
 
-        (uint256 bal0, uint256 bal1) = _totalAssets(key);
+        // Use vault-cap-aware balances for indicative quotes. Execution caps vault
+        // withdrawals at `maxWithdraw`, so quoting against the uncapped `_totalAssets`
+        // produces an indicative the JIT cycle cannot honour when the vault is paused
+        // or utilization-constrained. Share math (`_convertToAmounts`) deliberately uses
+        // `_totalAssets` (uncapped) so LP pro-rata claims are not capped — see
+        // INV-POOL-12 for the asymmetry rationale.
+        (uint256 bal0, uint256 bal1) = _effectiveAssets(key);
         if (bal0 == 0 && bal1 == 0) return (0, 0);
 
         uint160 sqrtPriceX96;
