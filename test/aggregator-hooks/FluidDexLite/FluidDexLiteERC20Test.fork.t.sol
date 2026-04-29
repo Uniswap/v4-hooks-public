@@ -74,17 +74,16 @@ contract FluidDexLiteERC20ForkedTest is Test {
     address public alice;
 
     function setUp() public {
-        bool forked;
         string memory rpcUrl;
         // Forking requires an RPC URL env var and an optional block number
-        try vm.envString("FORK_RPC_URL") returns (string memory _rpcUrl) {
+        try vm.envString("FORK_RPC_URL_1") returns (string memory _rpcUrl) {
             rpcUrl = _rpcUrl;
-            forked = true;
         } catch {
-            console.log("Not forking skipping tests");
+            console.log("Not forking. Skipping tests");
             vm.skip(true);
+            return;
         }
-        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_1", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         fluidDexLiteAddress = vm.envAddress("FLUID_DEX_LITE");
         fluidDexLiteResolverAddress = vm.envAddress("FLUID_DEX_LITE_RESOLVER");

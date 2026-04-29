@@ -13,6 +13,8 @@ import {FluidDexLiteAggregator} from "../src/aggregator-hooks/implementations/Fl
 import {
     TempoExchangeAggregator
 } from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
+import {UniswapV3Aggregator} from "../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
+import {SlipstreamAggregator} from "../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner
 /// @dev This script finds a salt that produces a hook address with the correct flags and first byte identifier
@@ -23,6 +25,8 @@ contract MineAggregatorHookScript is Script {
     uint8 constant ID_FLUIDDEXT1 = 0xF1;
     uint8 constant ID_FLUIDDEXLITE = 0xF3;
     uint8 constant ID_TEMPO = 0x71;
+    uint8 constant ID_UNISWAP_V3 = 0x03;
+    uint8 constant ID_SLIPSTREAM = 0xA1;
 
     function run() public view {
         // Read salt offset from environment variable (default to 0)
@@ -45,6 +49,8 @@ contract MineAggregatorHookScript is Script {
         // 0xF2 = FluidDexV2 (not yet implemented)
         // 0xF3 = FluidDexLite
         // 0x71 = Tempo (TempoExchange)
+        // 0x03 = Uniswap V3
+        // 0xA1 = Slipstream
         uint8 firstByte = uint8(vm.envUint("PROTOCOL_ID"));
         bytes memory creationCode;
         if (firstByte == ID_STABLESWAP) {
@@ -59,6 +65,10 @@ contract MineAggregatorHookScript is Script {
             creationCode = type(FluidDexLiteAggregator).creationCode;
         } else if (firstByte == ID_TEMPO) {
             creationCode = type(TempoExchangeAggregator).creationCode;
+        } else if (firstByte == ID_UNISWAP_V3) {
+            creationCode = type(UniswapV3Aggregator).creationCode;
+        } else if (firstByte == ID_SLIPSTREAM) {
+            creationCode = type(SlipstreamAggregator).creationCode;
         } else {
             revert("Invalid protocol ID");
         }

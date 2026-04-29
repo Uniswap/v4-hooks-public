@@ -48,14 +48,40 @@ The FluidDexLite/FluidDexT1 fuzz tests use pre-deployed infrastructure on forked
 
 ## Testing (Fork Tests)
 
-For tests that fork mainnet, you need an .env file containing pool info for each pool you want to test with.
+For tests that fork mainnet, you need an `.env` file containing pool info for each pool you want to test with.
+
+Fork URLs and blocks are **chain-scoped** by chain id (same `.env` can fork Ethereum and Base without mixing blocks):
+
+| Chain | RPC env | Optional pin |
+|-------|---------|----------------|
+| Ethereum mainnet (1) | `FORK_RPC_URL_1` | `FORK_BLOCK_NUMBER_1` (0 = latest) |
+| Base (8453) | `FORK_RPC_URL_8453` | `FORK_BLOCK_NUMBER_8453` |
+
+Fork suites read env vars only by chain id—there is no fallback to unsuffixed `FORK_RPC_URL` / `FORK_BLOCK_NUMBER`:
+
+- **Ethereum mainnet (chain id 1):** **Fluid**, **StableSwap**, **StableSwap-NG**, **Uniswap V3** (`UniswapV3AggregatorForkTest`) use `FORK_RPC_URL_1` and optional `FORK_BLOCK_NUMBER_1` (0 = latest). The suite **skips** when `FORK_RPC_URL_1` is unset.
+- **Base (8453):** only **Slipstream** (`SlipstreamAggregatorForkTest`) uses `FORK_RPC_URL_8453` and optional `FORK_BLOCK_NUMBER_8453`. The suite **skips** when `FORK_RPC_URL_8453` is unset.
+
+Pool-specific overrides: `UNISWAP_V3_POOL_MANAGER` / `UNISWAP_V3_QUOTER_V2` (Ethereum) and `SLIPSTREAM_POOL_MANAGER` / `SLIPSTREAM_QUOTER_V2` (Base); each falls back to `POOL_MANAGER` / `QUOTER_V2` if unset.
+
+See `.env.example` for keys. Example deployments (verify before production use):
+
+| Role | Ethereum (Uni V3 fork) | Base (Slipstream fork) |
+|------|-------------------------|-------------------------|
+| PoolManager | `UNISWAP_V3_POOL_MANAGER` — e.g. `0x000000000004444c5dc75cB358380D2e3dE08A90` | `SLIPSTREAM_POOL_MANAGER` — e.g. `0x498581fF718922c3f8e6A244956aF099B2652b2b` |
+| Factory | `UNISWAP_V3_FACTORY` — `0x1F98431c8aD98523631ae4a59f267346ea31F984` | `SLIPSTREAM_FACTORY` — Slipstream **Pool factory** `0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A` (not the pool implementation) |
+| Quoter | `UNISWAP_V3_QUOTER_V2` — `0x61fFE014bA17989E743c5F6cB21bF9697530B21e` | `SLIPSTREAM_QUOTER_V2` — `0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0` |
+| External pool | `UNISWAP_V3_EXTERNAL_POOL` — e.g. WETH/USDT 0.3% `0x4e68Ccd3E89f51c3074ca5072bbac773960dFa36` (includes USDT) | `SLIPSTREAM_EXTERNAL_POOL` — any Slipstream pool, e.g. WETH/USDC `0xdbc6998296caA1652A810dc8D3BaF4A8294330f1` |
 
 Example:
 
 ```
-# Aggregator Hooks:
-FORK_RPC_URL=
-# UniswapV4 Pool Manager (required for all tests)
+# Aggregator Hooks — chain forks
+FORK_RPC_URL_1=
+FORK_BLOCK_NUMBER_1=
+FORK_RPC_URL_8453=
+FORK_BLOCK_NUMBER_8453=
+# UniswapV4 Pool Manager (required for many fork tests)
 POOL_MANAGER=
 # StableSwap
 STABLE_SWAP_POOL=
@@ -66,7 +92,7 @@ FLUID_LIQUIDITY=
 # Fluid DEX T1
 FLUID_DEX_T1_POOL_ERC=
 FLUID_DEX_T1_POOL_NATIVE=
-FLUID_DEX_T1_RESOLVER=;
+FLUID_DEX_T1_RESOLVER=
 FLUID_DEX_T1_FACTORY=
 FLUID_DEX_T1_DEPLOYMENT_LOGIC=
 FLUID_DEX_T1_TIMELOCK=
@@ -78,4 +104,15 @@ FLUID_DEX_LITE_AUTH=
 FLUID_DEX_LITE_TOKEN0_ERC20=
 FLUID_DEX_LITE_TOKEN1_ERC20=
 FLUID_DEX_LITE_SALT_ERC20=
+# Uniswap V3 fork (`test/aggregator-hooks/UniswapV3/`)
+UNISWAP_V3_POOL_MANAGER=
+UNISWAP_V3_FACTORY=
+UNISWAP_V3_QUOTER_V2=
+UNISWAP_V3_EXTERNAL_POOL=
+QUOTER_V2=
+# Slipstream fork (`test/aggregator-hooks/Slipstream/`)
+SLIPSTREAM_POOL_MANAGER=
+SLIPSTREAM_FACTORY=
+SLIPSTREAM_QUOTER_V2=
+SLIPSTREAM_EXTERNAL_POOL=
 ```

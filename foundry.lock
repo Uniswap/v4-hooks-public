@@ -8,6 +8,9 @@
   "lib/briefcase": {
     "rev": "2b00819e5694c075a5437a9a0cde109fac0e6578"
   },
+  "lib/contracts": {
+    "rev": "1ba30815bba620f7e9faa34769ffd00c214c9b82"
+  },
   "lib/fluid-contracts-public": {
     "rev": "a9949b48ba1247d4f478cd0acb40896b5c8bf3f8"
   },
@@ -31,6 +34,18 @@
   },
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
+  "lib/v3-core": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "e3589b192d0be27e100cd0daaf6c97204fdb1899"
+    }
+  },
+  "lib/v3-periphery": {
+    "tag": {
+      "name": "v1.3.0",
+      "rev": "80f26c86c57b8a5e4b913f42844d4c8bd274d058"
+    }
   },
   "lib/v4-core": {
     "rev": "d153b048868a60c2403a3ef5b2301bb247884d46"

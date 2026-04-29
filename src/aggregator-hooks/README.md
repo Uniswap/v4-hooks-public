@@ -31,6 +31,8 @@ First-byte ID table:
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
 | 71  | TempoExchange      |
+| 03  | Uniswap V3         |
+| A1  | Slipstream         |
 
 ## Supported Protocols
 
@@ -82,6 +84,21 @@ Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton
 #### Defined interfaces
 
 The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
+
+### Uniswap V3 / Slipstream
+
+Singleton hooks route swaps through **Uniswap V3–compatible** pools (`swap` + `uniswapV3SwapCallback`). One deployment serves many Uniswap V4 pools; each external pool is keyed by factory plus tokens plus either **fee tier** (Uniswap V3 factory) or **tick spacing** (Slipstream factory).
+
+| Pool Type       | Implementation         | Factory lookup                                                                 |
+| --------------- | ---------------------- | ------------------------------------------------------------------------------ |
+| **Uniswap V3** | `UniswapV3Aggregator` | `getPool(tokenA, tokenB, fee)` — align `PoolKey.fee` with the external fee tier |
+| **Slipstream** | `SlipstreamAggregator` | `getPool(tokenA, tokenB, tickSpacing)` — align `PoolKey.tickSpacing` with the Slipstream pool |
+
+`SlipstreamAggregator` inherits `UniswapV3Aggregator` and overrides only external pool resolution (and canonical secondary key). Quotes use a chain-deployed **Quoter** compatible with `IQuoterV2`.
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV3/interfaces/` and `implementations/Slipstream/interfaces/` (`IUniswapV3Pool`, `IUniswapV3Factory`, `ISlipstreamFactory`, `IQuoterV2`, `IUniswapV3SwapCallback`) so the repo does not require a full `v3-core` submodule.
 
 ## Architecture
 
