@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.26;
 
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -135,6 +135,22 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///      targeted quoter to execute.
     error TargetsRequired();
 
+    /// @dev `strictTolerancePips > 0` but no indicative baseline could be established (every
+    ///      candidate's quote query failed). Strict tolerance has nothing to compare against,
+    ///      so the swap is refused — the caller asked for a guarantee the auction cannot make.
+    error MissingQuoteBaseline();
+
+    /// @dev Pre-planned mode received a target whose `amountSpecified` sign does not match the
+    ///      outer swap direction (e.g., exact-input outer with an exact-output target). Allowing
+    ///      mismatched signs would make the catch-all leg take the opposite swap direction and
+    ///      corrupt the aggregate accounting.
+    error TargetDirectionMismatch();
+
+    /// @dev Pre-planned mode received targets whose summed `|amountSpecified|` exceeds
+    ///      `|swapAmount|`. Over-allocating across legs flips the `remaining` tracker's sign and
+    ///      produces malformed downstream fills.
+    error TargetsOverAllocated();
+
     // ──── Events ────
 
     /// @notice Emitted once per auction after all fills complete.
@@ -153,12 +169,25 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param amount1 Token1 delta for this fill (negative = input, positive = output).
     event FillExecuted(address indexed quoter, int128 amount0, int128 amount1);
 
+    /// @notice Emitted when a candidate fill reverts and is soft-skipped during a split fill.
+    /// @dev    The auction continues with the next candidate. Routers can monitor this event
+    ///         to deprioritize the offending quoter in their reputation model.
+    /// @param quoter The quoter hook address whose fill failed.
+    event FillFailed(address indexed quoter);
+
+    /// @notice Emitted when ownership is transferred via {transferOwnership} or set in the constructor.
+    /// @dev    Mirrors OZ Ownable's event for indexer parity. One-step transfer (see K-08).
+    /// @param previousOwner The previous owner (`address(0)` on construction).
+    /// @param newOwner      The new owner (`address(0)` permanently renounces).
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     // ──── Constructor ────
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param _owner       Initial owner.
     constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) {
         owner = _owner;
+        emit OwnershipTransferred(address(0), _owner);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -167,6 +196,8 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
 
     /// @dev The auction hook needs:
     ///      - `beforeAddLiquidity`: to block LP on the virtual pool (it must remain empty)
+    ///      - `beforeDonate`: to block donations to the virtual pool (no LP can ever
+    ///        claim them, so they would be permanently locked in PM accounting)
     ///      - `beforeSwap`: core auction + split fill logic
     ///      - `beforeSwapReturnDelta`: to forward the aggregate nested delta to the outer swap
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -179,7 +210,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             afterRemoveLiquidity: false,
             beforeSwap: true,
             afterSwap: false,
-            beforeDonate: false,
+            beforeDonate: true,
             afterDonate: false,
             beforeSwapReturnDelta: true,
             afterSwapReturnDelta: false,
@@ -265,6 +296,17 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         revert LiquidityNotAllowed();
     }
 
+    /// @dev Blocks all donations. The virtual pool has no LP positions and never will, so any
+    ///      donation would be permanently locked in PoolManager accounting. Reverts unconditionally.
+    function _beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
+        internal
+        pure
+        override
+        returns (bytes4)
+    {
+        revert LiquidityNotAllowed();
+    }
+
     /// @dev Core auction entry point. Orchestrates:
     ///      1. Greedy split fill across sorted candidates
     ///      2. Protocol fee application (reads fee from slot0, takes to token jar)
@@ -285,14 +327,30 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         int128 unspecifiedDelta = _extractUnspecified(totalDelta, params);
         int128 feeAdjustment = _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
 
-        // 3. Tolerance enforcement (downside-only).
+        // 3. Tolerance enforcement (downside-only). The "downside" direction depends on swap
+        //    type: exact-input swappers want MORE output (so executed < bestQuote is bad);
+        //    exact-output swappers want LESS input (so executed > bestQuote is bad). The
+        //    earlier implementation only checked the exact-input direction, silently letting
+        //    overpayment pass on exact-output swaps.
         if (hookData.length > 0) {
             uint256 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
             if (tol > 0) {
+                // No baseline ⇒ no protection. Refuse rather than silently accept.
+                if (bestQuote == 0) revert MissingQuoteBaseline();
+
                 uint256 executed = _extractOutput(totalDelta, params);
-                if (executed < bestQuote) {
-                    uint256 dev = bestQuote - executed;
-                    if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                if (params.amountSpecified < 0) {
+                    // exact-input: revert if output undershoots the indicative.
+                    if (executed < bestQuote) {
+                        uint256 dev = bestQuote - executed;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                    }
+                } else {
+                    // exact-output: revert if input overshoots the indicative.
+                    if (executed > bestQuote) {
+                        uint256 dev = executed - bestQuote;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                    }
                 }
             }
         }
@@ -470,6 +528,11 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         bool zeroForOne,
         int256 amountSpecified
     ) internal returns (uint256 q, bytes memory quoterHookData) {
+        // Skip targets whose hook is this contract — preventing the auction from recursing into
+        // itself (gas-DoS via nested AuctionHookData). Only the caller pays for the wasted gas,
+        // but no useful execution is possible against the multiplexer's virtual pool.
+        if (address(target.poolKey.hooks) == address(this)) return (0, "");
+
         (q, quoterHookData) = _queryTargetView(target, attestationData, zeroForOne, amountSpecified);
         if (q == 0) return (0, "");
 
@@ -503,6 +566,30 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             if (targets[i].amountSpecified != 0) return true;
         }
         return false;
+    }
+
+    /// @dev Validate pre-planned per-target amounts against the outer swap.
+    ///      - Every non-catch-all target's `amountSpecified` must share the outer sign
+    ///        (exact-input → negative; exact-output → positive).
+    ///      - Sum of `|amountSpecified|` over non-catch-all targets must be ≤ `|swapAmount|`.
+    function _validatePrePlannedAmounts(AuctionHookData memory ahd, int256 swapAmount, bool exactInput)
+        internal
+        pure
+    {
+        // Compare against |swapAmount| using int256 arithmetic. swapAmount fits int256 by definition.
+        int256 sumSigned;
+        for (uint256 i = 0; i < ahd.targets.length; i++) {
+            int256 a = ahd.targets[i].amountSpecified;
+            if (a == 0) continue; // catch-all leg
+            if ((a < 0) != exactInput) revert TargetDirectionMismatch();
+            sumSigned += a;
+        }
+        if (exactInput) {
+            // Both negative: |sumSigned| > |swapAmount| ⇔ sumSigned < swapAmount
+            if (sumSigned < swapAmount) revert TargetsOverAllocated();
+        } else {
+            if (sumSigned > swapAmount) revert TargetsOverAllocated();
+        }
     }
 
     /// @dev Pre-planned execution: router has determined the optimal fill order and per-quoter
@@ -553,6 +640,11 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
 
     /// @dev Execute targets in the given order with their pre-planned amounts.
     ///      Separated from _executePrePlanned to manage stack depth.
+    /// @dev Validates per-target `amountSpecified` against the outer swap before executing:
+    ///      every non-zero (non-catch-all) target must share the outer swap's sign convention,
+    ///      and the sum of pre-planned magnitudes must not exceed `|swapAmount|`. Without these
+    ///      checks, an over-allocated leg flips the `remaining` tracker's sign and produces a
+    ///      catch-all swap in the wrong direction.
     function _runPrePlannedFills(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
         returns (BalanceDelta totalDelta)
@@ -561,28 +653,35 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         bool exactInput = swapAmount < 0;
         uint160 noLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
 
+        // Validate target amount signs and aggregate magnitude vs swapAmount.
+        _validatePrePlannedAmounts(ahd, swapAmount, exactInput);
+
         for (uint256 i = 0; i < ahd.targets.length && remaining != 0; i++) {
-            BalanceDelta delta;
-            {
-                bytes memory quoterHookData = abi.encode(
-                    ALFHookData({attestationData: ahd.attestationData, curveUpdateData: ahd.targets[i].curveUpdateData})
-                );
-                int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
+            // Skip targets pointing back at this multiplexer to prevent recursion.
+            if (address(ahd.targets[i].poolKey.hooks) == address(this)) continue;
 
-                delta = poolManager.swap(
-                    ahd.targets[i].poolKey,
-                    SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
-                    quoterHookData
-                );
+            bytes memory quoterHookData = abi.encode(
+                ALFHookData({attestationData: ahd.attestationData, curveUpdateData: ahd.targets[i].curveUpdateData})
+            );
+            int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
+
+            // Wrapped in try/catch so a single failing target does not abort the entire
+            // pre-planned auction — soft-fail per target, mirroring the autonomous-mode contract.
+            try poolManager.swap(
+                ahd.targets[i].poolKey,
+                SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
+                quoterHookData
+            ) returns (BalanceDelta delta) {
+                int128 filled = exactInput
+                    ? (zeroForOne ? delta.amount0() : delta.amount1())
+                    : (zeroForOne ? delta.amount1() : delta.amount0());
+                remaining -= int256(filled);
+                totalDelta = totalDelta + delta;
+
+                emit FillExecuted(address(ahd.targets[i].poolKey.hooks), delta.amount0(), delta.amount1());
+            } catch {
+                emit FillFailed(address(ahd.targets[i].poolKey.hooks));
             }
-
-            int128 filled = exactInput
-                ? (zeroForOne ? delta.amount0() : delta.amount1())
-                : (zeroForOne ? delta.amount1() : delta.amount0());
-            remaining -= int256(filled);
-            totalDelta = totalDelta + delta;
-
-            emit FillExecuted(address(ahd.targets[i].poolKey.hooks), delta.amount0(), delta.amount1());
         }
 
         if (!exactInput && remaining > 0) revert InsufficientLiquidity();
@@ -725,24 +824,32 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
                 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
             }
 
-            // Execute the nested swap on this candidate's pool.
-            BalanceDelta delta = poolManager.swap(
+            // Execute the nested swap on this candidate's pool. Wrapped in try/catch so a single
+            // failing target (vault DoS, malicious hook, etc.) is soft-skipped and the auction
+            // continues with the next candidate — matches the indicative-phase soft-fail
+            // semantics in INV-MUX-3 instead of leaving fill-phase as a hard-fail asymmetry.
+            try poolManager.swap(
                 candidates[i].poolKey,
                 SwapParams({zeroForOne: zeroForOne, amountSpecified: remaining, sqrtPriceLimitX96: limit}),
                 candidates[i].hookData
-            );
+            ) returns (BalanceDelta delta) {
+                // Extract the "filled" component from the delta and update remaining.
+                //   exact input:  filled = input consumed (negative), so remaining -= negative → less negative
+                //   exact output: filled = output received (positive), so remaining -= positive → less positive
+                // Both converge remaining toward zero.
+                int128 filled = exactInput
+                    ? (zeroForOne ? delta.amount0() : delta.amount1())
+                    : (zeroForOne ? delta.amount1() : delta.amount0());
+                remaining -= int256(filled);
+                totalDelta = totalDelta + delta;
 
-            // Extract the "filled" component from the delta and update remaining.
-            //   exact input:  filled = input consumed (negative), so remaining -= negative → less negative
-            //   exact output: filled = output received (positive), so remaining -= positive → less positive
-            // Both converge remaining toward zero.
-            int128 filled = exactInput
-                ? (zeroForOne ? delta.amount0() : delta.amount1())
-                : (zeroForOne ? delta.amount1() : delta.amount0());
-            remaining -= int256(filled);
-            totalDelta = totalDelta + delta;
-
-            emit FillExecuted(address(candidates[i].poolKey.hooks), delta.amount0(), delta.amount1());
+                emit FillExecuted(address(candidates[i].poolKey.hooks), delta.amount0(), delta.amount1());
+            } catch {
+                // Soft-fail: the failing candidate's transient state (hook state, PM deltas,
+                // ERC-20 transfers, vault calls) is rolled back by EVM revert semantics.
+                // remaining/totalDelta are unchanged; the next candidate inherits the original budget.
+                emit FillFailed(address(candidates[i].poolKey.hooks));
+            }
         }
 
         // Exact output: if remaining > 0 after all candidates, the aggregate liquidity wasn't
@@ -833,6 +940,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param newOwner The new owner address.
     function transferOwnership(address newOwner) external {
         if (msg.sender != owner) revert Unauthorized();
+        emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
     }
 }
