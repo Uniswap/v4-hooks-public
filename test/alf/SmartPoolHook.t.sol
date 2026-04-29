@@ -1252,7 +1252,14 @@ contract SmartPoolHookTest is Test, Deployers {
     ///      active tick, so the compatibility setter is present but disabled.
     function test_setActiveTick_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
+        vm.expectRevert(SmartPoolHook.SetActiveTickDisabled.selector);
+        hook.setActiveTick(testPoolKey, 0);
+    }
+
+    /// @dev `setActiveTick` is `pure` and reverts for any caller, not just non-owners.
+    function test_setActiveTick_revertsEvenForNonOwner() public {
+        vm.prank(makeAddr("notOwner"));
+        vm.expectRevert(SmartPoolHook.SetActiveTickDisabled.selector);
         hook.setActiveTick(testPoolKey, 0);
     }
 

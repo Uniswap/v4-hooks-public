@@ -377,14 +377,21 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         hook.setPriceSigner(priceSignerAddr);
     }
 
+    /// @dev Per-pool sequence counter for tests. Auto-increments so each call to
+    ///      `_buildCurveUpdateHookData` produces a strictly newer payload than the previous one,
+    ///      satisfying the H-01 monotonic sequence guard. Tests that need to replay the SAME
+    ///      payload (e.g., same-block-same-data) reuse the returned bytes verbatim.
+    mapping(PoolId => uint64) internal _testNextSequence;
+
     function _signPricingUpdate(
         SpreadQuoterBase.PricingState memory state,
         PoolId poolId,
         uint256 deadline,
+        uint64 sequence,
         uint256 signerPk
     ) internal view returns (bytes memory sig) {
         bytes32 TYPEHASH = keccak256(
-            "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
+            "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
         );
         bytes32 structHash = keccak256(
             abi.encode(
@@ -393,7 +400,8 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
                 state.askFeePips,
                 state.live,
                 PoolId.unwrap(poolId),
-                deadline
+                deadline,
+                sequence
             )
         );
         bytes32 domainSeparator = keccak256(
@@ -415,9 +423,22 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         PoolId poolId,
         uint256 deadline,
         uint256 signerPk
+    ) internal returns (bytes memory hookData) {
+        // Auto-increment per-pool sequence for tests; first commit gets sequence=1.
+        _testNextSequence[poolId] += 1;
+        uint64 sequence = _testNextSequence[poolId];
+        return _buildCurveUpdateHookDataWithSequence(state, poolId, deadline, sequence, signerPk);
+    }
+
+    function _buildCurveUpdateHookDataWithSequence(
+        SpreadQuoterBase.PricingState memory state,
+        PoolId poolId,
+        uint256 deadline,
+        uint64 sequence,
+        uint256 signerPk
     ) internal view returns (bytes memory hookData) {
-        bytes memory sig = _signPricingUpdate(state, poolId, deadline, signerPk);
-        bytes memory curveUpdateData = abi.encode(state, poolId, deadline, sig);
+        bytes memory sig = _signPricingUpdate(state, poolId, deadline, sequence, signerPk);
+        bytes memory curveUpdateData = abi.encode(state, poolId, deadline, sequence, sig);
         hookData = abi.encode(ALFHookData({attestationData: "", curveUpdateData: curveUpdateData}));
     }
 
@@ -525,9 +546,10 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
             bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
         });
 
-        bytes memory sig = _signPricingUpdate(newState, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
-        bytes memory curveUpdateData = abi.encode(newState, testPoolKey.toId(), block.timestamp + 1 hours, sig);
-        bytes memory hookData = abi.encode(ALFHookData({attestationData: "", curveUpdateData: curveUpdateData}));
+        uint64 sequence = 1;
+        bytes memory hookData = _buildCurveUpdateHookDataWithSequence(
+            newState, testPoolKey.toId(), block.timestamp + 1 hours, sequence, priceSignerPk
+        );
 
         // Indicative quote uses new pricing without modifying state
         uint256 output = hook.getIndicativeQuote(testPoolKey, true, -100e18, hookData);
@@ -537,5 +559,82 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         // Stored state is unchanged — regular quote still uses 2% fee
         uint256 storedOutput = hook.getIndicativeQuote(testPoolKey, true, -100e18, "");
         assertApproxEqRel(storedOutput, 98e18, 0.01e18);
+    }
+
+    // ──── H-01: cross-block signed-curve-update replay protection ────
+
+    /// @dev A previously-committed signed payload cannot be replayed in a later block, even if
+    ///      its `deadline` has not yet expired. This prevents an attacker from rewinding pricing
+    ///      to an older, more-attacker-favorable state by replaying an archived signature.
+    function test_hookDataCurveUpdate_staleSequenceReplayReverts() public {
+        _setupPriceSigner();
+
+        PoolId poolId = testPoolKey.toId();
+        uint256 deadline = block.timestamp + 1 hours;
+
+        // Signer issues sequence=1 (e.g., bid=1%) and it commits successfully.
+        SpreadQuoterBase.PricingState memory state1 = SpreadQuoterBase.PricingState({
+            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        bytes memory data1 = _buildCurveUpdateHookDataWithSequence(state1, poolId, deadline, 1, priceSignerPk);
+        swap(testPoolKey, true, -1e18, data1);
+        assertEq(hook.lastCommittedSequence(poolId), 1);
+
+        // Signer issues sequence=2 (e.g., bid=3%) in the next block.
+        vm.roll(block.number + 1);
+        SpreadQuoterBase.PricingState memory state2 = SpreadQuoterBase.PricingState({
+            bidFeePips: 30_000, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        bytes memory data2 = _buildCurveUpdateHookDataWithSequence(state2, poolId, deadline, 2, priceSignerPk);
+        swap(testPoolKey, true, -1e18, data2);
+        assertEq(hook.lastCommittedSequence(poolId), 2);
+
+        // Attacker replays the stale sequence=1 payload in a fresh block.
+        vm.roll(block.number + 1);
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, data1);
+    }
+
+    /// @dev Reusing the same sequence in a later block also reverts (strict `>` comparison).
+    function test_hookDataCurveUpdate_sameSequenceDifferentBlockReverts() public {
+        _setupPriceSigner();
+        PoolId poolId = testPoolKey.toId();
+        uint256 deadline = block.timestamp + 1 hours;
+
+        SpreadQuoterBase.PricingState memory s = SpreadQuoterBase.PricingState({
+            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        bytes memory data1 = _buildCurveUpdateHookDataWithSequence(s, poolId, deadline, 1, priceSignerPk);
+        swap(testPoolKey, true, -1e18, data1);
+
+        vm.roll(block.number + 1);
+        // Same sequence (1), DIFFERENT signature (different deadline → different digest)
+        bytes memory data1again =
+            _buildCurveUpdateHookDataWithSequence(s, poolId, deadline + 1, 1, priceSignerPk);
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, data1again);
+    }
+
+    /// @dev A skip in the sequence stream is allowed — the signer chooses how to count, the hook
+    ///      only enforces strict monotonicity. Skipping is useful for off-chain coordination.
+    function test_hookDataCurveUpdate_sequenceSkipAllowed() public {
+        _setupPriceSigner();
+        PoolId poolId = testPoolKey.toId();
+        uint256 deadline = block.timestamp + 1 hours;
+
+        SpreadQuoterBase.PricingState memory s = SpreadQuoterBase.PricingState({
+            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+        });
+
+        // First: sequence=5 (skipping 1..4)
+        bytes memory data5 = _buildCurveUpdateHookDataWithSequence(s, poolId, deadline, 5, priceSignerPk);
+        swap(testPoolKey, true, -1e18, data5);
+        assertEq(hook.lastCommittedSequence(poolId), 5);
+
+        // Then: sequence=10 in the next block
+        vm.roll(block.number + 1);
+        bytes memory data10 = _buildCurveUpdateHookDataWithSequence(s, poolId, deadline, 10, priceSignerPk);
+        swap(testPoolKey, true, -1e18, data10);
+        assertEq(hook.lastCommittedSequence(poolId), 10);
     }
 }

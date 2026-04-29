@@ -16,6 +16,7 @@ import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
@@ -45,8 +46,12 @@ contract ALFMultiplexerTest is Test, Deployers {
         deployMintAndApprove2Currencies();
 
         // ── Deploy auction hook ──
-        uint160 auctionFlags =
-            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
+        uint160 auctionFlags = uint160(
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+                | Hooks.BEFORE_DONATE_FLAG
+                | Hooks.BEFORE_SWAP_FLAG
+                | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+        );
         auctionHook =
             ALFMultiplexer(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags)));
         deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(auctionHook));
@@ -367,13 +372,17 @@ contract ALFMultiplexerTest is Test, Deployers {
     // ──── Targeted with curve update ────
 
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
+        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
     );
+
+    /// @dev Per-quoter monotonic counter used by the test helpers — first commit gets sequence=1.
+    mapping(address => uint64) internal _testNextSequence;
 
     function _signPricingUpdate(
         SpreadQuoterBase.PricingState memory state,
         PoolId poolId,
         uint256 deadline,
+        uint64 sequence,
         uint256 signerPk,
         address quoter
     ) internal view returns (bytes memory sig) {
@@ -384,7 +393,8 @@ contract ALFMultiplexerTest is Test, Deployers {
                 state.askFeePips,
                 state.live,
                 PoolId.unwrap(poolId),
-                deadline
+                deadline,
+                sequence
             )
         );
         bytes32 domainSeparator = keccak256(
@@ -407,9 +417,11 @@ contract ALFMultiplexerTest is Test, Deployers {
         uint256 deadline,
         uint256 signerPk,
         address quoter
-    ) internal view returns (bytes memory) {
-        bytes memory sig = _signPricingUpdate(state, poolKey_.toId(), deadline, signerPk, quoter);
-        return abi.encode(state, poolKey_.toId(), deadline, sig);
+    ) internal returns (bytes memory) {
+        _testNextSequence[quoter] += 1;
+        uint64 sequence = _testNextSequence[quoter];
+        bytes memory sig = _signPricingUpdate(state, poolKey_.toId(), deadline, sequence, signerPk, quoter);
+        return abi.encode(state, poolKey_.toId(), deadline, sequence, sig);
     }
 
     function test_targeted_curveUpdate_flipsWinner() public {
@@ -625,10 +637,67 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_governance_transferOwnership() public {
         address newOwner = makeAddr("newOwner");
+        vm.expectEmit(true, true, true, true);
+        emit ALFMultiplexer.OwnershipTransferred(address(this), newOwner);
         auctionHook.transferOwnership(newOwner);
         assertEq(auctionHook.owner(), newOwner);
 
         vm.expectRevert(ALFMultiplexer.Unauthorized.selector);
         auctionHook.transferOwnership(address(this));
+    }
+
+    // ════════════════════════════════════════════
+    //  M-04: pre-planned amount validation
+    // ════════════════════════════════════════════
+
+    /// @dev A pre-planned target whose `amountSpecified` sign mismatches the outer swap is rejected.
+    function test_prePlanned_directionMismatch_reverts() public {
+        // Outer swap: exact-input (negative). Target leg uses exact-output (positive) — mismatch.
+        AuctionHookData memory ahd = AuctionHookData({
+            attestationData: "",
+            targets: new TargetedQuoter[](2),
+            strictTolerancePips: 0
+        });
+        ahd.targets[0] =
+            TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: int256(0.5e18)}); // wrong sign!
+        ahd.targets[1] =
+            TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: int256(0)}); // catch-all
+
+        // The PoolManager wraps hook reverts in `WrappedError`, so we just verify it reverts.
+        vm.expectRevert();
+        swap(auctionPoolKey, true, -1e18, abi.encode(ahd));
+    }
+
+    /// @dev Pre-planned targets summing to more than `|swapAmount|` are rejected.
+    function test_prePlanned_overAllocated_reverts() public {
+        AuctionHookData memory ahd = AuctionHookData({
+            attestationData: "",
+            targets: new TargetedQuoter[](2),
+            strictTolerancePips: 0
+        });
+        ahd.targets[0] =
+            TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: int256(-0.6e18)});
+        ahd.targets[1] =
+            TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: int256(-0.6e18)});
+        // Sum = -1.2e18, outer swap is -1e18 → over-allocated.
+
+        vm.expectRevert();
+        swap(auctionPoolKey, true, -1e18, abi.encode(ahd));
+    }
+
+    // ════════════════════════════════════════════
+    //  M-06: donate path is blocked on virtual pool
+    // ════════════════════════════════════════════
+
+    /// @dev Donations to the virtual auction pool would be permanently locked since the pool
+    ///      has no LP positions — `_beforeDonate` reverts unconditionally.
+    function test_donate_revertsOnVirtualPool() public {
+        deal(Currency.unwrap(currency0), address(this), 1e18);
+        deal(Currency.unwrap(currency1), address(this), 1e18);
+        IERC20Minimal(Currency.unwrap(currency0)).approve(address(donateRouter), type(uint256).max);
+        IERC20Minimal(Currency.unwrap(currency1)).approve(address(donateRouter), type(uint256).max);
+
+        vm.expectRevert();
+        donateRouter.donate(auctionPoolKey, 1e18, 1e18, "");
     }
 }
