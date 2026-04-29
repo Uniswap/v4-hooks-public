@@ -6,6 +6,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -34,9 +35,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         bool live;
     }
 
-    /// @dev EIP-712 type hash for `PricingUpdate` curve-update messages.
+    /// @dev EIP-712 type hash for `PricingUpdate` curve-update messages. The `sequence` field
+    ///      makes each signed update strictly orderable per pool — replays of older payloads
+    ///      (cross-block) are rejected even when their `deadline` is still in the future.
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline)"
+        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
     );
 
     /// @notice Pricing state for each pool managed by this hook.
@@ -45,6 +48,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     /// @notice Lower tick of the single permitted LP range per pool. LP add liquidity calls
     ///         must use exactly `[activeLowerTick, activeLowerTick + tickSpacing]`.
     mapping(PoolId => int24) public activeLowerTick;
+
+    /// @notice Latest committed signed-update sequence per pool. New updates must have
+    ///         `sequence > lastCommittedSequence[poolId]`. The signer is responsible for
+    ///         choosing monotonic sequence numbers (e.g., a wall-clock-derived counter).
+    /// @dev    Owner-driven `updatePricingState` does NOT update this counter — it bypasses the
+    ///         signed channel entirely. Only `_applyCurveUpdate` advances the sequence.
+    mapping(PoolId => uint64) public lastCommittedSequence;
 
     /// @notice Emitted whenever a pool's pricing state is committed via `_commitPricingState`.
     /// @param poolId The pool whose pricing was updated.
@@ -72,6 +82,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ///      Without this guard, fees > 100% break v4's swap math (denominator underflow) and
     ///      enable an owner / compromised priceSigner to brick or extract from the pool.
     error FeeOutOfBounds();
+
+    /// @dev A signed curve update's `sequence` is not strictly greater than the last committed
+    ///      sequence for this pool. Prevents cross-block replay of older signed payloads whose
+    ///      deadline has not yet expired.
+    error StaleSequence();
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
@@ -112,7 +127,8 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
         PricingState memory state = pricingState[key.toId()];
         if (curveUpdateData.length > 0) {
-            (PricingState memory newState,,,) = abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+            (PricingState memory newState,,,,) =
+                abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
             state = newState;
         }
 
@@ -136,7 +152,8 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
             PricingState memory state = pricingState[key.toId()];
             if (curveUpdateData.length > 0) {
-                (PricingState memory newState,,,) = abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+                (PricingState memory newState,,,,) =
+                    abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
                 state = newState;
             }
 
@@ -152,14 +169,24 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     // ──── Hook Lifecycle ────
 
     /// @dev Auto-derive the active lower tick from the initial pool tick at initialization.
-    ///      Floor-aligns to `tickSpacing` so the resulting LP range satisfies `_enforceActiveTick`
-    ///      without any owner intervention. Emits no event — `setActiveTick` is the canonical
-    ///      source for `ActiveTickUpdated` events post-init.
+    ///      Floor-aligns to `tickSpacing` and clamps to the v4 usable tick range so the
+    ///      resulting LP range `[activeLowerTick, activeLowerTick + tickSpacing]` is always
+    ///      a valid v4 LP position — even at the extremes near MIN/MAX_TICK.
+    ///      Emits no event — `setActiveTick` is the canonical source for `ActiveTickUpdated`
+    ///      events post-init.
     function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick) internal override returns (bytes4) {
         // Auto-set active tick aligned to tickSpacing (floor division)
         int24 compressed = tick / key.tickSpacing;
         if (tick < 0 && tick % key.tickSpacing != 0) compressed--;
-        activeLowerTick[key.toId()] = compressed * key.tickSpacing;
+        int24 candidate = compressed * key.tickSpacing;
+
+        // Clamp into [minUsableTick, maxUsableTick - tickSpacing] so the LP range fits.
+        int24 minUsable = TickMath.minUsableTick(key.tickSpacing);
+        int24 maxLower = TickMath.maxUsableTick(key.tickSpacing) - key.tickSpacing;
+        if (candidate < minUsable) candidate = minUsable;
+        else if (candidate > maxLower) candidate = maxLower;
+
+        activeLowerTick[key.toId()] = candidate;
 
         return IHooks.afterInitialize.selector;
     }
@@ -266,32 +293,41 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
 
     // ──── Curve Update Logic ────
 
-    /// @dev Decode the curve update payload, validate metadata, and (if novel for this block)
-    ///      verify its signature and commit the new pricing state. Replays of an already-applied
-    ///      update for the same `(poolId, block.number)` short-circuit as no-ops; conflicting
-    ///      payloads in the same block revert from `_checkAndMarkCurveUpdate`.
+    /// @dev Decode the curve update payload, validate metadata + sequence, and (if novel for
+    ///      this block) verify its signature and commit the new pricing state.
+    ///      Replays of an already-applied update for the same `(poolId, block.number)`
+    ///      short-circuit as no-ops; conflicting payloads in the same block revert from
+    ///      `_checkAndMarkCurveUpdate`. Cross-block replay of an old payload (whose `deadline`
+    ///      has not yet expired) is rejected via the strictly-monotonic `sequence` check.
     /// @param key             The pool the update targets.
-    /// @param curveUpdateData ABI-encoded `(PricingState, PoolId, uint256 deadline, bytes sig)`.
+    /// @param curveUpdateData ABI-encoded
+    ///                        `(PricingState, PoolId, uint256 deadline, uint64 sequence, bytes sig)`.
     function _applyCurveUpdate(PoolKey calldata key, bytes memory curveUpdateData) internal {
-        (PricingState memory newState, PoolId updatePoolId, uint256 deadline, bytes memory sig) =
-            abi.decode(curveUpdateData, (PricingState, PoolId, uint256, bytes));
+        (PricingState memory newState, PoolId updatePoolId, uint256 deadline, uint64 sequence, bytes memory sig) =
+            abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
 
         PoolId poolId = key.toId();
         _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
 
         if (_checkAndMarkCurveUpdate(poolId, curveUpdateData)) {
-            _verifySignature(newState, poolId, deadline, sig);
+            // Reject stale signed payloads. Strict `>` enforces uniqueness — two updates with the
+            // same sequence cannot both commit even if the second arrives in a different block.
+            if (sequence <= lastCommittedSequence[poolId]) revert StaleSequence();
+            _verifySignature(newState, poolId, deadline, sequence, sig);
+            lastCommittedSequence[poolId] = sequence;
             _commitPricingState(key, newState);
         }
     }
 
     /// @dev Recover the EIP-712 signer over the `PricingUpdate` typed data and require it to
     ///      match the configured `priceSigner`. Reverts with {InvalidPriceSigner} on mismatch.
-    function _verifySignature(PricingState memory state, PoolId poolId, uint256 deadline, bytes memory sig)
-        internal
-        virtual
-        view
-    {
+    function _verifySignature(
+        PricingState memory state,
+        PoolId poolId,
+        uint256 deadline,
+        uint64 sequence,
+        bytes memory sig
+    ) internal virtual view {
         bytes32 structHash = keccak256(
             abi.encode(
                 PRICING_UPDATE_TYPEHASH,
@@ -299,7 +335,8 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
                 state.askFeePips,
                 state.live,
                 PoolId.unwrap(poolId),
-                deadline
+                deadline,
+                sequence
             )
         );
         bytes32 digest = _hashTypedDataV4(structHash);
