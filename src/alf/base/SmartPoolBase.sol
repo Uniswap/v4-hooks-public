@@ -47,6 +47,17 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE`. Without this guard,
     ///      fees > 100% break v4 swap math (denominator underflow).
     error FeeOutOfBounds();
+    /// @dev Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
+    ///      callers MUST go through the subclass's guarded `initializePool` entry point so
+    ///      pricing, distribution, and vault config are validated before PM init runs.
+    error DirectInitializeBlocked();
+
+    /// @dev Reject direct `poolManager.initialize`. Per v4 `Hooks.noSelfCall`, the hook's own
+    ///      `poolManager.initialize` from `initializePool` skips this callback, so the only
+    ///      caller path that reaches here is an external party's direct attempt.
+    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
+        revert DirectInitializeBlocked();
+    }
 
     /// @param manager The Uniswap v4 PoolManager.
     /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.

@@ -561,12 +561,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     //                        INTERNAL: HOOK CALLBACKS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Blocks direct pool initialization. Callers must use `initializePool` which
-    ///      validates parameters and configures the distribution before calling PM.initialize.
-    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
-        revert Unauthorized();
-    }
-
     /// @dev External LP additions are blocked. v4-core's `Hooks.noSelfCall` skips the hook
     ///      callback entirely when the hook itself is the caller, so the only path that
     ///      reaches this body is an external `modifyLiquidity` call -- always reject.
