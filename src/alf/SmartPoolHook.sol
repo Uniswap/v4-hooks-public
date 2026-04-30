@@ -202,6 +202,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      `OwnableUnauthorizedAccount`.
     error Unauthorized();
 
+    /// @dev `_beforeSwap` was invoked on a pool whose `live` flag is false. Owner pauses
+    ///      the pool via {setPoolLive}; while paused, swaps revert here so routers and
+    ///      aggregators see an explicit failure instead of executing against zero JIT
+    ///      liquidity.
+    /// @param poolId The pool whose live flag is currently false.
+    error PoolNotLive(PoolId poolId);
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
@@ -546,9 +553,14 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     }
 
     /// @dev JIT entry point. Reads the stored PricingState for the directional fee, deploys
-    ///      multi-range JIT liquidity under the JIT lock, and returns the fee override. Returns
-    ///      zero delta and no fee if the pool is not live (swap executes against zero liquidity →
-    ///      no output). hookData is ignored entirely (see contract-level NatSpec).
+    ///      multi-range JIT liquidity under the JIT lock, and returns the fee override.
+    ///
+    ///      Reverts when the pool is paused (`!live`). The previous behavior returned
+    ///      ZERO_DELTA + 0 fee, which let the v4 swap math run against zero deployed
+    ///      liquidity -- the swap would either no-op or revert internally with
+    ///      PriceLimitAlreadyExceeded depending on params. Reverting up-front is a cleaner
+    ///      signal for routers and aggregators (the multiplexer's per-target try/catch
+    ///      already handles it). hookData is ignored entirely (see contract-level NatSpec).
     ///
     ///      A reentrant `_beforeSwap` on the same pool (e.g., from a malicious vault calling
     ///      `poolManager.swap(samePool)` during `_withdrawFromVault`) would corrupt the JIT
@@ -561,9 +573,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         PoolId poolId = key.toId();
         if (_isJITLocked(poolId)) revert JITInProgress();
         PricingState memory state = pricingState[poolId];
-        if (!state.live) {
-            return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
-        }
+        if (!state.live) revert PoolNotLive(poolId);
 
         uint24 feePips = params.zeroForOne ? state.bidFeePips : state.askFeePips;
         _setJITLock(poolId);
@@ -573,17 +583,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @dev JIT teardown. Removes all bucket positions, resolves the hook's net delta for both
     ///      currencies (debiting per-pool ERC-20 on settle), re-deposits remaining ERC-20 to
-    ///      vaults, and clears the JIT lock.
+    ///      vaults, and clears the JIT lock. `_beforeSwap` always sets the lock when the pool
+    ///      is live and reverts when it isn't, so reaching `_afterSwap` implies the lock is
+    ///      set; a defensive `_isJITLocked` read is unnecessary.
     function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
         internal override returns (bytes4, int128)
     {
         PoolId poolId = key.toId();
-        // If beforeSwap returned early (pool not live), JIT lock was never set — skip teardown.
-        // Note: this checks the per-pool lock, NOT the global counter. A different pool's JIT
-        // cycle being in flight does not affect whether this pool's own teardown should run.
-        if (!_isJITLocked(poolId)) {
-            return (IHooks.afterSwap.selector, 0);
-        }
         _removeJIT(poolId, key);
         _resolveNetDelta(poolId, key);
         _depositAllToVaults(poolId, key);

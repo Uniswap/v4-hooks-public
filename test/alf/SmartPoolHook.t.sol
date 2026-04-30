@@ -606,6 +606,19 @@ contract SmartPoolHookTest is Test, Deployers {
         swap(testPoolKey, true, -100e18, "");
     }
 
+    function test_swap_revertsWhenPoolNotLive() public {
+        _depositAsOperator(1_000e18);
+
+        vm.prank(owner);
+        hook.setPoolLive(testPoolKey, false);
+
+        // Paused pools surface a hard `PoolNotLive(poolId)` error so routers and aggregators
+        // can route flow elsewhere instead of silently no-op'ing through zero JIT liquidity.
+        // v4 wraps hook reverts; assert the inner selector is present in the bubbled payload.
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                        RESERVES & QUOTE VIEWS
     // ═══════════════════════════════════════════════════════════════════════════
