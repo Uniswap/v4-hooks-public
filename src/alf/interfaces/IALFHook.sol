@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.26;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
@@ -14,7 +14,7 @@ struct ALFHookData {
 /// @title IALFHook
 /// @author Uniswap Labs
 /// @notice Standard interface implemented by ALF hooks on top of the v4 hook interface.
-/// @dev Provides a uniform way for the router and auction hook to query indicative quotes
+/// @dev Provides a uniform way for the router and multiplexer to query indicative quotes
 ///      and hook metadata. Hooks expose their own capabilities directly rather than
 ///      relying on a separate registry contract.
 /// @custom:security-contact security@uniswap.org
@@ -67,7 +67,7 @@ interface IALFHook {
     function getEffectiveLiquidity(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
 
     /// @notice Simulate a swap up to a target price, returning both input consumed and output received.
-    /// @dev Used by the auction hook and router for split fill planning. The swap terminates
+    /// @dev Used by the multiplexer and router for split fill planning. The swap terminates
     ///      when the target price is reached or the specified amount is exhausted, whichever
     ///      comes first. Returns (0, 0) for hooks that do not support price-bounded simulation.
     /// @param key The pool key for this quoter's pool.

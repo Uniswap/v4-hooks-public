@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -16,21 +15,21 @@ import {BaseHook} from "../base/BaseHook.sol";
 import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
 import {ALFProtocolFees} from "./base/ALFProtocolFees.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
-import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
+import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol";
 
 /// @title ALFMultiplexer
 /// @author Uniswap Labs
 ///
-/// @notice Stateless atomic auction hook deployed on a virtual (zero-liquidity) pool.
+/// @notice Stateless atomic multiplexer deployed on a virtual (zero-liquidity) pool.
 ///
-///         The auction hook provides onchain competitive execution across multiple ALF quoter
+///         The multiplexer provides onchain competitive execution across multiple ALF quoter
 ///         hooks. It receives a set of targeted quoters from the router via hookData, simulates
 ///         each candidate through the real v4 swap path, and executes a **greedy split fill**
 ///         that distributes swap flow across candidates in order of indicative quality.
 ///
 ///         ## Execution Model: Greedy Split Fill
 ///
-///         Rather than picking a single winner, the auction fills candidates sequentially from
+///         Rather than picking a single winner, the multiplexer fills candidates sequentially from
 ///         best to worst indicative. Each candidate receives the full remaining swap amount with
 ///         a `sqrtPriceLimitX96` derived from the next candidate's current pool price. This
 ///         causes the v4 swap loop to terminate when the current candidate's marginal price
@@ -44,22 +43,22 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///
 ///         ## Delta Forwarding
 ///
-///         The auction hook's virtual pool has zero liquidity — all execution happens via nested
+///         The multiplexer's virtual pool has zero liquidity — all execution happens via nested
 ///         `poolManager.swap()` calls on the candidates' real pools. The accumulated BalanceDelta
 ///         from all fills is negated into a `BeforeSwapDelta` that offsets the virtual pool's
-///         swap, ensuring the auction hook's net position is zero. The outer caller receives
+///         swap, ensuring the multiplexer's net position is zero. The outer caller receives
 ///         the aggregate execution as their swap result.
 ///
 ///         ## Protocol Fee
 ///
-///         The auction hook reads the v4 protocol fee from the virtual pool's slot0 and
+///         The multiplexer reads the v4 protocol fee from the virtual pool's slot0 and
 ///         applies it to the unspecified delta after the split fill completes. Fees are
 ///         taken directly to the token jar via `poolManager.take()`, matching the same
 ///         mechanism used by aggregator hooks and flat quoters.
 ///
 ///         ## Tolerance Enforcement
 ///
-///         Callers may set `strictTolerancePips` in AuctionHookData to revert if aggregate
+///         Callers may set `strictTolerancePips` in MultiplexerHookData to revert if aggregate
 ///         execution falls below the best individual indicative by more than the specified
 ///         tolerance. This is a downside-only check — split fill producing more output than
 ///         the best individual indicative (the expected case) does not trigger a revert.
@@ -67,7 +66,7 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///         ## Call Flow
 ///
 ///         ```
-///         Router → poolManager.swap(auctionPool, hookData=[targets])
+///         Router → poolManager.swap(multiplexerPool, hookData=[targets])
 ///           → ALFMultiplexer._beforeSwap()
 ///             → _prepareCandidates(): simulate all targets, sort by indicative
 ///             → _executeFills(): for each candidate (best to worst):
@@ -83,13 +82,12 @@ import {AuctionHookData, TargetedQuoter} from "./types/AuctionTypes.sol";
 ///         This nested-swap pattern is explicitly supported by v4's unlock model. All deltas
 ///         accumulate in transient storage and must net to zero before the unlock completes.
 ///
-/// @dev    Callers MUST encode hookData as `abi.encode(AuctionHookData(...))` with a non-empty
+/// @dev    Callers MUST encode hookData as `abi.encode(MultiplexerHookData(...))` with a non-empty
 ///         `targets` array. Each target specifies a quoter's PoolKey and optional per-quoter
-///         curve update data. The auction constructs per-quoter ALFHookData that pairs the
+///         curve update data. The multiplexer constructs per-quoter ALFHookData that pairs the
 ///         shared attestation with each quoter's curve update.
 /// @custom:security-contact security@uniswap.org
 contract ALFMultiplexer is BaseHook, ALFProtocolFees {
-    using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
@@ -112,7 +110,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @dev No targeted quoter returned a valid (non-zero) indicative quote.
     error NoValidQuotes();
 
-    /// @dev The auction hook's virtual pool must not hold liquidity.
+    /// @dev The multiplexer's virtual pool must not hold liquidity.
     error LiquidityNotAllowed();
 
     /// @dev Exact-output split fill: aggregate output across all candidates did not satisfy
@@ -131,13 +129,13 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @dev Quote helper may only be called through an external self-call.
     error NotSelf();
 
-    /// @dev hookData was empty or contained no targets. The auction requires at least one
+    /// @dev hookData was empty or contained no targets. The multiplexer requires at least one
     ///      targeted quoter to execute.
     error TargetsRequired();
 
     /// @dev `strictTolerancePips > 0` but no indicative baseline could be established (every
     ///      candidate's quote query failed). Strict tolerance has nothing to compare against,
-    ///      so the swap is refused — the caller asked for a guarantee the auction cannot make.
+    ///      so the swap is refused — the caller asked for a guarantee the multiplexer cannot make.
     error MissingQuoteBaseline();
 
     /// @dev Pre-planned mode received a target whose `amountSpecified` sign does not match the
@@ -153,16 +151,16 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
 
     // ──── Events ────
 
-    /// @notice Emitted once per auction after all fills complete.
+    /// @notice Emitted once per multiplexer execution after all fills complete.
     /// @param primaryQuoter The first quoter in the sorted fill order (best indicative).
     /// @param zeroForOne    The swap direction.
     /// @param amountSpecified The original swap amount (negative = exact input).
     /// @param bestQuote     The best individual indicative quote (tolerance baseline).
-    event AuctionExecuted(address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
+    event MultiplexerExecuted(address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
 
     /// @notice Emitted for each individual fill during a split fill execution.
     /// @dev    Useful for tracking per-quoter contributions to the aggregate result.
-    ///        `amount0` and `amount1` are from the auction hook's perspective (same sign
+    ///        `amount0` and `amount1` are from the multiplexer's perspective (same sign
     ///        convention as BalanceDelta).
     /// @param quoter  The quoter hook address that was filled.
     /// @param amount0 Token0 delta for this fill (negative = input, positive = output).
@@ -170,7 +168,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     event FillExecuted(address indexed quoter, int128 amount0, int128 amount1);
 
     /// @notice Emitted when a candidate fill reverts and is soft-skipped during a split fill.
-    /// @dev    The auction continues with the next candidate. Routers can monitor this event
+    /// @dev    The multiplexer continues with the next candidate. Routers can monitor this event
     ///         to deprioritize the offending quoter in their reputation model.
     /// @param quoter The quoter hook address whose fill failed.
     event FillFailed(address indexed quoter);
@@ -194,11 +192,11 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     //                          HOOK PERMISSIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev The auction hook needs:
+    /// @dev The multiplexer needs:
     ///      - `beforeAddLiquidity`: to block LP on the virtual pool (it must remain empty)
     ///      - `beforeDonate`: to block donations to the virtual pool (no LP can ever
     ///        claim them, so they would be permanently locked in PM accounting)
-    ///      - `beforeSwap`: core auction + split fill logic
+    ///      - `beforeSwap`: core multiplexer + split fill logic
     ///      - `beforeSwapReturnDelta`: to forward the aggregate nested delta to the outer swap
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
@@ -223,7 +221,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     //                          OFFCHAIN QUOTE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Simulate the auction without executing. Returns the single best quoter
+    /// @notice Simulate the multiplexer without executing. Returns the single best quoter
     ///         and their indicative quote.
     /// @dev    Intended for offchain routers to pre-identify the best candidate. The router
     ///         can then either:
@@ -232,7 +230,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///         Note: this returns the best *single* quoter, not a split fill simulation.
     /// @param zeroForOne      The swap direction.
     /// @param amountSpecified The swap amount (negative = exact input).
-    /// @param hookData        ABI-encoded AuctionHookData with targets.
+    /// @param hookData        ABI-encoded MultiplexerHookData with targets.
     /// @return winnerPoolKey  The best quoter's pool key.
     /// @return winner         The best quoter's hook address.
     /// @return bestQuote      The best indicative (output for exact-in, input for exact-out).
@@ -242,7 +240,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
     {
-        return _auction(zeroForOne, amountSpecified, hookData);
+        return _multiplex(zeroForOne, amountSpecified, hookData);
     }
 
     /// @dev External self-call target used to quote a candidate through the real v4 swap path.
@@ -285,7 +283,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     //                          HOOK LIFECYCLE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Blocks all liquidity additions. The auction pool is a virtual dispatch mechanism
+    /// @dev Blocks all liquidity additions. The multiplexer pool is a virtual dispatch mechanism
     ///      with zero liquidity — all real execution happens on candidates' pools.
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
@@ -307,7 +305,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         revert LiquidityNotAllowed();
     }
 
-    /// @dev Core auction entry point. Orchestrates:
+    /// @dev Core multiplexer entry point. Orchestrates:
     ///      1. Greedy split fill across sorted candidates
     ///      2. Protocol fee application (reads fee from slot0, takes to token jar)
     ///      3. Tolerance enforcement (downside-only)
@@ -319,7 +317,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     {
         // 1. Build sorted candidates and execute greedy split fill.
         (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote) =
-            _auctionAndSwap(key, params.zeroForOne, params.amountSpecified, hookData);
+            _multiplexAndSwap(key, params.zeroForOne, params.amountSpecified, hookData);
 
         // 2. Apply protocol fee from slot0 — takes fee directly to token jar.
         //    The unspecified delta is the side the swapper doesn't control:
@@ -333,7 +331,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         //    earlier implementation only checked the exact-input direction, silently letting
         //    overpayment pass on exact-output swaps.
         if (hookData.length > 0) {
-            uint256 tol = abi.decode(hookData, (AuctionHookData)).strictTolerancePips;
+            uint256 tol = abi.decode(hookData, (MultiplexerHookData)).strictTolerancePips;
             if (tol > 0) {
                 // No baseline ⇒ no protection. Refuse rather than silently accept.
                 if (bestQuote == 0) revert MissingQuoteBaseline();
@@ -355,7 +353,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             }
         }
 
-        emit AuctionExecuted(primaryQuoter, params.zeroForOne, params.amountSpecified, bestQuote);
+        emit MultiplexerExecuted(primaryQuoter, params.zeroForOne, params.amountSpecified, bestQuote);
 
         // 4. Convert BalanceDelta → BeforeSwapDelta, adjusting for the protocol fee.
         return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params, feeAdjustment), 0);
@@ -365,7 +363,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     //                          AUCTION INTERNALS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Top-level auction-and-execute. Detects the execution mode from the hookData:
+    /// @dev Top-level multiplex-and-execute. Detects the execution mode from the hookData:
     ///
     ///      **Autonomous mode** (all targets have amountSpecified = 0):
     ///        Queries indicatives, sorts candidates by quote quality, and executes a greedy
@@ -378,16 +376,16 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///
     /// @param zeroForOne The swap direction.
     /// @param swapAmount The swap amount (after protocol fee deduction for exact input).
-    /// @param hookData   ABI-encoded AuctionHookData from the caller.
+    /// @param hookData   ABI-encoded MultiplexerHookData from the caller.
     /// @return totalDelta     Accumulated BalanceDelta across all fills.
     /// @return primaryQuoter  The first quoter in fill order.
     /// @return bestQuote      The best individual indicative (tolerance baseline). 0 if skipped.
-    function _auctionAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+    function _multiplexAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
         returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
     {
         if (hookData.length == 0) revert TargetsRequired();
-        AuctionHookData memory ahd = abi.decode(hookData, (AuctionHookData));
+        MultiplexerHookData memory ahd = abi.decode(hookData, (MultiplexerHookData));
         if (ahd.targets.length == 0) revert TargetsRequired();
 
         if (_isPrePlanned(ahd.targets)) {
@@ -403,23 +401,23 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         }
     }
 
-    /// @dev Single-winner auction used by the `quote()` view function. Iterates all targets
+    /// @dev Single-winner selection used by the `quote()` view function. Iterates all targets
     ///      and returns the quoter with the best indicative quote. Does NOT execute any swaps.
     /// @param zeroForOne      The swap direction.
     /// @param amountSpecified The swap amount (negative = exact input).
-    /// @param hookData        ABI-encoded AuctionHookData.
+    /// @param hookData        ABI-encoded MultiplexerHookData.
     /// @return winnerPoolKey  The best quoter's pool key.
     /// @return winner         The best quoter's hook address.
     /// @return bestQuote      The best indicative quote.
     /// @return winnerHookData The constructed ALFHookData for the winner.
-    function _auction(bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+    function _multiplex(bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         internal
         view
         returns (PoolKey memory winnerPoolKey, address winner, uint256 bestQuote, bytes memory winnerHookData)
     {
         if (hookData.length == 0) revert TargetsRequired();
 
-        AuctionHookData memory ahd = abi.decode(hookData, (AuctionHookData));
+        MultiplexerHookData memory ahd = abi.decode(hookData, (MultiplexerHookData));
         if (ahd.targets.length == 0) revert TargetsRequired();
 
         (winnerPoolKey, winner, bestQuote, winnerHookData) =
@@ -472,12 +470,12 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///      3. `getIndicativeQuote()` — call with the gas budget, catch failures
     ///
     ///      Returns (0, "") if any step fails. Failures are soft — the quoter is skipped
-    ///      without reverting the entire auction.
+    ///      without reverting the entire multiplexer.
     ///
     ///      Constructs the per-quoter ALFHookData by pairing the shared attestation data
     ///      with the target's quoter-specific curve update data.
     /// @param target          The targeted quoter (pool key + curve update data).
-    /// @param attestationData Shared attestation payload from the AuctionHookData.
+    /// @param attestationData Shared attestation payload from the MultiplexerHookData.
     /// @param zeroForOne      The swap direction.
     /// @param amountSpecified The swap amount.
     /// @return q              The indicative quote (0 if invalid/failed).
@@ -519,7 +517,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     }
 
     /// @dev Query a single target by simulating its real v4 swap path in a reverting self-call.
-    ///      This is non-view and intended for the auction execution path, where the PoolManager
+    ///      This is non-view and intended for the multiplexer execution path, where the PoolManager
     ///      is already unlocked. It supports hooks that do not carry their own on-chain quote
     ///      simulator, such as SmartPoolHook.
     function _queryTargetBySwap(
@@ -528,8 +526,8 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         bool zeroForOne,
         int256 amountSpecified
     ) internal returns (uint256 q, bytes memory quoterHookData) {
-        // Skip targets whose hook is this contract — preventing the auction from recursing into
-        // itself (gas-DoS via nested AuctionHookData). Only the caller pays for the wasted gas,
+        // Skip targets whose hook is this contract — preventing the multiplexer from recursing into
+        // itself (gas-DoS via nested MultiplexerHookData). Only the caller pays for the wasted gas,
         // but no useful execution is possible against the multiplexer's virtual pool.
         if (address(target.poolKey.hooks) == address(this)) return (0, "");
 
@@ -560,7 +558,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Returns true if any target has a non-zero amountSpecified, indicating the router
-    ///      has pre-planned the split and the auction should execute in the given order.
+    ///      has pre-planned the split and the multiplexer should execute in the given order.
     function _isPrePlanned(TargetedQuoter[] memory targets) internal pure returns (bool) {
         for (uint256 i = 0; i < targets.length; i++) {
             if (targets[i].amountSpecified != 0) return true;
@@ -572,7 +570,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///      - Every non-catch-all target's `amountSpecified` must share the outer sign
     ///        (exact-input → negative; exact-output → positive).
     ///      - Sum of `|amountSpecified|` over non-catch-all targets must be ≤ `|swapAmount|`.
-    function _validatePrePlannedAmounts(AuctionHookData memory ahd, int256 swapAmount, bool exactInput)
+    function _validatePrePlannedAmounts(MultiplexerHookData memory ahd, int256 swapAmount, bool exactInput)
         internal
         pure
     {
@@ -602,13 +600,13 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///      enabled (strictTolerancePips > 0), indicatives are queried on-demand for the
     ///      tolerance baseline.
     ///
-    /// @param ahd         Decoded AuctionHookData.
+    /// @param ahd         Decoded MultiplexerHookData.
     /// @param zeroForOne  The swap direction.
     /// @param swapAmount  The total swap amount.
     /// @return totalDelta     Accumulated BalanceDelta across all fills.
     /// @return primaryQuoter  The first target's hook address.
     /// @return bestQuote      Best individual indicative (0 if tolerance is disabled).
-    function _executePrePlanned(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+    function _executePrePlanned(MultiplexerHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
         returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
     {
@@ -624,7 +622,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
 
     /// @dev Query all targets for indicatives and return the best one.
     ///      Used by pre-planned mode only when tolerance enforcement is enabled.
-    function _queryBestIndicative(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+    function _queryBestIndicative(MultiplexerHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
         returns (uint256 best)
     {
@@ -645,7 +643,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///      and the sum of pre-planned magnitudes must not exceed `|swapAmount|`. Without these
     ///      checks, an over-allocated leg flips the `remaining` tracker's sign and produces a
     ///      catch-all swap in the wrong direction.
-    function _runPrePlannedFills(AuctionHookData memory ahd, bool zeroForOne, int256 swapAmount)
+    function _runPrePlannedFills(MultiplexerHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
         returns (BalanceDelta totalDelta)
     {
@@ -666,7 +664,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
 
             // Wrapped in try/catch so a single failing target does not abort the entire
-            // pre-planned auction — soft-fail per target, mirroring the autonomous-mode contract.
+            // pre-planned multiplexer — soft-fail per target, mirroring the autonomous-mode contract.
             try poolManager.swap(
                 ahd.targets[i].poolKey,
                 SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
@@ -693,7 +691,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
 
     /// @dev Phase 1 of autonomous split fill: build and sort the candidate array.
     ///
-    ///      For each target in the AuctionHookData:
+    ///      For each target in the MultiplexerHookData:
     ///        - Simulate the quoter's real swap path for an indicative quote
     ///        - Read the quoter's pool sqrtPriceX96 (for price limit computation)
     ///        - If valid (non-zero indicative), add to the candidates array
@@ -709,11 +707,11 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     ///
     /// @param zeroForOne The swap direction.
     /// @param swapAmount The swap amount (after any fee deduction).
-    /// @param ahd        Decoded AuctionHookData.
+    /// @param ahd        Decoded MultiplexerHookData.
     /// @return candidates    Array of valid candidates, sorted best-first.
     /// @return count         Number of valid candidates (may be < candidates.length).
     /// @return bestIndividual The best individual indicative quote (tolerance baseline).
-    function _prepareCandidates(bool zeroForOne, int256 swapAmount, AuctionHookData memory ahd)
+    function _prepareCandidates(bool zeroForOne, int256 swapAmount, MultiplexerHookData memory ahd)
         internal
         returns (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual)
     {
@@ -825,7 +823,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             }
 
             // Execute the nested swap on this candidate's pool. Wrapped in try/catch so a single
-            // failing target (vault DoS, malicious hook, etc.) is soft-skipped and the auction
+            // failing target (vault DoS, malicious hook, etc.) is soft-skipped and the multiplexer
             // continues with the next candidate — matches the indicative-phase soft-fail
             // semantics in INV-MUX-3 instead of leaving fill-phase as a hard-fail asymmetry.
             try poolManager.swap(
@@ -933,7 +931,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     //                          GOVERNANCE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Transfer ownership of the auction hook.
+    /// @notice Transfer ownership of the multiplexer.
     /// @dev    One-step transfer; the new owner takes effect immediately. Reverts with
     ///         {Unauthorized} if the caller is not the current owner. Setting `newOwner` to
     ///         `address(0)` permanently renounces ownership.

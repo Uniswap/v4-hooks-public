@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
@@ -22,14 +22,14 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
-import {AuctionHookData, TargetedQuoter} from "../../src/alf/types/AuctionTypes.sol";
+import {MultiplexerHookData, TargetedQuoter} from "../../src/alf/types/MultiplexerTypes.sol";
 
 contract ALFMultiplexerTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    ALFMultiplexer public auctionHook;
+    ALFMultiplexer public multiplexer;
 
     SimpleSpreadQuoterHook public quoterA;
     SimpleSpreadQuoterHook public quoterB;
@@ -37,7 +37,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     address ownerA = makeAddr("ownerA");
     address ownerB = makeAddr("ownerB");
 
-    PoolKey auctionPoolKey;
+    PoolKey multiplexerPoolKey;
     PoolKey quoterAPoolKey;
     PoolKey quoterBPoolKey;
 
@@ -45,16 +45,16 @@ contract ALFMultiplexerTest is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        // ── Deploy auction hook ──
-        uint160 auctionFlags = uint160(
+        // ── Deploy multiplexer ──
+        uint160 multiplexerFlags = uint160(
             Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_DONATE_FLAG
                 | Hooks.BEFORE_SWAP_FLAG
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        auctionHook =
-            ALFMultiplexer(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | auctionFlags)));
-        deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(auctionHook));
+        multiplexer =
+            ALFMultiplexer(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | multiplexerFlags)));
+        deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(multiplexer));
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
@@ -88,14 +88,14 @@ contract ALFMultiplexerTest is Test, Deployers {
             hooks: IHooks(address(quoterB))
         });
 
-        auctionPoolKey = PoolKey({
-            currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(auctionHook))
+        multiplexerPoolKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 1, hooks: IHooks(address(multiplexer))
         });
 
         // ── Initialize pools (quoters at tick 30 → inside LP range [0,60)) ──
         manager.initialize(quoterAPoolKey, TickMath.getSqrtPriceAtTick(30));
         manager.initialize(quoterBPoolKey, TickMath.getSqrtPriceAtTick(30));
-        manager.initialize(auctionPoolKey, Constants.SQRT_PRICE_1_1);
+        manager.initialize(multiplexerPoolKey, Constants.SQRT_PRICE_1_1);
 
         // ── Authorize LP router and seed at active tick ──
         vm.prank(ownerA);
@@ -160,14 +160,14 @@ contract ALFMultiplexerTest is Test, Deployers {
     }
 
     function _buildTargetedHookData(TargetedQuoter[] memory targets) internal pure returns (bytes memory) {
-        return abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: 0}));
+        return abi.encode(MultiplexerHookData({attestationData: "", targets: targets, strictTolerancePips: 0}));
     }
 
-    // ──── Auction selects best quoter ────
+    // ──── Multiplexer selects best quoter ────
 
     function test_selectsBetterQuoter_zeroForOne() public {
-        // B has lower bidFee (1% vs 5%) → B wins auction
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        // B has lower bidFee (1% vs 5%) → B wins selection
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -177,8 +177,8 @@ contract ALFMultiplexerTest is Test, Deployers {
     }
 
     function test_selectsBetterQuoter_oneForZero() public {
-        // A has lower askFee (1% vs 5%) → A wins auction
-        BalanceDelta delta = swap(auctionPoolKey, false, -1e18, _buildBothTargets());
+        // A has lower askFee (1% vs 5%) → A wins selection
+        BalanceDelta delta = swap(multiplexerPoolKey, false, -1e18, _buildBothTargets());
 
         int128 output = delta.amount0();
         assertTrue(output > 0);
@@ -194,7 +194,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, false);
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -214,13 +214,13 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.expectRevert(
             abi.encodeWithSelector(
                 CustomRevert.WrappedError.selector,
-                address(auctionHook),
+                address(multiplexer),
                 IHooks.beforeSwap.selector,
                 abi.encodeWithSelector(ALFMultiplexer.NoValidQuotes.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
-        swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
     }
 
     // ──── Empty hookData reverts with TargetsRequired ────
@@ -229,13 +229,13 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.expectRevert(
             abi.encodeWithSelector(
                 CustomRevert.WrappedError.selector,
-                address(auctionHook),
+                address(multiplexer),
                 IHooks.beforeSwap.selector,
                 abi.encodeWithSelector(ALFMultiplexer.TargetsRequired.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
-        swap(auctionPoolKey, true, -1e18, "");
+        swap(multiplexerPoolKey, true, -1e18, "");
     }
 
     // ──── Delta forwarding correctness ────
@@ -247,7 +247,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         uint256 userBal0Before = token0.balanceOf(address(this));
         uint256 userBal1Before = token1.balanceOf(address(this));
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
 
         // User paid exactly 1e18 token0
         assertEq(token0.balanceOf(address(this)), userBal0Before - 1e18);
@@ -262,7 +262,7 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_deltaForwarding_exactOutput() public {
         // Exact output: user wants 0.5e18 token1 via zeroForOne
-        BalanceDelta delta = swap(auctionPoolKey, true, 0.5e18, _buildBothTargets());
+        BalanceDelta delta = swap(multiplexerPoolKey, true, 0.5e18, _buildBothTargets());
 
         int128 output = delta.amount1();
         assertTrue(output > 0);
@@ -276,24 +276,24 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.expectRevert(
             abi.encodeWithSelector(
                 CustomRevert.WrappedError.selector,
-                address(auctionHook),
+                address(multiplexer),
                 IHooks.beforeAddLiquidity.selector,
                 abi.encodeWithSelector(ALFMultiplexer.LiquidityNotAllowed.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
         modifyLiquidityRouter.modifyLiquidity(
-            auctionPoolKey, ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}), ""
+            multiplexerPoolKey, ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}), ""
         );
     }
 
     // ──── Event emission ────
 
-    function test_emitsAuctionExecuted() public {
+    function test_emitsMultiplexerExecuted_autonomous() public {
         // B wins with lower bidFee (1%) for zeroForOne
         vm.expectEmit(true, false, false, false); // only check winner address
-        emit ALFMultiplexer.AuctionExecuted(address(quoterB), true, -1e18, 0);
-        swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        emit ALFMultiplexer.MultiplexerExecuted(address(quoterB), true, -1e18, 0);
+        swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
     }
 
     // ════════════════════════════════════════════
@@ -306,7 +306,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -320,7 +320,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -338,7 +338,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -360,13 +360,13 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.expectRevert(
             abi.encodeWithSelector(
                 CustomRevert.WrappedError.selector,
-                address(auctionHook),
+                address(multiplexer),
                 IHooks.beforeSwap.selector,
                 abi.encodeWithSelector(ALFMultiplexer.NoValidQuotes.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
-        swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
     }
 
     // ──── Targeted with curve update ────
@@ -445,7 +445,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
@@ -474,22 +474,22 @@ contract ALFMultiplexerTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
 
-        swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         // After the nested swap, A's stored pricing should be updated
         (uint24 bidFeePips,,) = quoterA.pricingState(quoterAPoolKey.toId());
         assertEq(bidFeePips, 5_000);
     }
 
-    function test_targeted_emitsAuctionExecutedWithWinner() public {
+    function test_targeted_emitsMultiplexerExecuted() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // B wins with lower bidFee (1%) for zeroForOne
         vm.expectEmit(true, false, false, false);
-        emit ALFMultiplexer.AuctionExecuted(address(quoterB), true, -1e18, 0);
-        swap(auctionPoolKey, true, -1e18, _buildTargetedHookData(targets));
+        emit ALFMultiplexer.MultiplexerExecuted(address(quoterB), true, -1e18, 0);
+        swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
     }
 
     // ════════════════════════════════════════════
@@ -505,7 +505,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         pure
         returns (bytes memory)
     {
-        return abi.encode(AuctionHookData({attestationData: "", targets: targets, strictTolerancePips: tolerancePips}));
+        return abi.encode(MultiplexerHookData({attestationData: "", targets: targets, strictTolerancePips: tolerancePips}));
     }
 
     function test_strict_passesWhenQuoteMatchesExecution() public {
@@ -514,7 +514,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // Strict mode should pass — spread quoter's indicative matches execution exactly
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookData(targets));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -524,7 +524,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
         // Exact output with strict mode
-        BalanceDelta delta = swap(auctionPoolKey, true, 0.5e18, _buildStrictHookData(targets));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, 0.5e18, _buildStrictHookData(targets));
         assertEq(delta.amount1(), int128(0.5e18));
         assertTrue(delta.amount0() < 0);
     }
@@ -535,7 +535,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -545,7 +545,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -556,7 +556,7 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter_zeroForOne() public view {
         // B has lower bidFee (1% vs 5%) → B wins
-        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -564,7 +564,7 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter_oneForZero() public view {
         // A has lower askFee (1% vs 5%) → A wins
-        (, address winner, uint256 bestQuote,) = auctionHook.quote(false, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(false, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterA));
         assertTrue(bestQuote > 0);
@@ -575,7 +575,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildTargetedHookData(targets));
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildTargetedHookData(targets));
 
         assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
@@ -583,10 +583,10 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_quote_matchesSwapExecution() public {
         // Get the quote first
-        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, -1e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildBothTargets());
 
         // Execute the actual swap
-        BalanceDelta delta = swap(auctionPoolKey, true, -1e18, _buildBothTargets());
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
 
         // Quote winner should match the quoter that executed
         assertEq(winner, address(quoterB));
@@ -602,20 +602,20 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         vm.expectRevert(ALFMultiplexer.NoValidQuotes.selector);
-        auctionHook.quote(true, -1e18, _buildBothTargets());
+        multiplexer.quote(true, -1e18, _buildBothTargets());
     }
 
     function test_quote_skipsUnliveQuoter() public {
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, false);
 
-        (, address winner,,) = auctionHook.quote(true, -1e18, _buildBothTargets());
+        (, address winner,,) = multiplexer.quote(true, -1e18, _buildBothTargets());
         assertEq(winner, address(quoterA));
     }
 
     function test_quote_exactOutput() public view {
         // Exact output: picks quoter requiring least input
-        (, address winner, uint256 bestQuote,) = auctionHook.quote(true, 0.5e18, _buildBothTargets());
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(true, 0.5e18, _buildBothTargets());
 
         // B has lower bidFee → requires less input → wins
         assertEq(winner, address(quoterB));
@@ -629,21 +629,21 @@ contract ALFMultiplexerTest is Test, Deployers {
     // and taken directly to the token jar during _beforeSwap via _applyProtocolFee.
     // Full protocol fee testing requires a fee adapter mock — covered in fork tests.
 
-    function test_auctionFee_zeroFee() public {
+    function test_multiplexerFee_zeroFee() public {
         // Default pool has no protocol fee set in slot0 — verify no fee taken
-        swap(auctionPoolKey, true, -1e18, _buildBothTargets());
-        assertEq(manager.balanceOf(address(auctionHook), currency0.toId()), 0);
+        swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
+        assertEq(manager.balanceOf(address(multiplexer), currency0.toId()), 0);
     }
 
     function test_governance_transferOwnership() public {
         address newOwner = makeAddr("newOwner");
         vm.expectEmit(true, true, true, true);
         emit ALFMultiplexer.OwnershipTransferred(address(this), newOwner);
-        auctionHook.transferOwnership(newOwner);
-        assertEq(auctionHook.owner(), newOwner);
+        multiplexer.transferOwnership(newOwner);
+        assertEq(multiplexer.owner(), newOwner);
 
         vm.expectRevert(ALFMultiplexer.Unauthorized.selector);
-        auctionHook.transferOwnership(address(this));
+        multiplexer.transferOwnership(address(this));
     }
 
     // ════════════════════════════════════════════
@@ -653,7 +653,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     /// @dev A pre-planned target whose `amountSpecified` sign mismatches the outer swap is rejected.
     function test_prePlanned_directionMismatch_reverts() public {
         // Outer swap: exact-input (negative). Target leg uses exact-output (positive) — mismatch.
-        AuctionHookData memory ahd = AuctionHookData({
+        MultiplexerHookData memory ahd = MultiplexerHookData({
             attestationData: "",
             targets: new TargetedQuoter[](2),
             strictTolerancePips: 0
@@ -665,12 +665,12 @@ contract ALFMultiplexerTest is Test, Deployers {
 
         // The PoolManager wraps hook reverts in `WrappedError`, so we just verify it reverts.
         vm.expectRevert();
-        swap(auctionPoolKey, true, -1e18, abi.encode(ahd));
+        swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
     }
 
     /// @dev Pre-planned targets summing to more than `|swapAmount|` are rejected.
     function test_prePlanned_overAllocated_reverts() public {
-        AuctionHookData memory ahd = AuctionHookData({
+        MultiplexerHookData memory ahd = MultiplexerHookData({
             attestationData: "",
             targets: new TargetedQuoter[](2),
             strictTolerancePips: 0
@@ -682,14 +682,14 @@ contract ALFMultiplexerTest is Test, Deployers {
         // Sum = -1.2e18, outer swap is -1e18 → over-allocated.
 
         vm.expectRevert();
-        swap(auctionPoolKey, true, -1e18, abi.encode(ahd));
+        swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
     }
 
     // ════════════════════════════════════════════
     //  M-06: donate path is blocked on virtual pool
     // ════════════════════════════════════════════
 
-    /// @dev Donations to the virtual auction pool would be permanently locked since the pool
+    /// @dev Donations to the virtual multiplexer pool would be permanently locked since the pool
     ///      has no LP positions — `_beforeDonate` reverts unconditionally.
     function test_donate_revertsOnVirtualPool() public {
         deal(Currency.unwrap(currency0), address(this), 1e18);
@@ -698,6 +698,6 @@ contract ALFMultiplexerTest is Test, Deployers {
         IERC20Minimal(Currency.unwrap(currency1)).approve(address(donateRouter), type(uint256).max);
 
         vm.expectRevert();
-        donateRouter.donate(auctionPoolKey, 1e18, 1e18, "");
+        donateRouter.donate(multiplexerPoolKey, 1e18, 1e18, "");
     }
 }
