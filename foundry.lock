@@ -29,8 +29,17 @@
       "rev": "e9262fb5e3553f83ad1fc009183f3455b16e85dd"
     }
   },
+  "lib/slipstream": {
+    "rev": "f8717faaae6e6717db3c8e3850149c01a79c0603"
+  },
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
+  "lib/v2-core": {
+    "tag": {
+      "name": "v1.0.1",
+      "rev": "4dd59067c76dea4a0e8e4bfdda41877a6b16dedc"
+    }
   },
   "lib/v3-core": {
     "tag": {

@@ -82,7 +82,7 @@ contract StableSwapForkedTest is Test {
         // Load meta registry address from env vars
         metaRegistry = vm.envAddress("META_REGISTRY");
         // Load V4 infrastructure address from env vars
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
 
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);

@@ -15,12 +15,12 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
+import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {IUniswapV3Pool} from "../../../src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3Pool.sol";
 
-/// @notice Fork tests — Ethereum mainnet (chain id 1).
-/// @dev `FORK_RPC_URL_1` and optional `FORK_BLOCK_NUMBER_1`. Skips when RPC unset.
-contract UniswapV3AggregatorForkTest is Test {
+/// @notice Fork tests — Base mainnet (chain id 8453) PancakeSwap V3 external pools + Uniswap V4 PoolManager on Base.
+/// @dev `FORK_RPC_URL_8453`, `POOL_MANAGER_8453`, `PANCAKE_V3_*`. Skips when RPC unset or any required address env is missing.
+contract PancakeSwapV3AggregatorForkTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeERC20 for IERC20;
@@ -29,11 +29,12 @@ contract UniswapV3AggregatorForkTest is Test {
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
     uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
 
-    address constant USDT_MAINNET = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    /// @dev Bridged USDT on Base (verify on BaseScan for your fork block).
+    address constant USDT_BASE = 0xfDE4C96C8593536E31F229Ea8f37B2adAbC26991;
 
     IPoolManager public manager;
     SafePoolSwapTest public swapRouter;
-    UniswapV3Aggregator public hook;
+    PancakeSwapV3Aggregator public hook;
 
     address public token0Address;
     address public token1Address;
@@ -50,24 +51,31 @@ contract UniswapV3AggregatorForkTest is Test {
 
     function setUp() public {
         string memory rpcUrl;
-        try vm.envString("FORK_RPC_URL_1") returns (string memory r) {
+        try vm.envString("FORK_RPC_URL_8453") returns (string memory r) {
             rpcUrl = r;
         } catch {
             vm.skip(true);
             return;
         }
-        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_1", uint256(0));
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_8453", uint256(0));
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);
         } else {
             vm.createSelectFork(rpcUrl);
         }
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
-        address uniFactory = vm.envAddress("UNISWAP_V3_FACTORY");
-        address quoterAddr = vm.envAddress("UNISWAP_V3_QUOTER_V2");
-        address externalPoolAddr = vm.envAddress("UNISWAP_V3_EXTERNAL_POOL");
+        address poolManagerAddress = vm.envOr("POOL_MANAGER_8453", address(0));
+        address pancakeFactory = vm.envOr("PANCAKE_V3_FACTORY", address(0));
+        address quoterAddr = vm.envOr("PANCAKE_V3_QUOTER_V2", address(0));
+        address externalPoolAddr = vm.envOr("PANCAKE_V3_EXTERNAL_POOL", address(0));
 
-        alice = address(uint160(uint256(keccak256("univ3_agg_fork_alice_v1"))));
+        bool missingPancake = poolManagerAddress == address(0) || pancakeFactory == address(0)
+            || quoterAddr == address(0) || externalPoolAddr == address(0);
+        if (missingPancake) {
+            vm.skip(true);
+            return;
+        }
+
+        alice = address(uint160(uint256(keccak256("pancakeswap_v3_agg_fork_alice_v1"))));
 
         IUniswapV3Pool extPool = IUniswapV3Pool(externalPoolAddr);
         token0Address = extPool.token0();
@@ -84,7 +92,7 @@ contract UniswapV3AggregatorForkTest is Test {
         manager = IPoolManager(poolManagerAddress);
         swapRouter = new SafePoolSwapTest(manager);
 
-        _deployHook(uniFactory, quoterAddr);
+        _deployHook(pancakeFactory, quoterAddr);
 
         poolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: feeTier, tickSpacing: ts, hooks: IHooks(address(hook))
@@ -104,15 +112,16 @@ contract UniswapV3AggregatorForkTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(address uniFactory, address quoterAddr) internal {
+    function _deployHook(address factory_, address quoterAddr) internal {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(address(manager), uniFactory, quoterAddr, "UniswapV3Aggregator v1.0");
+        bytes memory constructorArgs =
+            abi.encode(address(manager), factory_, quoterAddr, "PancakeSwapV3Aggregator v1.0");
         (address hookAddress, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(UniswapV3Aggregator).creationCode, constructorArgs);
-        hook = new UniswapV3Aggregator{salt: salt}(manager, uniFactory, quoterAddr, "UniswapV3Aggregator v1.0");
+            HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
+        hook = new PancakeSwapV3Aggregator{salt: salt}(manager, factory_, quoterAddr, "PancakeSwapV3Aggregator v1.0");
         require(address(hook) == hookAddress, "hook addr");
     }
 
@@ -151,8 +160,8 @@ contract UniswapV3AggregatorForkTest is Test {
     }
 
     function test_fork_swapExactIn_quoteMatches_whenPoolIncludesUSDT_zeroForOne() public {
-        bool hasUsdt = token0Address == USDT_MAINNET || token1Address == USDT_MAINNET;
-        assertTrue(hasUsdt, "Point UNISWAP_V3_EXTERNAL_POOL at a USDT pool (README fork requirement)");
+        bool hasUsdt = token0Address == USDT_BASE || token1Address == USDT_BASE;
+        assertTrue(hasUsdt, "Point PANCAKE_V3_EXTERNAL_POOL at a USDT pool (README fork requirement)");
 
         uint256 amtIn = 100 * (10 ** token0Decimals);
         uint256 expectedOut = hook.quote(true, -int256(amtIn), poolId);
@@ -171,8 +180,8 @@ contract UniswapV3AggregatorForkTest is Test {
     }
 
     function test_fork_swapExactIn_quoteMatches_whenPoolIncludesUSDT_oneForZero() public {
-        bool hasUsdt = token0Address == USDT_MAINNET || token1Address == USDT_MAINNET;
-        assertTrue(hasUsdt, "Point UNISWAP_V3_EXTERNAL_POOL at a USDT pool (README fork requirement)");
+        bool hasUsdt = token0Address == USDT_BASE || token1Address == USDT_BASE;
+        assertTrue(hasUsdt, "Point PANCAKE_V3_EXTERNAL_POOL at a USDT pool (README fork requirement)");
 
         uint256 amtIn = 100 * (10 ** token1Decimals);
         uint256 expectedOut = hook.quote(false, -int256(amtIn), poolId);

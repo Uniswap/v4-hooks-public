@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -12,8 +11,8 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IUniswapV3MintCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {UniV3MintHelper} from "../UniswapV3/mocks/UniV3MintHelper.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {SlipstreamAggregator} from "../../../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
@@ -26,28 +25,9 @@ interface ISlipstreamCLFactory {
         returns (address pool);
 }
 
-/// @dev Pays mint callback; `payer` must approve this helper for both tokens.
-contract UniV3MintHelper is IUniswapV3MintCallback {
-    function mint(address pool, address recipient, int24 tickLower, int24 tickUpper, uint128 amount) external {
-        IUniswapV3Pool(pool).mint(recipient, tickLower, tickUpper, amount, abi.encode(msg.sender));
-    }
-
-    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external override {
-        address payer = abi.decode(data, (address));
-        if (amount0Owed > 0) {
-            address t0 = IUniswapV3Pool(msg.sender).token0();
-            require(IERC20(t0).transferFrom(payer, msg.sender, amount0Owed), "t0");
-        }
-        if (amount1Owed > 0) {
-            address t1 = IUniswapV3Pool(msg.sender).token1();
-            require(IERC20(t1).transferFrom(payer, msg.sender, amount1Owed), "t1");
-        }
-    }
-}
-
 /// @title SlipstreamAggregatorFuzz
 /// @notice Fuzz on a Base fork using canonical Slipstream CL factory + QuoterV2; creates a fresh CL pool from mock ERC-20s.
-/// @dev `FORK_RPC_URL_8453`, optional `FORK_BLOCK_NUMBER_8453`, `SLIPSTREAM_FACTORY`, `SLIPSTREAM_QUOTER_V2`. Skips when RPC unset.
+/// @dev Skips when RPC unset.
 contract SlipstreamAggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
 

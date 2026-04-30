@@ -52,9 +52,8 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
     error UnauthorizedCallback();
     error CallbackOutsideActiveSwap();
     error Reentrancy();
-    error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
-    /// @dev Swap return deltas did not show pool sending the expected output token (fee-on-transfer or buggy pool)
     error UnexpectedSwapOutputDelta();
+    error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 
     /// @param manager PoolManager
     /// @param factory_ Uniswap V3 factory (fee-tier `getPool`)
@@ -69,6 +68,10 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
 
     /// @inheritdoc IUniswapV3SwapCallback
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
+        _processCallback(amount0Delta, amount1Delta, data);
+    }
+
+    function _processCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) internal {
         address expectedPool = _transientExpectedPool();
         if (expectedPool == address(0)) revert CallbackOutsideActiveSwap();
         if (msg.sender != expectedPool) revert UnauthorizedCallback();

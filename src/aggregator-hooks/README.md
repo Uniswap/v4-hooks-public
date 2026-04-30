@@ -33,6 +33,7 @@ First-byte ID table:
 | 71  | TempoExchange      |
 | 03  | Uniswap V3         |
 | A1  | Slipstream         |
+| 93  | Pancakeswap V3     |
 
 ## Supported Protocols
 

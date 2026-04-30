@@ -13,12 +13,13 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
-import {MockUniV3Pool} from "./mocks/MockUniV3Pool.sol";
-import {MockUniV3Factory} from "./mocks/MockUniV3Factory.sol";
-import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {MockUniV3Pool} from "../UniswapV3/mocks/MockUniV3Pool.sol";
+import {MockUniV3Factory} from "../UniswapV3/mocks/MockUniV3Factory.sol";
+import {MockQuoterV2} from "../UniswapV3/mocks/MockQuoterV2.sol";
 
-contract UniswapV3AggregatorUnitTest is Test {
+/// @notice Unit tests for the PancakeSwapV3Aggregator hook.
+contract PancakeSwapV3AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public poolManager;
@@ -26,7 +27,7 @@ contract UniswapV3AggregatorUnitTest is Test {
     MockUniV3Factory public factory;
     MockUniV3Pool public extPool;
     MockQuoterV2 public quoter;
-    UniswapV3Aggregator public hook;
+    PancakeSwapV3Aggregator public hook;
 
     MockERC20 public token0;
     MockERC20 public token1;
@@ -84,18 +85,18 @@ contract UniswapV3AggregatorUnitTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook() internal returns (UniswapV3Aggregator) {
+    function _deployHook() internal returns (PancakeSwapV3Aggregator) {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
         bytes memory constructorArgs =
-            abi.encode(poolManager, address(factory), address(quoter), "UniswapV3Aggregator v1.0");
-        (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV3Aggregator).creationCode, constructorArgs);
-        return
-            new UniswapV3Aggregator{salt: salt}(
-                poolManager, address(factory), address(quoter), "UniswapV3Aggregator v1.0"
-            );
+            abi.encode(poolManager, address(factory), address(quoter), "PancakeSwapV3Aggregator v1.0");
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
+        return new PancakeSwapV3Aggregator{salt: salt}(
+            poolManager, address(factory), address(quoter), "PancakeSwapV3Aggregator v1.0"
+        );
     }
 
     function test_quote_exactIn_matches_math() public {
@@ -205,7 +206,6 @@ contract UniswapV3AggregatorUnitTest is Test {
             hooks: IHooks(address(hook))
         });
 
-        // PoolManager wraps hook revert as WrappedError
         vm.expectRevert();
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }

@@ -87,7 +87,7 @@ contract StableSwapNGForkedTest is Test {
         // Load Curve factory address from env vars
         curveFactoryNg = vm.envAddress("CURVE_FACTORY_NG");
         // Load V4 infrastructure address from env vars
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
 
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);

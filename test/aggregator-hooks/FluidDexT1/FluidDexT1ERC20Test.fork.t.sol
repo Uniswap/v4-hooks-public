@@ -94,7 +94,7 @@ contract FluidDexT1ERC20ForkedTest is Test {
         fluidDexReservesResolver = vm.envAddress("FLUID_DEX_T1_RESERVES_RESOLVER");
         fluidDexResolver = vm.envAddress("FLUID_DEX_T1_RESOLVER");
         // Load V4 infrastructure address from env vars
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
 
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);

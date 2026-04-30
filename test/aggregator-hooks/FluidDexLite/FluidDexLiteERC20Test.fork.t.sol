@@ -91,7 +91,7 @@ contract FluidDexLiteERC20ForkedTest is Test {
         token0Address = vm.envAddress("FLUID_DEX_LITE_TOKEN0_ERC20");
         token1Address = vm.envAddress("FLUID_DEX_LITE_TOKEN1_ERC20");
         // Load V4 infrastructure address from env vars
-        poolManagerAddress = vm.envAddress("POOL_MANAGER");
+        poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
 
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);

@@ -27,6 +27,7 @@ contract MineAggregatorHookScript is Script {
     uint8 constant ID_TEMPO = 0x71;
     uint8 constant ID_UNISWAP_V3 = 0x03;
     uint8 constant ID_SLIPSTREAM = 0xA1;
+    uint8 constant ID_PANCAKE_V3 = 0x93;
 
     function run() public view {
         // Read salt offset from environment variable (default to 0)

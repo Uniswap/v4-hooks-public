@@ -11,33 +11,36 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
+import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {WETH} from "solmate/src/tokens/WETH.sol";
-import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {UniV3MintHelper} from "./mocks/UniV3MintHelper.sol";
-
+import {IPancakeV3Factory} from "@pancakeswap/v3-core/interfaces/IPancakeV3Factory.sol";
+import {IPancakeV3Pool} from "@pancakeswap/v3-core/interfaces/IPancakeV3Pool.sol";
+import {IPancakeV3PoolDeployer} from "./mocks/IPancakeV3PoolDeployer.sol";
+import {PancakeV3MintHelper} from "./mocks/PancakeV3MintHelper.sol";
 import "forge-std/Test.sol";
 
-/// @notice Fuzz against canonical Uniswap V3 factory + QuoterV2 bytecode from `precompile/` (Curve-style `readFile` + `parseBytes`).
-/// @dev `QuoterV2` is constructed with real Solmate `WETH` as `WETH9` (ERC-20-only swaps in these tests).
-contract UniswapV3AggregatorFuzz is Test {
+/// @notice Fuzz with canonical PancakeSwap V3 bytecode: pool deployer + factory (constructor arg) + QuoterV2.
+/// @dev Precompile `.bin` files are **creation** bytecode for `CREATE` (not runtime `eth_getCode`).
+contract PancakeSwapV3AggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
 
-    string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/UniswapV3/precompile/UniswapV3Factory.bin";
-    string constant QUOTER_BYTECODE_PATH = "test/aggregator-hooks/UniswapV3/precompile/QuoterV2.bin";
+    string constant POOL_DEPLOYER_BYTECODE_PATH =
+        "test/aggregator-hooks/PancakeSwapV3/precompile/PancakeV3PoolDeployer.bin";
+    string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/PancakeSwapV3/precompile/PancakeV3Factory.bin";
+    string constant QUOTER_BYTECODE_PATH = "test/aggregator-hooks/PancakeSwapV3/precompile/QuoterV2.bin";
 
-    uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_LOWER = -600;
-    int24 constant TICK_UPPER = 600;
+    /// @dev Pancake factory enables 100 / 500 / 2500 (not 3000) / 10000 bps.
+    uint24 constant POOL_FEE = 2500;
+    int24 constant TICK_LOWER = -500;
+    int24 constant TICK_UPPER = 500;
     uint128 constant LIQUIDITY_AMOUNT = 1e24;
 
     IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
-    UniswapV3Aggregator public hook;
+    PancakeSwapV3Aggregator public hook;
 
-    IUniswapV3Factory public factory;
+    IPancakeV3Factory public factory;
     address public quoter;
     address public extPool;
 
@@ -57,18 +60,24 @@ contract UniswapV3AggregatorFuzz is Test {
             IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
         swapRouter = new SafePoolSwapTest(poolManager);
 
-        factory = IUniswapV3Factory(_deployCreate(FACTORY_BYTECODE_PATH));
+        address poolDeployer = _deployCreate(POOL_DEPLOYER_BYTECODE_PATH);
+        bytes memory factoryBytecode = _readPrecompileHex(FACTORY_BYTECODE_PATH);
+        bytes memory factoryCreation = abi.encodePacked(factoryBytecode, abi.encode(poolDeployer));
+        address factoryAddr = _deployCreateBytecode(factoryCreation);
+        IPancakeV3PoolDeployer(poolDeployer).setFactoryAddress(factoryAddr);
+        factory = IPancakeV3Factory(factoryAddr);
+
         WETH weth = new WETH();
-        quoter = _deployQuoter(address(factory), address(weth));
+        quoter = _deployQuoter(poolDeployer, factoryAddr, address(weth));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
         if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
 
         extPool = factory.createPool(address(token0), address(token1), POOL_FEE);
-        IUniswapV3Pool(extPool).initialize(SQRT_PRICE_1_1);
+        IPancakeV3Pool(extPool).initialize(SQRT_PRICE_1_1);
 
-        UniV3MintHelper mintHelper = new UniV3MintHelper();
+        PancakeV3MintHelper mintHelper = new PancakeV3MintHelper();
         token0.mint(address(this), type(uint128).max);
         token1.mint(address(this), type(uint128).max);
         token0.approve(address(mintHelper), type(uint256).max);
@@ -81,7 +90,7 @@ contract UniswapV3AggregatorFuzz is Test {
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
             fee: POOL_FEE,
-            tickSpacing: IUniswapV3Pool(extPool).tickSpacing(),
+            tickSpacing: IPancakeV3Pool(extPool).tickSpacing(),
             hooks: IHooks(address(hook))
         });
         poolId = poolKey.toId();
@@ -101,31 +110,49 @@ contract UniswapV3AggregatorFuzz is Test {
         vm.stopPrank();
     }
 
-    function _deployHook() internal returns (UniswapV3Aggregator) {
+    function _deployHook() internal returns (PancakeSwapV3Aggregator) {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), quoter, "UniswapV3Aggregator v1.0");
-        (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV3Aggregator).creationCode, constructorArgs);
-        return new UniswapV3Aggregator{salt: salt}(poolManager, address(factory), quoter, "UniswapV3Aggregator v1.0");
+        bytes memory constructorArgs = abi.encode(poolManager, address(factory), quoter, "PancakeSwapV3Aggregator v1.0");
+        (, bytes32 salt) =
+            HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
+        return
+            new PancakeSwapV3Aggregator{salt: salt}(
+                poolManager, address(factory), quoter, "PancakeSwapV3Aggregator v1.0"
+            );
     }
 
-    /// @notice Same pattern as Curve fuzz: `readFile` + `parseBytes`, but Uniswap V3 factory must run its constructor (CREATE, not `vm.etch`).
+    /// @dev Reads a single-line hex file; adds `0x` if missing (matches `UniswapV3Factory.bin` style).
+    function _readPrecompileHex(string memory path) internal view returns (bytes memory) {
+        string memory raw = vm.readFile(path);
+        bytes memory rb = bytes(raw);
+        if (rb.length >= 2 && rb[0] == bytes1(uint8(48)) && rb[1] == bytes1(uint8(120))) {
+            return vm.parseBytes(raw);
+        }
+        return vm.parseBytes(string.concat("0x", raw));
+    }
+
     function _deployCreate(string memory path) internal returns (address deployed) {
-        bytes memory bytecode = vm.parseBytes(vm.readFile(path));
+        bytes memory bytecode = _readPrecompileHex(path);
+        return _deployCreateBytecode(bytecode);
+    }
+
+    function _deployCreateBytecode(bytes memory bytecode) internal returns (address deployed) {
         require(bytecode.length > 0, "Empty bytecode");
         assembly {
             deployed := create(0, add(bytecode, 0x20), mload(bytecode))
         }
         require(deployed != address(0), "CREATE failed");
+        return deployed;
     }
 
-    /// @dev `QuoterV2.bin` creation code + `(address factory, address WETH9)` ABI args.
-    function _deployQuoter(address factory_, address weth) internal returns (address q) {
-        bytes memory code = vm.parseBytes(vm.readFile(QUOTER_BYTECODE_PATH));
+    /// @dev Pancake `QuoterV2` constructor: `(poolDeployer, factory, WETH9)` (Uniswap uses `(factory, WETH9)` only).
+    function _deployQuoter(address poolDeployer_, address factory_, address weth) internal returns (address q) {
+        bytes memory code = _readPrecompileHex(QUOTER_BYTECODE_PATH);
         require(code.length > 0, "Empty QuoterV2 bytecode");
-        bytes memory creation = abi.encodePacked(code, abi.encode(factory_, weth));
+        bytes memory creation = abi.encodePacked(code, abi.encode(poolDeployer_, factory_, weth));
         assembly {
             q := create(0, add(creation, 0x20), mload(creation))
         }

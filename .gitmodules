@@ -32,3 +32,9 @@
 [submodule "lib/v3-periphery"]
 	path = lib/v3-periphery
 	url = https://github.com/Uniswap/v3-periphery.git
+[submodule "lib/v2-core"]
+	path = lib/v2-core
+	url = https://github.com/Uniswap/v2-core
+[submodule "lib/pancake-v3-contracts"]
+	path = lib/pancake-v3-contracts
+	url = https://github.com/pancakeswap/pancake-v3-contracts.git

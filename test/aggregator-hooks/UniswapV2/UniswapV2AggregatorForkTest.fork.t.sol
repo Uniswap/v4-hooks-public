@@ -13,28 +13,27 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {SlipstreamAggregator} from "../../../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
-import {IUniswapV3Pool} from "../../../src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3Pool.sol";
-import {
-    ISlipstreamFactory
-} from "../../../src/aggregator-hooks/implementations/Slipstream/interfaces/ISlipstreamFactory.sol";
-import {IQuoterV2} from "../../../src/aggregator-hooks/implementations/Slipstream/interfaces/IQuoterV2.sol";
+import {UniswapV2Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol";
+import {IUniswapV2Pair as IUniV2Pair} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
-/// @notice Fork tests — Base mainnet (chain id 8453) Slipstream.
-/// @dev `FORK_RPC_URL_8453` and optional `FORK_BLOCK_NUMBER_8453`. Skips when RPC unset.
-contract SlipstreamAggregatorForkTest is Test {
+/// @notice Fork tests — Ethereum mainnet (chain id 1).
+/// @dev `FORK_RPC_URL_1` and optional `FORK_BLOCK_NUMBER_1`. Skips when RPC unset.
+contract UniswapV2AggregatorForkTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeERC20 for IERC20;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
     uint160 constant MIN_PRICE_LIMIT = TickMath.MIN_SQRT_PRICE + 1;
+    uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
+
+    address constant USDT_MAINNET = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 
     IPoolManager public manager;
     SafePoolSwapTest public swapRouter;
-    SlipstreamAggregator public hook;
+    UniswapV2Aggregator public hook;
 
     address public token0Address;
     address public token1Address;
@@ -51,74 +50,53 @@ contract SlipstreamAggregatorForkTest is Test {
 
     function setUp() public {
         string memory rpcUrl;
-        try vm.envString("FORK_RPC_URL_8453") returns (string memory r) {
+        try vm.envString("FORK_RPC_URL_1") returns (string memory r) {
             rpcUrl = r;
         } catch {
             vm.skip(true);
             return;
         }
-        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_8453", uint256(0));
+
+        address externalPairAddr = vm.envAddress("UNISWAP_V2_EXTERNAL_PAIR");
+
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_1", uint256(0));
         if (forkBlockNumber > 0) {
             vm.createSelectFork(rpcUrl, forkBlockNumber);
         } else {
             vm.createSelectFork(rpcUrl);
         }
 
-        address poolManagerAddress = vm.envAddress("POOL_MANAGER_8453");
-        address slipFactory = vm.envAddress("SLIPSTREAM_FACTORY");
-        address quoterAddr = vm.envAddress("SLIPSTREAM_QUOTER_V2");
-        address externalPoolAddr = vm.envAddress("SLIPSTREAM_EXTERNAL_POOL");
+        address poolManagerAddress = vm.envAddress("POOL_MANAGER_1");
 
-        alice = address(uint160(uint256(keccak256("slipstream_agg_fork_alice_v1"))));
+        alice = address(uint160(uint256(keccak256("univ2_agg_fork_alice_v1"))));
 
-        IUniswapV3Pool extPool = IUniswapV3Pool(externalPoolAddr);
-        token0Address = extPool.token0();
-        token1Address = extPool.token1();
-        uint24 feeTier = extPool.fee();
-        token0Decimals = IERC20Metadata(token0Address).decimals();
-        token1Decimals = IERC20Metadata(token1Address).decimals();
-        uint256 probeAmountIn = uint256(10) ** token0Decimals;
-
-        // Routing uses pool.tickSpacing() as the factory/quoter key (same as SlipstreamAggregator._quoterRoutingHintFromKey).
-        ISlipstreamFactory sf = ISlipstreamFactory(slipFactory);
-        IQuoterV2 sq = IQuoterV2(quoterAddr);
-        int24 ts = extPool.tickSpacing();
-        require(
-            sf.getPool(token0Address, token1Address, ts) == externalPoolAddr,
-            "fork: SLIPSTREAM_FACTORY does not register SLIPSTREAM_EXTERNAL_POOL at pool.tickSpacing()"
-        );
-        try sq.quoteExactInputSingle(
-            IQuoterV2.QuoteExactInputSingleParams({
-                tokenIn: token0Address,
-                tokenOut: token1Address,
-                amountIn: probeAmountIn,
-                tickSpacing: ts,
-                sqrtPriceLimitX96: 0
-            })
-        ) returns (
-            uint256
-        ) {}
-        catch {
-            revert("fork: quoter reverted at pool.tickSpacing(); check SLIPSTREAM_QUOTER_V2 / probe amount");
-        }
+        IUniV2Pair extPair = IUniV2Pair(externalPairAddr);
+        address uniFactory = extPair.factory();
+        token0Address = extPair.token0();
+        token1Address = extPair.token1();
 
         currency0 = Currency.wrap(token0Address);
         currency1 = Currency.wrap(token1Address);
 
+        token0Decimals = IERC20Metadata(token0Address).decimals();
+        token1Decimals = IERC20Metadata(token1Address).decimals();
+
         manager = IPoolManager(poolManagerAddress);
         swapRouter = new SafePoolSwapTest(manager);
 
-        _deployHook(slipFactory, quoterAddr);
+        _deployHook(uniFactory);
 
         poolKey = PoolKey({
-            currency0: currency0, currency1: currency1, fee: feeTier, tickSpacing: ts, hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: 3000, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         poolId = poolKey.toId();
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
 
-        deal(token0Address, alice, 1_000_000 * (10 ** token0Decimals));
-        deal(token1Address, alice, 1_000_000 * (10 ** token1Decimals));
+        uint256 bal0 = 1_000_000 * (10 ** token0Decimals);
+        uint256 bal1 = 1_000_000 * (10 ** token1Decimals);
+        deal(token0Address, alice, bal0);
+        deal(token1Address, alice, bal1);
 
         vm.startPrank(alice);
         IERC20(token0Address).forceApprove(address(swapRouter), type(uint256).max);
@@ -126,19 +104,22 @@ contract SlipstreamAggregatorForkTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(address slipFactory, address quoterAddr) internal {
+    function _deployHook(address uniFactory) internal {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(address(manager), slipFactory, quoterAddr);
+        bytes memory constructorArgs = abi.encode(address(manager), uniFactory, "UniswapV2Aggregator v1.0");
         (address hookAddress, bytes32 salt) =
-            HookMiner.find(address(this), flags, type(SlipstreamAggregator).creationCode, constructorArgs);
-        hook = new SlipstreamAggregator{salt: salt}(manager, slipFactory, quoterAddr);
+            HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
+        hook = new UniswapV2Aggregator{salt: salt}(manager, uniFactory, "UniswapV2Aggregator v1.0");
         require(address(hook) == hookAddress, "hook addr");
     }
 
-    function test_fork_swapExactIn_quoteMatches() public {
+    function test_fork_swapExactIn_quoteMatches_whenPoolIncludesUSDT() public {
+        bool hasUsdt = token0Address == USDT_MAINNET || token1Address == USDT_MAINNET;
+        assertTrue(hasUsdt, "Point UNISWAP_V2_EXTERNAL_PAIR at a USDT pool (README fork requirement)");
+
         uint256 amtIn = 100 * (10 ** token0Decimals);
         uint256 expectedOut = hook.quote(true, -int256(amtIn), poolId);
 
@@ -159,6 +140,23 @@ contract SlipstreamAggregatorForkTest is Test {
         uint256 amtIn = 1000 * (10 ** token0Decimals);
         uint256 out = hook.quote(true, -int256(amtIn), poolId);
         assertGt(out, 0);
+    }
+
+    function test_fork_swapExactIn_quoteMatches_oneForZero() public {
+        uint256 amtIn = 100 * (10 ** token1Decimals);
+        uint256 expectedOut = hook.quote(false, -int256(amtIn), poolId);
+
+        uint256 t0Before = IERC20(token0Address).balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: false, amountSpecified: -int256(amtIn), sqrtPriceLimitX96: MAX_PRICE_LIMIT}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertEq(IERC20(token0Address).balanceOf(alice) - t0Before, expectedOut);
     }
 
     receive() external payable {}
