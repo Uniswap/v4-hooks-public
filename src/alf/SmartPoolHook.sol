@@ -23,6 +23,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {SmartPoolBase} from "./base/SmartPoolBase.sol";
+import {JITLockable} from "./base/JITLockable.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 
 /// @title SmartPoolHook
@@ -79,7 +80,7 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///         `JIT_LOCK` transient slot and the LP entries reject calls while it is set. This
 ///         blocks an owner-configured ERC4626 vault from re-entering LP entry points mid-JIT.
 /// @custom:security-contact security@uniswap.org
-contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
+contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -95,21 +96,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///         each bucket requires one modifyLiquidity call to deploy and one to remove,
     ///         so gas scales linearly with bucket count.
     uint8 private constant MAX_BUCKETS = 8;
-
-    /// @dev Transient namespace for per-pool JIT locks. The slot for `poolId` is
-    ///      `keccak256(abi.encode(_JIT_LOCK_NAMESPACE, poolId))`. Per-pool scoping is required
-    ///      so a cross-pool reentry (vault on pool A invokes a swap on pool B during pool A's
-    ///      JIT cycle) cannot clear pool A's lock when pool B's `_afterSwap` runs. Independent
-    ///      from OZ's `ReentrancyGuardTransient` slot, which only covers user-initiated entry.
-    bytes32 private constant _JIT_LOCK_NAMESPACE = keccak256("smartpoolhook.jit.lock.v2");
-
-    /// @dev Transient slot for the global "any JIT in flight" counter. Incremented on
-    ///      `_setJITLock`, decremented on `_clearJITLock`. Read by `whenJITNotInProgress`
-    ///      to reject ANY reentrant user/admin call that originates inside an in-flight JIT
-    ///      cycle anywhere in this hook — closing the cross-pool path that a per-pool lock
-    ///      alone would leave open (e.g., `addLiquidity(A)` invoked while pool B is mid-cycle
-    ///      via a shared malicious vault).
-    bytes32 private constant _JIT_GLOBAL_COUNTER_SLOT = keccak256("smartpoolhook.jit.global.v1");
 
     /// @dev Transient namespace for active per-bucket JIT liquidity. The slot for bucket `i`
     ///      of pool `poolId` is `keccak256(_ACTIVE_LIQ_NAMESPACE, poolId) + i`. Lives only for
@@ -194,11 +180,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///      use a wrapped-ETH variant (e.g., WETH9) instead.
     error NativeNotSupported();
 
-    /// @dev A user-facing or admin entry point was called from inside an active JIT cycle.
-    ///      Triggered when an owner-configured ERC4626 vault attempts to re-enter the hook
-    ///      via `vault.deposit` / `vault.withdraw` callbacks during `_beforeSwap` / `_afterSwap`.
-    error JITInProgress();
-
     /// @dev Configured ERC-4626 vault's `asset()` does not match the pool's currency. Vault
     ///      addresses are immutable post-init, so this fails fast instead of producing a
     ///      pool that silently mis-accounts.
@@ -234,19 +215,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
         uint32 maxGas_,
         address owner_
     ) SmartPoolBase(_pm, maxGas_, owner_) {}
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                              MODIFIERS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Reverts if ANY pool's JIT cycle is currently in flight. Reads the global
-    ///      counter rather than a per-pool slot so cross-pool reentry is rejected: a vault
-    ///      callback during pool A's cycle cannot enter `addLiquidity(B)` (or `bootstrap(B)`,
-    ///      `setDistribution(B)`, etc.) even though pool B is not itself locked.
-    modifier whenJITNotInProgress() {
-        if (_isAnyJITInProgress()) revert JITInProgress();
-        _;
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: POOL INITIALIZATION
@@ -950,55 +918,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                        INTERNAL: JIT LOCK
+    //                        INTERNAL: ACTIVE LIQUIDITY SLOTS
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Set the per-pool JIT lock and increment the global in-flight counter. Called at
-    ///      the top of `_beforeSwap` when the pool is live. The per-pool slot scopes teardown
-    ///      detection in `_afterSwap`; the global counter scopes the user/admin entry-point
-    ///      guard so cross-pool reentry is rejected.
-    function _setJITLock(PoolId poolId) private {
-        bytes32 perPool = _jitLockSlot(poolId);
-        bytes32 global = _JIT_GLOBAL_COUNTER_SLOT;
-        assembly ("memory-safe") {
-            tstore(perPool, 1)
-            tstore(global, add(tload(global), 1))
-        }
-    }
-
-    /// @dev Clear the per-pool JIT lock and decrement the global counter. Called at the end of
-    ///      `_afterSwap`. Idempotent only when paired correctly with `_setJITLock` — callers
-    ///      must check `_isJITLocked(poolId)` before invoking, otherwise the counter underflows.
-    function _clearJITLock(PoolId poolId) private {
-        bytes32 perPool = _jitLockSlot(poolId);
-        bytes32 global = _JIT_GLOBAL_COUNTER_SLOT;
-        assembly ("memory-safe") {
-            tstore(perPool, 0)
-            tstore(global, sub(tload(global), 1))
-        }
-    }
-
-    /// @dev Returns whether the given pool has its own JIT cycle in flight.
-    function _isJITLocked(PoolId poolId) private view returns (bool locked) {
-        bytes32 slot = _jitLockSlot(poolId);
-        assembly ("memory-safe") {
-            locked := tload(slot)
-        }
-    }
-
-    /// @dev Returns whether ANY pool served by this hook has a JIT cycle in flight. Used by
-    ///      `whenJITNotInProgress` to reject cross-pool reentry from a vault callback.
-    function _isAnyJITInProgress() private view returns (bool inProgress) {
-        bytes32 slot = _JIT_GLOBAL_COUNTER_SLOT;
-        assembly ("memory-safe") {
-            inProgress := iszero(iszero(tload(slot)))
-        }
-    }
-
-    /// @dev Per-pool transient slot for the JIT lock.
-    function _jitLockSlot(PoolId poolId) private pure returns (bytes32) {
-        return keccak256(abi.encode(_JIT_LOCK_NAMESPACE, poolId));
-    }
 
     /// @dev Base transient slot for the active-liquidity array of `poolId`. Per-bucket
     ///      slots are derived as `base + bucketIndex`. Single keccak per JIT cycle, then
