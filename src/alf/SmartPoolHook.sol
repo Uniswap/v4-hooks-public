@@ -216,6 +216,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///      distribution buckets, not a single active tick. Use {setDistribution} instead.
     error SetActiveTickDisabled();
 
+    /// @dev Caller is not authorized for this entry point. Used by `_requireDepositAuth`
+    ///      and `_beforeInitialize`. Owner gating is handled by OZ Ownable's
+    ///      `OwnableUnauthorizedAccount`.
+    error Unauthorized();
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════

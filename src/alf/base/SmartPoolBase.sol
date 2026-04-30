@@ -13,6 +13,7 @@ import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {ImmutableState} from "@uniswap/v4-periphery/src/base/ImmutableState.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
+import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IALFHook} from "../interfaces/IALFHook.sol";
 
 /// @title SmartPoolBase
@@ -21,7 +22,7 @@ import {IALFHook} from "../interfaces/IALFHook.sol";
 /// @dev Deliberately avoids BaseALFHook/SpreadQuoterBase because SmartPool does not use
 ///      signed hookData updates, attestation resolution, EIP-712, or active-tick LPs.
 /// @custom:security-contact security@uniswap.org
-abstract contract SmartPoolBase is DeltaResolver, IALFHook {
+abstract contract SmartPoolBase is DeltaResolver, Ownable2Step, IALFHook {
     using PoolIdLibrary for PoolKey;
 
     /// @notice Pricing state per pool. Bid is the fee for zeroForOne swaps, ask is for oneForZero.
@@ -36,8 +37,6 @@ abstract contract SmartPoolBase is DeltaResolver, IALFHook {
 
     /// @dev Gas budget declared for `getIndicativeQuote` staticcalls. Returned by `maxGas()`.
     uint32 private immutable _maxGas;
-    /// @dev One-step contract owner. Authorized for pricing updates and other admin paths.
-    address private immutable _owner;
 
     /// @notice Pricing state for each pool managed by this hook.
     mapping(PoolId => PricingState) public pricingState;
@@ -47,15 +46,6 @@ abstract contract SmartPoolBase is DeltaResolver, IALFHook {
     /// @param state  The full new pricing state (post-validation).
     event PricingStateUpdated(PoolId indexed poolId, PricingState state);
 
-    /// @notice Emitted once at construction recording the initial owner. Provided for parity with
-    ///         OZ's Ownable; SmartPoolBase exposes a single immutable owner so no subsequent
-    ///         transfer event is ever emitted.
-    /// @param previousOwner Always `address(0)` (constructor only).
-    /// @param newOwner      The initial owner set in the constructor.
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-    /// @dev Caller is not the owner, or the operation is not permitted in the current state.
-    error Unauthorized();
     /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
     ///      not aligned to the pool's tickSpacing).
     error InvalidTickRange();
@@ -65,20 +55,14 @@ abstract contract SmartPoolBase is DeltaResolver, IALFHook {
 
     /// @param manager The Uniswap v4 PoolManager.
     /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_  Initial (and immutable) contract owner.
+    /// @param owner_  Initial contract owner. Transferable via OZ's two-step
+    ///                {Ownable2Step.transferOwnership} / {Ownable2Step.acceptOwnership} flow.
     constructor(IPoolManager manager, uint32 maxGas_, address owner_)
         ImmutableState(manager)
+        Ownable(owner_)
     {
         Hooks.validateHookPermissions(IHooks(address(this)), _hookPermissions());
         _maxGas = maxGas_;
-        _owner = owner_;
-        emit OwnershipTransferred(address(0), owner_);
-    }
-
-    /// @dev Restricts access to the immutable owner. Reverts with {Unauthorized} otherwise.
-    modifier onlyOwner() {
-        if (msg.sender != _owner) revert Unauthorized();
-        _;
     }
 
     /// @dev Subclasses MUST declare the v4 hook flags they require.
@@ -95,12 +79,6 @@ abstract contract SmartPoolBase is DeltaResolver, IALFHook {
     ///      individual pools may pause via {SmartPoolHook.setPoolLive}.
     function isLive() external pure override returns (bool) {
         return true;
-    }
-
-    /// @notice The immutable contract owner.
-    /// @return The owner address set at construction.
-    function owner() public view returns (address) {
-        return _owner;
     }
 
     /// @inheritdoc IALFHook
