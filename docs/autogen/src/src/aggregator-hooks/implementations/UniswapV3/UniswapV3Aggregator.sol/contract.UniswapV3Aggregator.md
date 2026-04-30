@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/8f2591d7920c37c7febdcff1c1ab7aa7c00d922f/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/d636b0c2e723a4f3e275fde691adb8ea9a34eb83/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -104,9 +104,26 @@ constructor(IPoolManager manager, address factory_, address quoter_, string memo
 
 ### uniswapV3SwapCallback
 
+Called to `msg.sender` after executing a swap on the pool
+
 
 ```solidity
 function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`amount0Delta`|`int256`|Owed amount of token0: pay pool if positive, receive from pool if negative|
+|`amount1Delta`|`int256`|Owed amount of token1: pay pool if positive, receive from pool if negative|
+|`data`|`bytes`|Arbitrary data forwarded from the `swap` call, e.g. payer routing|
+
+
+### _processCallback
+
+
+```solidity
+function _processCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) internal;
 ```
 
 ### _rawQuote
@@ -269,17 +286,15 @@ error CallbackOutsideActiveSwap();
 error Reentrancy();
 ```
 
+### UnexpectedSwapOutputDelta
+
+```solidity
+error UnexpectedSwapOutputDelta();
+```
+
 ### PairAlreadyHasCanonicalPool
 
 ```solidity
 error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
-```
-
-### UnexpectedSwapOutputDelta
-Swap return deltas did not show pool sending the expected output token (fee-on-transfer or buggy pool)
-
-
-```solidity
-error UnexpectedSwapOutputDelta();
 ```
 

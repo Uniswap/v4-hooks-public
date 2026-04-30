@@ -1,6 +1,7 @@
 
 
 # Contents
+- [PancakeSwapV3](/src/aggregator-hooks/PancakeSwapV3)
 - [implementations](/src/aggregator-hooks/implementations)
 - [interfaces](/src/aggregator-hooks/interfaces)
 - [utils](/src/aggregator-hooks/utils)

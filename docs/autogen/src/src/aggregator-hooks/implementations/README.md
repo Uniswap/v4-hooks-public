@@ -7,4 +7,5 @@
 - [StableSwap](/src/aggregator-hooks/implementations/StableSwap)
 - [StableSwapNG](/src/aggregator-hooks/implementations/StableSwapNG)
 - [TempoExchange](/src/aggregator-hooks/implementations/TempoExchange)
+- [UniswapV2](/src/aggregator-hooks/implementations/UniswapV2)
 - [UniswapV3](/src/aggregator-hooks/implementations/UniswapV3)
