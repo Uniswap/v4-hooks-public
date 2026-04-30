@@ -15,6 +15,7 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
@@ -162,6 +163,161 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         _logSwap(key, true, -5_000 ether, "ZF1 size 5000 t0   [stressed]");
     }
 
+    /// @notice Asymmetric fees: bid=10pips (0.001%), ask=5000pips (0.5%). Same conservative
+    ///         shape, swap each direction at the same size — slippage difference is the
+    ///         directional fee gap. Then rotate the asymmetry and re-run.
+    function test_demo_asymmetricFees() public {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        PoolKey memory key = _initWithDistributionEx(
+            "Asymmetric fees: cheap bid (10pips) / expensive ask (5000pips)",
+            dist,
+            10,
+            10, // bid: very cheap to sell t0
+            5_000, // ask: expensive to buy t0
+            IERC4626(address(0)),
+            IERC4626(address(0))
+        );
+
+        _logSwap(key, true, -10 ether, "ZF1 10 t0  (uses BID 10pips)");
+        _logSwap(key, true, -100 ether, "ZF1 100 t0 (uses BID 10pips)");
+        _logSwap(key, false, -10 ether, "1F0 10 t1  (uses ASK 5000pips)");
+        _logSwap(key, false, -100 ether, "1F0 100 t1 (uses ASK 5000pips)");
+
+        // Flip the asymmetry. Same shape, opposite fee bias.
+        SmartPoolBase.PricingState memory flipped = SmartPoolBase.PricingState({
+            bidFeePips: 5_000,
+            askFeePips: 10,
+            live: true
+        });
+        vm.prank(owner);
+        hook.updatePricingState(key, flipped);
+        console2.log("--- flipped fees: bid=5000pips / ask=10pips ---");
+
+        _logSwap(key, true, -10 ether, "ZF1 10 t0  (uses BID 5000pips)");
+        _logSwap(key, true, -100 ether, "ZF1 100 t0 (uses BID 5000pips)");
+        _logSwap(key, false, -10 ether, "1F0 10 t1  (uses ASK 10pips)");
+        _logSwap(key, false, -100 ether, "1F0 100 t1 (uses ASK 10pips)");
+    }
+
+    /// @notice Vault rehypothecation with maxWithdraw cap. Pool reserves are 10k of each in
+    ///         vaults; vault1 is then capped so only 2k of t1 can be withdrawn at once.
+    ///         Logs getReserves vs getEffectiveLiquidity, then runs a ZF1 large enough that
+    ///         it should hit the cap — execution truncates while LP shares remain unchanged
+    ///         (LPs still own the full economic stake).
+    function test_demo_vaultRehypothecation() public {
+        // Two ERC4626 vaults — vault1 has a settable maxWithdraw cap; vault0 is uncapped.
+        CappedMockERC4626 v0 = new CappedMockERC4626(ERC20(address(token0)));
+        CappedMockERC4626 v1 = new CappedMockERC4626(ERC20(address(token1)));
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        PoolKey memory key = _initWithDistributionEx(
+            "Vault rehypothecation: vault1 maxWithdraw capped at 2k of 10k",
+            dist,
+            10,
+            BID_FEE_PIPS,
+            ASK_FEE_PIPS,
+            IERC4626(address(v0)),
+            IERC4626(address(v1))
+        );
+
+        // Cap vault1 at 2k t1 — simulates a paused/utilized lending vault.
+        v1.setWithdrawCap(2_000 ether);
+
+        (uint256 r0, uint256 r1) = hook.getReserves(key);
+        (uint256 e0, uint256 e1) = hook.getEffectiveLiquidity(key);
+        console2.log(
+            string.concat(
+                "  getReserves        : t0=",
+                vm.toString(r0 / 1 ether),
+                " t1=",
+                vm.toString(r1 / 1 ether)
+            )
+        );
+        console2.log(
+            string.concat(
+                "  getEffectiveLiq    : t0=",
+                vm.toString(e0 / 1 ether),
+                " t1=",
+                vm.toString(e1 / 1 ether),
+                " (vault1 cap surfaces here)"
+            )
+        );
+
+        // ZF1 large enough that the JIT cycle would normally need >2k t1 to pay out;
+        // bounded by the cap, so output truncates near 2k t1. Tick crashes to MIN_TICK
+        // because the JIT couldn't honour the requested input fully.
+        _logSwap(key, true, -3_000 ether, "ZF1 size 3000 t0 (cap=2k t1)");
+
+        // Walk the price back toward peg with a reverse swap so subsequent ZF1s have
+        // headroom (otherwise they'd revert on PriceLimitAlreadyExceeded).
+        _logSwap(key, false, -2_000 ether, "1F0 size 2000 t1 (recover)");
+
+        // Lift the cap, repeat ZF1 at the same size -- output now reflects full effective
+        // liquidity instead of being truncated.
+        v1.setWithdrawCap(type(uint256).max);
+        console2.log("--- vault1 cap lifted ---");
+        (uint256 e0b, uint256 e1b) = hook.getEffectiveLiquidity(key);
+        console2.log(
+            string.concat(
+                "  getEffectiveLiq    : t0=",
+                vm.toString(e0b / 1 ether),
+                " t1=",
+                vm.toString(e1b / 1 ether),
+                " (now matches reserves)"
+            )
+        );
+        _logSwap(key, true, -3_000 ether, "ZF1 size 3000 t0 (uncapped)");
+    }
+
+    /// @notice Compares `getIndicativeQuote` to actual swap execution across three
+    ///         distribution shapes. Drift in pips = (actual - predicted) / predicted in ppm.
+    ///         The doc notes the indicative quote is "compact, not a full virtual tick-walking
+    ///         simulator", so drift on swaps that cross multiple bucket boundaries is expected.
+    function test_demo_quoteVsExec_drift() public {
+        // (a) Conservative — most-likely-realistic baseline.
+        SmartPoolHook.LiquidityBucket[] memory conservative = new SmartPoolHook.LiquidityBucket[](3);
+        conservative[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        conservative[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        conservative[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        _runQuoteSeries(_initWithDistribution(
+            "Conservative -- single dense bucket, simple drift", conservative, 10
+        ));
+
+        // (b) Barbell — far one-sided tails should make multi-bucket-crossing drift obvious.
+        SmartPoolHook.LiquidityBucket[] memory barbell = new SmartPoolHook.LiquidityBucket[](4);
+        barbell[0] = SmartPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 5_000});
+        barbell[1] = SmartPoolHook.LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
+        barbell[2] = SmartPoolHook.LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
+        barbell[3] = SmartPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
+        _runQuoteSeries(_initWithDistribution(
+            "Barbell -- multi-bucket crossings expected on big swaps", barbell, 5
+        ));
+
+        // (c) Ultra-tight — narrow active band, drift should grow as swap exits the [-1,1] core.
+        SmartPoolHook.LiquidityBucket[] memory tight = new SmartPoolHook.LiquidityBucket[](4);
+        tight[0] = SmartPoolHook.LiquidityBucket({tickLower: -1, tickUpper: 1, weightBps: 4_500});
+        tight[1] = SmartPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
+        tight[2] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
+        tight[3] = SmartPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
+        _runQuoteSeries(_initWithDistribution(
+            "Ultra-tight -- drift grows once size pushes past micro band", tight, 1
+        ));
+    }
+
+    function _runQuoteSeries(PoolKey memory key) internal {
+        _logSwapWithQuote(key, true, -1 ether, "ZF1 1 t0   ");
+        _logSwapWithQuote(key, true, -10 ether, "ZF1 10 t0  ");
+        _logSwapWithQuote(key, true, -100 ether, "ZF1 100 t0 ");
+        _logSwapWithQuote(key, true, -1_000 ether, "ZF1 1000 t0");
+        _logSwapWithQuote(key, true, -5_000 ether, "ZF1 5000 t0");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -170,6 +326,22 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         string memory name,
         SmartPoolHook.LiquidityBucket[] memory dist,
         int24 tickSpacing
+    ) internal returns (PoolKey memory key) {
+        return _initWithDistributionEx(
+            name, dist, tickSpacing, BID_FEE_PIPS, ASK_FEE_PIPS, IERC4626(address(0)), IERC4626(address(0))
+        );
+    }
+
+    /// @dev Extended initializer accepting custom fees and per-currency vaults. Used by the
+    ///      asymmetric-fee and vault-rehypothecation demos.
+    function _initWithDistributionEx(
+        string memory name,
+        SmartPoolHook.LiquidityBucket[] memory dist,
+        int24 tickSpacing,
+        uint24 bidFeePips,
+        uint24 askFeePips,
+        IERC4626 vault0,
+        IERC4626 vault1
     ) internal returns (PoolKey memory key) {
         key = PoolKey({
             currency0: currency0,
@@ -180,12 +352,11 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({bidFeePips: bidFeePips, askFeePips: askFeePips, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
-            // No vault: keeps assets as raw ERC-20 so logs reflect distribution alone.
-            vault0: IERC4626(address(0)),
-            vault1: IERC4626(address(0))
+            vault0: vault0,
+            vault1: vault1
         });
         vm.prank(owner);
         hook.initializePool(key, cfg);
@@ -211,7 +382,11 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
                 vm.toString(int256(tickSpacing)),
                 "  reserves=",
                 vm.toString(BOOTSTRAP_AMOUNT / 1 ether),
-                " token0/1 each"
+                " token0/1 each",
+                "  bid=",
+                _bps(uint256(bidFeePips)),
+                " ask=",
+                _bps(uint256(askFeePips))
             )
         );
         for (uint256 i; i < dist.length; i++) {
@@ -279,8 +454,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
                 vm.toString(outAbs / 1e15),
                 "e15  slip=",
                 favorable ? "-" : "",
-                vm.toString(slipPips),
-                "pips  tick:",
+                _bps(slipPips),
+                "  tick:",
                 vm.toString(int256(tickBefore)),
                 "->",
                 vm.toString(int256(tickAfter))
@@ -290,5 +465,122 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
 
     function _abs(int128 x) private pure returns (uint256) {
         return x < 0 ? uint256(int256(-x)) : uint256(int256(x));
+    }
+
+    /// @dev Format a ppm value (= pips) as a fixed-2-decimal bps string. 1 bps = 100 pips,
+    ///      so 1024 pips renders as "10.24bps".
+    function _bps(uint256 pips) private pure returns (string memory) {
+        uint256 frac = pips % 100;
+        string memory fracStr = frac < 10
+            ? string.concat("0", _toStr(frac))
+            : _toStr(frac);
+        return string.concat(_toStr(pips / 100), ".", fracStr, "bps");
+    }
+
+    function _toStr(uint256 x) private pure returns (string memory) {
+        if (x == 0) return "0";
+        uint256 len;
+        for (uint256 t = x; t > 0; t /= 10) len++;
+        bytes memory b = new bytes(len);
+        for (uint256 i = len; i > 0; i--) {
+            b[i - 1] = bytes1(uint8(48 + (x % 10)));
+            x /= 10;
+        }
+        return string(b);
+    }
+
+    /// @dev Same as `_logSwap` but also queries `getIndicativeQuote` first and reports the
+    ///      drift between predicted and actual output. Used by the quote/exec drift demo.
+    ///      Drift sign convention: positive = execution beat the quote (pool gave more out
+    ///      than predicted); negative = execution underdelivered.
+    function _logSwapWithQuote(PoolKey memory key, bool zeroForOne, int256 amountIn, string memory label) internal {
+        uint256 predicted = hook.getIndicativeQuote(key, zeroForOne, amountIn, "");
+
+        BalanceDelta delta = swap(key, zeroForOne, amountIn, "");
+        int128 d0 = delta.amount0();
+        int128 d1 = delta.amount1();
+        uint256 inAbs = zeroForOne ? _abs(d0) : _abs(d1);
+        uint256 outAbs = zeroForOne ? _abs(d1) : _abs(d0);
+
+        bool over = outAbs > predicted;
+        uint256 absDiff = predicted == 0 ? 0 : (over ? outAbs - predicted : predicted - outAbs);
+        uint256 driftPips = predicted > 0 ? (absDiff * 1_000_000) / predicted : 0;
+
+        console2.log(
+            string.concat(
+                "  ",
+                label,
+                " | in=",
+                vm.toString(inAbs / 1e15),
+                "e15  predicted=",
+                vm.toString(predicted / 1e15),
+                "e15  actual=",
+                vm.toString(outAbs / 1e15),
+                "e15  drift=",
+                over ? "+" : "-",
+                _bps(driftPips)
+            )
+        );
+    }
+}
+
+/// @notice ERC-4626 mock with a settable `withdrawCap` so tests can simulate
+///         paused/utilization-constrained vaults that cannot honour their full
+///         `convertToAssets(balanceOf)` on demand. Mirrors the small interface
+///         PoolVault actually uses (deposit, withdraw, convertToShares,
+///         convertToAssets, asset, maxWithdraw).
+contract CappedMockERC4626 is ERC20 {
+    ERC20 public immutable asset;
+    uint256 public withdrawCap;
+
+    constructor(ERC20 _asset)
+        ERC20(string.concat("Capped Vault ", _asset.name()), string.concat("cv", _asset.symbol()), _asset.decimals())
+    {
+        asset = _asset;
+        withdrawCap = type(uint256).max;
+    }
+
+    function setWithdrawCap(uint256 cap) external {
+        withdrawCap = cap;
+    }
+
+    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+        shares = convertToShares(assets);
+        asset.transferFrom(msg.sender, address(this), assets);
+        _mint(receiver, shares);
+    }
+
+    function withdraw(uint256 assets, address receiver, address owner_) external returns (uint256 shares) {
+        require(assets <= withdrawCap, "CappedMockERC4626: cap");
+        shares = convertToShares(assets);
+        if (msg.sender != owner_) {
+            uint256 allowed = allowance[owner_][msg.sender];
+            if (allowed != type(uint256).max) {
+                allowance[owner_][msg.sender] = allowed - shares;
+            }
+        }
+        _burn(owner_, shares);
+        asset.transfer(receiver, assets);
+    }
+
+    function totalAssets() public view returns (uint256) {
+        return asset.balanceOf(address(this));
+    }
+
+    function convertToShares(uint256 assets) public view returns (uint256) {
+        uint256 supply = totalSupply;
+        return supply == 0 ? assets : (assets * supply) / totalAssets();
+    }
+
+    function convertToAssets(uint256 shares) public view returns (uint256) {
+        uint256 supply = totalSupply;
+        return supply == 0 ? shares : (shares * totalAssets()) / supply;
+    }
+
+    /// @dev Effective max-withdraw is the lesser of the economic share value and the cap.
+    ///      Mirrors how Aave-style vaults reduce maxWithdraw when underlying is utilised.
+    function maxWithdraw(address owner_) external view returns (uint256) {
+        uint256 economic = convertToAssets(balanceOf[owner_]);
+        return economic < withdrawCap ? economic : withdrawCap;
     }
 }
