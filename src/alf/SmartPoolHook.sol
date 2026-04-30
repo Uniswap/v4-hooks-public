@@ -562,20 +562,20 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
         revert Unauthorized();
     }
 
-    /// @dev Only the hook itself may add pool liquidity (during JIT deployment in _beforeSwap).
-    function _beforeAddLiquidity(address sender, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal view override returns (bytes4)
+    /// @dev External LP additions are blocked. v4-core's `Hooks.noSelfCall` skips the hook
+    ///      callback entirely when the hook itself is the caller, so the only path that
+    ///      reaches this body is an external `modifyLiquidity` call -- always reject.
+    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal pure override returns (bytes4)
     {
-        if (sender != address(this)) revert LiquidityNotAllowed();
-        return IHooks.beforeAddLiquidity.selector;
+        revert LiquidityNotAllowed();
     }
 
-    /// @dev Only the hook itself may remove pool liquidity (during JIT teardown in _afterSwap).
-    function _beforeRemoveLiquidity(address sender, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal view override returns (bytes4)
+    /// @dev External LP removals are blocked. Same `noSelfCall` reasoning as `_beforeAddLiquidity`.
+    function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal pure override returns (bytes4)
     {
-        if (sender != address(this)) revert LiquidityNotAllowed();
-        return IHooks.beforeRemoveLiquidity.selector;
+        revert LiquidityNotAllowed();
     }
 
     /// @dev JIT entry point. Reads the stored PricingState for the directional fee, deploys
