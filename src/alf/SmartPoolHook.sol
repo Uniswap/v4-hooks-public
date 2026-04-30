@@ -582,10 +582,17 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///      multi-range JIT liquidity under the JIT lock, and returns the fee override. Returns
     ///      zero delta and no fee if the pool is not live (swap executes against zero liquidity →
     ///      no output). hookData is ignored entirely (see contract-level NatSpec).
+    ///
+    ///      A reentrant `_beforeSwap` on the same pool (e.g., from a malicious vault calling
+    ///      `poolManager.swap(samePool)` during `_withdrawFromVault`) would corrupt the JIT
+    ///      lifecycle: the inner `_clearJITLock` would zero the per-pool slot while the outer
+    ///      cycle is still in flight, so the outer `_afterSwap` would short-circuit and leave
+    ///      the outer's deployed positions orphaned. Reject up-front.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal override returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
+        if (_isJITLocked(poolId)) revert JITInProgress();
         PricingState memory state = pricingState[poolId];
         if (!state.live) {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);

@@ -13,7 +13,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
@@ -1169,6 +1169,56 @@ contract SmartPoolHookTest is Test, Deployers {
         swap(testPoolKey, true, -1e18, "");
     }
 
+    /// @dev Closes the same-pool reentrancy variant: a malicious vault re-enters via
+    ///      `manager.swap(samePool)` from inside `withdraw` (called during `_deployJIT`).
+    ///      The inner `_beforeSwap` would otherwise corrupt the JIT lifecycle by clearing
+    ///      the per-pool lock while the outer cycle is still in flight, orphaning LPs.
+    function test_vaultReentryIntoSamePoolSwap_revertsJITInProgress() public {
+        // Use a distinct pool key (different tickSpacing) so we can install the malicious
+        // vault from the start; testPoolKey is already initialized in setUp() with a normal vault.
+        PoolKey memory key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 11,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
+
+        SwapReentrantVault evilVault1 = new SwapReentrantVault();
+        // Pre-configure so `initializePool`'s `vault.asset() == currency` check passes and the
+        // malicious `withdraw` is wired to swap on this pool.
+        evilVault1.configure(Currency.unwrap(currency1), address(manager), key);
+
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            distribution: dist,
+            allowExternalDeposits: false,
+            // currency0 = uncapped MockERC4626 (vault0 from setUp), currency1 = malicious.
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(evilVault1))
+        });
+        vm.prank(owner);
+        hook.initializePool(key, cfg);
+
+        // Bootstrap and step a block.
+        token0.mint(owner, 1_000e18);
+        token1.mint(owner, 1_000e18);
+        vm.startPrank(owner);
+        token0.approve(address(hook), 1_000e18);
+        token1.approve(address(hook), 1_000e18);
+        hook.bootstrap(key, 1_000e18, 1_000e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // ZF1 swap drives `_withdrawFromVault(currency1)` -> evilVault1.withdraw -> reentrant
+        // `manager.swap(key)` -> inner `_beforeSwap` reverts on `_isJITLocked`.
+        vm.expectRevert();
+        swap(key, true, -1e18, "");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                   PRICING STATE & FEE BOUNDS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1851,5 +1901,62 @@ contract CappedVault {
 
     function redeem(uint256, address, address) external pure returns (uint256) {
         return 0;
+    }
+}
+
+/// @dev ERC-4626-shaped vault that re-enters the hook via `manager.swap(samePool)` from
+///      inside `withdraw`. Validates that `_beforeSwap` rejects reentrant invocation on a
+///      pool whose JIT cycle is already in flight.
+contract SwapReentrantVault {
+    address public asset;
+    IPoolManager public manager;
+    PoolKey public targetKey;
+
+    function configure(address _asset, address _manager, PoolKey calldata _key) external {
+        asset = _asset;
+        manager = IPoolManager(_manager);
+        targetKey = _key;
+    }
+
+    function deposit(uint256 assets, address) external returns (uint256) {
+        // Pull underlying from the hook so the JIT cycle's `safeTransferFrom` settles, but
+        // skip share bookkeeping -- the test only needs `withdraw` to re-enter.
+        if (asset != address(0)) {
+            (bool ok,) = asset.call(
+                abi.encodeWithSignature("transferFrom(address,address,uint256)", msg.sender, address(this), assets)
+            );
+            require(ok, "transferFrom failed");
+        }
+        return assets;
+    }
+
+    function withdraw(uint256 assets, address receiver, address) external returns (uint256) {
+        // Re-enter on the same pool; PM dispatches to `hook._beforeSwap`, which should revert
+        // because the outer JIT lock is still set.
+        manager.swap(
+            targetKey,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -1,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            ""
+        );
+        // Unreachable in the success-failure test; included so non-attacking flows work too.
+        (bool ok,) = asset.call(abi.encodeWithSignature("transfer(address,uint256)", receiver, assets));
+        require(ok, "transfer failed");
+        return assets;
+    }
+
+    function maxWithdraw(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function convertToShares(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function convertToAssets(uint256 s) external pure returns (uint256) {
+        return s;
     }
 }
