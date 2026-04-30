@@ -538,7 +538,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, ReentrancyGuardTransient {
     ///      - beforeAddLiquidity / beforeRemoveLiquidity: restrict to hook-only LP
     ///      - beforeSwap: JIT deployment + fee override
     ///      - afterSwap: JIT teardown + delta resolution
-    function _hookPermissions() internal pure override returns (Hooks.Permissions memory) {
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
             afterInitialize: false,
