@@ -1265,21 +1265,27 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                       PM DYNAMIC FEE SYNC
+    //                       CANONICAL FEE READ
     // ═══════════════════════════════════════════════════════════════════════════
     //
-    //  Every write to `pricingState` flows through `_commitPricingState`, which
-    //  syncs the PM's stored dynamic LP fee to `max(bidFeePips, askFeePips)` when
-    //  live, or 0 when not live. The actual per-swap fee is still set via the
-    //  `_beforeSwap` override (direction-aware). The stored value is for off-chain
-    //  consumers reading `getSlot0`.
+    //  SmartPool intentionally does NOT sync the PM's stored dynamic LP fee --
+    //  `max(bid, ask)` would be a directionally-lossy summary of the bid/ask
+    //  spread, and there is no v4 requirement to populate slot0.lpFee at all.
+    //  Per-swap pricing flows through the override returned from `_beforeSwap`.
+    //  Off-chain readers MUST consult `pricingState(poolId)` for the canonical
+    //  fees + live state; reading slot0.lpFee will always return 0.
 
-    function test_pmFeeSync_initializePool_setsRepresentativeFee() public view {
+    function test_pricingStateRead_initializePool_returnsConfiguredFees() public view {
+        (uint24 bid, uint24 ask, bool live) = hook.pricingState(testPoolId);
+        assertEq(bid, BID_FEE_PIPS);
+        assertEq(ask, ASK_FEE_PIPS);
+        assertTrue(live);
+        // PM does not track our fee.
         (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
-        assertEq(lpFee, BID_FEE_PIPS, "PM fee == max(bid, ask) after init");
+        assertEq(lpFee, 0, "PM slot0.lpFee not synced -- read pricingState instead");
     }
 
-    function test_pmFeeSync_updatePricingState_updatesPMFee() public {
+    function test_pricingStateRead_updatePricingState_updatesCanonicalRead() public {
         SmartPoolBase.PricingState memory newState = SmartPoolBase.PricingState({
             bidFeePips: 250,
             askFeePips: 5_000,
@@ -1287,24 +1293,19 @@ contract SmartPoolHookTest is Test, Deployers {
         });
         vm.prank(owner);
         hook.updatePricingState(testPoolKey, newState);
-        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
-        assertEq(lpFee, 5_000, "PM fee tracks max(bid, ask)");
+        (uint24 bid, uint24 ask, bool live) = hook.pricingState(testPoolId);
+        assertEq(bid, 250);
+        assertEq(ask, 5_000);
+        assertTrue(live);
     }
 
-    function test_pmFeeSync_setPoolLiveFalse_zeroesPMFee() public {
+    function test_pricingStateRead_setPoolLiveFalse_clearsLiveFlag() public {
         vm.prank(owner);
         hook.setPoolLive(testPoolKey, false);
-        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
-        assertEq(lpFee, 0, "PM fee == 0 when pool not live");
-    }
-
-    function test_pmFeeSync_setPoolLiveTrue_restoresRepresentativeFee() public {
-        vm.startPrank(owner);
-        hook.setPoolLive(testPoolKey, false);
-        hook.setPoolLive(testPoolKey, true);
-        vm.stopPrank();
-        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
-        assertEq(lpFee, BID_FEE_PIPS, "PM fee restored when live again");
+        (uint24 bid, uint24 ask, bool live) = hook.pricingState(testPoolId);
+        assertEq(bid, BID_FEE_PIPS, "bid preserved when paused");
+        assertEq(ask, ASK_FEE_PIPS, "ask preserved when paused");
+        assertFalse(live);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

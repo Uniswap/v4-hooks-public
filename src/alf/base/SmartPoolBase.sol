@@ -119,9 +119,9 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     }
 
     /// @notice Update the pricing state for a pool.
-    /// @dev    Routes through `_commitPricingState`: validates fee bounds, writes storage, syncs
-    ///         the PM's stored dynamic LP fee, and emits {PricingStateUpdated}. The pool MUST be
-    ///         initialized. Subclasses MAY override to add an in-flight-JIT guard.
+    /// @dev    Routes through `_commitPricingState`: validates fee bounds, writes storage,
+    ///         and emits {PricingStateUpdated}. Subclasses MAY override to add an in-flight-
+    ///         JIT guard. The pool need not be initialized for this call to succeed.
     /// @param key   The pool to update.
     /// @param state The new pricing state.
     function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
@@ -129,22 +129,17 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     }
 
     /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
-    ///      storage, syncs the PM's stored dynamic LP fee to `max(bid, ask)` (or 0 when paused),
-    ///      and emits {PricingStateUpdated}. Per-swap pricing remains direction-aware via the
-    ///      override returned from `_beforeSwap`. The pool MUST already be initialized.
+    ///      storage, and emits {PricingStateUpdated}. Per-swap pricing is direction-aware via
+    ///      the override returned from `_beforeSwap` -- the PoolManager's stored dynamic LP
+    ///      fee is intentionally NOT synced here, since `max(bid, ask)` would be a lossy
+    ///      single-direction summary. Off-chain readers should consult `pricingState(poolId)`
+    ///      directly for the canonical bid/ask + live state.
     /// @param key   The pool to update.
     /// @param state The validated state to commit.
     function _commitPricingState(PoolKey calldata key, PricingState memory state) internal {
         _validateFeeBounds(state);
-        PoolId poolId = key.toId();
-        pricingState[poolId] = state;
-
-        uint24 representativeFee = state.live
-            ? (state.bidFeePips > state.askFeePips ? state.bidFeePips : state.askFeePips)
-            : 0;
-        poolManager.updateDynamicLPFee(key, representativeFee);
-
-        emit PricingStateUpdated(poolId, state);
+        emit PricingStateUpdated(key.toId(), state);
+        pricingState[key.toId()] = state;
     }
 
     /// @dev Validate that bid/ask fees are within v4's `[0, MAX_LP_FEE]` range. Reverts with
