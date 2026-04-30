@@ -145,9 +145,11 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
             "Volatility-adaptive: CALM phase (80/20 across [-5,5] [-30,30])", calm, 5
         );
 
-        _logSwap(key, true, -100 ether, "ZF1 size 100  t0   [calm]");
-        _logSwap(key, true, -1_000 ether, "ZF1 size 1000 t0   [calm]");
-        _logSwap(key, true, -5_000 ether, "ZF1 size 5000 t0   [calm]");
+        _logSwap(key, true, -100 ether, "ZF1 size 100   t0   [calm]");
+        _logSwap(key, true, -1_000 ether, "ZF1 size 1000  t0   [calm]");
+        _logSwap(key, true, -5_000 ether, "ZF1 size 5000  t0   [calm]");
+        _logSwap(key, false, -500 ether, "1F0 size 500   t1   [calm recover]");
+        _logSwap(key, true, -9_500 ether, "ZF1 size 9_500 t0   [calm boundary]");
 
         // Rotate to stressed shape mid-life. Same reserves, much wider spread of liquidity.
         SmartPoolHook.LiquidityBucket[] memory stressed = new SmartPoolHook.LiquidityBucket[](3);
@@ -158,9 +160,13 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         hook.setDistribution(key, stressed);
         console2.log("--- rotated distribution to STRESSED (25/50/25) ---");
 
-        _logSwap(key, true, -100 ether, "ZF1 size 100  t0   [stressed]");
-        _logSwap(key, true, -1_000 ether, "ZF1 size 1000 t0   [stressed]");
-        _logSwap(key, true, -5_000 ether, "ZF1 size 5000 t0   [stressed]");
+        // Reset price so stressed-phase swaps run from a comparable starting point. Stressed
+        // shape's wide [-250,250] bucket means a few k of t1 only walks tick partway; use a
+        // bigger reset.
+        _logSwap(key, false, -5_000 ether, "1F0 size 5000  t1   [stressed reset]");
+        _logSwap(key, true, -100 ether, "ZF1 size 100   t0   [stressed]");
+        _logSwap(key, true, -1_000 ether, "ZF1 size 1000  t0   [stressed]");
+        _logSwap(key, true, -5_000 ether, "ZF1 size 5000  t0   [stressed]");
     }
 
     /// @notice Asymmetric fees: bid=10pips (0.001%), ask=5000pips (0.5%). Same conservative
@@ -412,16 +418,25 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
     ///      distribution-shape impact rather than just the flat LP fee. Then a reverse
     ///      pair to show the ask side.
     function _runSwapSeries(PoolKey memory key) internal {
-        _logSwap(key, true, -1e15, "ZF1 size 0.001 t0");
-        _logSwap(key, true, -1 ether, "ZF1 size 1     t0");
-        _logSwap(key, true, -10 ether, "ZF1 size 10    t0");
-        _logSwap(key, true, -100 ether, "ZF1 size 100   t0");
-        _logSwap(key, true, -500 ether, "ZF1 size 500   t0");
-        _logSwap(key, true, -1_000 ether, "ZF1 size 1000  t0");
-        _logSwap(key, true, -5_000 ether, "ZF1 size 5000  t0");
-        // Reverse direction at tail end — tick will be sub-zero by now; this is a buy of t0.
-        _logSwap(key, false, -100 ether, "1F0 size 100   t1");
-        _logSwap(key, false, -1_000 ether, "1F0 size 1000  t1");
+        // Standard size ladder: tiny -> small -> medium -> large.
+        _logSwap(key, true, -1e15, "ZF1 size 0.001  t0");
+        _logSwap(key, true, -1 ether, "ZF1 size 1      t0");
+        _logSwap(key, true, -10 ether, "ZF1 size 10     t0");
+        _logSwap(key, true, -100 ether, "ZF1 size 100    t0");
+        _logSwap(key, true, -500 ether, "ZF1 size 500    t0");
+        _logSwap(key, true, -1_000 ether, "ZF1 size 1000   t0");
+        _logSwap(key, true, -5_000 ether, "ZF1 size 5000   t0");
+        // Walk price back so the boundary swap has headroom on shapes that crashed to MIN_TICK.
+        _logSwap(key, false, -1_000 ether, "1F0 size 1000   t1 (recover)");
+        // Boundary push: ~95% of pool depth -- reaches the outer bucket on most shapes, may
+        // truncate to a partial fill on asymmetric shapes whose lower-side depth is thin.
+        _logSwap(key, true, -9_500 ether, "ZF1 size 9_500  t0 (boundary)");
+        // Mini-recover so the way-past swap can start above MIN_TICK.
+        _logSwap(key, false, -500 ether, "1F0 size 500    t1 (recover)");
+        // Way past: 5x pool size -- always partial-fills and crashes tick to MIN_TICK.
+        _logSwap(key, true, -50_000 ether, "ZF1 size 50_000 t0 (way past)");
+        // Final buy-side from the depleted state.
+        _logSwap(key, false, -1_000 ether, "1F0 size 1000   t1 (buy at depletion)");
     }
 
     /// @dev Run a single swap and log size, in/out (in milli-token units = 1e15 wei),
