@@ -13,20 +13,17 @@ import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {WETH} from "solmate/src/tokens/WETH.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniV3MintHelper} from "./mocks/UniV3MintHelper.sol";
 
 import "forge-std/Test.sol";
 
-/// @notice Fuzz against canonical Uniswap V3 factory + QuoterV2 bytecode from `precompile/` (Curve-style `readFile` + `parseBytes`).
-/// @dev `QuoterV2` is constructed with real Solmate `WETH` as `WETH9` (ERC-20-only swaps in these tests).
+/// @notice Fuzz against canonical Uniswap V3 factory bytecode from `precompile/`.
 contract UniswapV3AggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
 
     string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/UniswapV3/precompile/UniswapV3Factory.bin";
-    string constant QUOTER_BYTECODE_PATH = "test/aggregator-hooks/UniswapV3/precompile/QuoterV2.bin";
 
     uint24 constant POOL_FEE = 3000;
     int24 constant TICK_LOWER = -600;
@@ -38,7 +35,6 @@ contract UniswapV3AggregatorFuzz is Test {
     UniswapV3Aggregator public hook;
 
     IUniswapV3Factory public factory;
-    address public quoter;
     address public extPool;
 
     MockERC20 public token0;
@@ -58,8 +54,6 @@ contract UniswapV3AggregatorFuzz is Test {
         swapRouter = new SafePoolSwapTest(poolManager);
 
         factory = IUniswapV3Factory(_deployCreate(FACTORY_BYTECODE_PATH));
-        WETH weth = new WETH();
-        quoter = _deployQuoter(address(factory), address(weth));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -106,9 +100,9 @@ contract UniswapV3AggregatorFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), quoter, "UniswapV3Aggregator v1.0");
+        bytes memory constructorArgs = abi.encode(poolManager, address(factory), "UniswapV3Aggregator v1.0");
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV3Aggregator).creationCode, constructorArgs);
-        return new UniswapV3Aggregator{salt: salt}(poolManager, address(factory), quoter, "UniswapV3Aggregator v1.0");
+        return new UniswapV3Aggregator{salt: salt}(poolManager, address(factory), "UniswapV3Aggregator v1.0");
     }
 
     /// @notice Same pattern as Curve fuzz: `readFile` + `parseBytes`, but Uniswap V3 factory must run its constructor (CREATE, not `vm.etch`).
@@ -119,17 +113,6 @@ contract UniswapV3AggregatorFuzz is Test {
             deployed := create(0, add(bytecode, 0x20), mload(bytecode))
         }
         require(deployed != address(0), "CREATE failed");
-    }
-
-    /// @dev `QuoterV2.bin` creation code + `(address factory, address WETH9)` ABI args.
-    function _deployQuoter(address factory_, address weth) internal returns (address q) {
-        bytes memory code = vm.parseBytes(vm.readFile(QUOTER_BYTECODE_PATH));
-        require(code.length > 0, "Empty QuoterV2 bytecode");
-        bytes memory creation = abi.encodePacked(code, abi.encode(factory_, weth));
-        assembly {
-            q := create(0, add(creation, 0x20), mload(creation))
-        }
-        require(q != address(0) && q.code.length > 0, "Quoter CREATE failed");
     }
 
     function testFuzz_swapExactIn_zeroForOne(uint256 amountIn) public {

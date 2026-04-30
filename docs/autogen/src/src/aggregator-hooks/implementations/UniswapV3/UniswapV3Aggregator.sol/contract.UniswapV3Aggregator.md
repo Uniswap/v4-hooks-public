@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/d636b0c2e723a4f3e275fde691adb8ea9a34eb83/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/adb29379b80d9ef34b021ada72c07961aaf6cc84/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -20,30 +20,12 @@ address public immutable factory
 ```
 
 
-### quoter
-Quoter compatible with IQuoterV2 (deploy per chain)
-
-
-```solidity
-address public immutable quoter
-```
-
-
 ### poolIdToExternalPool
 External CL pool per registered Uniswap V4 pool
 
 
 ```solidity
 mapping(PoolId => address) public poolIdToExternalPool
-```
-
-
-### quoterRoutingHintByPoolId
-Third argument passed to QuoterV2 `quoteExact*`
-
-
-```solidity
-mapping(PoolId => uint24) internal quoterRoutingHintByPoolId
 ```
 
 
@@ -76,6 +58,14 @@ bytes32 private constant TRANSIENT_EXPECTED_POOL =
 ```
 
 
+### TRANSIENT_QUOTE_SIM
+
+```solidity
+bytes32 private constant TRANSIENT_QUOTE_SIM =
+    bytes32(uint256(keccak256("UniswapV3Aggregator.transient.quoteSim")) - 1)
+```
+
+
 ### TRANSIENT_SWAP_INPUT_PAID
 
 ```solidity
@@ -89,7 +79,7 @@ bytes32 private constant TRANSIENT_SWAP_INPUT_PAID =
 
 
 ```solidity
-constructor(IPoolManager manager, address factory_, address quoter_, string memory hookVersion)
+constructor(IPoolManager manager, address factory_, string memory hookVersion)
     BaseAggregatorHook(manager, hookVersion);
 ```
 **Parameters**
@@ -98,7 +88,6 @@ constructor(IPoolManager manager, address factory_, address quoter_, string memo
 |----|----|-----------|
 |`manager`|`IPoolManager`|PoolManager|
 |`factory_`|`address`|Uniswap V3 factory (fee-tier `getPool`)|
-|`quoter_`|`address`|Quoter contract (IQuoterV2-compatible)|
 |`hookVersion`|`string`|Display version string|
 
 
@@ -153,6 +142,34 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 |`amountUnspecified`|`uint256`|The raw unspecified amount before protocol fee adjustment|
 
 
+### _quoteViaPoolCallRevertData
+
+Low-level `call`: same-contract callback reverts do not surface through try/catch on a direct `swap` call.
+
+
+```solidity
+function _quoteViaPoolCallRevertData(address poolAddr, bool zeroToOne, int256 v3AmountSpecified, PoolId poolId)
+    private
+    returns (bytes memory revertData);
+```
+
+### _unspecifiedSideFromQuoteDeltas
+
+
+```solidity
+function _unspecifiedSideFromQuoteDeltas(bool zeroToOne, bool exactInput, int256 amount0Delta, int256 amount1Delta)
+    private
+    pure
+    returns (uint256 amt);
+```
+
+### _decodeQuoteRevert
+
+
+```solidity
+function _decodeQuoteRevert(bytes memory reason) private pure returns (int256 amount0Delta, int256 amount1Delta);
+```
+
 ### pseudoTotalValueLocked
 
 
@@ -171,15 +188,6 @@ function _resolveExternalPool(address token0, address token1, PoolKey calldata k
     view
     virtual
     returns (address pool);
-```
-
-### _quoterRoutingHintFromKey
-
-Value stored for QuoterV2 factory routing (`fee` field on QuoterV2 params).
-
-
-```solidity
-function _quoterRoutingHintFromKey(PoolKey calldata key) internal pure virtual returns (uint24);
 ```
 
 ### _beforeInitialize
@@ -296,5 +304,17 @@ error UnexpectedSwapOutputDelta();
 
 ```solidity
 error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
+```
+
+### QuoteRevert
+
+```solidity
+error QuoteRevert(int256 amount0Delta, int256 amount1Delta);
+```
+
+### UnexpectedQuoteBehavior
+
+```solidity
+error UnexpectedQuoteBehavior();
 ```
 

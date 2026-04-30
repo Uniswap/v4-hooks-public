@@ -34,6 +34,7 @@ First-byte ID table:
 | 03  | Uniswap V3         |
 | A1  | Slipstream         |
 | 93  | Pancakeswap V3     |
+| 02  | Uniswap V2         |
 
 ## Supported Protocols
 
@@ -85,6 +86,18 @@ Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton
 #### Defined interfaces
 
 The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
+
+### Uniswap V2
+
+Singleton hook routes swaps through **Uniswap V2–compatible** pairs (`getReserves`, constant-product `swap`). One deployment serves many Uniswap V4 pools; each external pair is resolved from the immutable factory via **`getPair(tokenA, tokenB)`**. On-chain reserves supply **view quotes**; `PoolKey.fee` and `PoolKey.tickSpacing` **do not** participate in routing (only the currency pair matters).
+
+| Pool Type      | Implementation        | Factory lookup                                                                                   |
+| -------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| **Uniswap V2** | `UniswapV2Aggregator` | `getPair(tokenA, tokenB)` — align `PoolKey` currencies with the pair’s `token0` / `token1` order |
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV2/interfaces/` (`IUniswapV2Pair`, `IUniswapV2Factory`) for the subset of the canonical V2 ABI the hook uses.
 
 ### Uniswap V3 / Slipstream
 

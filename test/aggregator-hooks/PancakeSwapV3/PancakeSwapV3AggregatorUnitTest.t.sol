@@ -16,9 +16,7 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {MockUniV3Pool} from "../UniswapV3/mocks/MockUniV3Pool.sol";
 import {MockUniV3Factory} from "../UniswapV3/mocks/MockUniV3Factory.sol";
-import {MockQuoterV2} from "../UniswapV3/mocks/MockQuoterV2.sol";
 
-/// @notice Unit tests for the PancakeSwapV3Aggregator hook.
 contract PancakeSwapV3AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -26,7 +24,6 @@ contract PancakeSwapV3AggregatorUnitTest is Test {
     SafePoolSwapTest public swapRouter;
     MockUniV3Factory public factory;
     MockUniV3Pool public extPool;
-    MockQuoterV2 public quoter;
     PancakeSwapV3Aggregator public hook;
 
     MockERC20 public token0;
@@ -54,7 +51,6 @@ contract PancakeSwapV3AggregatorUnitTest is Test {
         if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
 
         factory = new MockUniV3Factory();
-        quoter = new MockQuoterV2();
         extPool = new MockUniV3Pool(address(token0), address(token1), POOL_FEE, TICK_SPACING_A);
         factory.setPool(address(token0), address(token1), POOL_FEE, address(extPool));
 
@@ -90,13 +86,10 @@ contract PancakeSwapV3AggregatorUnitTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs =
-            abi.encode(poolManager, address(factory), address(quoter), "PancakeSwapV3Aggregator v1.0");
+        bytes memory constructorArgs = abi.encode(poolManager, address(factory), "PancakeSwapV3Aggregator v1.0");
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
-        return new PancakeSwapV3Aggregator{salt: salt}(
-            poolManager, address(factory), address(quoter), "PancakeSwapV3Aggregator v1.0"
-        );
+        return new PancakeSwapV3Aggregator{salt: salt}(poolManager, address(factory), "PancakeSwapV3Aggregator v1.0");
     }
 
     function test_quote_exactIn_matches_math() public {

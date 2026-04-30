@@ -13,14 +13,13 @@ import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {WETH} from "solmate/src/tokens/WETH.sol";
 import {IPancakeV3Factory} from "@pancakeswap/v3-core/interfaces/IPancakeV3Factory.sol";
 import {IPancakeV3Pool} from "@pancakeswap/v3-core/interfaces/IPancakeV3Pool.sol";
 import {IPancakeV3PoolDeployer} from "./mocks/IPancakeV3PoolDeployer.sol";
 import {PancakeV3MintHelper} from "./mocks/PancakeV3MintHelper.sol";
 import "forge-std/Test.sol";
 
-/// @notice Fuzz with canonical PancakeSwap V3 bytecode: pool deployer + factory (constructor arg) + QuoterV2.
+/// @notice Fuzz with canonical PancakeSwap V3 bytecode: pool deployer + factory.
 /// @dev Precompile `.bin` files are **creation** bytecode for `CREATE` (not runtime `eth_getCode`).
 contract PancakeSwapV3AggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
@@ -28,7 +27,6 @@ contract PancakeSwapV3AggregatorFuzz is Test {
     string constant POOL_DEPLOYER_BYTECODE_PATH =
         "test/aggregator-hooks/PancakeSwapV3/precompile/PancakeV3PoolDeployer.bin";
     string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/PancakeSwapV3/precompile/PancakeV3Factory.bin";
-    string constant QUOTER_BYTECODE_PATH = "test/aggregator-hooks/PancakeSwapV3/precompile/QuoterV2.bin";
 
     /// @dev Pancake factory enables 100 / 500 / 2500 (not 3000) / 10000 bps.
     uint24 constant POOL_FEE = 2500;
@@ -41,7 +39,6 @@ contract PancakeSwapV3AggregatorFuzz is Test {
     PancakeSwapV3Aggregator public hook;
 
     IPancakeV3Factory public factory;
-    address public quoter;
     address public extPool;
 
     MockERC20 public token0;
@@ -66,9 +63,6 @@ contract PancakeSwapV3AggregatorFuzz is Test {
         address factoryAddr = _deployCreateBytecode(factoryCreation);
         IPancakeV3PoolDeployer(poolDeployer).setFactoryAddress(factoryAddr);
         factory = IPancakeV3Factory(factoryAddr);
-
-        WETH weth = new WETH();
-        quoter = _deployQuoter(poolDeployer, factoryAddr, address(weth));
 
         token0 = new MockERC20("Token0", "TK0", 18);
         token1 = new MockERC20("Token1", "TK1", 18);
@@ -115,13 +109,10 @@ contract PancakeSwapV3AggregatorFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), quoter, "PancakeSwapV3Aggregator v1.0");
+        bytes memory constructorArgs = abi.encode(poolManager, address(factory), "PancakeSwapV3Aggregator v1.0");
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
-        return
-            new PancakeSwapV3Aggregator{salt: salt}(
-                poolManager, address(factory), quoter, "PancakeSwapV3Aggregator v1.0"
-            );
+        return new PancakeSwapV3Aggregator{salt: salt}(poolManager, address(factory), "PancakeSwapV3Aggregator v1.0");
     }
 
     /// @dev Reads a single-line hex file; adds `0x` if missing (matches `UniswapV3Factory.bin` style).
@@ -146,17 +137,6 @@ contract PancakeSwapV3AggregatorFuzz is Test {
         }
         require(deployed != address(0), "CREATE failed");
         return deployed;
-    }
-
-    /// @dev Pancake `QuoterV2` constructor: `(poolDeployer, factory, WETH9)` (Uniswap uses `(factory, WETH9)` only).
-    function _deployQuoter(address poolDeployer_, address factory_, address weth) internal returns (address q) {
-        bytes memory code = _readPrecompileHex(QUOTER_BYTECODE_PATH);
-        require(code.length > 0, "Empty QuoterV2 bytecode");
-        bytes memory creation = abi.encodePacked(code, abi.encode(poolDeployer_, factory_, weth));
-        assembly {
-            q := create(0, add(creation, 0x20), mload(creation))
-        }
-        require(q != address(0) && q.code.length > 0, "Quoter CREATE failed");
     }
 
     function testFuzz_swapExactIn_zeroForOne(uint256 amountIn) public {

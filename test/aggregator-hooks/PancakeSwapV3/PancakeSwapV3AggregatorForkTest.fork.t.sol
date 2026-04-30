@@ -30,7 +30,7 @@ contract PancakeSwapV3AggregatorForkTest is Test {
     uint160 constant MAX_PRICE_LIMIT = TickMath.MAX_SQRT_PRICE - 1;
 
     /// @dev Bridged USDT on Base (verify on BaseScan for your fork block).
-    address constant USDT_BASE = 0xfDE4C96C8593536E31F229Ea8f37B2adAbC26991;
+    address constant USDT_BASE = 0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2;
 
     IPoolManager public manager;
     SafePoolSwapTest public swapRouter;
@@ -65,11 +65,10 @@ contract PancakeSwapV3AggregatorForkTest is Test {
         }
         address poolManagerAddress = vm.envOr("POOL_MANAGER_8453", address(0));
         address pancakeFactory = vm.envOr("PANCAKE_V3_FACTORY", address(0));
-        address quoterAddr = vm.envOr("PANCAKE_V3_QUOTER_V2", address(0));
         address externalPoolAddr = vm.envOr("PANCAKE_V3_EXTERNAL_POOL", address(0));
 
-        bool missingPancake = poolManagerAddress == address(0) || pancakeFactory == address(0)
-            || quoterAddr == address(0) || externalPoolAddr == address(0);
+        bool missingPancake =
+            poolManagerAddress == address(0) || pancakeFactory == address(0) || externalPoolAddr == address(0);
         if (missingPancake) {
             vm.skip(true);
             return;
@@ -92,7 +91,7 @@ contract PancakeSwapV3AggregatorForkTest is Test {
         manager = IPoolManager(poolManagerAddress);
         swapRouter = new SafePoolSwapTest(manager);
 
-        _deployHook(pancakeFactory, quoterAddr);
+        _deployHook(pancakeFactory);
 
         poolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: feeTier, tickSpacing: ts, hooks: IHooks(address(hook))
@@ -112,16 +111,15 @@ contract PancakeSwapV3AggregatorForkTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(address factory_, address quoterAddr) internal {
+    function _deployHook(address factory_) internal {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs =
-            abi.encode(address(manager), factory_, quoterAddr, "PancakeSwapV3Aggregator v1.0");
+        bytes memory constructorArgs = abi.encode(address(manager), factory_, "PancakeSwapV3Aggregator v1.0");
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(PancakeSwapV3Aggregator).creationCode, constructorArgs);
-        hook = new PancakeSwapV3Aggregator{salt: salt}(manager, factory_, quoterAddr, "PancakeSwapV3Aggregator v1.0");
+        hook = new PancakeSwapV3Aggregator{salt: salt}(manager, factory_, "PancakeSwapV3Aggregator v1.0");
         require(address(hook) == hookAddress, "hook addr");
     }
 

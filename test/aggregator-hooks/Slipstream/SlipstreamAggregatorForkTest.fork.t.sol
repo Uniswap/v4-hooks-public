@@ -20,7 +20,6 @@ import {IUniswapV3Pool} from "../../../src/aggregator-hooks/implementations/Unis
 import {
     ISlipstreamFactory
 } from "../../../src/aggregator-hooks/implementations/Slipstream/interfaces/ISlipstreamFactory.sol";
-import {IQuoterV2} from "../../../src/aggregator-hooks/implementations/Slipstream/interfaces/IQuoterV2.sol";
 
 /// @notice Fork tests — Base mainnet (chain id 8453) Slipstream.
 /// @dev `FORK_RPC_URL_8453` and optional `FORK_BLOCK_NUMBER_8453`. Skips when RPC unset.
@@ -66,7 +65,6 @@ contract SlipstreamAggregatorForkTest is Test {
 
         address poolManagerAddress = vm.envAddress("POOL_MANAGER_8453");
         address slipFactory = vm.envAddress("SLIPSTREAM_FACTORY");
-        address quoterAddr = vm.envAddress("SLIPSTREAM_QUOTER_V2");
         address externalPoolAddr = vm.envAddress("SLIPSTREAM_EXTERNAL_POOL");
 
         alice = address(uint160(uint256(keccak256("slipstream_agg_fork_alice_v1"))));
@@ -77,30 +75,13 @@ contract SlipstreamAggregatorForkTest is Test {
         uint24 feeTier = extPool.fee();
         token0Decimals = IERC20Metadata(token0Address).decimals();
         token1Decimals = IERC20Metadata(token1Address).decimals();
-        uint256 probeAmountIn = uint256(10) ** token0Decimals;
 
-        // Routing uses pool.tickSpacing() as the factory/quoter key (same as SlipstreamAggregator._quoterRoutingHintFromKey).
         ISlipstreamFactory sf = ISlipstreamFactory(slipFactory);
-        IQuoterV2 sq = IQuoterV2(quoterAddr);
         int24 ts = extPool.tickSpacing();
         require(
             sf.getPool(token0Address, token1Address, ts) == externalPoolAddr,
             "fork: SLIPSTREAM_FACTORY does not register SLIPSTREAM_EXTERNAL_POOL at pool.tickSpacing()"
         );
-        try sq.quoteExactInputSingle(
-            IQuoterV2.QuoteExactInputSingleParams({
-                tokenIn: token0Address,
-                tokenOut: token1Address,
-                amountIn: probeAmountIn,
-                tickSpacing: ts,
-                sqrtPriceLimitX96: 0
-            })
-        ) returns (
-            uint256
-        ) {}
-        catch {
-            revert("fork: quoter reverted at pool.tickSpacing(); check SLIPSTREAM_QUOTER_V2 / probe amount");
-        }
 
         currency0 = Currency.wrap(token0Address);
         currency1 = Currency.wrap(token1Address);
@@ -108,7 +89,7 @@ contract SlipstreamAggregatorForkTest is Test {
         manager = IPoolManager(poolManagerAddress);
         swapRouter = new SafePoolSwapTest(manager);
 
-        _deployHook(slipFactory, quoterAddr);
+        _deployHook(slipFactory);
 
         poolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: feeTier, tickSpacing: ts, hooks: IHooks(address(hook))
@@ -126,15 +107,15 @@ contract SlipstreamAggregatorForkTest is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(address slipFactory, address quoterAddr) internal {
+    function _deployHook(address slipFactory) internal {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(address(manager), slipFactory, quoterAddr);
+        bytes memory constructorArgs = abi.encode(address(manager), slipFactory);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(SlipstreamAggregator).creationCode, constructorArgs);
-        hook = new SlipstreamAggregator{salt: salt}(manager, slipFactory, quoterAddr);
+        hook = new SlipstreamAggregator{salt: salt}(manager, slipFactory);
         require(address(hook) == hookAddress, "hook addr");
     }
 

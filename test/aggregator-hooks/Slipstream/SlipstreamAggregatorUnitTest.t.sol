@@ -16,9 +16,8 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {SlipstreamAggregator} from "../../../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
 import {MockUniV3Pool} from "../UniswapV3/mocks/MockUniV3Pool.sol";
 import {MockSlipstreamFactory} from "./mocks/MockSlipstreamFactory.sol";
-import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 
-/// @notice Slipstream: tickSpacing-keyed factory + quoter; mirrors UniswapV3AggregatorUnitTest patterns.
+/// @notice Slipstream: tickSpacing-keyed factory; mirrors UniswapV3AggregatorUnitTest patterns.
 contract SlipstreamAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -26,7 +25,6 @@ contract SlipstreamAggregatorUnitTest is Test {
     SafePoolSwapTest public swapRouter;
     MockSlipstreamFactory public factory;
     MockUniV3Pool public extPool;
-    MockQuoterV2 public quoter;
     SlipstreamAggregator public hook;
 
     MockERC20 public token0;
@@ -55,7 +53,6 @@ contract SlipstreamAggregatorUnitTest is Test {
         if (address(token0) > address(token1)) (token0, token1) = (token1, token0);
 
         factory = new MockSlipstreamFactory();
-        quoter = new MockQuoterV2();
         extPool = new MockUniV3Pool(address(token0), address(token1), POOL_FEE, TICK_SPACING);
         factory.setPool(address(token0), address(token1), TICK_SPACING, address(extPool));
 
@@ -90,10 +87,10 @@ contract SlipstreamAggregatorUnitTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), address(quoter));
+        bytes memory constructorArgs = abi.encode(poolManager, address(factory));
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(SlipstreamAggregator).creationCode, constructorArgs);
-        return new SlipstreamAggregator{salt: salt}(poolManager, address(factory), address(quoter));
+        return new SlipstreamAggregator{salt: salt}(poolManager, address(factory));
     }
 
     function test_quote_exactIn_matches_math() public {

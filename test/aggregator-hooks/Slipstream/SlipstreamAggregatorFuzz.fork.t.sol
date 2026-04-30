@@ -26,7 +26,7 @@ interface ISlipstreamCLFactory {
 }
 
 /// @title SlipstreamAggregatorFuzz
-/// @notice Fuzz on a Base fork using canonical Slipstream CL factory + QuoterV2; creates a fresh CL pool from mock ERC-20s.
+/// @notice Fuzz on a Base fork using canonical Slipstream CL factory; creates a fresh CL pool from mock ERC-20s.
 /// @dev Skips when RPC unset.
 contract SlipstreamAggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
@@ -45,7 +45,6 @@ contract SlipstreamAggregatorFuzz is Test {
     SlipstreamAggregator public hook;
 
     ISlipstreamCLFactory public clFactory;
-    address public quoter;
     address public extPool;
 
     MockERC20 public token0;
@@ -71,7 +70,6 @@ contract SlipstreamAggregatorFuzz is Test {
         }
 
         address slipFactory = vm.envAddress("SLIPSTREAM_FACTORY");
-        quoter = vm.envAddress("SLIPSTREAM_QUOTER_V2");
         clFactory = ISlipstreamCLFactory(slipFactory);
 
         poolManager =
@@ -92,7 +90,7 @@ contract SlipstreamAggregatorFuzz is Test {
         token1.approve(address(mintHelper), type(uint256).max);
         mintHelper.mint(extPool, address(this), TICK_LOWER, TICK_UPPER, LIQUIDITY_AMOUNT);
 
-        hook = _deployHook(slipFactory, quoter);
+        hook = _deployHook(slipFactory);
 
         IUniswapV3Pool p = IUniswapV3Pool(extPool);
         poolKey = PoolKey({
@@ -119,15 +117,15 @@ contract SlipstreamAggregatorFuzz is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(address slipFactory, address quoterAddr) internal returns (SlipstreamAggregator) {
+    function _deployHook(address slipFactory) internal returns (SlipstreamAggregator) {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, slipFactory, quoterAddr);
+        bytes memory constructorArgs = abi.encode(poolManager, slipFactory);
         (, bytes32 salt) =
             HookMiner.find(address(this), flags, type(SlipstreamAggregator).creationCode, constructorArgs);
-        return new SlipstreamAggregator{salt: salt}(poolManager, slipFactory, quoterAddr);
+        return new SlipstreamAggregator{salt: salt}(poolManager, slipFactory);
     }
 
     function testFuzz_swapExactIn_zeroForOne(uint256 amountIn) public {
