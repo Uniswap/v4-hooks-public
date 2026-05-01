@@ -11,6 +11,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
@@ -104,6 +105,10 @@ contract PoolVaultTest is Test, Deployers {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
 
+    /// @dev Mirror of `PoolVault._decimalsOffset()` so test expectations can be computed
+    ///      with the same formula the contract uses.
+    uint8 internal constant _OFFSET = 12;
+
     function setUp() public {
         deployFreshManagerAndRouters();
 
@@ -184,14 +189,15 @@ contract PoolVaultTest is Test, Deployers {
     //  Bootstrap
     // ══════════════════════════════════════════════════════════
 
-    function test_bootstrap_mintsSqrtSharesAndLocksDeadShares() public {
+    function test_bootstrap_mintsSqrtSharesToBootstrapper() public {
         uint256 shares = _bootstrap(alice, 1000e18);
 
-        // sqrt(1000e18 * 1000e18) = 1000e18
+        // sqrt(1000e18 * 1000e18) = 1000e18, all credited to alice. No address(0) lock --
+        // inflation defense is virtual-shares offsets in `_convertToAmounts` (see PoolVault).
         assertEq(shares, 1000e18, "shares = sqrt(a0 * a1)");
         assertEq(vault.totalShares(poolIdA), 1000e18);
-        assertEq(vault.userShares(poolIdA, alice), 1000e18 - vault.MINIMUM_SHARES());
-        assertEq(vault.userShares(poolIdA, address(0)), vault.MINIMUM_SHARES());
+        assertEq(vault.userShares(poolIdA, alice), 1000e18, "alice gets the full bootstrap mint");
+        assertEq(vault.userShares(poolIdA, address(0)), 0, "no dead-share lock");
     }
 
     function test_bootstrap_revertsWhenAlreadyBootstrapped() public {
@@ -222,16 +228,21 @@ contract PoolVaultTest is Test, Deployers {
         vm.stopPrank();
     }
 
-    function test_bootstrap_revertsBelowMinimumShares() public {
-        // sqrt(1 * 1) = 1, well below MINIMUM_SHARES (1000)
+    function test_bootstrap_acceptsTinyAmounts_underVirtualOffsets() public {
+        // Under the EIP-4626 virtual-shares defense, a (1, 1) bootstrap is no longer special.
+        // `sqrt(1*1) = 1` share is minted; the conversion math reads
+        // `supply + 10**_decimalsOffset() = 1 + 1e12`, so a hypothetical donation attack
+        // captures only `1 / (1 + 1e12)` of the donation -- ~zero, regardless of bootstrap size.
         token0.mint(alice, 1);
         token1.mint(alice, 1);
         vm.startPrank(alice);
         token0.approve(address(vault), 1);
         token1.approve(address(vault), 1);
-        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
-        vault.bootstrap(poolKeyA, alice, alice, 1, 1);
+        uint256 shares = vault.bootstrap(poolKeyA, alice, alice, 1, 1);
         vm.stopPrank();
+        assertEq(shares, 1);
+        assertEq(vault.totalShares(poolIdA), 1);
+        assertEq(vault.userShares(poolIdA, alice), 1);
     }
 
     function test_addLiquidity_revertsIfNotBootstrapped() public {
@@ -254,9 +265,13 @@ contract PoolVaultTest is Test, Deployers {
         (uint256 a0, uint256 a1) = _depositA(bob, 500e18);
 
         // After bootstrap: total0 = total1 = 1000e18, supply = 1000e18.
-        // 500e18 shares costs ceil(500e18 * 1000e18 / 1000e18) = 500e18 of each.
-        assertEq(a0, 500e18);
-        assertEq(a1, 500e18);
+        // Deposit rounds UP per `_convertToAmounts(roundUp=true)`:
+        //   ceil(500e18 * (1000e18 + 1) / (1000e18 + 10**_decimalsOffset()))
+        // The +1 virtual asset and +10^offset virtual shares are the EIP-4626 inflation
+        // defense; they bias every conversion by ~1 ppb at the default offset of 12.
+        uint256 expected = FixedPointMathLib.fullMulDivUp(500e18, 1000e18 + 1, 1000e18 + 10 ** _OFFSET);
+        assertEq(a0, expected);
+        assertEq(a1, expected);
         assertEq(vault.userShares(poolIdA, bob), 500e18);
         assertEq(vault.totalShares(poolIdA), 1500e18);
     }
@@ -287,15 +302,17 @@ contract PoolVaultTest is Test, Deployers {
         uint256 bal1Before = token1.balanceOf(bob);
 
         // Alice withdraws half, sends to Bob.
-        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, bob, aliceShares / 2);
+        uint256 burnShares = aliceShares / 2;
+        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, bob, burnShares);
 
-        // After dead-share dilution: aliceShares ≈ 1000e18 - 1000. Withdraw half.
-        // Returned amount per currency = floor(burned * 1000e18 / 1000e18).
-        assertEq(a0, aliceShares / 2);
-        assertEq(a1, aliceShares / 2);
-        assertEq(vault.userShares(poolIdA, alice), aliceShares - aliceShares / 2);
-        assertEq(token0.balanceOf(bob) - bal0Before, aliceShares / 2);
-        assertEq(token1.balanceOf(bob) - bal1Before, aliceShares / 2);
+        // No dead-share lock; aliceShares == 1000e18. Withdraw rounds DOWN:
+        //   floor(500e18 * (1000e18 + 1) / (1000e18 + 10**_decimalsOffset()))
+        uint256 expected = FixedPointMathLib.fullMulDiv(burnShares, 1000e18 + 1, 1000e18 + 10 ** _OFFSET);
+        assertEq(a0, expected);
+        assertEq(a1, expected);
+        assertEq(vault.userShares(poolIdA, alice), aliceShares - burnShares);
+        assertEq(token0.balanceOf(bob) - bal0Before, a0);
+        assertEq(token1.balanceOf(bob) - bal1Before, a1);
     }
 
     function test_withdraw_revertsInsufficientShares() public {
@@ -458,8 +475,8 @@ contract PoolVaultTest is Test, Deployers {
 
         assertEq(vault.totalShares(poolIdA), 1000e18);
         assertEq(vault.totalShares(poolIdB), 500e18);
-        assertEq(vault.userShares(poolIdA, alice), 1000e18 - vault.MINIMUM_SHARES());
-        assertEq(vault.userShares(poolIdB, bob), 500e18 - vault.MINIMUM_SHARES());
+        assertEq(vault.userShares(poolIdA, alice), 1000e18);
+        assertEq(vault.userShares(poolIdB, bob), 500e18);
         assertEq(vault.userShares(poolIdA, bob), 0);
         assertEq(vault.userShares(poolIdB, alice), 0);
     }

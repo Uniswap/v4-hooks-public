@@ -45,9 +45,13 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 ///           - Deposits round **up** (depositor pays slightly more, preventing dilution)
 ///           - Withdrawals round **down** (withdrawer receives slightly less, preventing theft)
 ///           - First deposit goes through `_bootstrap`, which mints `sqrt(amount0 * amount1)`
-///             shares (Uniswap V2 style) and locks `MINIMUM_SHARES` at `address(0)` to prevent
-///             share-price inflation attacks. After bootstrap, `totalShares >= MINIMUM_SHARES`
-///             permanently — the pool can never be reset.
+///             shares (Uniswap V2 style) to the bootstrapper at the chosen amount ratio.
+///           - Inflation defense uses EIP-4626 virtual-shares offsets in conversion math:
+///             every read of `_convertToAmounts` adds `10**_decimalsOffset()` virtual shares
+///             to `supply` and `1 wei` of virtual asset to each `total`. Donation attacks are
+///             diluted across the virtual shares (which can never withdraw), making them
+///             uneconomic regardless of bootstrap size. Replaces the older "burn 1000 shares
+///             to address(0)" defense, which scaled poorly with adversarial bootstrap inputs.
 ///           - Conversion uses Solady's `fullMulDiv` / `fullMulDivUp` for overflow-safe precision
 ///
 ///         ## Token Compatibility
@@ -103,16 +107,6 @@ abstract contract PoolVault is BlockNumberish {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                              CONSTANTS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Dead shares locked at `address(0)` on first bootstrap. Prevents `totalShares`
-    ///         from ever reaching zero again, which would re-enable inflation attacks. Also
-    ///         dilutes the very first depositor's share value, making single-wei bootstrap
-    ///         attacks unprofitable.
-    uint256 public constant MINIMUM_SHARES = 1_000;
-
-    // ═══════════════════════════════════════════════════════════════════════════
     //                              STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -123,13 +117,12 @@ abstract contract PoolVault is BlockNumberish {
     mapping(PoolId => mapping(Currency => IERC4626)) public vaults;
 
     /// @notice Total shares outstanding for a pool, across all depositors.
-    /// @dev    Denominator for proportional share conversions. Always `>= MINIMUM_SHARES`
-    ///         after bootstrap; zero only before bootstrap.
+    /// @dev    Real depositor shares only; the conversion math reads `supply + 10**_decimalsOffset()`
+    ///         to add virtual shares for inflation defense.
     mapping(PoolId => uint256) public totalShares;
 
     /// @notice Share balance for each (pool, user) pair.
-    /// @dev    Numerator for a user's proportional claim on pool assets. `address(0)` holds
-    ///         the dead shares from bootstrap.
+    /// @dev    Numerator for a user's proportional claim on pool assets.
     mapping(PoolId => mapping(address => uint256)) public userShares;
 
     /// @dev Number of ERC4626 vault shares this pool owns. Isolated from other pools that may
@@ -171,7 +164,7 @@ abstract contract PoolVault is BlockNumberish {
 
     /// @notice Emitted on first deposit (bootstrap) — sets the initial share/asset ratio.
     /// @param poolId   The pool being bootstrapped.
-    /// @param provider The address that received the bootstrap shares (less MINIMUM_SHARES).
+    /// @param provider The address that received the full bootstrap shares.
     /// @param shares   Total shares minted (`sqrt(amount0 * amount1)`).
     /// @param amount0  Currency0 transferred from the bootstraper.
     /// @param amount1  Currency1 transferred from the bootstraper.
@@ -206,7 +199,7 @@ abstract contract PoolVault is BlockNumberish {
     /// @dev `_bootstrap` was called for a pool that already has shares.
     error PoolAlreadyBootstrapped();
 
-    /// @dev Bootstrap amounts produce fewer than `MINIMUM_SHARES` shares.
+    /// @dev Bootstrap amounts produce zero shares (one or both received amounts is zero).
     error InsufficientBootstrap();
 
     /// @dev `_withdraw` was called in the same block as the depositor's last `_deposit`.
@@ -283,23 +276,33 @@ abstract contract PoolVault is BlockNumberish {
     //                          INTERNAL: BOOTSTRAP
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Seed the pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares,
-    ///      locks `MINIMUM_SHARES` at `address(0)` (preventing future inflation attacks), and
-    ///      assigns the remainder to `to`. Caller must be authorized by the subclass — typically
-    ///      restricted to the pool owner so the initial share/asset ratio is set correctly for
-    ///      mismatched-decimal pairs (e.g., USDC/WETH).
+    /// @dev Seed the pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares to
+    ///      `to` and sets the initial share/asset ratio. Caller must be authorized by the
+    ///      subclass — typically restricted to the pool owner so the initial ratio is set
+    ///      correctly for mismatched-decimal pairs (e.g., USDC/WETH).
+    ///
+    ///      Inflation defense: the conversion math (`_convertToAmounts`) reads
+    ///      `(supply + 10**_decimalsOffset())` and `(total + 1)`. Donation attacks against the
+    ///      pool's underlying balances are diluted across the virtual shares, which can never
+    ///      withdraw, so any donation is captured almost entirely by the burn-equivalent
+    ///      virtual position regardless of bootstrap size. This replaces the older
+    ///      "burn 1000 shares to address(0)" defense, whose strength scaled with the
+    ///      bootstrap-amount-to-MINIMUM_SHARES ratio and was fragile against permissionless
+    ///      bootstrappers.
     ///
     ///      Reverts if:
     ///      - `totalShares[poolId] != 0` (already bootstrapped)
     ///      - `amount0 == 0 || amount1 == 0` (cannot price empty pool)
-    ///      - `sqrt(amount0 * amount1) <= MINIMUM_SHARES` (bootstrap too small to dilute attacker)
+    ///      - `received0 == 0 || received1 == 0` (FoT/rebasing under-receipt)
+    ///      - `sqrt(received0 * received1) == 0` (mathematically impossible if both received
+    ///        amounts are >= 1, since sqrt(1) = 1; but kept as a defensive guard)
     ///
     /// @param key      The pool to bootstrap.
     /// @param from     The address to pull tokens from.
-    /// @param to       The address to credit shares to (less `MINIMUM_SHARES`).
+    /// @param to       The address to credit shares to.
     /// @param amount0  Currency0 to deposit.
     /// @param amount1  Currency1 to deposit.
-    /// @return sharesMinted Total shares minted (including the locked MINIMUM_SHARES).
+    /// @return sharesMinted Total shares minted, all credited to `to`.
     function _bootstrap(PoolKey calldata key, address from, address to, uint256 amount0, uint256 amount1)
         internal
         returns (uint256 sharesMinted)
@@ -317,14 +320,13 @@ abstract contract PoolVault is BlockNumberish {
         if (received0 == 0 || received1 == 0) revert InsufficientBootstrap();
 
         sharesMinted = FixedPointMathLib.sqrt(received0 * received1);
-        if (sharesMinted <= MINIMUM_SHARES) revert InsufficientBootstrap();
+        if (sharesMinted == 0) revert InsufficientBootstrap();
 
         _depositToVault(poolId, key.currency0, received0);
         _depositToVault(poolId, key.currency1, received1);
 
         totalShares[poolId] = sharesMinted;
-        userShares[poolId][address(0)] = MINIMUM_SHARES;
-        userShares[poolId][to] = sharesMinted - MINIMUM_SHARES;
+        userShares[poolId][to] = sharesMinted;
         _lastDepositBlock[poolId][to] = _getBlockNumberish();
 
         emit Bootstrap(poolId, to, sharesMinted, received0, received1);
@@ -425,8 +427,14 @@ abstract contract PoolVault is BlockNumberish {
     ///      Reverts if `totalShares == 0` — pre-bootstrap pools have no defined share/asset
     ///      ratio. Subclasses must ensure `_bootstrap` is called before any `_deposit`/`_withdraw`.
     ///
+    ///      EIP-4626 virtual-shares offsets are applied here: `(supply + 10**_decimalsOffset())`
+    ///      and `(total + 1)` per asset. The offset bounds the share/asset ratio's drift under
+    ///      donation attacks -- the donation is captured proportionally by virtual shares
+    ///      (which can never withdraw), making post-bootstrap inflation uneconomic regardless
+    ///      of bootstrap size.
+    ///
     ///      Uses Solady `fullMulDiv` for overflow-safe 512-bit intermediate precision:
-    ///        amount = shares * totalAsset / totalShares
+    ///        amount = shares * (totalAsset + 1) / (totalShares + 10**offset)
     ///
     /// @param key     The pool to compute amounts for.
     /// @param shares  The number of shares to convert.
@@ -443,14 +451,28 @@ abstract contract PoolVault is BlockNumberish {
         uint256 supply = totalShares[poolId];
         if (supply == 0) revert PoolNotBootstrapped();
 
+        uint256 effSupply = supply + 10 ** _decimalsOffset();
         (uint256 total0, uint256 total1) = _totalAssets(key);
         if (roundUp) {
-            amount0 = FixedPointMathLib.fullMulDivUp(shares, total0, supply);
-            amount1 = FixedPointMathLib.fullMulDivUp(shares, total1, supply);
+            amount0 = FixedPointMathLib.fullMulDivUp(shares, total0 + 1, effSupply);
+            amount1 = FixedPointMathLib.fullMulDivUp(shares, total1 + 1, effSupply);
         } else {
-            amount0 = FixedPointMathLib.fullMulDiv(shares, total0, supply);
-            amount1 = FixedPointMathLib.fullMulDiv(shares, total1, supply);
+            amount0 = FixedPointMathLib.fullMulDiv(shares, total0 + 1, effSupply);
+            amount1 = FixedPointMathLib.fullMulDiv(shares, total1 + 1, effSupply);
         }
+    }
+
+    /// @notice Number of "virtual shares" decimal places used in EIP-4626-style inflation
+    ///         defense. The conversion math reads `supply + 10**_decimalsOffset()` so an
+    ///         attacker's post-bootstrap donation is diluted across the virtual position.
+    /// @dev    Default: 12 (i.e., 1e12 virtual shares). For a typical bootstrap that mints
+    ///         O(1e18) shares, the virtual position is dominated; for a tiny bootstrap that
+    ///         mints O(1) shares, the virtual position dominates and any donation attack
+    ///         loses 1 - O(1/1e12) ≈ 100% of the donated value. Subclasses MAY override to
+    ///         match a different decimal regime (e.g., return 18 for WETH-pair vaults if
+    ///         tighter share denomination is desired).
+    function _decimalsOffset() internal view virtual returns (uint8) {
+        return 12;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -67,10 +67,11 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///         ## Share Accounting
 ///
 ///         Inherited from PoolVault. Pools are seeded by the owner via `bootstrap`, which mints
-///         `sqrt(amount0 * amount1)` shares (Uniswap V2 style) and locks `MINIMUM_SHARES` at
-///         `address(0)` to prevent share-price inflation attacks. After bootstrap, anyone with
-///         deposit auth may call `addLiquidity` for proportional shares. LPs hold proportional
-///         shares of the pool's total assets (vault shares + claims + per-pool ERC-20).
+///         `sqrt(amount0 * amount1)` shares (Uniswap V2 style). Inflation defense uses
+///         EIP-4626 virtual-shares offsets in the conversion math (see PoolVault). After
+///         bootstrap, anyone with deposit auth may call `addLiquidity` for proportional
+///         shares. LPs hold proportional shares of the pool's total assets (vault shares +
+///         claims + per-pool ERC-20).
 ///
 ///         ## Reentrancy
 ///
@@ -279,17 +280,18 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     //                        EXTERNAL: LP DEPOSIT / WITHDRAW
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Seed a pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares,
-    ///         locks `MINIMUM_SHARES` at `address(0)`, and credits the owner with the rest.
+    /// @notice Seed a pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares
+    ///         to the owner.
     /// @dev    Only the owner may bootstrap. The owner-supplied amounts set the initial
     ///         share/asset ratio, which is critical for asymmetric-decimal pairs (e.g.,
     ///         USDC/WETH) where a naïve 1-wei-of-each bootstrap would either be unaffordable
-    ///         or set a meaningless price. Reverts if the pool is already bootstrapped or if
-    ///         `sqrt(amount0 * amount1) <= MINIMUM_SHARES`.
+    ///         or set a meaningless price. Inflation defense is provided by virtual-shares
+    ///         offsets in the conversion math (see {PoolVault._convertToAmounts}). Reverts
+    ///         if the pool is already bootstrapped or if `sqrt(amount0 * amount1) == 0`.
     /// @param key     The pool to bootstrap.
     /// @param amount0 Currency0 to deposit.
     /// @param amount1 Currency1 to deposit.
-    /// @return shares Total shares minted (including the locked dead shares).
+    /// @return shares Total shares minted, all credited to the owner.
     function bootstrap(PoolKey calldata key, uint256 amount0, uint256 amount1)
         external
         onlyOwner

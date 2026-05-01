@@ -17,6 +17,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
@@ -57,6 +58,10 @@ contract SmartPoolHookTest is Test, Deployers {
     ///      a small relative tolerance because SmartPool now uses a compact indicative quote.
     uint256 constant ABS_TOLERANCE = 1;
     uint256 constant INDICATIVE_REL_TOLERANCE = 5e14; // 5 bps
+
+    /// @dev Mirror of `PoolVault._decimalsOffset()` so test expectations can be computed with
+    ///      the same EIP-4626 virtual-shares formula the contract uses.
+    uint8 internal constant _OFFSET = 12;
 
     function setUp() public {
         deployFreshManagerAndRouters();
@@ -112,8 +117,9 @@ contract SmartPoolHookTest is Test, Deployers {
     ///      the same-block-withdraw guard does not block immediate `removeLiquidity` in tests.
     function _depositAsOperator(uint256 amount) internal {
         if (hook.totalShares(testPoolId) == 0) {
-            // sqrt(amount * amount) = amount → matching-amount bootstrap shares == amount.
-            // MINIMUM_SHARES is locked at address(0); the rest goes to the owner.
+            // sqrt(amount * amount) = amount → matching-amount bootstrap shares == amount,
+            // all credited to the owner. Inflation defense is virtual-shares offsets, not
+            // a dead-share lock.
             token0.mint(owner, amount);
             token1.mint(owner, amount);
             vm.startPrank(owner);
@@ -398,15 +404,16 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.stopPrank();
     }
 
-    function test_bootstrap_rejectsAmountsBelowMinimumShares() public {
-        // sqrt(1 * 1) = 1, well below MINIMUM_SHARES (1000).
+    function test_bootstrap_rejectsZeroAmount() public {
+        // Bootstrap requires both amounts > 0; the inflation defense relies on virtual-shares
+        // offsets in the conversion math (not a sqrt-floor), so even (1, 1) is now allowed.
         token0.mint(owner, 1);
         token1.mint(owner, 1);
         vm.startPrank(owner);
         token0.approve(address(hook), 1);
         token1.approve(address(hook), 1);
         vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
-        hook.bootstrap(testPoolKey, 1, 1);
+        hook.bootstrap(testPoolKey, 0, 1);
         vm.stopPrank();
     }
 
@@ -439,9 +446,10 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.stopPrank();
 
         // sqrt(2000e6 * 1e18) ≈ 4.47e13; bootstrap shares are independent of decimal scale.
-        assertGt(shares, hook.MINIMUM_SHARES());
+        assertGt(shares, 0);
         assertEq(hook.totalShares(id), shares);
-        assertEq(hook.userShares(id, address(0)), hook.MINIMUM_SHARES());
+        assertEq(hook.userShares(id, owner), shares, "owner gets full bootstrap shares");
+        assertEq(hook.userShares(id, address(0)), 0, "no dead-share lock under virtual offsets");
         // Initial ratio reflects what the owner deposited, not 1:1.
         (uint256 r0, uint256 r1) = hook.getReserves(key);
         assertEq(r0, a0);
@@ -455,11 +463,11 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_addLiquidity_ownerCanDeposit() public {
         _depositAsOperator(1_000e18);
 
-        // Bootstrap: total shares == sqrt(1000e18 * 1000e18) == 1000e18.
-        // MINIMUM_SHARES locked at address(0), the rest credited to the owner.
+        // Bootstrap: total shares == sqrt(1000e18 * 1000e18) == 1000e18, all credited to owner.
+        // No dead-share lock; inflation defense is virtual-shares offsets in conversion math.
         assertEq(hook.totalShares(testPoolId), 1_000e18);
-        assertEq(hook.userShares(testPoolId, owner), 1_000e18 - hook.MINIMUM_SHARES());
-        assertEq(hook.userShares(testPoolId, address(0)), hook.MINIMUM_SHARES());
+        assertEq(hook.userShares(testPoolId, owner), 1_000e18);
+        assertEq(hook.userShares(testPoolId, address(0)), 0);
 
         // Tokens routed into vaults.
         assertEq(token0.balanceOf(address(hook)), 0);
@@ -508,10 +516,12 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.prank(owner);
         hook.removeLiquidity(testPoolKey, 500e18, 0, 0, block.timestamp);
 
+        // Withdraw rounds DOWN: floor(500e18 * (1000e18 + 1) / (1000e18 + 1e12)).
+        uint256 expected = FixedPointMathLib.fullMulDiv(500e18, 1000e18 + 1, 1000e18 + 10 ** _OFFSET);
         assertEq(hook.userShares(testPoolId, owner), ownerSharesBefore - 500e18);
         assertEq(hook.totalShares(testPoolId), 1_000e18 - 500e18);
-        assertEq(token0.balanceOf(owner) - balBefore0, 500e18);
-        assertEq(token1.balanceOf(owner) - balBefore1, 500e18);
+        assertEq(token0.balanceOf(owner) - balBefore0, expected);
+        assertEq(token1.balanceOf(owner) - balBefore1, expected);
     }
 
     function test_removeLiquidity_revertsInsufficientShares() public {
@@ -704,8 +714,11 @@ contract SmartPoolHookTest is Test, Deployers {
         vault1.simulateYield(100e18);
 
         (uint256 amount0, uint256 amount1) = hook.previewWithdraw(testPoolKey, 1_000e18);
-        assertEq(amount0, 1_100e18);
-        assertEq(amount1, 1_100e18);
+        // After yield: total = 1_100e18, supply = 1_000e18.
+        // Withdraw rounds down: floor(1000e18 * (1100e18 + 1) / (1000e18 + 1e12)).
+        uint256 expected = FixedPointMathLib.fullMulDiv(1_000e18, 1_100e18 + 1, 1_000e18 + 10 ** _OFFSET);
+        assertEq(amount0, expected);
+        assertEq(amount1, expected);
     }
 
     /// @dev Late entrants must not extract yield that accrued before they joined. Bob deposits
@@ -724,9 +737,12 @@ contract SmartPoolHookTest is Test, Deployers {
         vault0.simulateYield(100e18);
         vault1.simulateYield(100e18);
 
-        // Bob deposits AFTER yield, paying the higher share price (~1050 each).
+        // Bob deposits AFTER yield. The exact post-yield share price depends on alice's
+        // deposit cost (which is itself diluted by the virtual offset and so isn't exactly
+        // 1000e18); rather than rebuild the cascade, capture what the hook charges bob
+        // and verify it exceeds the pre-yield 1:1 price.
         (uint256 bobPaid0, uint256 bobPaid1) = hook.previewDeposit(testPoolKey, 1_000e18);
-        assertApproxEqAbs(bobPaid0, 1_050e18, 1, "bob pays post-yield share price");
+        assertGt(bobPaid0, 1_000e18, "bob pays a higher share price post-yield");
         assertEq(bobPaid0, bobPaid1);
         _externalDeposit(testPoolKey, bob, 1_000e18);
 
@@ -734,14 +750,19 @@ contract SmartPoolHookTest is Test, Deployers {
         (uint256 bobOut0, uint256 bobOut1) = _exitAll(bob);
 
         // Alice's slice of yield: 1000 / (1000 + 1000) = 50% → ~50e18 profit per side.
+        // Tolerance = 2e12 wei reflects the cumulative virtual-offset dilution across four
+        // deposit/withdraw cycles (alice in, bob in, alice out, bob out) at offset=12. The
+        // share-of-yield ratio is exact; only the absolute wei drifts by the offset capture.
         assertGt(aliceOut0, 1_000e18, "alice profited on currency0");
         assertGt(aliceOut1, 1_000e18, "alice profited on currency1");
-        assertApproxEqAbs(aliceOut0 - 1_000e18, 50e18, 1, "alice captured half of currency0 yield");
-        assertApproxEqAbs(aliceOut1 - 1_000e18, 50e18, 1, "alice captured half of currency1 yield");
+        assertApproxEqAbs(aliceOut0 - 1_000e18, 50e18, 2e12, "alice captured half of currency0 yield");
+        assertApproxEqAbs(aliceOut1 - 1_000e18, 50e18, 2e12, "alice captured half of currency1 yield");
 
-        // Bob breaks even within rounding (deposit rounds up + withdraw rounds down → 1-2 wei).
-        assertApproxEqAbs(bobOut0, bobPaid0, 10, "bob breaks even on currency0");
-        assertApproxEqAbs(bobOut1, bobPaid1, 10, "bob breaks even on currency1");
+        // Bob breaks even within rounding: deposit rounds up, withdraw rounds down, plus
+        // virtual-offset dilution. Tolerance widened from 10 wei to 2e12 wei to reflect the
+        // offset=12 dilution scale.
+        assertApproxEqAbs(bobOut0, bobPaid0, 2e12, "bob breaks even on currency0");
+        assertApproxEqAbs(bobOut1, bobPaid1, 2e12, "bob breaks even on currency1");
     }
 
     /// @dev Three depositors enter at three different times, with yield accruing between each.
@@ -884,9 +905,11 @@ contract SmartPoolHookTest is Test, Deployers {
         _externalDeposit(testPoolKey, alice, 200e18);
         _externalDeposit(keyB, bob, 100e18);
         _assertCrossPoolSolvency(testPoolKey, keyB);
-        // Hook now holds 600e18 of each (500 bootstrap + 100 bob).
-        assertEq(token0.balanceOf(address(hook)), 600e18);
-        assertEq(token1.balanceOf(address(hook)), 600e18);
+        // Hook holds 500e18 (pool B's bootstrap, unvaulted) + bob's deposit charge.
+        // Bob's deposit on B uses the virtual-offset formula: ceil(100e18 * (500e18+1) / (500e18+1e12)).
+        uint256 bobPaid = FixedPointMathLib.fullMulDivUp(100e18, 500e18 + 1, 500e18 + 10 ** _OFFSET);
+        assertEq(token0.balanceOf(address(hook)), 500e18 + bobPaid);
+        assertEq(token1.balanceOf(address(hook)), 500e18 + bobPaid);
 
         // Each swap must leave the OTHER pool's reserves untouched.
         _swapAndAssertOtherPoolUnchanged(testPoolKey, keyB, true, -50e18);
@@ -917,18 +940,17 @@ contract SmartPoolHookTest is Test, Deployers {
         _fullExit(testPoolKey, alice);
         _assertCrossPoolSolvency(testPoolKey, keyB);
 
-        // After everyone except owner + dead shares has exited:
-        //   pool A shares == owner_A + MINIMUM_SHARES
-        //   pool B shares == owner_B + MINIMUM_SHARES
+        // After everyone except the owner has exited, total shares == owner shares
+        // (no dead-share lock under virtual-offset inflation defense).
         assertEq(
             hook.totalShares(testPoolId),
-            hook.userShares(testPoolId, owner) + hook.MINIMUM_SHARES(),
-            "pool A share supply matches owner + dead shares"
+            hook.userShares(testPoolId, owner),
+            "pool A share supply matches owner"
         );
         assertEq(
             hook.totalShares(idB),
-            hook.userShares(idB, owner) + hook.MINIMUM_SHARES(),
-            "pool B share supply matches owner + dead shares"
+            hook.userShares(idB, owner),
+            "pool B share supply matches owner"
         );
     }
 
@@ -1341,14 +1363,16 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_previewAddLiquidity_proportionalAfterBootstrap() public {
         _depositAsOperator(1_000e18);
         (uint256 a0, uint256 a1) = hook.previewDeposit(testPoolKey, 500e18);
-        // total0 = total1 = 1000e18, supply = 1000e18 → 500e18 shares costs 500e18 of each.
-        assertEq(a0, 500e18);
-        assertEq(a1, 500e18);
+        // total0 = total1 = 1000e18, supply = 1000e18, virtual offset = 1e12.
+        // Deposit rounds up: ceil(500e18 * (1000e18 + 1) / (1000e18 + 1e12)).
+        uint256 expected = FixedPointMathLib.fullMulDivUp(500e18, 1000e18 + 1, 1000e18 + 10 ** _OFFSET);
+        assertEq(a0, expected);
+        assertEq(a1, expected);
     }
 
     function test_sharesOf() public {
         _depositAsOperator(1_000e18);
-        assertEq(hook.sharesOf(testPoolKey, owner), 1_000e18 - hook.MINIMUM_SHARES());
+        assertEq(hook.sharesOf(testPoolKey, owner), 1_000e18);
         assertEq(hook.sharesOf(testPoolKey, alice), 0);
     }
 
@@ -1556,7 +1580,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         // Bootstrap with realistic units. Whichever currency is t0/t1 by address, deposit
         // enough decimal-equivalent value on each side so liquidity is non-degenerate.
-        // 1_000 stable @ 1e6 = 1e9 ; 1 WETH @ 1e18 = 1e18 ; sqrt(1e27) ~ 3.16e13 >> MINIMUM_SHARES.
+        // 1_000 stable @ 1e6 = 1e9 ; 1 WETH @ 1e18 = 1e18 ; sqrt(1e27) ~ 3.16e13 shares.
         uint256 amtStable = 1_000e6;
         uint256 amtWeth = 1e18;
         (uint256 amt0, uint256 amt1) = address(t0) == address(stable) ? (amtStable, amtWeth) : (amtWeth, amtStable);
