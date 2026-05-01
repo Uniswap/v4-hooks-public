@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {MultiAssetShareMath} from "./MultiAssetShareMath.sol";
 import {VaultId} from "../../types/VaultId.sol";
 
 /// @title MultiAssetVault
@@ -151,7 +151,7 @@ abstract contract MultiAssetVault is BlockNumberish {
         uint256 received1 = _pullAsset(vaultId, asset1, from, amount1);
         if (received0 == 0 || received1 == 0) revert InsufficientBootstrap();
 
-        sharesMinted = FixedPointMathLib.sqrt(received0 * received1);
+        sharesMinted = MultiAssetShareMath.bootstrapShares(received0, received1);
         if (sharesMinted == 0) revert InsufficientBootstrap();
 
         _totalShares[vaultId] = sharesMinted;
@@ -243,16 +243,14 @@ abstract contract MultiAssetVault is BlockNumberish {
         uint256 supply = _totalShares[vaultId];
         if (supply == 0) revert VaultNotBootstrapped();
 
-        uint256 effSupply = supply + 10 ** _decimalsOffset();
-        uint256 total0 = _assetBalance(vaultId, asset0);
-        uint256 total1 = _assetBalance(vaultId, asset1);
-        if (roundUp) {
-            amount0 = FixedPointMathLib.fullMulDivUp(shares, total0 + 1, effSupply);
-            amount1 = FixedPointMathLib.fullMulDivUp(shares, total1 + 1, effSupply);
-        } else {
-            amount0 = FixedPointMathLib.fullMulDiv(shares, total0 + 1, effSupply);
-            amount1 = FixedPointMathLib.fullMulDiv(shares, total1 + 1, effSupply);
-        }
+        return MultiAssetShareMath.convertToAmounts(
+            shares,
+            _assetBalance(vaultId, asset0),
+            _assetBalance(vaultId, asset1),
+            supply,
+            _decimalsOffset(),
+            roundUp
+        );
     }
 
     /// @notice Number of "virtual shares" decimal places used in the inflation defense.
