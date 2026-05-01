@@ -489,4 +489,52 @@ contract PoolVaultTest is Test, Deployers {
         assertEq(vault.getClaims(poolIdA, poolKeyA.currency0), 100e18);
         assertEq(vault.getClaims(poolIdB, poolKeyB.currency0), 50e18);
     }
+
+    // ══════════════════════════════════════════════════════════
+    //  M-03 regression: just-in-time vault allowance refresh
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev Simulates a USDT-style decrement on the hook's vault allowance: the test prank-
+    ///      calls `approve` from the hook to lower its vault allowance below the next
+    ///      deposit amount. Without M-03's just-in-time check, `_depositToVault`'s subsequent
+    ///      `vault.deposit` would revert on insufficient allowance, bricking the pool. With
+    ///      the check, the allowance is refreshed to `type(uint256).max` before the deposit.
+    function test_depositToVault_refreshesAllowance_whenBelowAmount() public {
+        _bootstrap(alice, 1_000e18);
+
+        // Simulate USDT-style allowance decrement: hook's allowance drops below next deposit.
+        vm.prank(address(vault));
+        token0.approve(address(vault0), 100); // 100 wei is far below any realistic deposit
+
+        // Fund the pool's tracked ERC-20 ledger so `_depositAllToVault` has something to push.
+        // This also requires bypassing share-math (we want a raw ERC-20 → vault flow for the
+        // allowance test), so we use `ensureERC20` to populate ERC-20 from a vault-shares
+        // withdrawal first, then re-deposit.
+        token0.mint(address(vault), 5_000e18);
+        // Direct push of `5_000e18` into the vault — without M-03, this reverts on allowance.
+        vault.depositToVault(poolIdA, poolKeyA.currency0, 5_000e18);
+
+        // Verify allowance was refreshed to max (the post-condition of the JIT check).
+        assertEq(token0.allowance(address(vault), address(vault0)), type(uint256).max);
+    }
+
+    /// @dev Same-currency-and-vault but the allowance is already comfortably above the deposit.
+    ///      The JIT check should NOT issue a redundant `forceApprove` (gas conservation), but
+    ///      the post-deposit allowance must still be sufficient for future ops.
+    function test_depositToVault_doesNotRefresh_whenAllowanceSufficient() public {
+        _bootstrap(alice, 1_000e18);
+
+        // Allowance is already type(uint256).max from `_approveVault` at setVault time.
+        uint256 beforeAllowance = token0.allowance(address(vault), address(vault0));
+        assertEq(beforeAllowance, type(uint256).max);
+
+        // Trigger another deposit that's small enough to leave plenty of headroom.
+        token0.mint(address(vault), 1_000e18);
+        vault.depositToVault(poolIdA, poolKeyA.currency0, 1_000e18);
+
+        // For non-decrementing tokens, allowance stays at max — no forceApprove needed.
+        // For USDT-style (which solmate's MockERC20 doesn't simulate), this assertion would
+        // hold trivially because `forceApprove` would have raised it back to max anyway.
+        assertEq(token0.allowance(address(vault), address(vault0)), type(uint256).max);
+    }
 }

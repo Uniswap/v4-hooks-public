@@ -352,6 +352,7 @@ abstract contract PoolVault is MultiAssetVault {
         uint256 sharesPredicted = vault.convertToShares(amount);
         _vaultShares[poolId][currency] += sharesPredicted;
 
+        _ensureVaultAllowance(currency, address(vault), amount);
         uint256 sharesActual = vault.deposit(amount, address(this));
 
         // Fail-fast on a vault that swallows assets without minting shares.
@@ -388,6 +389,7 @@ abstract contract PoolVault is MultiAssetVault {
         s.erc20 = 0;
         _vaultShares[poolId][currency] += sharesPredicted;
 
+        _ensureVaultAllowance(currency, address(vault), amount);
         uint256 sharesActual = vault.deposit(amount, address(this));
         if (sharesActual == 0) revert ZeroSharesMinted();
 
@@ -457,6 +459,23 @@ abstract contract PoolVault is MultiAssetVault {
         if (vault == address(0)) return;
         IERC20 token = IERC20(Currency.unwrap(currency));
         if (token.allowance(address(this), vault) == 0) {
+            token.forceApprove(vault, type(uint256).max);
+        }
+    }
+
+    /// @dev Ensure the hook's allowance to `vault` for `currency` is at least `amount` for the
+    ///      current operation. Refreshes to `type(uint256).max` only when below the required
+    ///      threshold — a no-op for tokens that don't decrement allowance on transfer (the
+    ///      common case), and a recovery path for USDT-style tokens whose post-init
+    ///      max-allowance is gradually consumed by ordinary deposits.
+    ///
+    ///      Without this guard, the JIT cycle would brick on the first deposit after the
+    ///      cumulative deposit volume crossed `type(uint256).max` — no real-world threshold,
+    ///      but unbounded for tokens that decrement on every transfer (USDT) and bricks the
+    ///      pool until owner manually calls `refreshVaultApproval`.
+    function _ensureVaultAllowance(Currency currency, address vault, uint256 amount) internal {
+        IERC20 token = IERC20(Currency.unwrap(currency));
+        if (token.allowance(address(this), vault) < amount) {
             token.forceApprove(vault, type(uint256).max);
         }
     }
