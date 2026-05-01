@@ -10,6 +10,7 @@ import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibr
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /// @title ALFProtocolFees
 /// @author Uniswap Labs
@@ -25,10 +26,15 @@ abstract contract ALFProtocolFees {
     using ProtocolFeeLibrary for uint16;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
+    using SafeCast for uint256;
+    using SafeCast for int256;
 
     /// @notice Cached token-jar address resolved from the v4 protocol fee controller. Refreshed
     ///         lazily on the first fee collection or explicitly via {pollTokenJar}.
     address public tokenJar;
+
+    /// @dev PoolManager whose protocol fee controller owns the token jar.
+    IPoolManager private immutable _protocolFeePoolManager;
 
     /// @notice Emitted each time protocol fee is taken to the token jar.
     /// @param recipient The token-jar address that received the fee.
@@ -40,27 +46,34 @@ abstract contract ALFProtocolFees {
     /// @param newTokenJar The newly resolved jar address.
     event TokenJarUpdated(address indexed newTokenJar);
 
+    constructor(IPoolManager poolManager_) {
+        _protocolFeePoolManager = poolManager_;
+    }
+
     /// @notice Resolve and cache the token jar from the v4 fee adapter.
-    /// @dev    Subclasses MUST implement to refresh `tokenJar` from
-    ///         `poolManager.protocolFeeController().TOKEN_JAR()` and emit {TokenJarUpdated} on
-    ///         change. Permissionless — anyone can refresh.
+    /// @dev    Permissionless — anyone can refresh after the fee controller updates its jar.
     /// @return The (newly cached) token jar address.
-    function pollTokenJar() public virtual returns (address);
+    function pollTokenJar() public returns (address) {
+        address newTokenJar = _getTokenJar();
+        if (tokenJar != newTokenJar) {
+            tokenJar = newTokenJar;
+            emit TokenJarUpdated(newTokenJar);
+        }
+        return tokenJar;
+    }
 
     /// @dev Take the v4 protocol fee on the unspecified-side delta to the cached token jar.
     ///      No-op if the protocol fee for the swap direction is zero or no jar is configured.
     ///      Lazily polls the jar on first use.
-    /// @param poolManager     The PoolManager (caller's `poolManager`).
     /// @param key             The swap's pool key.
     /// @param params          The swap params (used for direction and exact-input/output sense).
     /// @param unspecifiedDelta The unspecified-side delta of the swap (signed).
     /// @return feeAmount The amount taken to the jar (as a positive int128).
-    function _applyProtocolFee(
-        IPoolManager poolManager,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        int128 unspecifiedDelta
-    ) internal returns (int128) {
+    function _applyProtocolFee(PoolKey calldata key, SwapParams calldata params, int128 unspecifiedDelta)
+        internal
+        returns (int128)
+    {
+        IPoolManager poolManager = _protocolFeePoolManager;
         uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
         if (protocolFee == 0) return 0;
         if (tokenJar == address(0)) pollTokenJar();
@@ -73,7 +86,7 @@ abstract contract ALFProtocolFees {
 
         emit ProtocolFeesCollected(tokenJar, unspecifiedCurrency, feeAmount);
         poolManager.take(unspecifiedCurrency, tokenJar, feeAmount);
-        return int128(uint128(feeAmount));
+        return feeAmount.toInt256().toInt128();
     }
 
     function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint256 amountUnspecified)
@@ -99,7 +112,8 @@ abstract contract ALFProtocolFees {
         protocolFee = zeroForOne ? raw.getZeroForOneFee() : raw.getOneForZeroFee();
     }
 
-    function _getTokenJar(IPoolManager poolManager) internal view returns (address currentJar) {
+    function _getTokenJar() internal view returns (address currentJar) {
+        IPoolManager poolManager = _protocolFeePoolManager;
         address feeController = poolManager.protocolFeeController();
         if (feeController == address(0) || feeController.code.length == 0) return address(0);
         (bool success, bytes memory data) = feeController.staticcall(abi.encodeWithSignature("TOKEN_JAR()"));

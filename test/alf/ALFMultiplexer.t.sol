@@ -19,6 +19,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
@@ -47,13 +48,12 @@ contract ALFMultiplexerTest is Test, Deployers {
 
         // ── Deploy multiplexer ──
         uint160 multiplexerFlags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_DONATE_FLAG
-                | Hooks.BEFORE_SWAP_FLAG
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
-        multiplexer =
-            ALFMultiplexer(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | multiplexerFlags)));
+        multiplexer = ALFMultiplexer(
+            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | multiplexerFlags))
+        );
         deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(multiplexer));
 
         // ── Deploy quoters (native LP model with LP gating) ──
@@ -73,19 +73,11 @@ contract ALFMultiplexerTest is Test, Deployers {
 
         // ── Create pool keys with static fees: A expensive (5%), B cheap (1%) ──
         quoterAPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 50_000,
-            tickSpacing: 60,
-            hooks: IHooks(address(quoterA))
+            currency0: currency0, currency1: currency1, fee: 50_000, tickSpacing: 60, hooks: IHooks(address(quoterA))
         });
 
         quoterBPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 10_000,
-            tickSpacing: 60,
-            hooks: IHooks(address(quoterB))
+            currency0: currency0, currency1: currency1, fee: 10_000, tickSpacing: 60, hooks: IHooks(address(quoterB))
         });
 
         multiplexerPoolKey = PoolKey({
@@ -267,7 +259,9 @@ contract ALFMultiplexerTest is Test, Deployers {
             )
         );
         modifyLiquidityRouter.modifyLiquidity(
-            multiplexerPoolKey, ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}), ""
+            multiplexerPoolKey,
+            ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 1e18, salt: 0}),
+            ""
         );
     }
 
@@ -377,7 +371,9 @@ contract ALFMultiplexerTest is Test, Deployers {
         pure
         returns (bytes memory)
     {
-        return abi.encode(MultiplexerHookData({attestationData: "", targets: targets, strictTolerancePips: tolerancePips}));
+        return abi.encode(
+            MultiplexerHookData({attestationData: "", targets: targets, strictTolerancePips: tolerancePips})
+        );
     }
 
     function test_strict_passesWhenQuoteMatchesExecution() public {
@@ -418,6 +414,67 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
+        assertEq(delta.amount0(), -1e18);
+        assertTrue(delta.amount1() > 0);
+    }
+
+    // ──── H-01 regression: tolerance accounts for multiplexer's own protocol fee ────
+    //
+    //  `_extractOutput` reports the candidate-frame delta (pre-multiplexer fee), but the
+    //  swapper's actual receipt is the post-fee delta. The tolerance check must apply the
+    //  fee adjustment before comparing against the candidate-frame `bestQuote`. Without
+    //  this, a swapper setting `strictTolerancePips` below the multiplexer pool's slot0
+    //  protocol fee would silently overpay (exact-out) or under-receive (exact-in).
+
+    /// @dev `TOKEN_JAR()` shim: ALFProtocolFees staticcalls this on the v4 fee controller.
+    ///      Since the test contract acts as the controller, it must expose this selector.
+    function TOKEN_JAR() external view returns (address) {
+        return address(this);
+    }
+
+    /// @dev Configure the multiplexer pool to charge the maximum v4 protocol fee
+    ///      (1000 pips per direction = 0.1%) so the tolerance interaction is observable.
+    function _enableMaxMultiplexerProtocolFee() internal {
+        manager.setProtocolFeeController(address(this));
+        // Encode (oneForZero << 12) | zeroForOne. Both directions = 1000 = 0x3E8.
+        manager.setProtocolFee(multiplexerPoolKey, uint24((uint24(1000) << 12) | uint24(1000)));
+        // Refresh the multiplexer's tokenJar cache.
+        multiplexer.pollTokenJar();
+    }
+
+    function test_strict_tolerance_accountsForProtocolFee_exactInput() public {
+        _enableMaxMultiplexerProtocolFee();
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        // Tolerance = 100 ppm (0.01%), but the protocol fee on the unspecified side is
+        // 1000 pips (0.1%) — the swapper's actual output is 0.1% below candidate-frame
+        // bestQuote. Without the fix this passed silently; with the fix it must revert.
+        vm.expectRevert();
+        swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100));
+    }
+
+    function test_strict_tolerance_accountsForProtocolFee_exactOutput() public {
+        _enableMaxMultiplexerProtocolFee();
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        // Same scenario, exact-output direction. Swapper pays MORE input than the
+        // candidate-frame quote suggested; tolerance must catch the overpayment.
+        vm.expectRevert();
+        swap(multiplexerPoolKey, true, int256(0.5e18), _buildStrictHookDataWithTolerance(targets, 100));
+    }
+
+    function test_strict_tolerance_accountsForProtocolFee_passesWhenLooseEnough() public {
+        _enableMaxMultiplexerProtocolFee();
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        // Tolerance = 5000 ppm (0.5%) > the 0.1% protocol fee → swap must pass.
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 5000));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }
@@ -510,11 +567,11 @@ contract ALFMultiplexerTest is Test, Deployers {
     function test_governance_transferOwnership() public {
         address newOwner = makeAddr("newOwner");
         vm.expectEmit(true, true, true, true);
-        emit ALFMultiplexer.OwnershipTransferred(address(this), newOwner);
+        emit Ownable.OwnershipTransferred(address(this), newOwner);
         multiplexer.transferOwnership(newOwner);
         assertEq(multiplexer.owner(), newOwner);
 
-        vm.expectRevert(ALFMultiplexer.Unauthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         multiplexer.transferOwnership(address(this));
     }
 
@@ -525,15 +582,10 @@ contract ALFMultiplexerTest is Test, Deployers {
     /// @dev A pre-planned target whose `amountSpecified` sign mismatches the outer swap is rejected.
     function test_prePlanned_directionMismatch_reverts() public {
         // Outer swap: exact-input (negative). Target leg uses exact-output (positive) — mismatch.
-        MultiplexerHookData memory ahd = MultiplexerHookData({
-            attestationData: "",
-            targets: new TargetedQuoter[](2),
-            strictTolerancePips: 0
-        });
-        ahd.targets[0] =
-            TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(0.5e18)}); // wrong sign!
-        ahd.targets[1] =
-            TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(0)}); // catch-all
+        MultiplexerHookData memory ahd =
+            MultiplexerHookData({attestationData: "", targets: new TargetedQuoter[](2), strictTolerancePips: 0});
+        ahd.targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(0.5e18)}); // wrong sign!
+        ahd.targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(0)}); // catch-all
 
         // The PoolManager wraps hook reverts in `WrappedError`, so we just verify it reverts.
         vm.expectRevert();
@@ -542,15 +594,10 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     /// @dev Pre-planned targets summing to more than `|swapAmount|` are rejected.
     function test_prePlanned_overAllocated_reverts() public {
-        MultiplexerHookData memory ahd = MultiplexerHookData({
-            attestationData: "",
-            targets: new TargetedQuoter[](2),
-            strictTolerancePips: 0
-        });
-        ahd.targets[0] =
-            TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(-0.6e18)});
-        ahd.targets[1] =
-            TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(-0.6e18)});
+        MultiplexerHookData memory ahd =
+            MultiplexerHookData({attestationData: "", targets: new TargetedQuoter[](2), strictTolerancePips: 0});
+        ahd.targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(-0.6e18)});
+        ahd.targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(-0.6e18)});
         // Sum = -1.2e18, outer swap is -1e18 → over-allocated.
 
         vm.expectRevert();

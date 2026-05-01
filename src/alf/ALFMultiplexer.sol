@@ -13,6 +13,7 @@ import {toBeforeSwapDelta, BeforeSwapDelta} from "@uniswap/v4-core/src/types/Bef
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BaseHook} from "../base/BaseHook.sol";
 import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ALFProtocolFees} from "./base/ALFProtocolFees.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
 import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol";
@@ -87,13 +88,10 @@ import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol"
 ///         curve update data. The multiplexer constructs per-quoter ALFHookData that pairs the
 ///         shared attestation with each quoter's curve update.
 /// @custom:security-contact security@uniswap.org
-contract ALFMultiplexer is BaseHook, ALFProtocolFees {
+contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
-
-    /// @notice Contract owner. Can transfer ownership.
-    address public owner;
 
     /// @dev Tracks a quoter candidate during the split fill process.
     ///      Built during `_prepareCandidates`, sorted by indicative quality, and consumed
@@ -122,9 +120,6 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param indicative The best individual indicative quote (the tolerance baseline).
     /// @param executed   The actual aggregate output from the split fill.
     error QuoteDeviation(uint256 indicative, uint256 executed);
-
-    /// @dev Caller is not the contract owner.
-    error Unauthorized();
 
     /// @dev Quote helper may only be called through an external self-call.
     error NotSelf();
@@ -156,7 +151,9 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param zeroForOne    The swap direction.
     /// @param amountSpecified The original swap amount (negative = exact input).
     /// @param bestQuote     The best individual indicative quote (tolerance baseline).
-    event MultiplexerExecuted(address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote);
+    event MultiplexerExecuted(
+        address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote
+    );
 
     /// @notice Emitted for each individual fill during a split fill execution.
     /// @dev    Useful for tracking per-quoter contributions to the aggregate result.
@@ -173,20 +170,15 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param quoter The quoter hook address whose fill failed.
     event FillFailed(address indexed quoter);
 
-    /// @notice Emitted when ownership is transferred via {transferOwnership} or set in the constructor.
-    /// @dev    Mirrors OZ Ownable's event for indexer parity. One-step transfer (see K-08).
-    /// @param previousOwner The previous owner (`address(0)` on construction).
-    /// @param newOwner      The new owner (`address(0)` permanently renounces).
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
     // ──── Constructor ────
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param _owner       Initial owner.
-    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) {
-        owner = _owner;
-        emit OwnershipTransferred(address(0), _owner);
-    }
+    constructor(IPoolManager _poolManager, address _owner)
+        BaseHook(_poolManager)
+        ALFProtocolFees(_poolManager)
+        Ownable(_owner)
+    {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          HOOK PERMISSIONS
@@ -253,10 +245,12 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
     /// @param amountSpecified The swap amount (negative = exact input, positive = exact output).
     /// @param hookData        ABI-encoded ALFHookData for the candidate.
     /// @return Always reverts before returning (function always reverts via {QuoterRevert.QuoteSwap}).
-    function quoteTargetBySwap(PoolKey calldata poolKey, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
-        external
-        returns (uint256)
-    {
+    function quoteTargetBySwap(
+        PoolKey calldata poolKey,
+        bool zeroForOne,
+        int256 amountSpecified,
+        bytes calldata hookData
+    ) external returns (uint256) {
         if (msg.sender != address(this)) revert NotSelf();
 
         BalanceDelta delta = poolManager.swap(
@@ -323,31 +317,40 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         //    The unspecified delta is the side the swapper doesn't control:
         //    exact-in → output, exact-out → input.
         int128 unspecifiedDelta = _extractUnspecified(totalDelta, params);
-        int128 feeAdjustment = _applyProtocolFee(poolManager, key, params, unspecifiedDelta);
+        int128 feeAdjustment = _applyProtocolFee(key, params, unspecifiedDelta);
 
         // 3. Tolerance enforcement (downside-only). The "downside" direction depends on swap
         //    type: exact-input swappers want MORE output (so executed < bestQuote is bad);
-        //    exact-output swappers want LESS input (so executed > bestQuote is bad). The
-        //    earlier implementation only checked the exact-input direction, silently letting
-        //    overpayment pass on exact-output swaps.
+        //    exact-output swappers want LESS input (so executed > bestQuote is bad).
+        //
+        //    `_extractOutput` is denominated in the candidate-only frame (pre-multiplexer
+        //    protocol fee), so it must be adjusted by `feeAdjustment` to reflect what the
+        //    swapper actually receives/pays. Without this adjustment a swapper setting
+        //    `strictTolerancePips` below the multiplexer's slot0 protocol fee would silently
+        //    overpay (exact-out) or under-receive (exact-in) by up to that fee.
         if (hookData.length > 0) {
             uint256 tol = abi.decode(hookData, (MultiplexerHookData)).strictTolerancePips;
             if (tol > 0) {
                 // No baseline ⇒ no protection. Refuse rather than silently accept.
                 if (bestQuote == 0) revert MissingQuoteBaseline();
 
-                uint256 executed = _extractOutput(totalDelta, params);
+                uint256 preFee = _extractOutput(totalDelta, params);
+                // `feeAdjustment` is always non-negative (see ALFProtocolFees._applyProtocolFee).
+                uint256 feeMag = uint256(uint128(feeAdjustment));
+                uint256 effective;
                 if (params.amountSpecified < 0) {
-                    // exact-input: revert if output undershoots the indicative.
-                    if (executed < bestQuote) {
-                        uint256 dev = bestQuote - executed;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                    // exact-input: swapper receives `preFee - feeMag` of output.
+                    effective = preFee > feeMag ? preFee - feeMag : 0;
+                    if (effective < bestQuote) {
+                        uint256 dev = bestQuote - effective;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, effective);
                     }
                 } else {
-                    // exact-output: revert if input overshoots the indicative.
-                    if (executed > bestQuote) {
-                        uint256 dev = executed - bestQuote;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                    // exact-output: swapper pays `preFee + feeMag` of input.
+                    effective = preFee + feeMag;
+                    if (effective > bestQuote) {
+                        uint256 dev = effective - bestQuote;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, effective);
                     }
                 }
             }
@@ -533,9 +536,12 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         (q, quoterHookData) = _queryTargetView(target, attestationData, zeroForOne, amountSpecified);
         if (q == 0) return (0, "");
 
-        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (uint256) {
-            // quoteTargetBySwap always reverts with QuoteSwap on success.
-        } catch (bytes memory reason) {
+        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (
+            uint256
+        ) {
+        // quoteTargetBySwap always reverts with QuoteSwap on success.
+        }
+        catch (bytes memory reason) {
             q = _parseQuoteOrZero(reason);
         }
     }
@@ -666,7 +672,9 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
                 ahd.targets[i].poolKey,
                 SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
                 quoterHookData
-            ) returns (BalanceDelta delta) {
+            ) returns (
+                BalanceDelta delta
+            ) {
                 int128 filled = exactInput
                     ? (zeroForOne ? delta.amount0() : delta.amount1())
                     : (zeroForOne ? delta.amount1() : delta.amount0());
@@ -827,7 +835,9 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
                 candidates[i].poolKey,
                 SwapParams({zeroForOne: zeroForOne, amountSpecified: remaining, sqrtPriceLimitX96: limit}),
                 candidates[i].hookData
-            ) returns (BalanceDelta delta) {
+            ) returns (
+                BalanceDelta delta
+            ) {
                 // Extract the "filled" component from the delta and update remaining.
                 //   exact input:  filled = input consumed (negative), so remaining -= negative → less negative
                 //   exact output: filled = output received (positive), so remaining -= positive → less positive
@@ -906,36 +916,5 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         }
 
         return toBeforeSwapDelta(specified, unspecified);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                          PROTOCOL FEES
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Resolve and cache the token jar address from the v4 fee adapter.
-    /// @dev    Refreshes `tokenJar` from the PoolManager's protocol fee controller. Permissionless —
-    ///         anyone may call to refresh the cache after the controller updates its jar address.
-    /// @return The current token jar address (may be `address(0)` if no controller is configured).
-    function pollTokenJar() public override returns (address) {
-        address newTokenJar = _getTokenJar(poolManager);
-        if (tokenJar != newTokenJar) {
-            tokenJar = newTokenJar;
-        }
-        return tokenJar;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                          GOVERNANCE
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Transfer ownership of the multiplexer.
-    /// @dev    One-step transfer; the new owner takes effect immediately. Reverts with
-    ///         {Unauthorized} if the caller is not the current owner. Setting `newOwner` to
-    ///         `address(0)` permanently renounces ownership.
-    /// @param newOwner The new owner address.
-    function transferOwnership(address newOwner) external {
-        if (msg.sender != owner) revert Unauthorized();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
     }
 }
