@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {VaultId} from "./VaultId.sol";
+import {VaultId} from "../../types/VaultId.sol";
 
 /// @title MultiAssetVault
 /// @author Uniswap Labs

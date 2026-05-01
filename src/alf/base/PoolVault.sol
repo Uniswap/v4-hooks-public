@@ -10,7 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
-import {VaultId} from "./vault/VaultId.sol";
+import {VaultId} from "../types/VaultId.sol";
 
 /// @title PoolVault
 /// @author Uniswap Labs
