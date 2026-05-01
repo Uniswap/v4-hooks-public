@@ -233,21 +233,22 @@ contract PoolVaultTest is Test, Deployers {
         vm.stopPrank();
     }
 
-    function test_bootstrap_acceptsTinyAmounts_underVirtualOffsets() public {
-        // Under the EIP-4626 virtual-shares defense, a (1, 1) bootstrap is no longer special.
-        // `sqrt(1*1) = 1` share is minted; the conversion math reads
-        // `supply + 10**_decimalsOffset() = 1 + 1e12`, so a hypothetical donation attack
-        // captures only `1 / (1 + 1e12)` of the donation -- ~zero, regardless of bootstrap size.
+    function test_bootstrap_revertsBelowVirtualSharesFloor() public {
+        // M-07 fix: tiny bootstraps that produce shares below `100 * 10**_decimalsOffset()`
+        // permanently dilute the bootstrapper into the virtual position. The runtime check
+        // rejects them with `BootstrapTooSmall` so operators can't accidentally lose
+        // their seed capital.
+        //
+        // With default offset = 12, the floor is `100 * 1e12 = 1e14` shares. A `(1, 1)`
+        // bootstrap produces `sqrt(1) = 1` share — well below the floor.
         token0.mint(alice, 1);
         token1.mint(alice, 1);
         vm.startPrank(alice);
         token0.approve(address(vault), 1);
         token1.approve(address(vault), 1);
-        uint256 shares = vault.bootstrap(poolKeyA, alice, alice, 1, 1);
+        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.BootstrapTooSmall.selector, 1, 1e14));
+        vault.bootstrap(poolKeyA, alice, alice, 1, 1);
         vm.stopPrank();
-        assertEq(shares, 1);
-        assertEq(vault.totalShares(poolIdA), 1);
-        assertEq(vault.userShares(poolIdA, alice), 1);
     }
 
     function test_addLiquidity_revertsIfNotBootstrapped() public {

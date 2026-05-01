@@ -424,10 +424,12 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_bootstrap_supportsAsymmetricAmounts() public {
         // Fresh unvaulted pool; bootstrap with mismatched scales (think USDC-6dp vs WETH-18dp).
+        // Amounts are scaled to land above the M-07 BootstrapTooSmall floor
+        // (`S >= 100 * 10**_decimalsOffset()` = `100 * 1e12` = `1e14` for the default offset).
         (PoolKey memory key, PoolId id) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
 
-        uint256 a0 = 2000e6; // pretend 6dp
-        uint256 a1 = 1e18; // pretend 18dp
+        uint256 a0 = 1_000_000e6; // 1M "USDC" (6dp)
+        uint256 a1 = 100e18; // 100 "WETH" (18dp) — sqrt = 1e16 ≫ 1e14 floor
         token0.mint(owner, a0);
         token1.mint(owner, a1);
         vm.startPrank(owner);
@@ -436,7 +438,7 @@ contract SmartPoolHookTest is Test, Deployers {
         uint256 shares = hook.bootstrap(key, a0, a1);
         vm.stopPrank();
 
-        // sqrt(2000e6 * 1e18) ≈ 4.47e13; bootstrap shares are independent of decimal scale.
+        // sqrt(1e12 * 1e20) = 1e16; bootstrap shares are independent of decimal scale.
         assertGt(shares, 0);
         assertEq(hook.totalShares(id), shares);
         assertEq(hook.userShares(id, owner), shares, "owner gets full bootstrap shares");
@@ -1488,11 +1490,11 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.prank(owner);
         hook.initializePool(key, cfg);
 
-        // Bootstrap with realistic units. Whichever currency is t0/t1 by address, deposit
-        // enough decimal-equivalent value on each side so liquidity is non-degenerate.
-        // 1_000 stable @ 1e6 = 1e9 ; 1 WETH @ 1e18 = 1e18 ; sqrt(1e27) ~ 3.16e13 shares.
-        uint256 amtStable = 1_000e6;
-        uint256 amtWeth = 1e18;
+        // Bootstrap with realistic units, scaled above the M-07 BootstrapTooSmall floor
+        // (`S >= 100 * 10**12 = 1e14`). 100k stable @ 1e6 = 1e11; 100 WETH @ 1e18 = 1e20;
+        // sqrt(1e11 * 1e20) ≈ 3.16e15, comfortably above the 1e14 floor.
+        uint256 amtStable = 100_000e6;
+        uint256 amtWeth = 100e18;
         (uint256 amt0, uint256 amt1) = address(t0) == address(stable) ? (amtStable, amtWeth) : (amtWeth, amtStable);
 
         t0.mint(owner, amt0);

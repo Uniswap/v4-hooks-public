@@ -14,14 +14,36 @@ import {VaultId} from "../../types/VaultId.sol";
 ///         token. Each vault id has its own supply (`totalShares`) and per-user balance
 ///         (`userShares`). Conversion math uses the EIP-4626 virtual-shares pattern:
 ///
-///             amount = shares * (total + 1) / (supply + 10**_decimalsOffset())
+///             amount = shares * (total + 1) / (supply + 10**_decimalsOffset(vaultId))
 ///
 ///         The `+1` virtual asset and `+10**offset` virtual shares exist only in math --
-///         they don't correspond to real entries and can never withdraw. They make
-///         post-bootstrap inflation attacks (e.g., direct donations to an underlying
-///         yield source that the subclass reads through `_assetBalance`) uneconomic
-///         regardless of bootstrap size: any donation is captured proportionally by the
-///         virtual position.
+///         they don't correspond to real entries and can never withdraw. They mitigate
+///         post-bootstrap donation attacks: any direct donation to an underlying yield
+///         source that the subclass reads through `_assetBalance` is captured
+///         proportionally by the virtual position.
+///
+///         **Bootstrap drift.** The bootstrapper's economic claim on the pool's value is
+///         `S / (S + 10**offset)` where `S = sqrt(received0 * received1)`. When `S` is
+///         comparable to or smaller than `10**offset`, the bootstrapper PERMANENTLY loses
+///         a meaningful fraction of their seed capital to the virtual position. With the
+///         default `_decimalsOffset = 12`, drift breakpoints look like:
+///
+///             | Bootstrap (each side, 6dec)   | shares S | drift |
+///             |-------------------------------|---------:|------:|
+///             | 1 wei                         |     1    |   ~1  |
+///             | 1 USDC (1e6 wei)              |    1e6   |   ~1  |
+///             | 1k USDC (1e9 wei)             |    1e9   |  ~99% |
+///             | 1M USDC (1e12 wei)            |    1e12  |   50% |
+///             | 100M USDC (1e14 wei)          |    1e14  | 1ppm  |
+///             | Bootstrap (each side, 18dec)  | shares S | drift |
+///             | 1 wei                         |     1    |   ~1  |
+///             | 1 token (1e18 wei)            |    1e18  | 1ppb  |
+///             | 1k token (1e21 wei)           |    1e21  |  ~0   |
+///
+///         For ~ppm-or-better drift, operators MUST seed with `S >= 100 * 10**offset`.
+///         The base enforces this floor at bootstrap with `BootstrapTooSmall`. Subclasses
+///         that handle low-decimal pairs SHOULD override `_decimalsOffset(vaultId)` to
+///         lower the offset (e.g., to 6 for stablecoin pairs).
 ///
 ///         Lifecycle:
 ///           - First deposit goes through `_bootstrap`, mints `sqrt(received0 * received1)`
@@ -126,6 +148,15 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      compensate within `_pullAsset` (e.g., by topping up).
     error TransferReceiptShortfall();
 
+    /// @dev Bootstrap shares (`sqrt(received0 * received1)`) are below the inflation-defense
+    ///      floor of `100 * 10**_decimalsOffset(vaultId)`. Below this floor, the bootstrapper
+    ///      PERMANENTLY loses more than ~1% of their seed capital to the virtual position.
+    ///      Operators MUST seed with larger bootstrap amounts; the floor guarantees drift
+    ///      stays below ~1%.
+    /// @param sharesMinted The bootstrap shares the operator's amounts would have produced.
+    /// @param minShares    The minimum shares the offset requires (`100 * 10**offset`).
+    error BootstrapTooSmall(uint256 sharesMinted, uint256 minShares);
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          INTERNAL: BOOTSTRAP
     // ═══════════════════════════════════════════════════════════════════════════
@@ -167,6 +198,15 @@ abstract contract MultiAssetVault is BlockNumberish {
 
         sharesMinted = MultiAssetShareMath.bootstrapShares(received0, received1);
         if (sharesMinted == 0) revert InsufficientBootstrap();
+
+        // Inflation-defense floor: bootstrap shares must dwarf the virtual position so the
+        // bootstrapper's economic claim is close to 100%. `100 * 10**offset` corresponds to
+        // ~1% drift; below that, the bootstrapper permanently loses non-trivial seed capital
+        // to the virtual position, AND a subsequent attacker can cheaply capture remaining
+        // value via small `_deposit` calls (the EIP-4626 inflation defense protects future
+        // depositors from EACH OTHER, not the bootstrapper themselves).
+        uint256 minShares = 100 * 10 ** uint256(_decimalsOffset(vaultId));
+        if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
 
         _totalShares[vaultId] = sharesMinted;
         _userShares[vaultId][to] = sharesMinted;
@@ -258,18 +298,28 @@ abstract contract MultiAssetVault is BlockNumberish {
             _assetBalance(vaultId, asset0),
             _assetBalance(vaultId, asset1),
             supply,
-            _decimalsOffset(),
+            _decimalsOffset(vaultId),
             roundUp
         );
     }
 
-    /// @notice Number of "virtual shares" decimal places used in the inflation defense.
-    ///         The conversion math reads `supply + 10**_decimalsOffset()` so an attacker's
-    ///         post-bootstrap donation is diluted across the virtual position.
-    /// @dev    Default: 12 (1e12 virtual shares). Strong defense regardless of bootstrap
-    ///         size; conversion math drifts ~1 ppb from strict proportional values.
-    ///         Subclasses MAY override to match a different decimal regime.
-    function _decimalsOffset() internal view virtual returns (uint8) {
+    /// @notice Number of "virtual shares" decimal places used in the inflation defense for a
+    ///         specific vault. The conversion math reads `supply + 10**_decimalsOffset(vaultId)`
+    ///         so an attacker's post-bootstrap donation is diluted across the virtual position.
+    /// @dev    Default: `12` for every vault (1e12 virtual shares). The relationship between
+    ///         the offset and the bootstrapper's drift is approximately
+    ///         `drift = 10**offset / (S + 10**offset)` where `S = sqrt(received0 * received1)`.
+    ///         For ~ppm drift the offset SHOULD be 6-12 dB below `log10(S)`.
+    ///
+    ///         Subclasses MAY override per-vault — for example, a stablecoin-pair vault
+    ///         (6-decimal tokens) might return `6` to keep drift below 1ppm at typical
+    ///         operator bootstrap sizes, while keeping the default `12` for 18-decimal
+    ///         pairs. The override SHOULD return a value bound to the bootstrap-time
+    ///         pair (e.g., cached in the `Assets` struct or derived from
+    ///         `IERC20Metadata.decimals()` lookups), so a single vault's offset is stable.
+    /// @param vaultId The vault to look up the offset for. Default impl ignores it.
+    function _decimalsOffset(VaultId vaultId) internal view virtual returns (uint8) {
+        vaultId; // silence unused-parameter warning
         return 12;
     }
 
