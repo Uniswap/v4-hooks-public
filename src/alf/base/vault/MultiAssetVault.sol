@@ -3,11 +3,12 @@ pragma solidity 0.8.26;
 
 import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {VaultId} from "./VaultId.sol";
 
 /// @title MultiAssetVault
 /// @author Uniswap Labs
 /// @notice Generic two-asset share-accounting primitive. Tracks proportional shares of an
-///         abstract `(asset0, asset1)` pair indexed by an opaque `bytes32 vaultId`.
+///         abstract `(asset0, asset1)` pair indexed by an opaque `VaultId`.
 ///
 ///         Shares are non-transferable internal accounting -- there is no ERC-20 share
 ///         token. Each vault id has its own supply (`totalShares`) and per-user balance
@@ -56,11 +57,11 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      shares only; conversion math reads `supply + 10**_decimalsOffset()` to add
     ///      virtual shares for inflation defense. Subclasses expose typed getters (e.g.,
     ///      `PoolVault.totalShares(PoolId)`) over this internal storage.
-    mapping(bytes32 vaultId => uint256) internal _totalShares;
+    mapping(VaultId vaultId => uint256) internal _totalShares;
 
     /// @dev Share balance for each (vaultId, user) pair. Numerator for a user's
     ///      proportional claim on vault assets.
-    mapping(bytes32 vaultId => mapping(address user => uint256)) internal _userShares;
+    mapping(VaultId vaultId => mapping(address user => uint256)) internal _userShares;
 
     /// @dev Block number of the last `_deposit` for each (vaultId, user). `_withdraw`
     ///      reverts when called in the same block, defending against atomic fee/yield
@@ -68,7 +69,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      value reflects the chain's fastest block clock; on Arbitrum One, `block.number`
     ///      returns the L1 block number which makes many sequencer transactions share the
     ///      same value, defeating the lock.
-    mapping(bytes32 vaultId => mapping(address user => uint256)) internal _lastDepositBlock;
+    mapping(VaultId vaultId => mapping(address user => uint256)) internal _lastDepositBlock;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              EVENTS
@@ -81,17 +82,17 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @param amount0  Asset0 transferred from the bootstrapper (post-FoT receipt).
     /// @param amount1  Asset1 transferred from the bootstrapper (post-FoT receipt).
     event Bootstrap(
-        bytes32 indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
+        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
     );
 
     /// @notice Emitted when a depositor mints shares by providing proportional token amounts.
     event Deposit(
-        bytes32 indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
+        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
     );
 
     /// @notice Emitted when a depositor burns shares and receives proportional token amounts.
     event Withdraw(
-        bytes32 indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
+        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
     );
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -132,7 +133,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @param amount1 Asset1 to deposit.
     /// @return sharesMinted Total shares minted, all credited to `to`.
     function _bootstrap(
-        bytes32 vaultId,
+        VaultId vaultId,
         address asset0,
         address asset1,
         address from,
@@ -168,7 +169,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      conversion rounds UP per the virtual-offset formula -- depositor pays slightly
     ///      more to prevent share-value dilution.
     function _deposit(
-        bytes32 vaultId,
+        VaultId vaultId,
         address asset0,
         address asset1,
         address from,
@@ -200,7 +201,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      conversion rounds DOWN -- withdrawer receives slightly less to prevent
     ///      over-withdrawal at remaining shareholders' expense.
     function _withdraw(
-        bytes32 vaultId,
+        VaultId vaultId,
         address asset0,
         address asset1,
         address from,
@@ -233,7 +234,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///
     ///      Reverts if `supply == 0` -- pre-bootstrap vaults have no defined ratio.
     function _convertToAmounts(
-        bytes32 vaultId,
+        VaultId vaultId,
         address asset0,
         address asset1,
         uint256 shares,
@@ -274,7 +275,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///      post-receipt routing (e.g., depositing to an ERC-4626 yield source). The
     ///      returned `received` is what the share math uses, so FoT/rebasing reconciliation
     ///      lives here.
-    function _pullAsset(bytes32 vaultId, address asset, address from, uint256 want)
+    function _pullAsset(VaultId vaultId, address asset, address from, uint256 want)
         internal
         virtual
         returns (uint256 received);
@@ -282,10 +283,10 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @dev Push `amount` of `asset` from the vault's custody to `to`. Subclasses are
     ///      responsible for sourcing the asset (raw balance, ERC-4626 withdrawal, claim
     ///      redemption, etc.) and the actual transfer.
-    function _pushAsset(bytes32 vaultId, address asset, address to, uint256 amount) internal virtual;
+    function _pushAsset(VaultId vaultId, address asset, address to, uint256 amount) internal virtual;
 
     /// @dev Read the vault's total managed balance of `asset`. Used by `_convertToAmounts`
     ///      for both legs. Subclasses sum whatever balance sources they manage (e.g.,
     ///      raw ERC-20 + ERC-6909 claims + ERC-4626 vault holdings).
-    function _assetBalance(bytes32 vaultId, address asset) internal view virtual returns (uint256);
+    function _assetBalance(VaultId vaultId, address asset) internal view virtual returns (uint256);
 }

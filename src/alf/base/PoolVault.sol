@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
+import {VaultId} from "./vault/VaultId.sol";
 
 /// @title PoolVault
 /// @author Uniswap Labs
@@ -52,7 +53,7 @@ import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
 ///
 /// @dev    See `MultiAssetVault` for the share-math + lifecycle. This contract is the V4
 ///         binding: it translates `PoolKey` / `PoolId` / `Currency` into the base's
-///         `bytes32 vaultId` / `address asset` plumbing, and adds the V4-specific helpers
+///         `VaultId` / `address asset` plumbing, and adds the V4-specific helpers
 ///         (`_redeemPoolClaims`, `_recordClaims`, `_debitPoolERC20`) that the JIT lifecycle
 ///         in subclasses calls during swap callbacks.
 /// @custom:security-contact security@uniswap.org
@@ -127,12 +128,19 @@ abstract contract PoolVault is MultiAssetVault {
 
     /// @notice Total shares outstanding for a pool, across all depositors.
     function totalShares(PoolId poolId) external view returns (uint256) {
-        return _totalShares[PoolId.unwrap(poolId)];
+        return _totalShares[_vaultIdFor(poolId)];
     }
 
     /// @notice Share balance for `(poolId, user)`.
     function userShares(PoolId poolId, address user) external view returns (uint256) {
-        return _userShares[PoolId.unwrap(poolId)][user];
+        return _userShares[_vaultIdFor(poolId)][user];
+    }
+
+    /// @dev Wrap a `PoolId` into the base's `VaultId` namespace (info-lossless cast through
+    ///      bytes32). Inlined at every PoolKey/PoolId boundary; `internal pure` so the
+    ///      optimizer eliminates the call frame.
+    function _vaultIdFor(PoolId poolId) internal pure returns (VaultId) {
+        return VaultId.wrap(PoolId.unwrap(poolId));
     }
 
     /// @notice Returns the total managed assets for a pool across both currencies.
@@ -149,7 +157,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _convertToAmounts(
-            PoolId.unwrap(key.toId()),
+            _vaultIdFor(key.toId()),
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
             shares,
@@ -164,7 +172,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _convertToAmounts(
-            PoolId.unwrap(key.toId()),
+            _vaultIdFor(key.toId()),
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
             shares,
@@ -182,7 +190,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 sharesMinted)
     {
         return _bootstrap(
-            PoolId.unwrap(key.toId()),
+            _vaultIdFor(key.toId()),
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
             from,
@@ -198,7 +206,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _deposit(
-            PoolId.unwrap(key.toId()),
+            _vaultIdFor(key.toId()),
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
             from,
@@ -213,7 +221,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _withdraw(
-            PoolId.unwrap(key.toId()),
+            _vaultIdFor(key.toId()),
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
             from,
@@ -282,13 +290,13 @@ abstract contract PoolVault is MultiAssetVault {
     ///        - If a vault is configured for this `(pool, currency)`, deposits to the vault
     ///          (updating `_vaultShares`).
     ///        - Otherwise, credits the per-pool `_state.erc20` counter.
-    function _pullAsset(bytes32 vaultId, address asset, address from, uint256 want)
+    function _pullAsset(VaultId vaultId, address asset, address from, uint256 want)
         internal
         override
         returns (uint256 received)
     {
         if (want == 0) return 0;
-        PoolId poolId = PoolId.wrap(vaultId);
+        PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
         Currency currency = Currency.wrap(asset);
 
         // Measure inbound receipt against the hook's balance, NOT the vault's, so FoT and
@@ -313,9 +321,9 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Ensures the per-pool `_state.erc20` holds at least `amount` -- redeems claims
     ///      and/or withdraws from the configured vault as needed -- then transfers via
     ///      `Currency.transfer` (USDT-safe).
-    function _pushAsset(bytes32 vaultId, address asset, address to, uint256 amount) internal override {
+    function _pushAsset(VaultId vaultId, address asset, address to, uint256 amount) internal override {
         if (amount == 0) return;
-        PoolId poolId = PoolId.wrap(vaultId);
+        PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
         Currency currency = Currency.wrap(asset);
 
         _ensureERC20(poolId, currency, amount);
@@ -325,8 +333,8 @@ abstract contract PoolVault is MultiAssetVault {
     /// @inheritdoc MultiAssetVault
     /// @dev Sums the per-(pool, currency) ERC-4626 vault assets (via `convertToAssets`),
     ///      ERC-6909 claims, and tracked ERC-20.
-    function _assetBalance(bytes32 vaultId, address asset) internal view override returns (uint256) {
-        return _assetBalanceV4(PoolId.wrap(vaultId), Currency.wrap(asset));
+    function _assetBalance(VaultId vaultId, address asset) internal view override returns (uint256) {
+        return _assetBalanceV4(PoolId.wrap(VaultId.unwrap(vaultId)), Currency.wrap(asset));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
