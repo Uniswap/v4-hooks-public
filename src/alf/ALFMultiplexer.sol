@@ -664,7 +664,22 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
             if (address(ahd.targets[i].poolKey.hooks) == address(this)) continue;
 
             bytes memory quoterHookData = abi.encode(ALFHookData({attestationData: ahd.attestationData}));
+
+            // Pick the per-target amount, then clamp against `remaining`. The clamp is the
+            // load-bearing protection against catch-all-not-last over-fills: if a catch-all
+            // leg only partially filled, `remaining` already reflects the residual, and a
+            // subsequent sized leg with `amountSpecified > remaining` (or with the wrong
+            // sign relative to the residual after a partial fill) must be capped — otherwise
+            // the aggregate `totalDelta` exceeds the swapper's stated swap amount.
             int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
+            if (exactInput) {
+                // Both negative; "smaller magnitude" = "less negative" = "greater than".
+                if (thisAmount < remaining) thisAmount = remaining;
+            } else {
+                // Both positive; "smaller magnitude" = "less than".
+                if (thisAmount > remaining) thisAmount = remaining;
+            }
+            if (thisAmount == 0) continue;
 
             // Wrapped in try/catch so a single failing target does not abort the entire
             // pre-planned multiplexer — soft-fail per target, mirroring the autonomous-mode contract.
