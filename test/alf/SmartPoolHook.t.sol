@@ -663,18 +663,12 @@ contract SmartPoolHookTest is Test, Deployers {
     // ═══════════════════════════════════════════════════════════════════════════
     //
     //  SmartPoolHook overrides `_beforeSwap`, `getIndicativeQuote`, and `swapToPrice`
-    //  to ignore hookData entirely — pricing is fully owner-controlled. The hook has
-    //  no signed curve-update path. These tests pin that behavior.
+    //  to ignore hookData entirely — pricing is fully owner-controlled.
 
-    function test_swap_ignoresHookDataCurveUpdate() public {
+    function test_swap_ignoresHookData() public {
         _depositAsOperator(10_000e18);
 
-        SmartPoolBase.PricingState memory bogus = SmartPoolBase.PricingState({
-            feePips: 999_000, // ~99.9% — would be catastrophic if applied
-            live: true
-        });
-        bytes memory curveUpdateData = abi.encode(bogus, testPoolId, block.timestamp + 1, bytes(""));
-        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes(""), curveUpdateData: curveUpdateData}));
+        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes("anything")}));
 
         (uint24 storedFeeBefore, bool storedLiveBefore) = hook.pricingState(testPoolId);
         swap(testPoolKey, true, -1e18, hookData);
@@ -687,16 +681,11 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_indicativeQuote_ignoresHookData() public {
         _depositAsOperator(10_000e18);
 
-        SmartPoolBase.PricingState memory bogus = SmartPoolBase.PricingState({
-            feePips: 999_000,
-            live: true
-        });
-        bytes memory curveUpdateData = abi.encode(bogus, testPoolId, block.timestamp + 1, bytes(""));
-        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes(""), curveUpdateData: curveUpdateData}));
+        bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes("anything")}));
 
-        uint256 quoteWithBogus = hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
+        uint256 quoteWithData = hook.getIndicativeQuote(testPoolKey, true, -1e18, hookData);
         uint256 quoteWithEmpty = hook.getIndicativeQuote(testPoolKey, true, -1e18, "");
-        assertEq(quoteWithBogus, quoteWithEmpty, "hookData has no effect on quote");
+        assertEq(quoteWithData, quoteWithEmpty, "hookData has no effect on quote");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -5,10 +5,9 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 /// @notice Standard hookData encoding for ALF hooks.
 /// @dev Callers MUST encode hookData as `abi.encode(ALFHookData(...))`.
-///      Both fields are optional — pass empty bytes when not applicable.
+///      `attestationData` is optional — pass empty bytes when not applicable.
 struct ALFHookData {
     bytes attestationData; // ABI-encoded attestation payload, or empty
-    bytes curveUpdateData; // ABI-encoded signed curve update, or empty
 }
 
 /// @title IALFHook

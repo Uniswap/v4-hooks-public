@@ -12,8 +12,7 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 /// @author Uniswap Labs
 /// @notice Spread quoter with owner-restricted LP. Only authorized addresses can add or
 ///         remove liquidity, and all LP must be concentrated in a single tick spacing at
-///         the active tick. Owner controls pricing via a single symmetric fee override
-///         and signed hookData curve updates.
+///         the active tick. Owner controls pricing via a single symmetric fee override.
 /// @custom:security-contact security@uniswap.org
 contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @notice Whether an address is authorized to add or remove pool liquidity.
@@ -31,7 +30,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_       Initial contract owner (Ownable2Step).
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
-        SpreadQuoterBase(_poolManager, maxGas_, owner_, "SimpleSpreadQuoterHook")
+        SpreadQuoterBase(_poolManager, maxGas_, owner_)
     {}
 
     // ──── Hook Permissions ────
@@ -39,7 +38,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @notice The v4 hook permissions for this contract.
     /// @dev    `afterInitialize` registers the active tick; `beforeAddLiquidity` /
     ///         `beforeRemoveLiquidity` enforce the LP allowlist; `beforeSwap` applies
-    ///         the LP fee override and applies any signed curve updates.
+    ///         the LP fee override.
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: false,
@@ -48,7 +47,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
             beforeRemoveLiquidity: true, // LP authorization
             afterAddLiquidity: false,
             afterRemoveLiquidity: false,
-            beforeSwap: true, // fee override + curve updates
+            beforeSwap: true, // fee override
             afterSwap: false,
             beforeDonate: false,
             afterDonate: false,

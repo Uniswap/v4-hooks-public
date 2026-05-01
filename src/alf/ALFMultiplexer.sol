@@ -504,8 +504,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
         }
 
         // 3. Build per-quoter hookData and query the indicative
-        quoterHookData =
-            abi.encode(ALFHookData({attestationData: attestationData, curveUpdateData: target.curveUpdateData}));
+        quoterHookData = abi.encode(ALFHookData({attestationData: attestationData}));
 
         try IALFHook(hook).getIndicativeQuote{gas: gasLimit}(
             target.poolKey, zeroForOne, amountSpecified, quoterHookData
@@ -658,9 +657,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees {
             // Skip targets pointing back at this multiplexer to prevent recursion.
             if (address(ahd.targets[i].poolKey.hooks) == address(this)) continue;
 
-            bytes memory quoterHookData = abi.encode(
-                ALFHookData({attestationData: ahd.attestationData, curveUpdateData: ahd.targets[i].curveUpdateData})
-            );
+            bytes memory quoterHookData = abi.encode(ALFHookData({attestationData: ahd.attestationData}));
             int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
 
             // Wrapped in try/catch so a single failing target does not abort the entire

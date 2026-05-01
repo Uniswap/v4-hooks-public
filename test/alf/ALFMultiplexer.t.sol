@@ -146,8 +146,8 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function _buildBothTargets() internal view returns (bytes memory) {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
         return _buildTargetedHookData(targets);
     }
 
@@ -295,8 +295,8 @@ contract ALFMultiplexerTest is Test, Deployers {
     function test_targeted_selectsBetterQuoter() public {
         // Target both quoters — B should win for zeroForOne (1% vs 5% bid fee)
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -310,7 +310,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     function test_targeted_singleQuoter() public {
         // Target only A for zeroForOne — A executes with its 5% bidFee
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -327,8 +327,8 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
@@ -346,8 +346,8 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, false);
 
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -361,119 +361,10 @@ contract ALFMultiplexerTest is Test, Deployers {
         swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
     }
 
-    // ──── Targeted with curve update ────
-
-    bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 feePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
-    );
-
-    /// @dev Per-quoter monotonic counter used by the test helpers — first commit gets sequence=1.
-    mapping(address => uint64) internal _testNextSequence;
-
-    function _signPricingUpdate(
-        SpreadQuoterBase.PricingState memory state,
-        PoolId poolId,
-        uint256 deadline,
-        uint64 sequence,
-        uint256 signerPk,
-        address quoter
-    ) internal view returns (bytes memory sig) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                PRICING_UPDATE_TYPEHASH,
-                state.feePips,
-                state.live,
-                PoolId.unwrap(poolId),
-                deadline,
-                sequence
-            )
-        );
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("SimpleSpreadQuoterHook"),
-                keccak256("1"),
-                block.chainid,
-                quoter
-            )
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPk, digest);
-        sig = abi.encodePacked(r, s, v);
-    }
-
-    function _buildCurveUpdateData(
-        SpreadQuoterBase.PricingState memory state,
-        PoolKey memory poolKey_,
-        uint256 deadline,
-        uint256 signerPk,
-        address quoter
-    ) internal returns (bytes memory) {
-        _testNextSequence[quoter] += 1;
-        uint64 sequence = _testNextSequence[quoter];
-        bytes memory sig = _signPricingUpdate(state, poolKey_.toId(), deadline, sequence, signerPk, quoter);
-        return abi.encode(state, poolKey_.toId(), deadline, sequence, sig);
-    }
-
-    function test_targeted_curveUpdate_flipsWinner() public {
-        // A normally has 5% fee (loses to B's 1%).
-        // Send a targeted curve update giving A a 0.5% fee → A should now win.
-        (address priceSignerA, uint256 priceSignerAPk) = makeAddrAndKey("priceSignerA");
-        vm.prank(ownerA);
-        quoterA.setPriceSigner(priceSignerA);
-
-        SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
-            feePips: 5_000, // 0.5%
-            live: true
-        });
-
-        bytes memory curveUpdateA = _buildCurveUpdateData(
-            newStateA, quoterAPoolKey, block.timestamp + 1 hours, priceSignerAPk, address(quoterA)
-        );
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
-
-        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
-
-        assertEq(delta.amount0(), -1e18);
-        int128 output = delta.amount1();
-        assertTrue(output > 0);
-        // A wins with 0.5% fee → ~0.995e18 (better than B's ~0.99e18)
-        assertApproxEqRel(uint256(int256(output)), 0.995e18, 0.01e18);
-    }
-
-    function test_targeted_curveUpdate_appliedOnNestedSwap() public {
-        // Verify the curve update is actually persisted via the nested swap
-        (address priceSignerA, uint256 priceSignerAPk) = makeAddrAndKey("priceSignerA");
-        vm.prank(ownerA);
-        quoterA.setPriceSigner(priceSignerA);
-
-        SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
-            feePips: 5_000, // 0.5%
-            live: true
-        });
-
-        bytes memory curveUpdateA = _buildCurveUpdateData(
-            newStateA, quoterAPoolKey, block.timestamp + 1 hours, priceSignerAPk, address(quoterA)
-        );
-
-        // Target only A so it's the winner
-        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: curveUpdateA, amountSpecified: 0});
-
-        swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
-
-        // After the nested swap, A's stored pricing should be updated
-        (uint24 feePips,) = quoterA.pricingState(quoterAPoolKey.toId());
-        assertEq(feePips, 5_000);
-    }
-
     function test_targeted_emitsMultiplexerExecuted() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         // B wins with lower fee (1%)
         vm.expectEmit(true, false, false, false);
@@ -499,8 +390,8 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_strict_passesWhenQuoteMatchesExecution() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         // Strict mode should pass — spread quoter's indicative matches execution exactly
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookData(targets));
@@ -510,7 +401,7 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_strict_exactOutput() public {
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         // Exact output with strict mode
         BalanceDelta delta = swap(multiplexerPoolKey, true, 0.5e18, _buildStrictHookData(targets));
@@ -522,7 +413,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         // SpreadQuoter is deterministic (indicative == executed), so any tolerance > 0 passes.
         // Use a large tolerance (10%) to demonstrate the feature.
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100_000)); // 10%
         assertEq(delta.amount0(), -1e18);
@@ -532,7 +423,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     function test_strict_zeroToleranceDisablesCheck() public {
         // strictTolerancePips = 0 → no strict check at all
         TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
         assertEq(delta.amount0(), -1e18);
@@ -561,8 +452,8 @@ contract ALFMultiplexerTest is Test, Deployers {
 
     function test_quote_targeted_selectsBestQuoter() public view {
         TargetedQuoter[] memory targets = new TargetedQuoter[](2);
-        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
-        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildTargetedHookData(targets));
 
@@ -648,9 +539,9 @@ contract ALFMultiplexerTest is Test, Deployers {
             strictTolerancePips: 0
         });
         ahd.targets[0] =
-            TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: int256(0.5e18)}); // wrong sign!
+            TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(0.5e18)}); // wrong sign!
         ahd.targets[1] =
-            TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: int256(0)}); // catch-all
+            TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(0)}); // catch-all
 
         // The PoolManager wraps hook reverts in `WrappedError`, so we just verify it reverts.
         vm.expectRevert();
@@ -665,9 +556,9 @@ contract ALFMultiplexerTest is Test, Deployers {
             strictTolerancePips: 0
         });
         ahd.targets[0] =
-            TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: int256(-0.6e18)});
+            TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(-0.6e18)});
         ahd.targets[1] =
-            TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: int256(-0.6e18)});
+            TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(-0.6e18)});
         // Sum = -1.2e18, outer swap is -1e18 → over-allocated.
 
         vm.expectRevert();
