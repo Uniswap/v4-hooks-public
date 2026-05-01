@@ -648,10 +648,19 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             uint160 sqrtLower = TickMath.getSqrtPriceAtTick(dist[i].tickLower);
             uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(dist[i].tickUpper);
 
-            uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96, sqrtLower, sqrtUpper, bal0, bal1
+            // Pre-budget the bucket against its weighted share of the balance. The earlier
+            // implementation passed the FULL `(bal0, bal1)` to `getLiquidityForAmounts` and
+            // post-scaled by `weightBps / 10_000`. That over-counted capital across in-range
+            // buckets — each bucket's `maxLiq` was sized for the entire balance, so the
+            // summed liquidity (and indicative quote) overstated what the pool could actually
+            // deploy. Pre-budgeting eliminates the implicit reuse and makes the indicative
+            // path deterministic w.r.t. the JIT cycle's actual allocation.
+            uint256 weightBps = dist[i].weightBps;
+            uint256 weightedBal0 = bal0 * weightBps / 10_000;
+            uint256 weightedBal1 = bal1 * weightBps / 10_000;
+            uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96, sqrtLower, sqrtUpper, weightedBal0, weightedBal1
             );
-            uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
             liqs[i] = liq;
 
             if (liq > 0) {
@@ -864,14 +873,19 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
         for (uint256 i; i < n; i++) {
             if (currentTick < dist[i].tickLower || currentTick >= dist[i].tickUpper) continue;
-            uint128 maxLiq = LiquidityAmounts.getLiquidityForAmounts(
+            // Match `_computeAllocations`: pre-budget each bucket against its weighted share
+            // of the balance so the indicative quote tracks what JIT actually deploys.
+            // See M-06 in the audit report for the rationale.
+            uint256 weightBps = dist[i].weightBps;
+            uint256 weightedBal0 = bal0 * weightBps / 10_000;
+            uint256 weightedBal1 = bal1 * weightBps / 10_000;
+            uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
                 sqrtPriceX96,
                 TickMath.getSqrtPriceAtTick(dist[i].tickLower),
                 TickMath.getSqrtPriceAtTick(dist[i].tickUpper),
-                bal0,
-                bal1
+                weightedBal0,
+                weightedBal1
             );
-            uint128 liq = uint128(uint256(maxLiq) * dist[i].weightBps / 10_000);
             liquidity += liq;
         }
     }
