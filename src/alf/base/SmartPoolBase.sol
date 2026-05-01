@@ -20,13 +20,11 @@ import {IALFHook} from "../interfaces/IALFHook.sol";
 abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHook {
     using PoolIdLibrary for PoolKey;
 
-    /// @notice Pricing state per pool. Bid is the fee for zeroForOne swaps, ask is for oneForZero.
-    /// @param bidFeePips Fee override (in pips, max `LPFeeLibrary.MAX_LP_FEE`) for zeroForOne swaps.
-    /// @param askFeePips Fee override (in pips, max `LPFeeLibrary.MAX_LP_FEE`) for oneForZero swaps.
-    /// @param live       Whether the pool currently quotes and executes swaps.
+    /// @notice Pricing state per pool. Single symmetric LP fee applied in both swap directions.
+    /// @param feePips Fee override (in pips, max `LPFeeLibrary.MAX_LP_FEE`) applied to all swaps.
+    /// @param live    Whether the pool currently quotes and executes swaps.
     struct PricingState {
-        uint24 bidFeePips;
-        uint24 askFeePips;
+        uint24 feePips;
         bool live;
     }
 
@@ -44,8 +42,8 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
     ///      not aligned to the pool's tickSpacing).
     error InvalidTickRange();
-    /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE`. Without this guard,
-    ///      fees > 100% break v4 swap math (denominator underflow).
+    /// @dev `feePips` exceeds `LPFeeLibrary.MAX_LP_FEE`. Without this guard, fees > 100% break
+    ///      v4 swap math (denominator underflow).
     error FeeOutOfBounds();
     /// @dev Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
     ///      callers MUST go through the subclass's guarded `initializePool` entry point so
@@ -129,11 +127,9 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     }
 
     /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
-    ///      storage, and emits {PricingStateUpdated}. Per-swap pricing is direction-aware via
-    ///      the override returned from `_beforeSwap` -- the PoolManager's stored dynamic LP
-    ///      fee is intentionally NOT synced here, since `max(bid, ask)` would be a lossy
-    ///      single-direction summary. Off-chain readers should consult `pricingState(poolId)`
-    ///      directly for the canonical bid/ask + live state.
+    ///      storage, and emits {PricingStateUpdated}. The PoolManager's stored dynamic LP fee
+    ///      is intentionally NOT synced; off-chain readers consult `pricingState(poolId)` for
+    ///      the canonical fee + live state.
     /// @param key   The pool to update.
     /// @param state The validated state to commit.
     function _commitPricingState(PoolKey calldata key, PricingState memory state) internal {
@@ -142,11 +138,10 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
         pricingState[key.toId()] = state;
     }
 
-    /// @dev Validate that bid/ask fees are within v4's `[0, MAX_LP_FEE]` range. Reverts with
-    ///      {FeeOutOfBounds} if either bound is exceeded.
+    /// @dev Validate that the fee is within v4's `[0, MAX_LP_FEE]` range. Reverts with
+    ///      {FeeOutOfBounds} if exceeded.
     function _validateFeeBounds(PricingState memory state) internal pure {
-        if (state.bidFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
-        if (state.askFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+        if (state.feePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
     }
 
     /// @inheritdoc DeltaResolver

@@ -28,8 +28,7 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
     MockERC4626 vault0;
     MockERC4626 vault1;
 
-    uint24 constant BID_FEE_PIPS = 1_000;
-    uint24 constant ASK_FEE_PIPS = 1_000;
+    uint24 constant FEE_PIPS = 1_000;
     uint256 constant POOL_SIZE = 10_000 ether;
 
     function setUp() public {
@@ -117,7 +116,7 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true}),
+            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: withVault ? IERC4626(address(vault0)) : IERC4626(address(0)),

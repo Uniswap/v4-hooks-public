@@ -32,8 +32,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     PoolKey testPoolKey;
 
     // Fee pips for tests: 20_000 pips = 2%
-    uint24 constant BID_FEE_PIPS = 20_000;
-    uint24 constant ASK_FEE_PIPS = 50_000; // 5%
+    uint24 constant FEE_PIPS = 20_000;
 
     function setUp() public {
         deployFreshManagerAndRouters();
@@ -67,13 +66,11 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         // Add LP at the active tick (single-tick concentration)
         _seedAtActiveTick(testPoolKey, 10_000e18, 10_000e18);
 
-        // Set pricing state with fee overrides
+        // Set pricing state with fee override
         vm.prank(owner);
         hook.updatePricingState(
             testPoolKey,
-            SpreadQuoterBase.PricingState({
-                bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true
-            })
+            SpreadQuoterBase.PricingState({feePips: FEE_PIPS, live: true})
         );
     }
 
@@ -218,8 +215,8 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
     function test_getIndicativeQuote_oneForZero() public view {
         uint256 output = hook.getIndicativeQuote(testPoolKey, false, -100e18, "");
-        // Simulates AMM swap with 5% fee → ~95e18 output
-        assertApproxEqRel(output, 95e18, 0.01e18);
+        // Simulates AMM swap with 2% fee → ~98e18 output (symmetric)
+        assertApproxEqRel(output, 98e18, 0.01e18);
     }
 
     function test_getIndicativeQuote_unlivePool_returnsZero() public {
@@ -244,9 +241,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         vm.prank(owner);
         hook.updatePricingState(
             emptyPoolKey,
-            SpreadQuoterBase.PricingState({
-                bidFeePips: BID_FEE_PIPS, askFeePips: ASK_FEE_PIPS, live: true
-            })
+            SpreadQuoterBase.PricingState({feePips: FEE_PIPS, live: true})
         );
 
         // No liquidity → simulation returns 0
@@ -267,8 +262,8 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
     // ──── beforeSwap: fee override ────
 
-    function test_beforeSwap_zeroForOne_appliesBidFee() public {
-        // Swap 1e18 token0 → token1 with BID_FEE_PIPS (2%)
+    function test_beforeSwap_zeroForOne_appliesFee() public {
+        // Swap 1e18 token0 → token1 with FEE_PIPS (2%)
         BalanceDelta delta = swap(testPoolKey, true, -1e18, "");
 
         assertEq(delta.amount0(), -1e18);
@@ -277,14 +272,14 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertApproxEqRel(uint256(int256(output)), 0.98e18, 0.01e18);
     }
 
-    function test_beforeSwap_oneForZero_appliesAskFee() public {
-        // Swap 1e18 token1 → token0 with ASK_FEE_PIPS (5%)
+    function test_beforeSwap_oneForZero_appliesFee() public {
+        // Swap 1e18 token1 → token0 with FEE_PIPS (2%) — symmetric
         BalanceDelta delta = swap(testPoolKey, false, -1e18, "");
 
         assertEq(delta.amount1(), -1e18);
         int128 output = delta.amount0();
         assertTrue(output > 0);
-        assertApproxEqRel(uint256(int256(output)), 0.95e18, 0.01e18);
+        assertApproxEqRel(uint256(int256(output)), 0.98e18, 0.01e18);
     }
 
     function test_beforeSwap_unlivePool_noFeeOverride() public {
@@ -314,7 +309,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.updatePricingState(
             testPoolKey,
-            SpreadQuoterBase.PricingState({bidFeePips: 0, askFeePips: 0, live: true})
+            SpreadQuoterBase.PricingState({feePips: 0, live: true})
         );
     }
 
@@ -322,7 +317,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         vm.prank(owner);
         hook.updatePricingState(
             testPoolKey,
-            SpreadQuoterBase.PricingState({bidFeePips: 0, askFeePips: 0, live: true})
+            SpreadQuoterBase.PricingState({feePips: 0, live: true})
         );
 
         BalanceDelta delta = swap(testPoolKey, true, -1e18, "");
@@ -334,19 +329,6 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_setPoolLive_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.setPoolLive(testPoolKey, false);
-    }
-
-    // ──── Asymmetric fees ────
-
-    function test_asymmetricFees() public {
-        BalanceDelta deltaZFO = swap(testPoolKey, true, -1e18, "");
-        BalanceDelta deltaOFZ = swap(testPoolKey, false, -1e18, "");
-
-        uint256 outputZFO = uint256(int256(deltaZFO.amount1()));
-        uint256 outputOFZ = uint256(int256(deltaOFZ.amount0()));
-
-        // zeroForOne output should be larger (smaller fee)
-        assertTrue(outputZFO > outputOFZ);
     }
 
     // ──── setPriceSigner ────
@@ -388,13 +370,12 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         uint256 signerPk
     ) internal view returns (bytes memory sig) {
         bytes32 TYPEHASH = keccak256(
-            "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
+            "PricingUpdate(uint24 feePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
         );
         bytes32 structHash = keccak256(
             abi.encode(
                 TYPEHASH,
-                state.bidFeePips,
-                state.askFeePips,
+                state.feePips,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline,
@@ -442,10 +423,9 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_hookDataCurveUpdate_appliesNewPricing() public {
         _setupPriceSigner();
 
-        // New pricing: 1% bid fee (down from 2%)
+        // New pricing: 1% fee (down from 2%)
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, // 1%
-            askFeePips: ASK_FEE_PIPS,
+            feePips: 10_000, // 1%
             live: true
         });
 
@@ -464,7 +444,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
 
         bytes memory hookData =
@@ -485,7 +465,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory state1 = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
         bytes memory hookData1 =
             _buildCurveUpdateHookData(state1, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
@@ -493,8 +473,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
         // Conflicting update in same block
         SpreadQuoterBase.PricingState memory state2 = SpreadQuoterBase.PricingState({
-            bidFeePips: 30_000, // different fee
-            askFeePips: ASK_FEE_PIPS,
+            feePips: 30_000, // different fee
             live: true
         });
         bytes memory hookData2 =
@@ -508,7 +487,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
 
         // Deadline in the past
@@ -523,7 +502,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
 
         // Sign with wrong key
@@ -538,9 +517,9 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_getIndicativeQuote_withHookDataCurveUpdate() public {
         _setupPriceSigner();
 
-        // New pricing: 1% bid fee
+        // New pricing: 1% fee
         SpreadQuoterBase.PricingState memory newState = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
 
         uint64 sequence = 1;
@@ -572,8 +551,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
-            bidFeePips: 1, // would make the quoter look essentially free
-            askFeePips: ASK_FEE_PIPS,
+            feePips: 1, // would make the quoter look essentially free
             live: true
         });
         // Empty signature -> ECDSA.recover returns address(0) (or reverts), neither matches signer.
@@ -590,7 +568,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
-            bidFeePips: 1, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 1, live: true
         });
         (, uint256 wrongPk) = makeAddrAndKey("attacker");
         bytes memory hookData =
@@ -608,7 +586,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
         // Commit sequence=1 via swap, advancing lastCommittedSequence.
         SpreadQuoterBase.PricingState memory s1 = SpreadQuoterBase.PricingState({
-            bidFeePips: 5_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 5_000, live: true
         });
         bytes memory commit =
             _buildCurveUpdateHookData(s1, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
@@ -627,7 +605,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         _setupPriceSigner();
 
         SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
-            bidFeePips: 1, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 1, live: true
         });
         (, uint256 wrongPk) = makeAddrAndKey("attacker");
         bytes memory hookData =
@@ -650,7 +628,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
         // Signer issues sequence=1 (e.g., bid=1%) and it commits successfully.
         SpreadQuoterBase.PricingState memory state1 = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
         bytes memory data1 = _buildCurveUpdateHookDataWithSequence(state1, poolId, deadline, 1, priceSignerPk);
         swap(testPoolKey, true, -1e18, data1);
@@ -659,7 +637,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         // Signer issues sequence=2 (e.g., bid=3%) in the next block.
         vm.roll(block.number + 1);
         SpreadQuoterBase.PricingState memory state2 = SpreadQuoterBase.PricingState({
-            bidFeePips: 30_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 30_000, live: true
         });
         bytes memory data2 = _buildCurveUpdateHookDataWithSequence(state2, poolId, deadline, 2, priceSignerPk);
         swap(testPoolKey, true, -1e18, data2);
@@ -678,7 +656,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         uint256 deadline = block.timestamp + 1 hours;
 
         SpreadQuoterBase.PricingState memory s = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
         bytes memory data1 = _buildCurveUpdateHookDataWithSequence(s, poolId, deadline, 1, priceSignerPk);
         swap(testPoolKey, true, -1e18, data1);
@@ -699,7 +677,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         uint256 deadline = block.timestamp + 1 hours;
 
         SpreadQuoterBase.PricingState memory s = SpreadQuoterBase.PricingState({
-            bidFeePips: 10_000, askFeePips: ASK_FEE_PIPS, live: true
+            feePips: 10_000, live: true
         });
 
         // First: sequence=5 (skipping 1..4)

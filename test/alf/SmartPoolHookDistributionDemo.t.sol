@@ -38,8 +38,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
     MockERC20 token0;
     MockERC20 token1;
 
-    uint24 constant BID_FEE_PIPS = 1_000; // 0.1% LP fee on token0 → token1 swaps
-    uint24 constant ASK_FEE_PIPS = 1_000; // 0.1% LP fee on token1 → token0 swaps
+    uint24 constant FEE_PIPS = 1_000; // 0.1% symmetric LP fee
     /// @dev Sized so the swap ladder (up to 5,000 t0) actually consumes a meaningful share
     ///      of pool depth and surfaces distribution-shape differences. With BOOTSTRAP_AMOUNT
     ///      at 1M, even 1k swaps register only the LP fee — not interesting for a demo.
@@ -169,45 +168,6 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         _logSwap(key, true, -5_000 ether, "ZF1 size 5000  t0   [stressed]");
     }
 
-    /// @notice Asymmetric fees: bid=10pips (0.001%), ask=5000pips (0.5%). Same conservative
-    ///         shape, swap each direction at the same size — slippage difference is the
-    ///         directional fee gap. Then rotate the asymmetry and re-run.
-    function test_demo_asymmetricFees() public {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
-        PoolKey memory key = _initWithDistributionEx(
-            "Asymmetric fees: cheap bid (10pips) / expensive ask (5000pips)",
-            dist,
-            10,
-            10, // bid: very cheap to sell t0
-            5_000, // ask: expensive to buy t0
-            IERC4626(address(0)),
-            IERC4626(address(0))
-        );
-
-        _logSwap(key, true, -10 ether, "ZF1 10 t0  (uses BID 10pips)");
-        _logSwap(key, true, -100 ether, "ZF1 100 t0 (uses BID 10pips)");
-        _logSwap(key, false, -10 ether, "1F0 10 t1  (uses ASK 5000pips)");
-        _logSwap(key, false, -100 ether, "1F0 100 t1 (uses ASK 5000pips)");
-
-        // Flip the asymmetry. Same shape, opposite fee bias.
-        SmartPoolBase.PricingState memory flipped = SmartPoolBase.PricingState({
-            bidFeePips: 5_000,
-            askFeePips: 10,
-            live: true
-        });
-        vm.prank(owner);
-        hook.updatePricingState(key, flipped);
-        console2.log("--- flipped fees: bid=5000pips / ask=10pips ---");
-
-        _logSwap(key, true, -10 ether, "ZF1 10 t0  (uses BID 5000pips)");
-        _logSwap(key, true, -100 ether, "ZF1 100 t0 (uses BID 5000pips)");
-        _logSwap(key, false, -10 ether, "1F0 10 t1  (uses ASK 10pips)");
-        _logSwap(key, false, -100 ether, "1F0 100 t1 (uses ASK 10pips)");
-    }
-
     /// @notice Vault rehypothecation with maxWithdraw cap. Pool reserves are 10k of each in
     ///         vaults; vault1 is then capped so only 2k of t1 can be withdrawn at once.
     ///         Logs getReserves vs getEffectiveLiquidity, then runs a ZF1 large enough that
@@ -226,8 +186,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
             "Vault rehypothecation: vault1 maxWithdraw capped at 2k of 10k",
             dist,
             10,
-            BID_FEE_PIPS,
-            ASK_FEE_PIPS,
+            FEE_PIPS,
             IERC4626(address(v0)),
             IERC4626(address(v1))
         );
@@ -334,18 +293,17 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         int24 tickSpacing
     ) internal returns (PoolKey memory key) {
         return _initWithDistributionEx(
-            name, dist, tickSpacing, BID_FEE_PIPS, ASK_FEE_PIPS, IERC4626(address(0)), IERC4626(address(0))
+            name, dist, tickSpacing, FEE_PIPS, IERC4626(address(0)), IERC4626(address(0))
         );
     }
 
-    /// @dev Extended initializer accepting custom fees and per-currency vaults. Used by the
-    ///      asymmetric-fee and vault-rehypothecation demos.
+    /// @dev Extended initializer accepting a custom fee and per-currency vaults. Used by the
+    ///      vault-rehypothecation demo.
     function _initWithDistributionEx(
         string memory name,
         SmartPoolHook.LiquidityBucket[] memory dist,
         int24 tickSpacing,
-        uint24 bidFeePips,
-        uint24 askFeePips,
+        uint24 feePips,
         IERC4626 vault0,
         IERC4626 vault1
     ) internal returns (PoolKey memory key) {
@@ -358,7 +316,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({bidFeePips: bidFeePips, askFeePips: askFeePips, live: true}),
+            pricing: SmartPoolBase.PricingState({feePips: feePips, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: vault0,
@@ -389,10 +347,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
                 "  reserves=",
                 vm.toString(BOOTSTRAP_AMOUNT / 1 ether),
                 " token0/1 each",
-                "  bid=",
-                _bps(uint256(bidFeePips)),
-                " ask=",
-                _bps(uint256(askFeePips))
+                "  fee=",
+                _bps(uint256(feePips))
             )
         );
         for (uint256 i; i < dist.length; i++) {

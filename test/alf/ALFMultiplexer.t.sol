@@ -106,26 +106,18 @@ contract ALFMultiplexerTest is Test, Deployers {
         _seedAtActiveTick(quoterAPoolKey, quoterA, 10_000e18, 10_000e18);
         _seedAtActiveTick(quoterBPoolKey, quoterB, 10_000e18, 10_000e18);
 
-        // ── Set pricing: asymmetric fees create directional winners ──
-        // A: expensive bid (5%), cheap ask (1%)
+        // ── Set pricing: B is the cheaper quoter, A is the expensive fallback ──
+        // A: expensive (5%)
         vm.prank(ownerA);
         quoterA.updatePricingState(
             quoterAPoolKey,
-            SpreadQuoterBase.PricingState({
-                bidFeePips: 50_000, // 5%
-                askFeePips: 10_000, // 1%
-                live: true
-            })
+            SpreadQuoterBase.PricingState({feePips: 50_000, live: true})
         );
-        // B: cheap bid (1%), expensive ask (5%)
+        // B: cheap (1%)
         vm.prank(ownerB);
         quoterB.updatePricingState(
             quoterBPoolKey,
-            SpreadQuoterBase.PricingState({
-                bidFeePips: 10_000, // 1%
-                askFeePips: 50_000, // 5%
-                live: true
-            })
+            SpreadQuoterBase.PricingState({feePips: 10_000, live: true})
         );
     }
 
@@ -166,7 +158,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     // ──── Multiplexer selects best quoter ────
 
     function test_selectsBetterQuoter_zeroForOne() public {
-        // B has lower bidFee (1% vs 5%) → B wins selection
+        // B has the lower fee (1% vs 5%) → B wins selection
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
 
         assertEq(delta.amount0(), -1e18);
@@ -177,20 +169,20 @@ contract ALFMultiplexerTest is Test, Deployers {
     }
 
     function test_selectsBetterQuoter_oneForZero() public {
-        // A has lower askFee (1% vs 5%) → A wins selection
+        // B has the lower fee (1% vs 5%) → B wins selection (symmetric)
         BalanceDelta delta = swap(multiplexerPoolKey, false, -1e18, _buildBothTargets());
 
         int128 output = delta.amount0();
         assertTrue(output > 0);
         assertEq(delta.amount1(), -1e18);
-        // A's 1% fee → ~0.99e18 output
+        // B's 1% fee → ~0.99e18 output
         assertApproxEqRel(uint256(int256(output)), 0.99e18, 0.01e18);
     }
 
     // ──── Skips failed quoters ────
 
     function test_skipsUnliveQuoter_routesToLiveOne() public {
-        // Turn off B (the better quoter for zeroForOne bid)
+        // Turn off B (the cheaper quoter)
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, false);
 
@@ -199,7 +191,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         assertEq(delta.amount0(), -1e18);
         int128 output = delta.amount1();
         assertTrue(output > 0);
-        // Falls back to A with 5% bidFee → ~0.95e18
+        // Falls back to A with 5% fee → ~0.95e18
         assertApproxEqRel(uint256(int256(output)), 0.95e18, 0.01e18);
     }
 
@@ -290,7 +282,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     // ──── Event emission ────
 
     function test_emitsMultiplexerExecuted_autonomous() public {
-        // B wins with lower bidFee (1%) for zeroForOne
+        // B wins with lower fee (1%)
         vm.expectEmit(true, false, false, false); // only check winner address
         emit ALFMultiplexer.MultiplexerExecuted(address(quoterB), true, -1e18, 0);
         swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
@@ -372,7 +364,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     // ──── Targeted with curve update ────
 
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
+        "PricingUpdate(uint24 feePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
     );
 
     /// @dev Per-quoter monotonic counter used by the test helpers — first commit gets sequence=1.
@@ -389,8 +381,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         bytes32 structHash = keccak256(
             abi.encode(
                 PRICING_UPDATE_TYPEHASH,
-                state.bidFeePips,
-                state.askFeePips,
+                state.feePips,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline,
@@ -425,15 +416,14 @@ contract ALFMultiplexerTest is Test, Deployers {
     }
 
     function test_targeted_curveUpdate_flipsWinner() public {
-        // A normally has 5% bidFee (loses to B's 1% for zeroForOne).
-        // Send a targeted curve update giving A a 0.5% bidFee → A should now win.
+        // A normally has 5% fee (loses to B's 1%).
+        // Send a targeted curve update giving A a 0.5% fee → A should now win.
         (address priceSignerA, uint256 priceSignerAPk) = makeAddrAndKey("priceSignerA");
         vm.prank(ownerA);
         quoterA.setPriceSigner(priceSignerA);
 
         SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
-            bidFeePips: 5_000, // 0.5%
-            askFeePips: 10_000,
+            feePips: 5_000, // 0.5%
             live: true
         });
 
@@ -461,8 +451,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterA.setPriceSigner(priceSignerA);
 
         SpreadQuoterBase.PricingState memory newStateA = SpreadQuoterBase.PricingState({
-            bidFeePips: 5_000, // 0.5%
-            askFeePips: 10_000,
+            feePips: 5_000, // 0.5%
             live: true
         });
 
@@ -477,8 +466,8 @@ contract ALFMultiplexerTest is Test, Deployers {
         swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
 
         // After the nested swap, A's stored pricing should be updated
-        (uint24 bidFeePips,,) = quoterA.pricingState(quoterAPoolKey.toId());
-        assertEq(bidFeePips, 5_000);
+        (uint24 feePips,) = quoterA.pricingState(quoterAPoolKey.toId());
+        assertEq(feePips, 5_000);
     }
 
     function test_targeted_emitsMultiplexerExecuted() public {
@@ -486,7 +475,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, curveUpdateData: "", amountSpecified: 0});
         targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, curveUpdateData: "", amountSpecified: 0});
 
-        // B wins with lower bidFee (1%) for zeroForOne
+        // B wins with lower fee (1%)
         vm.expectEmit(true, false, false, false);
         emit ALFMultiplexer.MultiplexerExecuted(address(quoterB), true, -1e18, 0);
         swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
@@ -555,7 +544,7 @@ contract ALFMultiplexerTest is Test, Deployers {
     // ════════════════════════════════════════════
 
     function test_quote_targeted_selectsBestQuoter_zeroForOne() public view {
-        // B has lower bidFee (1% vs 5%) → B wins
+        // B has the lower fee (1% vs 5%) → B wins
         (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildBothTargets());
 
         assertEq(winner, address(quoterB));
@@ -563,10 +552,10 @@ contract ALFMultiplexerTest is Test, Deployers {
     }
 
     function test_quote_targeted_selectsBestQuoter_oneForZero() public view {
-        // A has lower askFee (1% vs 5%) → A wins
+        // B has the lower fee (1% vs 5%) → B wins (symmetric)
         (, address winner, uint256 bestQuote,) = multiplexer.quote(false, -1e18, _buildBothTargets());
 
-        assertEq(winner, address(quoterA));
+        assertEq(winner, address(quoterB));
         assertTrue(bestQuote > 0);
     }
 

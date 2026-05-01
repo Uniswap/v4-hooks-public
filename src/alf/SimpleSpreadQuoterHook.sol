@@ -10,9 +10,9 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 
 /// @title SimpleSpreadQuoterHook
 /// @author Uniswap Labs
-/// @notice Bid/ask spread quoter with owner-restricted LP. Only authorized addresses
-///         can add or remove liquidity, and all LP must be concentrated in a single
-///         tick spacing at the active tick. Owner controls pricing via fee overrides
+/// @notice Spread quoter with owner-restricted LP. Only authorized addresses can add or
+///         remove liquidity, and all LP must be concentrated in a single tick spacing at
+///         the active tick. Owner controls pricing via a single symmetric fee override
 ///         and signed hookData curve updates.
 /// @custom:security-contact security@uniswap.org
 contract SimpleSpreadQuoterHook is SpreadQuoterBase {
@@ -39,7 +39,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @notice The v4 hook permissions for this contract.
     /// @dev    `afterInitialize` registers the active tick; `beforeAddLiquidity` /
     ///         `beforeRemoveLiquidity` enforce the LP allowlist; `beforeSwap` applies
-    ///         the directional fee override and applies any signed curve updates.
+    ///         the LP fee override and applies any signed curve updates.
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: false,

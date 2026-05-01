@@ -17,7 +17,7 @@ import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 
 /// @title SpreadQuoterBase
 /// @author Uniswap Labs
-/// @notice Abstract base for bid/ask spread quoters using native v4 LP with fee overrides.
+/// @notice Abstract base for spread quoters using native v4 LP with a single symmetric fee.
 ///         Provides pricing via SwapSimulator, EIP-712 signed curve updates with
 ///         one-update-per-block enforcement, and single-tick LP concentration.
 ///         Concrete hooks define LP access control and hook permissions.
@@ -25,13 +25,11 @@ import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     using PoolIdLibrary for PoolKey;
 
-    /// @notice Pricing state per pool. Bid is the fee for zeroForOne swaps, ask is for oneForZero.
-    /// @param bidFeePips Fee override for zeroForOne swaps (pips, max `LPFeeLibrary.MAX_LP_FEE`).
-    /// @param askFeePips Fee override for oneForZero swaps (pips, max `LPFeeLibrary.MAX_LP_FEE`).
-    /// @param live       Whether the pool currently quotes and executes swaps.
+    /// @notice Pricing state per pool. Single symmetric LP fee applied in both swap directions.
+    /// @param feePips Fee override (pips, max `LPFeeLibrary.MAX_LP_FEE`) applied to all swaps.
+    /// @param live    Whether the pool currently quotes and executes swaps.
     struct PricingState {
-        uint24 bidFeePips;
-        uint24 askFeePips;
+        uint24 feePips;
         bool live;
     }
 
@@ -39,7 +37,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ///      makes each signed update strictly orderable per pool — replays of older payloads
     ///      (cross-block) are rejected even when their `deadline` is still in the future.
     bytes32 private constant PRICING_UPDATE_TYPEHASH = keccak256(
-        "PricingUpdate(uint24 bidFeePips,uint24 askFeePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
+        "PricingUpdate(uint24 feePips,bool live,bytes32 poolId,uint256 deadline,uint64 sequence)"
     );
 
     /// @notice Pricing state for each pool managed by this hook.
@@ -78,7 +76,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     /// @dev LP add-liquidity range is correctly shaped but not at the configured `activeLowerTick`.
     error WrongActiveTick();
 
-    /// @dev `bidFeePips` or `askFeePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%).
+    /// @dev `feePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%).
     ///      Without this guard, fees > 100% break v4's swap math (denominator underflow) and
     ///      enable an owner / compromised priceSigner to brick or extract from the pool.
     error FeeOutOfBounds();
@@ -153,7 +151,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
                 : pricingState[key.toId()];
 
             if (!state.live) return (0, 0);
-            feePips = _effectiveFee(state, zeroForOne);
+            feePips = state.feePips;
         }
 
         return SwapSimulator.simulateSwapToPrice(
@@ -186,9 +184,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         return IHooks.afterInitialize.selector;
     }
 
-    /// @dev Apply any signed curve update from `hookData`, then return the directional fee
-    ///      override for the swap. Returns a zero override (no fee) if the pool is not live.
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+    /// @dev Apply any signed curve update from `hookData`, then return the LP fee override
+    ///      for the swap. Returns a zero override (no fee) if the pool is not live.
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata hookData)
         internal
         virtual
         override
@@ -205,7 +203,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
 
-        uint24 feePips = _effectiveFee(state, params.zeroForOne);
+        uint24 feePips = state.feePips;
         uint24 feeOverride = feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeOverride);
@@ -233,42 +231,29 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     ) internal view returns (uint256 outputAmount) {
         if (!state.live) return 0;
 
-        uint24 feePips = _effectiveFee(state, zeroForOne);
+        uint24 feePips = state.feePips;
         outputAmount =
             SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing);
     }
 
-    /// @dev Compute the effective fee for a swap direction.
-    ///      Used by both _beforeSwap (execution) and _priceWithState (indicative) to ensure fidelity.
-    function _effectiveFee(PricingState memory state, bool zeroForOne)
-        internal
-        pure
-        returns (uint24 feePips)
-    {
-        feePips = zeroForOne ? state.bidFeePips : state.askFeePips;
-    }
-
-    /// @dev Validate that bid/ask fees are within v4's `[0, MAX_LP_FEE]` range. Used by
+    /// @dev Validate that the fee is within v4's `[0, MAX_LP_FEE]` range. Used by
     ///      `_commitPricingState` for every write to `pricingState`.
     function _validateFeeBounds(PricingState memory state) internal pure {
-        if (state.bidFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
-        if (state.askFeePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
+        if (state.feePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
     }
 
     /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
     ///      storage, syncs the PM's stored dynamic LP fee, and emits the event.
     ///
-    ///      The PM's stored LP fee is set to `max(bidFeePips, askFeePips)` when the pool is
-    ///      live, or `0` when not live. Per-swap pricing is still controlled by the override
-    ///      returned from `_beforeSwap`, which is direction-aware (bid vs ask). The stored
-    ///      value is informational — useful for off-chain consumers that read `getSlot0` to
-    ///      estimate slippage and want a conservative upper bound on the current LP fee.
-    ///      Callers that need the directional fee should read `pricingState[poolId]` directly.
+    ///      The PM's stored LP fee is set to `feePips` when the pool is live, or `0` when not
+    ///      live. Per-swap pricing is still controlled by the override returned from
+    ///      `_beforeSwap`. The stored value is informational -- useful for off-chain
+    ///      consumers that read `getSlot0` to estimate slippage.
     ///
     ///      `poolManager.updateDynamicLPFee` requires the pool to be initialized; subclass
-    ///      init flows MUST call this AFTER `poolManager.initialize(key, …)`.
+    ///      init flows MUST call this AFTER `poolManager.initialize(key, ...)`.
     ///
-    ///      Safe to call inside a v4 unlock callback — `updateDynamicLPFee` does not require
+    ///      Safe to call inside a v4 unlock callback -- `updateDynamicLPFee` does not require
     ///      unlock and the per-swap override (set in `_beforeSwap`) takes precedence over the
     ///      stored fee for the in-flight swap.
     /// @param key   The pool to update.
@@ -278,10 +263,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         PoolId poolId = key.toId();
         pricingState[poolId] = state;
 
-        uint24 representativeFee = state.live
-            ? (state.bidFeePips > state.askFeePips ? state.bidFeePips : state.askFeePips)
-            : 0;
-        poolManager.updateDynamicLPFee(key, representativeFee);
+        poolManager.updateDynamicLPFee(key, state.live ? state.feePips : 0);
 
         emit PricingStateUpdated(poolId, state);
     }
@@ -359,8 +341,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         bytes32 structHash = keccak256(
             abi.encode(
                 PRICING_UPDATE_TYPEHASH,
-                state.bidFeePips,
-                state.askFeePips,
+                state.feePips,
                 state.live,
                 PoolId.unwrap(poolId),
                 deadline,
@@ -383,9 +364,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     // ──── Owner Functions ────
 
     /// @notice Update the pricing state for a pool.
-    /// @dev Routes through `_commitPricingState` — validates fee bounds, writes storage, and
-    ///      syncs the PM's stored dynamic LP fee. Reverts if `bidFeePips` or `askFeePips`
-    ///      exceeds `LPFeeLibrary.MAX_LP_FEE`. The pool MUST already be initialized.
+    /// @dev Routes through `_commitPricingState` -- validates fee bounds, writes storage, and
+    ///      syncs the PM's stored dynamic LP fee. Reverts if `feePips` exceeds
+    ///      `LPFeeLibrary.MAX_LP_FEE`. The pool MUST already be initialized.
     function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
         _commitPricingState(key, state);
     }
