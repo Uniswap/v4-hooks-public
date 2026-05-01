@@ -33,6 +33,12 @@ optimizer_runs = 200
 [fuzz]
 runs = 10
 
+[invariant]
+runs = 32
+depth = 32
+fail_on_revert = false
+shrink_run_limit = 1024
+
 [rpc_endpoints]
 sepolia = "https://rpc.sepolia.org"
 unichain_sepolia = "https://sepolia.unichain.org"
