@@ -136,16 +136,8 @@ abstract contract PoolVault is MultiAssetVault {
         return _userShares[_vaultIdFor(poolId)][user];
     }
 
-    /// @dev Wrap a `PoolId` into the base's `VaultId` namespace (info-lossless cast through
-    ///      bytes32). Inlined at every PoolKey/PoolId boundary; `internal pure` so the
-    ///      optimizer eliminates the call frame.
-    function _vaultIdFor(PoolId poolId) internal pure returns (VaultId) {
-        return VaultId.wrap(PoolId.unwrap(poolId));
-    }
-
-    /// @notice Returns the total managed assets for a pool across both currencies.
-    /// @dev    Sums vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool
-    ///         ERC-20 for each currency. Includes yield accrued in vaults.
+    /// @notice Returns the total managed assets for a pool across both currencies. Sums
+    ///         vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool ERC-20.
     function totalAssets(PoolKey calldata key) external view returns (uint256 amount0, uint256 amount1) {
         return _totalAssets(key);
     }
@@ -180,6 +172,12 @@ abstract contract PoolVault is MultiAssetVault {
         );
     }
 
+    /// @dev Wrap a `PoolId` into the base's `VaultId` namespace. Info-lossless cast
+    ///      through bytes32; both types are `type X is bytes32`.
+    function _vaultIdFor(PoolId poolId) internal pure returns (VaultId) {
+        return VaultId.wrap(PoolId.unwrap(poolId));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //              PoolKey-FLAVORED LIFECYCLE (adapters into base)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -200,19 +198,13 @@ abstract contract PoolVault is MultiAssetVault {
         );
     }
 
-    /// @dev See {MultiAssetVault._deposit}.
+    /// @dev See {MultiAssetVault._deposit}. Asset pair is read from the base's `_assets`
+    ///      storage (set at bootstrap), not threaded through here.
     function _deposit(PoolKey calldata key, address from, address to, uint256 shares)
         internal
         returns (uint256 amount0, uint256 amount1)
     {
-        return _deposit(
-            _vaultIdFor(key.toId()),
-            Currency.unwrap(key.currency0),
-            Currency.unwrap(key.currency1),
-            from,
-            to,
-            shares
-        );
+        return _deposit(_vaultIdFor(key.toId()), from, to, shares);
     }
 
     /// @dev See {MultiAssetVault._withdraw}.
@@ -220,14 +212,7 @@ abstract contract PoolVault is MultiAssetVault {
         internal
         returns (uint256 amount0, uint256 amount1)
     {
-        return _withdraw(
-            _vaultIdFor(key.toId()),
-            Currency.unwrap(key.currency0),
-            Currency.unwrap(key.currency1),
-            from,
-            to,
-            shares
-        );
+        return _withdraw(_vaultIdFor(key.toId()), from, to, shares);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

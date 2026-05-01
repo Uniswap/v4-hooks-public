@@ -49,6 +49,15 @@ import {VaultId} from "../../types/VaultId.sol";
 ///         coherent snapshot.
 /// @custom:security-contact security@uniswap.org
 abstract contract MultiAssetVault is BlockNumberish {
+    /// @dev Asset pair backing each vault, set at first bootstrap. Immutable thereafter --
+    ///      `_bootstrap` reverts on a re-bootstrap, so the pair never changes once set.
+    struct Assets {
+        address asset0;
+        address asset1;
+    }
+
+    mapping(VaultId vaultId => Assets) internal _assets;
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              STATE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -144,6 +153,11 @@ abstract contract MultiAssetVault is BlockNumberish {
         if (_totalShares[vaultId] != 0) revert VaultAlreadyBootstrapped();
         if (amount0 == 0 || amount1 == 0) revert InsufficientBootstrap();
 
+        // Bind the vault to its asset pair; subsequent operations read from this storage
+        // rather than re-accepting the pair on every call. Defense against the subclass
+        // accidentally passing a different pair on later operations.
+        _assets[vaultId] = Assets({asset0: asset0, asset1: asset1});
+
         // FoT/rebasing reconciliation is the subclass's responsibility inside `_pullAsset`.
         // The share math uses the returned `received` so any under-receipt translates to
         // smaller bootstrap shares rather than silent share dilution.
@@ -167,18 +181,16 @@ abstract contract MultiAssetVault is BlockNumberish {
 
     /// @dev Mint `shares` to `to` by pulling proportional token amounts from `from`. The
     ///      conversion rounds UP per the virtual-offset formula -- depositor pays slightly
-    ///      more to prevent share-value dilution.
-    function _deposit(
-        VaultId vaultId,
-        address asset0,
-        address asset1,
-        address from,
-        address to,
-        uint256 shares
-    ) internal returns (uint256 amount0, uint256 amount1) {
+    ///      more to prevent share-value dilution. The asset pair is read from `_assets`
+    ///      (set at bootstrap) so the caller can't accidentally pass a different pair.
+    function _deposit(VaultId vaultId, address from, address to, uint256 shares)
+        internal
+        returns (uint256 amount0, uint256 amount1)
+    {
         if (_totalShares[vaultId] == 0) revert VaultNotBootstrapped();
 
-        (uint256 want0, uint256 want1) = _convertToAmounts(vaultId, asset0, asset1, shares, true);
+        Assets memory pair = _assets[vaultId];
+        (uint256 want0, uint256 want1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, true);
 
         // Effects-first: share counters update before any asset I/O so a reentrant view
         // path (e.g., a callback observing `previewDeposit`) sees a coherent snapshot.
@@ -190,8 +202,8 @@ abstract contract MultiAssetVault is BlockNumberish {
         // dilute existing shareholders by leaving the vault short on assets. Fail-fast on
         // under-receipt -- subclasses that want to support FoT must compensate inside
         // `_pullAsset` (e.g., by pre-funding the difference).
-        amount0 = want0 > 0 ? _pullAsset(vaultId, asset0, from, want0) : 0;
-        amount1 = want1 > 0 ? _pullAsset(vaultId, asset1, from, want1) : 0;
+        amount0 = want0 > 0 ? _pullAsset(vaultId, pair.asset0, from, want0) : 0;
+        amount1 = want1 > 0 ? _pullAsset(vaultId, pair.asset1, from, want1) : 0;
         if (amount0 < want0 || amount1 < want1) revert TransferReceiptShortfall();
 
         emit Deposit(vaultId, to, shares, amount0, amount1);
@@ -200,27 +212,25 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @dev Burn `shares` from `from` and send proportional token amounts to `to`. The
     ///      conversion rounds DOWN -- withdrawer receives slightly less to prevent
     ///      over-withdrawal at remaining shareholders' expense.
-    function _withdraw(
-        VaultId vaultId,
-        address asset0,
-        address asset1,
-        address from,
-        address to,
-        uint256 shares
-    ) internal returns (uint256 amount0, uint256 amount1) {
+    function _withdraw(VaultId vaultId, address from, address to, uint256 shares)
+        internal
+        returns (uint256 amount0, uint256 amount1)
+    {
         if (_getBlockNumberish() == _lastDepositBlock[vaultId][from]) revert SameBlockWithdraw();
         if (_userShares[vaultId][from] < shares) revert InsufficientShares();
 
-        (amount0, amount1) = _convertToAmounts(vaultId, asset0, asset1, shares, false);
+        Assets memory pair = _assets[vaultId];
+        (amount0, amount1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, false);
 
         _totalShares[vaultId] -= shares;
         _userShares[vaultId][from] -= shares;
 
-        if (amount0 > 0) _pushAsset(vaultId, asset0, to, amount0);
-        if (amount1 > 0) _pushAsset(vaultId, asset1, to, amount1);
+        if (amount0 > 0) _pushAsset(vaultId, pair.asset0, to, amount0);
+        if (amount1 > 0) _pushAsset(vaultId, pair.asset1, to, amount1);
 
         emit Withdraw(vaultId, from, shares, amount0, amount1);
     }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          INTERNAL: SHARE MATH
