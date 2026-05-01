@@ -94,8 +94,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
             revert UnexpectedSwapOutputDelta();
         }
         _setTransientSwapInputPaid(owedAmt);
-        poolManager.take(Currency.wrap(tokenOwed), address(this), owedAmt);
-        IERC20(tokenOwed).safeTransfer(pool, owedAmt);
+        poolManager.take(Currency.wrap(tokenOwed), pool, owedAmt);
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -225,8 +224,11 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         // Uniswap V4 uses negative amountSpecified for exact-input swaps; Uniswap V3 `swap` expects positive for exact-input (negative for exact-output).
         int256 v3AmountSpecified = -params.amountSpecified;
 
+        poolManager.sync(settleCurrency);
         (int256 amount0Delta, int256 amount1Delta) = IUniswapV3Pool(poolAddr)
-            .swap(address(this), params.zeroForOne, v3AmountSpecified, sqrtPriceLimitX96, abi.encode(poolId, false));
+            .swap(
+                address(poolManager), params.zeroForOne, v3AmountSpecified, sqrtPriceLimitX96, abi.encode(poolId, false)
+            );
 
         // Pool.swap returns balance deltas: positive = pool gained token, negative = pool sent token out to recipient.
         if (params.zeroForOne) {
@@ -242,12 +244,8 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         _setTransientExpectedPool(address(0));
         _setTransientSwapInputPaid(0);
 
-        poolManager.sync(settleCurrency);
-        IERC20(Currency.unwrap(settleCurrency)).safeTransfer(address(poolManager), amountSettle);
         poolManager.settle();
         hasSettled = true;
-
-        return (amountSettle, amountTake, hasSettled);
     }
 
     function _setTransientExpectedPool(address pool) private {

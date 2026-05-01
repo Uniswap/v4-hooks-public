@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/d636b0c2e723a4f3e275fde691adb8ea9a34eb83/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0cc83724d9fa337cd357d09f0bd4d09be719e496/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -153,14 +153,21 @@ function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
 
 ### _swapOnPair
 
-Executes Constant-Product swap on `pair`; returns input amount debited via PoolManager (`take`).
+Executes Constant-Product swap on `pair`. Pulls input from PoolManager to `pair` via `take`; pair sends output to PoolManager.
 
 
 ```solidity
-function _swapOnPair(address pairAddr, Currency takeCurrency, IERC20 takeToken, SwapParams calldata params)
+function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCurrency, SwapParams calldata params)
     private
-    returns (uint256 amountTakeUsed);
+    returns (uint256 amountTakeUsed, uint256 amountSettle);
 ```
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`amountTakeUsed`|`uint256`|Input amount taken from PoolManager for the pair.|
+|`amountSettle`|`uint256`|Output amount sent by the pair to PoolManager (must match `settle` after `sync`).|
+
 
 ## Errors
 ### NativeCurrencyNotSupported

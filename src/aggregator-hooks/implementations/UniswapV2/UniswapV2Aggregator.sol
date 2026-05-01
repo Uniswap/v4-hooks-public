@@ -124,28 +124,16 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         if (_conductSwapEntered != 0) revert Reentrancy();
         _conductSwapEntered = 1;
 
-        IERC20 settleToken = IERC20(Currency.unwrap(settleCurrency));
-
-        IERC20 takeToken = IERC20(Currency.unwrap(takeCurrency));
-        uint256 settleBefore = settleToken.balanceOf(address(this));
-
-        amountTake = _swapOnPair(pairAddr, takeCurrency, takeToken, params);
+        poolManager.sync(settleCurrency);
+        (amountTake, amountSettle) = _swapOnPair(pairAddr, takeCurrency, settleCurrency, params);
+        poolManager.settle();
+        hasSettled = true;
 
         _conductSwapEntered = 0;
-
-        uint256 settleAfter = settleToken.balanceOf(address(this));
-        amountSettle = settleAfter - settleBefore;
 
         if (params.amountSpecified >= 0 && params.amountSpecified != 0 && amountSettle == 0) {
             revert UnexpectedSwapOutputDelta();
         }
-
-        poolManager.sync(settleCurrency);
-        settleToken.safeTransfer(address(poolManager), amountSettle);
-        poolManager.settle();
-        hasSettled = true;
-
-        return (amountSettle, amountTake, hasSettled);
     }
 
     function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
@@ -173,10 +161,12 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         amountIn = numerator / denominator + 1;
     }
 
-    /// @dev Executes Constant-Product swap on `pair`; returns input amount debited via PoolManager (`take`).
-    function _swapOnPair(address pairAddr, Currency takeCurrency, IERC20 takeToken, SwapParams calldata params)
+    /// @dev Executes Constant-Product swap on `pair`. Pulls input from PoolManager to `pair` via `take`; pair sends output to PoolManager.
+    /// @return amountTakeUsed Input amount taken from PoolManager for the pair.
+    /// @return amountSettle Output amount sent by the pair to PoolManager (must match `settle` after `sync`).
+    function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCurrency, SwapParams calldata params)
         private
-        returns (uint256 amountTakeUsed)
+        returns (uint256 amountTakeUsed, uint256 amountSettle)
     {
         bool zeroForOne = params.zeroForOne;
 
@@ -188,13 +178,19 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         uint256 amountOut;
         if (params.amountSpecified < 0) {
             amountTakeUsed = uint256(-params.amountSpecified);
-            amountOut = getAmountOut(amountTakeUsed, reserveIn, reserveOut);
+            // FoT: use amount that actually lands on the pair for the quote.
+            uint256 balanceTakeBefore = takeCurrency.balanceOf(pairAddr);
+            poolManager.take(takeCurrency, pairAddr, amountTakeUsed);
+            uint256 balanceTakeAfter = takeCurrency.balanceOf(pairAddr);
+            uint256 amountArrived = balanceTakeAfter - balanceTakeBefore;
+            amountOut = getAmountOut(amountArrived, reserveIn, reserveOut);
         } else {
             amountOut = uint256(params.amountSpecified);
             amountTakeUsed = getAmountIn(amountOut, reserveIn, reserveOut);
+            poolManager.take(takeCurrency, pairAddr, amountTakeUsed);
+            // Fee-on-transfer input is unsupported for exact-out (pair needs full getAmountIn on balance).
         }
-        poolManager.take(takeCurrency, address(this), amountTakeUsed);
-        takeToken.safeTransfer(pairAddr, amountTakeUsed);
+
         uint256 amount0Out;
         uint256 amount1Out;
         if (zeroForOne) {
@@ -202,6 +198,10 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         } else {
             amount0Out = amountOut;
         }
-        IUniswapV2Pair(pairAddr).swap(amount0Out, amount1Out, address(this), "");
+        uint256 balanceSettleBefore = settleCurrency.balanceOf(address(poolManager));
+        IUniswapV2Pair(pairAddr).swap(amount0Out, amount1Out, address(poolManager), "");
+        uint256 balanceSettleAfter = settleCurrency.balanceOf(address(poolManager));
+
+        amountSettle = balanceSettleAfter - balanceSettleBefore;
     }
 }
