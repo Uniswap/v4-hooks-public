@@ -45,11 +45,11 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
             SimpleSpreadQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), owner), address(hook));
 
-        // Create pool key (dynamic fee pool — fee override requires this)
+        // Create pool key with static fee (`PoolKey.fee`)
         testPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
@@ -64,12 +64,9 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         // Add LP at the active tick (single-tick concentration)
         _seedAtActiveTick(testPoolKey, 10_000e18, 10_000e18);
 
-        // Set pricing state with fee override
+        // Activate the pool for swaps (defaults to paused after manager.initialize)
         vm.prank(owner);
-        hook.updatePricingState(
-            testPoolKey,
-            SpreadQuoterBase.PricingState({feePips: FEE_PIPS, live: true})
-        );
+        hook.setPoolLive(testPoolKey, true);
     }
 
     // ──── Helpers ────
@@ -230,17 +227,14 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         PoolKey memory emptyPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
         manager.initialize(emptyPoolKey, Constants.SQRT_PRICE_1_1);
 
         vm.prank(owner);
-        hook.updatePricingState(
-            emptyPoolKey,
-            SpreadQuoterBase.PricingState({feePips: FEE_PIPS, live: true})
-        );
+        hook.setPoolLive(emptyPoolKey, true);
 
         // No liquidity → simulation returns 0
         uint256 output = hook.getIndicativeQuote(emptyPoolKey, true, -1e18, "");
@@ -280,16 +274,12 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertApproxEqRel(uint256(int256(output)), 0.98e18, 0.01e18);
     }
 
-    function test_beforeSwap_unlivePool_noFeeOverride() public {
+    function test_beforeSwap_unlivePool_reverts() public {
         vm.prank(owner);
         hook.setPoolLive(testPoolKey, false);
 
-        BalanceDelta delta = swap(testPoolKey, true, -1e18, "");
-
-        assertEq(delta.amount0(), -1e18);
-        int128 output = delta.amount1();
-        assertTrue(output > 0);
-        assertApproxEqRel(uint256(int256(output)), 1e18, 0.005e18);
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
     }
 
     function test_beforeSwap_exactOutput_zeroForOne() public {
@@ -302,27 +292,6 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     }
 
     // ──── Owner functions ────
-
-    function test_updatePricingState_onlyOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
-        hook.updatePricingState(
-            testPoolKey,
-            SpreadQuoterBase.PricingState({feePips: 0, live: true})
-        );
-    }
-
-    function test_updatePricingState_changesFee() public {
-        vm.prank(owner);
-        hook.updatePricingState(
-            testPoolKey,
-            SpreadQuoterBase.PricingState({feePips: 0, live: true})
-        );
-
-        BalanceDelta delta = swap(testPoolKey, true, -1e18, "");
-        int128 output = delta.amount1();
-        // With 0 fees, output should be close to input (price ≈ 1:1 at tick 30)
-        assertApproxEqRel(uint256(int256(output)), 1e18, 0.01e18);
-    }
 
     function test_setPoolLive_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));

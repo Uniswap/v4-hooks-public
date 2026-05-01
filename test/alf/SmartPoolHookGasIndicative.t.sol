@@ -110,13 +110,12 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
         key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: tickSpacing,
             hooks: IHooks(address(hook))
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: withVault ? IERC4626(address(vault0)) : IERC4626(address(0)),

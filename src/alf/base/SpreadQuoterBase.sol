@@ -5,7 +5,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
@@ -15,32 +14,24 @@ import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 
 /// @title SpreadQuoterBase
 /// @author Uniswap Labs
-/// @notice Abstract base for spread quoters using native v4 LP with a single symmetric fee.
+/// @notice Abstract base for spread quoters using native v4 LP with a static, per-pool fee.
 ///         Provides pricing via SwapSimulator and single-tick LP concentration. Concrete
 ///         hooks define LP access control and hook permissions.
+/// @dev    Pools use a static fee defined by `PoolKey.fee` at deploy time. The v4 PoolManager
+///         charges this fee natively on every swap. Owner has only a per-pool liveness flag
+///         (`setPoolLive`) for pause/resume; pricing itself is immutable post-initialize.
 /// @custom:security-contact security@uniswap.org
 abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     using PoolIdLibrary for PoolKey;
 
-    /// @notice Pricing state per pool. Single symmetric LP fee applied in both swap directions.
-    /// @param feePips Fee override (pips, max `LPFeeLibrary.MAX_LP_FEE`) applied to all swaps.
-    /// @param live    Whether the pool currently quotes and executes swaps.
-    struct PricingState {
-        uint24 feePips;
-        bool live;
-    }
-
-    /// @notice Pricing state for each pool managed by this hook.
-    mapping(PoolId => PricingState) public pricingState;
+    /// @notice Whether each pool is currently quoting and executing swaps. Pools default to
+    ///         paused (`false`) after `manager.initialize`; the owner enables them via
+    ///         {setPoolLive}.
+    mapping(PoolId => bool) public livePools;
 
     /// @notice Lower tick of the single permitted LP range per pool. LP add liquidity calls
     ///         must use exactly `[activeLowerTick, activeLowerTick + tickSpacing]`.
     mapping(PoolId => int24) public activeLowerTick;
-
-    /// @notice Emitted whenever a pool's pricing state is committed via `_commitPricingState`.
-    /// @param poolId The pool whose pricing was updated.
-    /// @param state  The full new pricing state (post-validation).
-    event PricingStateUpdated(PoolId indexed poolId, PricingState state);
 
     /// @notice Emitted when a pool's liveness flag is toggled via `setPoolLive`.
     /// @param poolId The pool whose liveness changed.
@@ -59,14 +50,14 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @dev LP add-liquidity range is correctly shaped but not at the configured `activeLowerTick`.
     error WrongActiveTick();
 
-    /// @dev `feePips` exceeds `LPFeeLibrary.MAX_LP_FEE` (1_000_000 = 100%). Without this guard,
-    ///      fees > 100% break v4's swap math (denominator underflow) and enable an owner to
-    ///      brick or extract from the pool.
-    error FeeOutOfBounds();
+    /// @dev `_beforeSwap` was invoked on a pool whose `livePools` flag is false. Pools default
+    ///      to paused after `manager.initialize`; the owner enables a pool via {setPoolLive}.
+    /// @param poolId The pool whose live flag is currently false.
+    error PoolNotLive(PoolId poolId);
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_       Initial owner (Ownable2Step). Owner can update pricing/active-tick state.
+    /// @param owner_       Initial owner (Ownable2Step). Owner can toggle liveness and the active tick.
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
         BaseALFHook(_poolManager, maxGas_)
         Ownable(owner_)
@@ -74,15 +65,15 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     // ──── IALFHook ────
 
-    /// @notice Always reports live; per-pool liveness is gated by `pricingState[poolId].live`.
-    /// @dev    See {IALFHook.isLive}. Routers SHOULD also consult per-pool pricing state to
-    ///         determine effective liveness for swaps.
+    /// @notice Always reports live; per-pool liveness is gated by `livePools[poolId]`.
+    /// @dev    See {IALFHook.isLive}. Routers SHOULD also consult per-pool liveness for swap
+    ///         eligibility.
     function isLive() external pure override returns (bool) {
         return true;
     }
 
-    /// @notice Indicative quote against the stored pricing state.
-    /// @dev Resolves attestation from hookData; the per-call pricing is taken from storage.
+    /// @notice Indicative quote against the static pool fee.
+    /// @dev Resolves attestation from hookData; the pool's static `key.fee` drives pricing.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
         view
@@ -91,11 +82,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         returns (uint256 outputAmount)
     {
         (bool isAttested, address attester) = _resolveHookData(hookData);
-        return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, pricingState[key.toId()]);
+        return _price(key, zeroForOne, amountSpecified, isAttested, attester);
     }
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
-    /// @dev Delegates to `SwapSimulator.simulateSwapToPrice` with the stored pricing state.
+    /// @dev Delegates to `SwapSimulator.simulateSwapToPrice` using `key.fee`.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
@@ -103,11 +94,10 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         uint160 sqrtPriceLimitX96,
         bytes calldata
     ) external view virtual override returns (uint256 amountIn, uint256 amountOut) {
-        PricingState memory state = pricingState[key.toId()];
-        if (!state.live) return (0, 0);
+        if (!livePools[key.toId()]) return (0, 0);
 
         return SwapSimulator.simulateSwapToPrice(
-            poolManager, key.toId(), zeroForOne, amountSpecified, state.feePips, key.tickSpacing, sqrtPriceLimitX96
+            poolManager, key.toId(), zeroForOne, amountSpecified, key.fee, key.tickSpacing, sqrtPriceLimitX96
         );
     }
 
@@ -136,79 +126,32 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         return IHooks.afterInitialize.selector;
     }
 
-    /// @dev Return the LP fee override for the swap. Returns a zero override (no fee) if
-    ///      the pool is not live. hookData is ignored; pricing is owner-controlled.
+    /// @dev Reverts when the pool is paused; otherwise no-ops. v4 charges the static fee from
+    ///      `key.fee`, so no override is returned. hookData is ignored; pricing is fully static.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         internal
+        view
         virtual
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        PricingState memory state = pricingState[key.toId()];
-        if (!state.live) {
-            return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
-        }
-        uint24 feeOverride = state.feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG;
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeOverride);
+        PoolId poolId = key.toId();
+        if (!livePools[poolId]) revert PoolNotLive(poolId);
+        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
     // ──── Pricing ────
 
-    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool isAttested, address attester)
+    function _price(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bool, address)
         internal
         view
         virtual
         override
         returns (uint256 outputAmount)
     {
-        return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, pricingState[key.toId()]);
-    }
-
-    function _priceWithState(
-        PoolKey calldata key,
-        bool zeroForOne,
-        int256 amountSpecified,
-        bool,
-        address,
-        PricingState memory state
-    ) internal view returns (uint256 outputAmount) {
-        if (!state.live) return 0;
-
-        uint24 feePips = state.feePips;
+        if (!livePools[key.toId()]) return 0;
         outputAmount =
-            SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, feePips, key.tickSpacing);
-    }
-
-    /// @dev Validate that the fee is within v4's `[0, MAX_LP_FEE]` range. Used by
-    ///      `_commitPricingState` for every write to `pricingState`.
-    function _validateFeeBounds(PricingState memory state) internal pure {
-        if (state.feePips > LPFeeLibrary.MAX_LP_FEE) revert FeeOutOfBounds();
-    }
-
-    /// @dev Single chokepoint for committing a `PricingState`. Validates fee bounds, writes
-    ///      storage, syncs the PM's stored dynamic LP fee, and emits the event.
-    ///
-    ///      The PM's stored LP fee is set to `feePips` when the pool is live, or `0` when not
-    ///      live. Per-swap pricing is still controlled by the override returned from
-    ///      `_beforeSwap`. The stored value is informational -- useful for off-chain
-    ///      consumers that read `getSlot0` to estimate slippage.
-    ///
-    ///      `poolManager.updateDynamicLPFee` requires the pool to be initialized; subclass
-    ///      init flows MUST call this AFTER `poolManager.initialize(key, ...)`.
-    ///
-    ///      Safe to call inside a v4 unlock callback -- `updateDynamicLPFee` does not require
-    ///      unlock and the per-swap override (set in `_beforeSwap`) takes precedence over the
-    ///      stored fee for the in-flight swap.
-    /// @param key   The pool to update.
-    /// @param state The new pricing state (validated for fee bounds).
-    function _commitPricingState(PoolKey calldata key, PricingState memory state) internal {
-        _validateFeeBounds(state);
-        PoolId poolId = key.toId();
-        pricingState[poolId] = state;
-
-        poolManager.updateDynamicLPFee(key, state.live ? state.feePips : 0);
-
-        emit PricingStateUpdated(poolId, state);
+            SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, key.fee, key.tickSpacing);
     }
 
     // ──── LP Tick Enforcement ────
@@ -221,22 +164,12 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     // ──── Owner Functions ────
 
-    /// @notice Update the pricing state for a pool.
-    /// @dev Routes through `_commitPricingState` -- validates fee bounds, writes storage, and
-    ///      syncs the PM's stored dynamic LP fee. Reverts if `feePips` exceeds
-    ///      `LPFeeLibrary.MAX_LP_FEE`. The pool MUST already be initialized.
-    function updatePricingState(PoolKey calldata key, PricingState calldata state) external virtual onlyOwner {
-        _commitPricingState(key, state);
-    }
-
     /// @notice Toggle liveness for a pool.
-    /// @dev Reads the existing `pricingState`, mutates `live`, and routes through
-    ///      `_commitPricingState`. When toggling to `false`, the PM's stored dynamic LP fee
-    ///      is set to 0 to reflect that no swap fee will be charged on this pool.
+    /// @dev Pools default to paused (`false`) immediately after `manager.initialize`. The
+    ///      owner enables a pool by calling `setPoolLive(key, true)`. Disabling pauses swaps
+    ///      via `_beforeSwap`'s liveness check; pricing (the static `key.fee`) is unaffected.
     function setPoolLive(PoolKey calldata key, bool live) external virtual onlyOwner {
-        PricingState memory state = pricingState[key.toId()];
-        state.live = live;
-        _commitPricingState(key, state);
+        livePools[key.toId()] = live;
         emit PoolLivenessUpdated(key.toId(), live);
     }
 

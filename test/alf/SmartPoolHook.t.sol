@@ -84,7 +84,7 @@ contract SmartPoolHookTest is Test, Deployers {
         testPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
@@ -104,7 +104,6 @@ contract SmartPoolHookTest is Test, Deployers {
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
         return SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(vault0)),
@@ -152,7 +151,7 @@ contract SmartPoolHookTest is Test, Deployers {
         key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
@@ -160,7 +159,6 @@ contract SmartPoolHookTest is Test, Deployers {
 
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: true,
             vault0: vaulted ? IERC4626(address(vault0)) : IERC4626(address(0)),
@@ -270,7 +268,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key2 = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 20,
             hooks: IHooks(address(hook))
         });
@@ -282,7 +280,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key2 = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 20,
             hooks: IHooks(address(hook))
         });
@@ -295,7 +293,6 @@ contract SmartPoolHookTest is Test, Deployers {
             key2,
             SmartPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-                pricing: SmartPoolBase.PricingState({feePips: 100, live: true}),
                 distribution: dist,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
@@ -311,13 +308,12 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory nativeKey = PoolKey({
             currency0: Currency.wrap(address(0)),
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -336,13 +332,12 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory weirdKey = PoolKey({
             currency0: currency0,
             currency1: Currency.wrap(address(0)),
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -354,28 +349,25 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     function test_initializePool_revertsAboveMaxLPFee() public {
+        // Fees are static (`PoolKey.fee`); v4's PoolManager rejects fees > MAX_LP_FEE on init.
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory key2 = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: LPFeeLibrary.MAX_LP_FEE + 1,
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
         SmartPoolHook.PoolConfig memory bad = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({
-                feePips: LPFeeLibrary.MAX_LP_FEE + 1,
-                live: true
-            }),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
             vault1: IERC4626(address(0))
         });
         vm.prank(owner);
-        vm.expectRevert(bytes4(keccak256("FeeOutOfBounds()")));
+        vm.expectRevert();
         hook.initializePool(key2, bad);
     }
 
@@ -670,12 +662,11 @@ contract SmartPoolHookTest is Test, Deployers {
 
         bytes memory hookData = abi.encode(ALFHookData({attestationData: bytes("anything")}));
 
-        (uint24 storedFeeBefore, bool storedLiveBefore) = hook.pricingState(testPoolId);
+        bool liveBefore = hook.livePools(testPoolId);
         swap(testPoolKey, true, -1e18, hookData);
-        (uint24 storedFeeAfter, bool storedLiveAfter) = hook.pricingState(testPoolId);
+        bool liveAfter = hook.livePools(testPoolId);
 
-        assertEq(storedFeeAfter, storedFeeBefore, "stored fee unchanged");
-        assertEq(storedLiveAfter, storedLiveBefore, "stored live unchanged");
+        assertEq(liveAfter, liveBefore, "stored live unchanged");
     }
 
     function test_indicativeQuote_ignoresHookData() public {
@@ -1087,7 +1078,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory keyU = PoolKey({
             currency0: Currency.wrap(address(usdt0)),
             currency1: Currency.wrap(address(usdt1)),
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
@@ -1096,7 +1087,6 @@ contract SmartPoolHookTest is Test, Deployers {
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
@@ -1199,7 +1189,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 11,
             hooks: IHooks(address(hook))
         });
@@ -1213,7 +1203,6 @@ contract SmartPoolHookTest is Test, Deployers {
 
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             // currency0 = uncapped MockERC4626 (vault0 from setUp), currency1 = malicious.
@@ -1240,65 +1229,20 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                   PRICING STATE & FEE BOUNDS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    function test_updatePricingState_revertsAboveMaxLPFee() public {
-        SmartPoolBase.PricingState memory bad = SmartPoolBase.PricingState({
-            feePips: LPFeeLibrary.MAX_LP_FEE + 1,
-            live: true
-        });
-        vm.prank(owner);
-        vm.expectRevert(bytes4(keccak256("FeeOutOfBounds()")));
-        hook.updatePricingState(testPoolKey, bad);
-    }
-
-    function test_updatePricingState_atMaxIsAccepted() public {
-        SmartPoolBase.PricingState memory edge = SmartPoolBase.PricingState({
-            feePips: LPFeeLibrary.MAX_LP_FEE,
-            live: true
-        });
-        vm.prank(owner);
-        hook.updatePricingState(testPoolKey, edge);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                       CANONICAL FEE READ
+    //                       LIVENESS
     // ═══════════════════════════════════════════════════════════════════════════
     //
-    //  SmartPool intentionally does NOT sync the PM's stored dynamic LP fee --
-    //  there is no v4 requirement to populate slot0.lpFee at all.
-    //  Per-swap pricing flows through the override returned from `_beforeSwap`.
-    //  Off-chain readers MUST consult `pricingState(poolId)` for the canonical
-    //  fee + live state; reading slot0.lpFee will always return 0.
+    //  Pool fees are static (`PoolKey.fee`) and immutable post-init. Owner has only
+    //  a per-pool liveness flag (`livePools`) for emergency pause/resume.
 
-    function test_pricingStateRead_initializePool_returnsConfiguredFee() public view {
-        (uint24 fee, bool live) = hook.pricingState(testPoolId);
-        assertEq(fee, FEE_PIPS);
-        assertTrue(live);
-        // PM does not track our fee.
-        (,,, uint24 lpFee) = manager.getSlot0(testPoolId);
-        assertEq(lpFee, 0, "PM slot0.lpFee not synced -- read pricingState instead");
+    function test_livePool_initializePool_setsLive() public view {
+        assertTrue(hook.livePools(testPoolId));
     }
 
-    function test_pricingStateRead_updatePricingState_updatesCanonicalRead() public {
-        SmartPoolBase.PricingState memory newState = SmartPoolBase.PricingState({
-            feePips: 5_000,
-            live: true
-        });
-        vm.prank(owner);
-        hook.updatePricingState(testPoolKey, newState);
-        (uint24 fee, bool live) = hook.pricingState(testPoolId);
-        assertEq(fee, 5_000);
-        assertTrue(live);
-    }
-
-    function test_pricingStateRead_setPoolLiveFalse_clearsLiveFlag() public {
+    function test_livePool_setPoolLiveFalse_clearsLiveFlag() public {
         vm.prank(owner);
         hook.setPoolLive(testPoolKey, false);
-        (uint24 fee, bool live) = hook.pricingState(testPoolId);
-        assertEq(fee, FEE_PIPS, "fee preserved when paused");
-        assertFalse(live);
+        assertFalse(hook.livePools(testPoolId));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1525,7 +1469,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key = PoolKey({
             currency0: c0,
             currency1: c1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
@@ -1535,7 +1479,6 @@ contract SmartPoolHookTest is Test, Deployers {
 
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(v0)),
@@ -1676,7 +1619,7 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: FEE_PIPS,
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
@@ -1687,7 +1630,6 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.expectRevert(SmartPoolHook.VaultAssetMismatch.selector);
         hook.initializePool(key, SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: FEE_PIPS, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(wrongVault)),

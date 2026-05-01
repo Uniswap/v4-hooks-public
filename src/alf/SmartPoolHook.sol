@@ -7,7 +7,6 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
@@ -28,8 +27,9 @@ import {PoolVault} from "./base/PoolVault.sol";
 
 /// @title SmartPoolHook
 /// @author Uniswap Labs
-/// @notice JIT spread quoter with ERC4626 vault rehypothecation and multi-range liquidity
-///         distribution.
+/// @notice JIT quoter with ERC4626 vault rehypothecation and multi-range liquidity
+///         distribution. Pricing is fully static — pool fees are set at deploy time via
+///         `PoolKey.fee` and never change.
 ///
 ///         Assets are deployed across multiple tick ranges ("buckets") during each JIT cycle,
 ///         with owner-configured weights that control capital concentration. Token allocation
@@ -59,10 +59,10 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///
 ///         ## Pricing
 ///
-///         A single symmetric LP fee is set via SmartPoolBase's PricingState and applied as a v4
-///         dynamic fee override. The owner updates spreads through `updatePricingState`. This
-///         hook intentionally **ignores hookData on swaps** — pricing is fully owner-controlled.
-///         The hook does not include signed curve updates or EIP-712 attestation machinery.
+///         The pool's LP fee is read from `PoolKey.fee` and charged natively by v4 on every
+///         swap. The fee is fixed at pool-creation time and cannot be changed afterwards. The
+///         owner has only a per-pool liveness flag (`setPoolLive`) for emergency pause; the
+///         hook intentionally **ignores hookData on swaps**.
 ///
 ///         ## Share Accounting
 ///
@@ -122,14 +122,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @notice Configuration for initializing a new pool. Passed to `initializePool`.
     /// @param sqrtPriceX96         Initial sqrt price (Q64.96) for the v4 pool.
-    /// @param pricing              Initial fee + liveness configuration. `feePips` must be ≤ MAX_LP_FEE.
     /// @param distribution         Liquidity distribution buckets (weights must sum to 10_000).
     /// @param allowExternalDeposits Whether non-owner addresses may call `addLiquidity`.
     /// @param vault0               ERC4626 vault for currency0 (address(0) to hold as ERC-20).
     /// @param vault1               ERC4626 vault for currency1 (address(0) to hold as ERC-20).
     struct PoolConfig {
         uint160 sqrtPriceX96;
-        PricingState pricing;
         LiquidityBucket[] distribution;
         bool allowExternalDeposits;
         IERC4626 vault0;
@@ -167,9 +165,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @dev The PoolKey's hooks address does not match this contract.
     error InvalidHookAddress();
-
-    /// @dev The PoolKey's fee must use DYNAMIC_FEE_FLAG for fee override pricing.
-    error MustUseDynamicFee();
 
     /// @dev Distribution is invalid: empty, exceeds MAX_BUCKETS, weights don't sum to 10_000,
     ///      or a bucket has zero weight.
@@ -228,26 +223,25 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Initialize a new pool with vaults, pricing, and liquidity distribution.
-    /// @dev    Calls `poolManager.initialize` internally. Vaults are permanent — set at creation
-    ///         and cannot be changed. The distribution can be updated later via `setDistribution`.
+    /// @notice Initialize a new pool with vaults and liquidity distribution.
+    /// @dev    Calls `poolManager.initialize` internally. The pool's LP fee is taken from
+    ///         `key.fee` and is static — it cannot be changed post-deployment. Vaults are
+    ///         permanent — set at creation and cannot be changed. The distribution can be
+    ///         updated later via `setDistribution`.
     ///         Native ETH (currency `address(0)`) is rejected — wrap as WETH instead.
-    ///         Pricing fees must be ≤ `LPFeeLibrary.MAX_LP_FEE`.
+    ///         The pool is initialized as live; toggle via `setPoolLive` for emergency pause.
     ///         The pool is **not seeded** by `initializePool`; the owner must call `bootstrap`
     ///         to mint the first shares before any swaps or external deposits can occur.
-    /// @param key    The PoolKey (must reference this hook and use DYNAMIC_FEE_FLAG).
-    /// @param config Pool configuration including pricing, distribution, vaults, and permissions.
+    /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee.
+    /// @param config Pool configuration including distribution, vaults, and permissions.
     /// @return tick  The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, PoolConfig calldata config)
         external
         onlyOwner
         returns (int24 tick)
     {
-        if (!LPFeeLibrary.isDynamicFee(key.fee)) revert MustUseDynamicFee();
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeNotSupported();
-        // Fail-fast on bad pricing before any state writes or the (gas-heavy) PM initialize call.
-        _validateFeeBounds(config.pricing);
 
         // Vaults are immutable per (pool, currency) post-init. Verify the configured ERC-4626
         // vault wraps the same underlying as the currency before storing — a mismatch would
@@ -271,8 +265,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         _setDistribution(poolId, config.distribution, key.tickSpacing);
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
-        // Commit pricing AFTER PM initialize: `updateDynamicLPFee` requires `checkPoolInitialized`.
-        _commitPricingState(key, config.pricing);
+        livePools[poolId] = true;
+        emit PoolLivenessUpdated(poolId, true);
         emit PoolCreated(poolId);
     }
 
@@ -426,22 +420,10 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         revert SetActiveTickDisabled();
     }
 
-    /// @inheritdoc SmartPoolBase
-    /// @dev    Overridden to gate on `whenJITNotInProgress`. A vault-as-owner
-    ///         callback inside an in-flight JIT cycle cannot mutate pricing state mid-flight.
-    function updatePricingState(PoolKey calldata key, PricingState calldata state)
-        external
-        override
-        onlyOwner
-        whenJITNotInProgress
-    {
-        _commitPricingState(key, state);
-    }
-
-    /// @notice Enable or disable pool liveness while preserving the configured fee.
-    /// @dev    When toggled to false, `_beforeSwap` returns early without deploying JIT
-    ///         liquidity, effectively pausing the pool for swaps. The stored fee is retained,
-    ///         so re-enabling restores prior pricing without reconfiguration.
+    /// @notice Enable or disable pool liveness for emergency pause/resume.
+    /// @dev    When toggled to false, `_beforeSwap` reverts with {PoolNotLive}, pausing the
+    ///         pool for swaps. The static fee (`key.fee`) is unaffected — re-enabling
+    ///         immediately restores trading at the original rate.
     /// @param key  The pool to toggle.
     /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
     function setPoolLive(PoolKey calldata key, bool live)
@@ -449,9 +431,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         onlyOwner
         whenJITNotInProgress
     {
-        PricingState memory state = pricingState[key.toId()];
-        state.live = live;
-        _commitPricingState(key, state);
+        livePools[key.toId()] = live;
+        emit PoolLivenessUpdated(key.toId(), live);
     }
 
     /// @notice Total reserves managed by this hook for the given pool.
@@ -469,7 +450,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @notice Indicative quote against hypothetical SmartPool JIT liquidity.
     /// @dev    Uses current active distribution-bucket liquidity for a compact view quote.
-    ///         Ignores hookData; pricing is determined by stored PricingState.
+    ///         Ignores hookData; pricing is the static `key.fee`.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata)
         external
         view
@@ -554,15 +535,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         revert LiquidityNotAllowed();
     }
 
-    /// @dev JIT entry point. Reads the stored PricingState for the LP fee, deploys
-    ///      multi-range JIT liquidity under the JIT lock, and returns the fee override.
+    /// @dev JIT entry point. Deploys multi-range JIT liquidity under the JIT lock. v4 charges
+    ///      the static `key.fee` on the in-flight swap natively — no override is returned.
     ///
-    ///      Reverts when the pool is paused (`!live`). The previous behavior returned
-    ///      ZERO_DELTA + 0 fee, which let the v4 swap math run against zero deployed
-    ///      liquidity -- the swap would either no-op or revert internally with
-    ///      PriceLimitAlreadyExceeded depending on params. Reverting up-front is a cleaner
-    ///      signal for routers and aggregators (the multiplexer's per-target try/catch
-    ///      already handles it). hookData is ignored entirely (see contract-level NatSpec).
+    ///      Reverts when the pool is paused (`!live`). Routers and aggregators see an explicit
+    ///      failure instead of the swap running against zero deployed liquidity; the
+    ///      multiplexer's per-target try/catch already handles the revert. hookData is
+    ///      ignored entirely (see contract-level NatSpec).
     ///
     ///      A reentrant `_beforeSwap` on the same pool (e.g., from a malicious vault calling
     ///      `poolManager.swap(samePool)` during `_withdrawFromVault`) would corrupt the JIT
@@ -574,12 +553,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     {
         PoolId poolId = key.toId();
         if (_isJITLocked(poolId)) revert JITInProgress();
-        PricingState memory state = pricingState[poolId];
-        if (!state.live) revert PoolNotLive(poolId);
+        if (!livePools[poolId]) revert PoolNotLive(poolId);
 
         _setJITLock(poolId);
         _deployJIT(poolId, key);
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, state.feePips | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
     /// @dev JIT teardown. Removes all bucket positions, resolves the hook's net delta for both
@@ -837,9 +815,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     {
         PoolId poolId = key.toId();
 
-        PricingState memory state = pricingState[poolId];
-        if (!state.live) return (0, 0);
-        uint24 feePips = state.feePips;
+        if (!livePools[poolId]) return (0, 0);
+        uint24 feePips = key.fee;
 
         // Use vault-cap-aware balances for indicative quotes. Execution caps vault
         // withdrawals at `maxWithdraw`, so quoting against the uncapped `_totalAssets`

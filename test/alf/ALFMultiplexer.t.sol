@@ -71,11 +71,11 @@ contract ALFMultiplexerTest is Test, Deployers {
         );
         deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), ownerB), address(quoterB));
 
-        // ── Create pool keys (dynamic fee for fee override) ──
+        // ── Create pool keys with static fees: A expensive (5%), B cheap (1%) ──
         quoterAPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: 50_000,
             tickSpacing: 60,
             hooks: IHooks(address(quoterA))
         });
@@ -83,7 +83,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterBPoolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: 10_000,
             tickSpacing: 60,
             hooks: IHooks(address(quoterB))
         });
@@ -106,19 +106,11 @@ contract ALFMultiplexerTest is Test, Deployers {
         _seedAtActiveTick(quoterAPoolKey, quoterA, 10_000e18, 10_000e18);
         _seedAtActiveTick(quoterBPoolKey, quoterB, 10_000e18, 10_000e18);
 
-        // ── Set pricing: B is the cheaper quoter, A is the expensive fallback ──
-        // A: expensive (5%)
+        // ── Activate both pools ──
         vm.prank(ownerA);
-        quoterA.updatePricingState(
-            quoterAPoolKey,
-            SpreadQuoterBase.PricingState({feePips: 50_000, live: true})
-        );
-        // B: cheap (1%)
+        quoterA.setPoolLive(quoterAPoolKey, true);
         vm.prank(ownerB);
-        quoterB.updatePricingState(
-            quoterBPoolKey,
-            SpreadQuoterBase.PricingState({feePips: 10_000, live: true})
-        );
+        quoterB.setPoolLive(quoterBPoolKey, true);
     }
 
     // ──── Helpers ────

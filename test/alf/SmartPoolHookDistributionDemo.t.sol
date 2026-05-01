@@ -310,13 +310,12 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            fee: feePips,
             tickSpacing: tickSpacing,
             hooks: IHooks(address(hook))
         });
         SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            pricing: SmartPoolBase.PricingState({feePips: feePips, live: true}),
             distribution: dist,
             allowExternalDeposits: false,
             vault0: vault0,
