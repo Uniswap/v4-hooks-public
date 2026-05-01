@@ -230,6 +230,22 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Total managed balance for a single (pool, currency) pair. Sums three sources:
     ///      ERC4626 vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool
     ///      ERC-20 holdings.
+    ///
+    ///      DELIBERATE CAP-ASYMMETRY (do NOT "fix"): this function does NOT cap the vault
+    ///      contribution by `maxWithdraw`, while `_effectiveBalance` does. The asymmetry
+    ///      is load-bearing for share math — LP shares represent the pool's TOTAL economic
+    ///      claim, including capital temporarily locked in a paused, capped, or
+    ///      utilization-constrained vault. Capping here would let vault throttling reduce
+    ///      LP exit value even though the pool's underlying stake is unchanged. Callers
+    ///      that want the immediately-withdrawable subset (JIT deployment sizing, indicative
+    ///      quotes) MUST use `_effectiveBalance` instead.
+    ///
+    ///      The trade-off: a vault that overstates `convertToAssets` (unrealised yield not
+    ///      actually withdrawable, buggy/adversarial vault) inflates `_assetBalanceV4` →
+    ///      inflates `previewDeposit`/`previewWithdraw` → dilutes new depositors and may
+    ///      brick withdrawals at `_ensureERC20`'s maxWithdraw cap. This is bounded by the
+    ///      documented vault-trust assumption: operators must use trusted ERC-4626 vaults.
+    ///      See M-08 in the audit report for the full analysis.
     function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         // Single SLOAD reads both packed fields.
         CurrencyState storage s = _state[poolId][currency];
