@@ -99,7 +99,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertEq(hook.activeLowerTick(testPoolKey.toId()), int24(0));
     }
 
-    // ──── M-05 regression: init gating ────
+    // ──── init gating ────
 
     /// @dev Direct `manager.initialize` on a SpreadQuoter pool MUST revert. Without the
     ///      `_beforeInitialize` gate, an attacker could front-run an operator-planned launch

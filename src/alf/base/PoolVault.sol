@@ -245,7 +245,6 @@ abstract contract PoolVault is MultiAssetVault {
     ///      inflates `previewDeposit`/`previewWithdraw` → dilutes new depositors and may
     ///      brick withdrawals at `_ensureERC20`'s maxWithdraw cap. This is bounded by the
     ///      documented vault-trust assumption: operators must use trusted ERC-4626 vaults.
-    ///      See M-08 in the audit report for the full analysis.
     function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         // Single SLOAD reads both packed fields.
         CurrencyState storage s = _state[poolId][currency];

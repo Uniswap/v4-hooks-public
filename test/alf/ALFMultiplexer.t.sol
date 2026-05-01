@@ -422,7 +422,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         assertTrue(delta.amount1() > 0);
     }
 
-    // ──── H-01 regression: tolerance accounts for multiplexer's own protocol fee ────
+    // ──── tolerance accounts for multiplexer's own protocol fee ────
     //
     //  `_extractOutput` reports the candidate-frame delta (pre-multiplexer fee), but the
     //  swapper's actual receipt is the post-fee delta. The tolerance check must apply the
@@ -579,10 +579,6 @@ contract ALFMultiplexerTest is Test, Deployers {
         multiplexer.transferOwnership(address(this));
     }
 
-    // ════════════════════════════════════════════
-    //  M-04: pre-planned amount validation
-    // ════════════════════════════════════════════
-
     /// @dev A pre-planned target whose `amountSpecified` sign mismatches the outer swap is rejected.
     function test_prePlanned_directionMismatch_reverts() public {
         // Outer swap: exact-input (negative). Target leg uses exact-output (positive) — mismatch.
@@ -607,10 +603,6 @@ contract ALFMultiplexerTest is Test, Deployers {
         vm.expectRevert();
         swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
     }
-
-    // ════════════════════════════════════════════
-    //  M-06: donate path is blocked on virtual pool
-    // ════════════════════════════════════════════
 
     /// @dev Donations to the virtual multiplexer pool would be permanently locked since the pool
     ///      has no LP positions — `_beforeDonate` reverts unconditionally.

@@ -234,7 +234,7 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     function test_bootstrap_revertsBelowVirtualSharesFloor() public {
-        // M-07 fix: tiny bootstraps that produce shares below `100 * 10**_decimalsOffset()`
+        // Tiny bootstraps that produce shares below `100 * 10**_decimalsOffset()`
         // permanently dilute the bootstrapper into the virtual position. The runtime check
         // rejects them with `BootstrapTooSmall` so operators can't accidentally lose
         // their seed capital.
@@ -496,12 +496,12 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  M-03 regression: just-in-time vault allowance refresh
+    //  Just-in-time vault allowance refresh
     // ══════════════════════════════════════════════════════════
 
     /// @dev Simulates a USDT-style decrement on the hook's vault allowance: the test prank-
     ///      calls `approve` from the hook to lower its vault allowance below the next
-    ///      deposit amount. Without M-03's just-in-time check, `_depositToVault`'s subsequent
+    ///      deposit amount. Without the just-in-time check, `_depositToVault`'s subsequent
     ///      `vault.deposit` would revert on insufficient allowance, bricking the pool. With
     ///      the check, the allowance is refreshed to `type(uint256).max` before the deposit.
     function test_depositToVault_refreshesAllowance_whenBelowAmount() public {
@@ -516,7 +516,8 @@ contract PoolVaultTest is Test, Deployers {
         // allowance test), so we use `ensureERC20` to populate ERC-20 from a vault-shares
         // withdrawal first, then re-deposit.
         token0.mint(address(vault), 5_000e18);
-        // Direct push of `5_000e18` into the vault — without M-03, this reverts on allowance.
+        // Direct push of `5_000e18` into the vault — without the JIT check, this reverts on
+        // allowance.
         vault.depositToVault(poolIdA, poolKeyA.currency0, 5_000e18);
 
         // Verify allowance was refreshed to max (the post-condition of the JIT check).
@@ -544,15 +545,15 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  M-04 regression: per-pool vault maxWithdraw cap
+    //  Per-pool vault maxWithdraw cap
     // ══════════════════════════════════════════════════════════
 
     /// @dev When two pools share the same vault and the vault is utilization-constrained
     ///      (`maxWithdraw` < `convertToAssets(totalShares)`), each pool's effective balance
     ///      must reflect its PRO-RATA share of the constrained capacity, not the full
-    ///      hook-wide cap. Without M-04, pool B's `_effectiveBalance` would see the full
-    ///      cap and over-state available liquidity → cross-pool DoS when pool A's parallel
-    ///      JIT cycle consumes the global capacity first.
+    ///      hook-wide cap. Without the per-pool cap, pool B's `_effectiveBalance` would see
+    ///      the full cap and over-state available liquidity → cross-pool DoS when pool A's
+    ///      parallel JIT cycle consumes the global capacity first.
     function test_effectiveBalance_perPoolMaxWithdrawCap() public {
         // Pool A bootstraps 1000, pool B bootstraps 4000 — pool B owns 80% of vault shares.
         _bootstrap(alice, 1_000e18);

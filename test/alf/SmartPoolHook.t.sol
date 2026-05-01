@@ -424,7 +424,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_bootstrap_supportsAsymmetricAmounts() public {
         // Fresh unvaulted pool; bootstrap with mismatched scales (think USDC-6dp vs WETH-18dp).
-        // Amounts are scaled to land above the M-07 BootstrapTooSmall floor
+        // Amounts are scaled to land above the BootstrapTooSmall floor
         // (`S >= 100 * 10**_decimalsOffset()` = `100 * 1e12` = `1e14` for the default offset).
         (PoolKey memory key, PoolId id) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
 
@@ -1490,7 +1490,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.prank(owner);
         hook.initializePool(key, cfg);
 
-        // Bootstrap with realistic units, scaled above the M-07 BootstrapTooSmall floor
+        // Bootstrap with realistic units, scaled above the BootstrapTooSmall floor
         // (`S >= 100 * 10**12 = 1e14`). 100k stable @ 1e6 = 1e11; 100 WETH @ 1e18 = 1e20;
         // sqrt(1e11 * 1e20) ≈ 3.16e15, comfortably above the 1e14 floor.
         uint256 amtStable = 100_000e6;

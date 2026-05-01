@@ -875,7 +875,6 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             if (currentTick < dist[i].tickLower || currentTick >= dist[i].tickUpper) continue;
             // Match `_computeAllocations`: pre-budget each bucket against its weighted share
             // of the balance so the indicative quote tracks what JIT actually deploys.
-            // See M-06 in the audit report for the rationale.
             uint256 weightBps = dist[i].weightBps;
             uint256 weightedBal0 = bal0 * weightBps / 10_000;
             uint256 weightedBal1 = bal1 * weightBps / 10_000;

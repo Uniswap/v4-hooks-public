@@ -51,9 +51,9 @@ contract SmartPoolInvariantTest is Test, Deployers {
     uint24 constant FEE_PIPS = 1_000;
 
     /// @dev Bootstrap with a supply that comfortably exceeds the virtual-shares offset (1e12),
-    ///      so the inflation-defense math doesn't dominate ratios. M-07 in the audit report
-    ///      explains why smaller bootstraps are problematic; the invariant suite assumes
-    ///      operators have followed best practice.
+    ///      so the inflation-defense math doesn't dominate ratios. Smaller bootstraps would
+    ///      hit `BootstrapTooSmall`; the invariant suite assumes operators have followed
+    ///      best practice.
     uint256 constant BOOTSTRAP_AMOUNT = 1e22; // 10k 18-decimal tokens each side
 
     function setUp() public {
