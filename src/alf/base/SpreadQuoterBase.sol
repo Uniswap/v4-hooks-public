@@ -109,13 +109,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     }
 
     /// @notice Indicative quote with hookData-aware pricing.
-    /// @dev If hookData contains a curve update, the new pricing is used for the simulation
-    ///      without modifying storage (view function).
-    /// @dev WARNING: This base implementation applies the hookData-supplied pricing without
-    ///      verifying the signature. Quotes are non-binding by design; the actual swap path
-    ///      verifies signatures separately. Subclasses serving production traffic SHOULD
-    ///      override this to verify signatures (or ignore hookData entirely) so that aggregator
-    ///      routers cannot be misled by unsigned quote payloads.
+    /// @dev If hookData carries a curve update, it is fully authenticated -- decoded, metadata-
+    ///      validated, sequence-checked against `lastCommittedSequence`, and EIP-712-verified
+    ///      against `priceSigner` -- before its pricing is used for the simulation. This
+    ///      mirrors the swap-time validation, so an aggregator router cannot be misled by
+    ///      forged or replayed quote payloads. Reverts on any auth failure (consistent with
+    ///      the swap path); routers that don't have a fresh signed update SHOULD send empty
+    ///      hookData to fall back to the stored `pricingState`.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
         view
@@ -125,20 +125,18 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     {
         (bytes memory curveUpdateData, bool isAttested, address attester) = _resolveHookData(hookData);
 
-        PricingState memory state = pricingState[key.toId()];
-        if (curveUpdateData.length > 0) {
-            (PricingState memory newState,,,,) =
-                abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
-            state = newState;
-        }
+        PricingState memory state = curveUpdateData.length > 0
+            ? _decodeAndVerifyCurveUpdate(key, curveUpdateData)
+            : pricingState[key.toId()];
 
         return _priceWithState(key, zeroForOne, amountSpecified, isAttested, attester, state);
     }
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
-    /// @dev Resolves hookData (curve updates, attestation) the same way as getIndicativeQuote,
-    ///      then delegates to SwapSimulator.simulateSwapToPrice with the effective fee.
-    /// @dev Same caveat as `getIndicativeQuote` regarding unsigned hookData pricing.
+    /// @dev Resolves hookData (curve updates, attestation) the same way as `getIndicativeQuote`,
+    ///      then delegates to `SwapSimulator.simulateSwapToPrice` with the effective fee.
+    ///      Curve updates carried in hookData are fully authenticated -- see
+    ///      `getIndicativeQuote` for details.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
@@ -150,12 +148,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
         {
             (bytes memory curveUpdateData,,) = _resolveHookData(hookData);
 
-            PricingState memory state = pricingState[key.toId()];
-            if (curveUpdateData.length > 0) {
-                (PricingState memory newState,,,,) =
-                    abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
-                state = newState;
-            }
+            PricingState memory state = curveUpdateData.length > 0
+                ? _decodeAndVerifyCurveUpdate(key, curveUpdateData)
+                : pricingState[key.toId()];
 
             if (!state.live) return (0, 0);
             feePips = _effectiveFee(state, zeroForOne);
@@ -292,6 +287,39 @@ abstract contract SpreadQuoterBase is BaseALFHook, EIP712, Ownable2Step {
     }
 
     // ──── Curve Update Logic ────
+
+    /// @dev View-side decode + full authentication of a curve-update payload. Validates
+    ///      metadata, requires `sequence > lastCommittedSequence`, and verifies the EIP-712
+    ///      signature against `priceSigner`. Returns the verified `PricingState` for use in
+    ///      indicative simulations. Reverts on any auth failure -- callers are responsible
+    ///      for catching when they want soft-fail semantics.
+    ///
+    ///      Mirrors the auth half of `_applyCurveUpdate` but skips the
+    ///      `_checkAndMarkCurveUpdate` per-block dedup write (impossible in a view) and the
+    ///      `_commitPricingState` write (the view function never mutates state). The result
+    ///      is "what would the quote be if this signed update were committed right now",
+    ///      with the same authorization guarantees as the swap path.
+    /// @param key             The pool the update targets.
+    /// @param curveUpdateData ABI-encoded
+    ///                        `(PricingState, PoolId, uint256 deadline, uint64 sequence, bytes sig)`.
+    /// @return state The authenticated pricing state from the payload.
+    function _decodeAndVerifyCurveUpdate(PoolKey calldata key, bytes memory curveUpdateData)
+        internal
+        view
+        returns (PricingState memory state)
+    {
+        PoolId updatePoolId;
+        uint256 deadline;
+        uint64 sequence;
+        bytes memory sig;
+        (state, updatePoolId, deadline, sequence, sig) =
+            abi.decode(curveUpdateData, (PricingState, PoolId, uint256, uint64, bytes));
+
+        PoolId poolId = key.toId();
+        _validateCurveUpdateMeta(poolId, updatePoolId, deadline);
+        if (sequence <= lastCommittedSequence[poolId]) revert StaleSequence();
+        _verifySignature(state, poolId, deadline, sequence, sig);
+    }
 
     /// @dev Decode the curve update payload, validate metadata + sequence, and (if novel for
     ///      this block) verify its signature and commit the new pricing state.

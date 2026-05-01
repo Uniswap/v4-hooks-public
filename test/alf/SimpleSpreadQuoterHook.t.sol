@@ -18,6 +18,7 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
+import {BaseALFHook} from "../../src/alf/base/BaseALFHook.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 
 contract SimpleSpreadQuoterHookTest is Test, Deployers {
@@ -555,6 +556,85 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         // Stored state is unchanged — regular quote still uses 2% fee
         uint256 storedOutput = hook.getIndicativeQuote(testPoolKey, true, -100e18, "");
         assertApproxEqRel(storedOutput, 98e18, 0.01e18);
+    }
+
+    // ──── view-path curve-update authentication ────
+    //
+    //   Indicative paths (`getIndicativeQuote`, `swapToPrice`) MUST authenticate
+    //   curve updates the same way the swap path does. Without this, an aggregator
+    //   router can be misled by forged or replayed quote payloads -- a SpreadQuoter
+    //   could be made to look much cheaper than the maker actually quotes, gaming
+    //   split-fill ordering at the multiplexer or 1inch-style pathfinder.
+
+    /// @dev An unsigned curve update (sig recovers to a non-priceSigner address) must revert
+    ///      in `getIndicativeQuote`, matching the swap path.
+    function test_getIndicativeQuote_unsignedCurveUpdate_reverts() public {
+        _setupPriceSigner();
+
+        SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
+            bidFeePips: 1, // would make the quoter look essentially free
+            askFeePips: ASK_FEE_PIPS,
+            live: true
+        });
+        // Empty signature -> ECDSA.recover returns address(0) (or reverts), neither matches signer.
+        bytes memory curveUpdateData = abi.encode(tampered, testPoolKey.toId(), block.timestamp + 1 hours, uint64(1), bytes(""));
+        bytes memory hookData = abi.encode(ALFHookData({attestationData: "", curveUpdateData: curveUpdateData}));
+
+        vm.expectRevert();
+        hook.getIndicativeQuote(testPoolKey, true, -100e18, hookData);
+    }
+
+    /// @dev A curve update signed by an arbitrary key (not `priceSigner`) must revert in the
+    ///      indicative path. This is the load-bearing aggregator-protection check.
+    function test_getIndicativeQuote_wrongSignerCurveUpdate_reverts() public {
+        _setupPriceSigner();
+
+        SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
+            bidFeePips: 1, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        (, uint256 wrongPk) = makeAddrAndKey("attacker");
+        bytes memory hookData =
+            _buildCurveUpdateHookData(tampered, testPoolKey.toId(), block.timestamp + 1 hours, wrongPk);
+
+        vm.expectRevert(BaseALFHook.InvalidPriceSigner.selector);
+        hook.getIndicativeQuote(testPoolKey, true, -100e18, hookData);
+    }
+
+    /// @dev Replay protection on the indicative path: a properly-signed payload whose
+    ///      `sequence <= lastCommittedSequence[poolId]` must revert with `StaleSequence`.
+    ///      Otherwise an attacker could replay an older, more-favorable signed quote indefinitely.
+    function test_getIndicativeQuote_staleSequenceCurveUpdate_reverts() public {
+        _setupPriceSigner();
+
+        // Commit sequence=1 via swap, advancing lastCommittedSequence.
+        SpreadQuoterBase.PricingState memory s1 = SpreadQuoterBase.PricingState({
+            bidFeePips: 5_000, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        bytes memory commit =
+            _buildCurveUpdateHookData(s1, testPoolKey.toId(), block.timestamp + 1 hours, priceSignerPk);
+        swap(testPoolKey, true, -1e18, commit);
+
+        // Replay sequence=1 against the indicative path -- must revert.
+        bytes memory replay = _buildCurveUpdateHookDataWithSequence(
+            s1, testPoolKey.toId(), block.timestamp + 1 hours, 1, priceSignerPk
+        );
+        vm.expectRevert(SpreadQuoterBase.StaleSequence.selector);
+        hook.getIndicativeQuote(testPoolKey, true, -100e18, replay);
+    }
+
+    /// @dev `swapToPrice` shares the same auth path; an attacker-signed payload must revert.
+    function test_swapToPrice_wrongSignerCurveUpdate_reverts() public {
+        _setupPriceSigner();
+
+        SpreadQuoterBase.PricingState memory tampered = SpreadQuoterBase.PricingState({
+            bidFeePips: 1, askFeePips: ASK_FEE_PIPS, live: true
+        });
+        (, uint256 wrongPk) = makeAddrAndKey("attacker");
+        bytes memory hookData =
+            _buildCurveUpdateHookData(tampered, testPoolKey.toId(), block.timestamp + 1 hours, wrongPk);
+
+        vm.expectRevert(BaseALFHook.InvalidPriceSigner.selector);
+        hook.swapToPrice(testPoolKey, true, -1e18, TickMath.MIN_SQRT_PRICE + 1, hookData);
     }
 
     // ──── H-01: cross-block signed-curve-update replay protection ────
