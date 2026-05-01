@@ -9,6 +9,7 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
 import {VaultId} from "../types/VaultId.sol";
 
@@ -241,9 +242,16 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @dev Liquidity-ready balance for a single (pool, currency) pair. Same composition as
-    ///      `_assetBalanceV4`, but caps the vault contribution at `vault.maxWithdraw(this)`
-    ///      so callers requesting "what can be deployed right now" see the truth even when
-    ///      the vault is paused, capped, or utilization-constrained.
+    ///      `_assetBalanceV4`, but caps the vault contribution at this pool's PRO-RATA share
+    ///      of `vault.maxWithdraw(this)` so callers requesting "what can be deployed right
+    ///      now" see the truth even when the vault is paused, capped, or
+    ///      utilization-constrained.
+    ///
+    ///      Pro-rata cap detail: `maxWithdraw(this)` is hook-wide across all pools sharing
+    ///      this vault. A naive cap at the global value would let pool A see liquidity that
+    ///      actually belongs to pool B (or vice versa), enabling cross-pool DoS during vault
+    ///      utilization spikes. The fix scales the global cap by this pool's share of total
+    ///      hook-held vault shares: `poolMax = globalMax * poolShares / totalVaultShares`.
     function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         CurrencyState storage s = _state[poolId][currency];
         bal = uint256(s.erc20) + uint256(s.claims);
@@ -252,8 +260,11 @@ abstract contract PoolVault is MultiAssetVault {
             uint256 shares = _vaultShares[poolId][currency];
             if (shares > 0) {
                 uint256 byConvert = vault.convertToAssets(shares);
-                uint256 byMaxWithdraw = vault.maxWithdraw(address(this));
-                bal += byConvert < byMaxWithdraw ? byConvert : byMaxWithdraw;
+                uint256 globalMax = vault.maxWithdraw(address(this));
+                uint256 totalHookShares = IERC20(address(vault)).balanceOf(address(this));
+                uint256 poolMax =
+                    totalHookShares > 0 ? FullMath.mulDiv(globalMax, shares, totalHookShares) : 0;
+                bal += byConvert < poolMax ? byConvert : poolMax;
             }
         }
     }

@@ -85,6 +85,10 @@ contract MockPoolVault is PoolVault {
     function getERC20(PoolId poolId, Currency currency) external view returns (uint256) {
         return _state[poolId][currency].erc20;
     }
+
+    function effectiveBalance(PoolId poolId, Currency currency) external view returns (uint256) {
+        return _effectiveBalance(poolId, currency);
+    }
 }
 
 contract PoolVaultTest is Test, Deployers {
@@ -536,5 +540,50 @@ contract PoolVaultTest is Test, Deployers {
         // For USDT-style (which solmate's MockERC20 doesn't simulate), this assertion would
         // hold trivially because `forceApprove` would have raised it back to max anyway.
         assertEq(token0.allowance(address(vault), address(vault0)), type(uint256).max);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  M-04 regression: per-pool vault maxWithdraw cap
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev When two pools share the same vault and the vault is utilization-constrained
+    ///      (`maxWithdraw` < `convertToAssets(totalShares)`), each pool's effective balance
+    ///      must reflect its PRO-RATA share of the constrained capacity, not the full
+    ///      hook-wide cap. Without M-04, pool B's `_effectiveBalance` would see the full
+    ///      cap and over-state available liquidity → cross-pool DoS when pool A's parallel
+    ///      JIT cycle consumes the global capacity first.
+    function test_effectiveBalance_perPoolMaxWithdrawCap() public {
+        // Pool A bootstraps 1000, pool B bootstraps 4000 — pool B owns 80% of vault shares.
+        _bootstrap(alice, 1_000e18);
+        // Configure pool B to share the same vault for currency0.
+        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
+        vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
+        _bootstrapPool(poolKeyB, bob, 4_000e18);
+
+        // Pool A holds 1000e18 / 5000e18 = 20% of vault shares.
+        // Pool B holds 4000e18 / 5000e18 = 80% of vault shares.
+
+        // Mock vault.maxWithdraw to return 1000 — utilization-constrained scenario.
+        // (The vault holds 5000 economic but only 1000 is presently withdrawable.)
+        vm.mockCall(
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)),
+            abi.encode(1_000e18)
+        );
+
+        // Pool A's effective balance: pro-rata cap = 1000 * 1000/5000 = 200.
+        // byConvert for pool A's 1000 shares = 1000 (1:1 vault).
+        // min(byConvert, poolMax) = min(1000, 200) = 200.
+        uint256 effA = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+
+        // Pool B's effective balance: pro-rata cap = 1000 * 4000/5000 = 800.
+        // byConvert for pool B's 4000 shares = 4000.
+        // min(byConvert, poolMax) = min(4000, 800) = 800.
+        uint256 effB = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
+
+        assertEq(effA, 200e18, "pool A capped at its 20% pro-rata share");
+        assertEq(effB, 800e18, "pool B capped at its 80% pro-rata share");
+        // Sum must not exceed the global cap (the load-bearing safety property).
+        assertLe(effA + effB, 1_000e18, "sum of effective balances must not exceed global cap");
     }
 }
