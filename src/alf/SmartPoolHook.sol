@@ -496,7 +496,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param user The address whose shares to look up.
     /// @return The number of pool shares held by `user`.
     function sharesOf(PoolKey calldata key, address user) external view returns (uint256) {
-        return userShares[key.toId()][user];
+        return _userShares[PoolId.unwrap(key.toId())][user];
     }
 
     /// @notice Returns the current liquidity distribution for a pool.

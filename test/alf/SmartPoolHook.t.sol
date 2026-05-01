@@ -18,6 +18,7 @@ import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/Bala
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
@@ -412,7 +413,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(owner);
         token0.approve(address(hook), 1);
         token1.approve(address(hook), 1);
-        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vm.expectRevert(MultiAssetVault.InsufficientBootstrap.selector);
         hook.bootstrap(testPoolKey, 0, 1);
         vm.stopPrank();
     }
@@ -426,7 +427,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
         hook.addLiquidity(key, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
     }
@@ -528,7 +529,7 @@ contract SmartPoolHookTest is Test, Deployers {
         _depositAsOperator(1_000e18);
 
         vm.prank(owner);
-        vm.expectRevert(PoolVault.InsufficientShares.selector);
+        vm.expectRevert(MultiAssetVault.InsufficientShares.selector);
         hook.removeLiquidity(testPoolKey, 2_000e18, 0, 0, block.timestamp);
     }
 
@@ -546,7 +547,7 @@ contract SmartPoolHookTest is Test, Deployers {
         token1.approve(address(hook), 100e18);
         hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
 
-        vm.expectRevert(PoolVault.SameBlockWithdraw.selector);
+        vm.expectRevert(MultiAssetVault.SameBlockWithdraw.selector);
         hook.removeLiquidity(testPoolKey, 100e18, 0, 0, block.timestamp);
         vm.stopPrank();
     }
@@ -1356,7 +1357,7 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_previewAddLiquidity_revertsBeforeBootstrap() public {
         // Fresh pool that hasn't been bootstrapped.
         (PoolKey memory key,) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
-        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
         hook.previewDeposit(key, 500e18);
     }
 

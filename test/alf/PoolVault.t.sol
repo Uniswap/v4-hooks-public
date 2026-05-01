@@ -12,6 +12,7 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
@@ -208,7 +209,7 @@ contract PoolVaultTest is Test, Deployers {
         vm.startPrank(bob);
         token0.approve(address(vault), 1e18);
         token1.approve(address(vault), 1e18);
-        vm.expectRevert(PoolVault.PoolAlreadyBootstrapped.selector);
+        vm.expectRevert(MultiAssetVault.VaultAlreadyBootstrapped.selector);
         vault.bootstrap(poolKeyA, bob, bob, 1e18, 1e18);
         vm.stopPrank();
     }
@@ -220,10 +221,10 @@ contract PoolVaultTest is Test, Deployers {
         token0.approve(address(vault), 100);
         token1.approve(address(vault), 100);
 
-        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vm.expectRevert(MultiAssetVault.InsufficientBootstrap.selector);
         vault.bootstrap(poolKeyA, alice, alice, 0, 100);
 
-        vm.expectRevert(PoolVault.InsufficientBootstrap.selector);
+        vm.expectRevert(MultiAssetVault.InsufficientBootstrap.selector);
         vault.bootstrap(poolKeyA, alice, alice, 100, 0);
         vm.stopPrank();
     }
@@ -246,12 +247,12 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     function test_addLiquidity_revertsIfNotBootstrapped() public {
-        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
         vault.deposit(poolKeyA, alice, alice, 100e18);
     }
 
     function test_previewDeposit_revertsIfNotBootstrapped() public {
-        vm.expectRevert(PoolVault.PoolNotBootstrapped.selector);
+        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
         vault.previewDeposit(poolKeyA, 100e18);
     }
 
@@ -319,7 +320,7 @@ contract PoolVaultTest is Test, Deployers {
         _bootstrap(alice, 1000e18);
         uint256 aliceShares = vault.userShares(poolIdA, alice);
 
-        vm.expectRevert(PoolVault.InsufficientShares.selector);
+        vm.expectRevert(MultiAssetVault.InsufficientShares.selector);
         vault.withdraw(poolKeyA, alice, alice, aliceShares + 1);
     }
 
@@ -334,7 +335,7 @@ contract PoolVaultTest is Test, Deployers {
         token1.approve(address(vault), need1);
         vault.deposit(poolKeyA, bob, bob, 100e18);
         // No vm.roll — same block.
-        vm.expectRevert(PoolVault.SameBlockWithdraw.selector);
+        vm.expectRevert(MultiAssetVault.SameBlockWithdraw.selector);
         vault.withdraw(poolKeyA, bob, bob, 100e18);
         vm.stopPrank();
     }
