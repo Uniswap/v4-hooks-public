@@ -55,6 +55,16 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @param poolId The pool whose live flag is currently false.
     error PoolNotLive(PoolId poolId);
 
+    /// @dev Direct `poolManager.initialize` for any SpreadQuoter-hooked pool is rejected;
+    ///      callers MUST go through the subclass's owner-only `initializePool` entry point so
+    ///      the pool's `sqrtPriceX96` (immutable post-init) cannot be front-run by a third
+    ///      party at a price the operator did not choose.
+    error DirectInitializeBlocked();
+
+    /// @dev The PoolKey's hooks address does not match this contract — `initializePool` was
+    ///      called with a key intended for a different hook.
+    error InvalidHookAddress();
+
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_       Initial owner (Ownable2Step). Owner can toggle liveness and the active tick.
@@ -102,6 +112,29 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     // ──── Hook Lifecycle ────
+
+    /// @dev Reject direct `poolManager.initialize`. Per v4 `Hooks.noSelfCall`, the hook's own
+    ///      `poolManager.initialize` from `initializePool` skips this callback, so the only
+    ///      caller path that reaches here is an external party's direct attempt. Without this
+    ///      gate, anyone could front-run an operator-planned launch and pin the pool's
+    ///      `sqrtPriceX96` (immutable post-init) to a price the operator did not choose.
+    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
+        revert DirectInitializeBlocked();
+    }
+
+    /// @notice Initialize a new SpreadQuoter pool at the operator's chosen price.
+    /// @dev    `onlyOwner`-gated and routes through `poolManager.initialize` so v4's
+    ///         `Hooks.noSelfCall` exempts the call from `_beforeInitialize`'s revert. The pool
+    ///         starts paused (`livePools[id] == false`); enable via {setPoolLive} after
+    ///         seeding LP at the auto-derived active tick.
+    /// @param key            The PoolKey (must reference this hook).
+    /// @param sqrtPriceX96   Initial sqrt price (Q64.96). This price is permanent for the pool's
+    ///                       lifetime.
+    /// @return tick          The initial tick assigned by the PoolManager.
+    function initializePool(PoolKey calldata key, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick) {
+        if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
+        return poolManager.initialize(key, sqrtPriceX96);
+    }
 
     /// @dev Auto-derive the active lower tick from the initial pool tick at initialization.
     ///      Floor-aligns to `tickSpacing` and clamps to the v4 usable tick range so the

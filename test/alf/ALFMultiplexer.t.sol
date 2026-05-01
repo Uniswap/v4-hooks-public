@@ -58,8 +58,8 @@ contract ALFMultiplexerTest is Test, Deployers {
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
-                | Hooks.BEFORE_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
         );
         quoterA = SimpleSpreadQuoterHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | quoterFlags))
@@ -85,8 +85,12 @@ contract ALFMultiplexerTest is Test, Deployers {
         });
 
         // ── Initialize pools (quoters at tick 30 → inside LP range [0,60)) ──
-        manager.initialize(quoterAPoolKey, TickMath.getSqrtPriceAtTick(30));
-        manager.initialize(quoterBPoolKey, TickMath.getSqrtPriceAtTick(30));
+        // SpreadQuoter pools must be initialized via the owner-only `initializePool` entry
+        // (direct `manager.initialize` is now blocked by `_beforeInitialize`).
+        vm.prank(ownerA);
+        quoterA.initializePool(quoterAPoolKey, TickMath.getSqrtPriceAtTick(30));
+        vm.prank(ownerB);
+        quoterB.initializePool(quoterBPoolKey, TickMath.getSqrtPriceAtTick(30));
         manager.initialize(multiplexerPoolKey, Constants.SQRT_PRICE_1_1);
 
         // ── Authorize LP router and seed at active tick ──

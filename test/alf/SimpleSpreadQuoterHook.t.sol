@@ -38,8 +38,8 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
         // Deploy hook at flag-mined address
         uint160 flags = uint160(
-            Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
-                | Hooks.BEFORE_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
         );
         hook =
             SimpleSpreadQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
@@ -54,8 +54,10 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
-        // Initialize pool at tick 30 → inside LP range [0,60) so both swap directions have liquidity
-        manager.initialize(testPoolKey, TickMath.getSqrtPriceAtTick(30));
+        // Initialize pool at tick 30 via owner-only `initializePool` — direct
+        // `manager.initialize` is now blocked.
+        vm.prank(owner);
+        hook.initializePool(testPoolKey, TickMath.getSqrtPriceAtTick(30));
 
         // Authorize the modifyLiquidityRouter for LP operations
         vm.prank(owner);
@@ -95,6 +97,38 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_afterInitialize_setsActiveLowerTick() public view {
         // Init tick 30, tickSpacing 60 → floor(30/60)*60 = 0 → activeLowerTick = 0
         assertEq(hook.activeLowerTick(testPoolKey.toId()), int24(0));
+    }
+
+    // ──── M-05 regression: init gating ────
+
+    /// @dev Direct `manager.initialize` on a SpreadQuoter pool MUST revert. Without the
+    ///      `_beforeInitialize` gate, an attacker could front-run an operator-planned launch
+    ///      and pin the pool's `sqrtPriceX96` (immutable for the pool's lifetime) to a
+    ///      price the operator did not choose.
+    function test_directInitialize_reverts() public {
+        PoolKey memory unowned = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: FEE_PIPS,
+            tickSpacing: 30,
+            hooks: IHooks(address(hook))
+        });
+        vm.expectRevert();
+        manager.initialize(unowned, TickMath.getSqrtPriceAtTick(0));
+    }
+
+    /// @dev `initializePool` is `onlyOwner` — non-owners cannot bypass the gate via the
+    ///      hook's own entry point either.
+    function test_initializePool_onlyOwner() public {
+        PoolKey memory unowned = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: FEE_PIPS,
+            tickSpacing: 30,
+            hooks: IHooks(address(hook))
+        });
+        vm.expectRevert();
+        hook.initializePool(unowned, TickMath.getSqrtPriceAtTick(0));
     }
 
     // ──── LP authorization ────
@@ -231,7 +265,8 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
-        manager.initialize(emptyPoolKey, Constants.SQRT_PRICE_1_1);
+        vm.prank(owner);
+        hook.initializePool(emptyPoolKey, Constants.SQRT_PRICE_1_1);
 
         vm.prank(owner);
         hook.setPoolLive(emptyPoolKey, true);
