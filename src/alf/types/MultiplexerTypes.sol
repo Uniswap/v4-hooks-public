@@ -23,10 +23,14 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 ///
 ///      Both modes support tolerance enforcement via `strictTolerancePips` and forward
 ///      shared attestation data to the nested swaps.
+/// @param attestationData Shared attestation payload forwarded to nested quoter swaps.
+/// @param targets Targeted quoter list. Must be non-empty.
+/// @param strictTolerancePips Maximum relative deviation before revert, in parts per million.
+///                            Set to 0 to disable strict tolerance checks.
 struct MultiplexerHookData {
-    bytes attestationData; // Shared attestation payload (optional)
-    TargetedQuoter[] targets; // Must be non-empty
-    uint24 strictTolerancePips; // 0 = no check; >0 = max relative deviation (ppm) before revert
+    bytes attestationData;
+    TargetedQuoter[] targets;
+    uint24 strictTolerancePips;
 }
 
 /// @notice A specific quoter target for the multiplexer.
@@ -35,7 +39,10 @@ struct MultiplexerHookData {
 ///        - negative: exact input amount for this quoter (e.g., -600e18 = spend 600 tokens here)
 ///        - positive: exact output amount from this quoter (e.g., 400e18 = get 400 tokens here)
 ///      The sign convention matches SwapParams.amountSpecified.
+/// @param poolKey The quoter's pool key (hook address embedded in `poolKey.hooks`).
+/// @param amountSpecified Pre-planned amount for this quoter. Zero lets the multiplexer
+///                        decide the amount or fill the remaining amount.
 struct TargetedQuoter {
-    PoolKey poolKey; // The quoter's pool key (hook address embedded in poolKey.hooks)
-    int256 amountSpecified; // Pre-planned amount for this quoter (0 = let multiplexer decide)
+    PoolKey poolKey;
+    int256 amountSpecified;
 }

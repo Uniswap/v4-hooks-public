@@ -128,22 +128,34 @@ abstract contract PoolVault is MultiAssetVault {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Total shares outstanding for a pool, across all depositors.
+    /// @param poolId The pool whose share supply should be read.
+    /// @return shares Total non-transferable pool shares outstanding.
     function totalShares(PoolId poolId) external view returns (uint256) {
         return _totalShares[_vaultIdFor(poolId)];
     }
 
     /// @notice Share balance for `(poolId, user)`.
+    /// @param poolId The pool whose share ledger should be read.
+    /// @param user The account whose share balance should be read.
+    /// @return shares Non-transferable pool shares held by `user`.
     function userShares(PoolId poolId, address user) external view returns (uint256) {
         return _userShares[_vaultIdFor(poolId)][user];
     }
 
     /// @notice Returns the total managed assets for a pool across both currencies. Sums
     ///         vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool ERC-20.
+    /// @param key The PoolKey identifying the pool and its two currencies.
+    /// @return amount0 Total managed currency0 assets, in currency0 native decimals.
+    /// @return amount1 Total managed currency1 assets, in currency1 native decimals.
     function totalAssets(PoolKey calldata key) external view returns (uint256 amount0, uint256 amount1) {
         return _totalAssets(key);
     }
 
     /// @notice Preview the token amounts required to mint `shares` for a pool. Rounds up.
+    /// @param key The PoolKey identifying the pool and its two currencies.
+    /// @param shares The number of non-transferable pool shares to mint.
+    /// @return amount0 Required currency0 amount, rounded up, in currency0 native decimals.
+    /// @return amount1 Required currency1 amount, rounded up, in currency1 native decimals.
     function previewDeposit(PoolKey calldata key, uint256 shares)
         external
         view
@@ -159,6 +171,10 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @notice Preview the token amounts returned for burning `shares` from a pool. Rounds down.
+    /// @param key The PoolKey identifying the pool and its two currencies.
+    /// @param shares The number of non-transferable pool shares to burn.
+    /// @return amount0 Returned currency0 amount, rounded down, in currency0 native decimals.
+    /// @return amount1 Returned currency1 amount, rounded down, in currency1 native decimals.
     function previewWithdraw(PoolKey calldata key, uint256 shares)
         external
         view

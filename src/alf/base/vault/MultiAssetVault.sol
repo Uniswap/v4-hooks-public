@@ -117,11 +117,21 @@ abstract contract MultiAssetVault is BlockNumberish {
     );
 
     /// @notice Emitted when a depositor mints shares by providing proportional token amounts.
+    /// @param vaultId  The vault receiving the deposit.
+    /// @param provider The address that received the minted shares.
+    /// @param shares   Shares minted to `provider`.
+    /// @param amount0  Asset0 transferred from the depositor (post-FoT receipt).
+    /// @param amount1  Asset1 transferred from the depositor (post-FoT receipt).
     event Deposit(
         VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
     );
 
     /// @notice Emitted when a depositor burns shares and receives proportional token amounts.
+    /// @param vaultId  The vault being withdrawn from.
+    /// @param provider The address whose shares were burned.
+    /// @param shares   Shares burned from `provider`.
+    /// @param amount0  Asset0 transferred to the withdrawer.
+    /// @param amount1  Asset1 transferred to the withdrawer.
     event Withdraw(
         VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
     );

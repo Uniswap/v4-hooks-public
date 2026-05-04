@@ -93,14 +93,18 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
 
-    /// @dev Tracks a quoter candidate during the split fill process.
-    ///      Built during `_prepareCandidates`, sorted by indicative quality, and consumed
-    ///      sequentially by `_executeFills`.
+    /// @dev Tracks a quoter candidate during the split fill process. Built during
+    ///      `_prepareCandidates`, sorted by indicative quality, and consumed sequentially by
+    ///      `_executeFills`.
+    /// @param poolKey The candidate's pool key (hook address embedded in `poolKey.hooks`).
+    /// @param hookData Constructed ALFHookData for this candidate (attestation + curve update).
+    /// @param sqrtPriceX96 The candidate's pool price at query time, used for price limits.
+    /// @param indicative Indicative quote for the full swap amount, used for sorting.
     struct FillCandidate {
-        PoolKey poolKey; // The candidate's pool key (hook address embedded in poolKey.hooks)
-        bytes hookData; // Constructed ALFHookData for this candidate (attestation + curve update)
-        uint160 sqrtPriceX96; // The candidate's pool price at query time (used for price limits)
-        uint256 indicative; // Indicative quote for the full swap amount (used for sorting)
+        PoolKey poolKey;
+        bytes hookData;
+        uint160 sqrtPriceX96;
+        uint256 indicative;
     }
 
     // ──── Errors ────
@@ -115,10 +119,14 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
     ///      the requested amount. The swap cannot be fully filled at acceptable prices.
     error InsufficientLiquidity();
 
-    /// @dev Strict tolerance check failed: aggregate execution deviated below the best
-    ///      individual indicative by more than `strictTolerancePips`.
-    /// @param indicative The best individual indicative quote (the tolerance baseline).
-    /// @param executed   The actual aggregate output from the split fill.
+    /// @dev Strict tolerance check failed. For exact input, effective output was below the
+    ///      best individual indicative output by more than `strictTolerancePips`; for exact
+    ///      output, effective input paid was above the best individual indicative input by
+    ///      more than `strictTolerancePips`.
+    /// @param indicative The best individual indicative quote used as the tolerance baseline
+    ///                   (output for exact input, input for exact output).
+    /// @param executed The effective executed amount compared to the baseline (output for
+    ///                 exact input, input paid for exact output).
     error QuoteDeviation(uint256 indicative, uint256 executed);
 
     /// @dev Quote helper may only be called through an external self-call.

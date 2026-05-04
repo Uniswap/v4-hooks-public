@@ -89,10 +89,17 @@ abstract contract ALFProtocolFees {
         return feeAmount.toInt256().toInt128();
     }
 
+    /// @dev Calculate the protocol fee owed on the unspecified-side amount. Exact-input swaps
+    ///      take fees from output directly, while exact-output swaps gross up the input side so
+    ///      the quoter still receives the requested output after the protocol fee is added.
+    /// @param protocolFee Directional v4 protocol fee in pips.
+    /// @param isExactInput True when the swap amount is exact input, false for exact output.
+    /// @param amountUnspecified Absolute unspecified-side amount before protocol fee.
+    /// @return feeAmount Protocol fee amount owed to the token jar.
     function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint256 amountUnspecified)
         internal
         pure
-        returns (uint256)
+        returns (uint256 feeAmount)
     {
         if (isExactInput) {
             return FullMath.mulDivRoundingUp(amountUnspecified, protocolFee, ProtocolFeeLibrary.PIPS_DENOMINATOR);
@@ -103,6 +110,11 @@ abstract contract ALFProtocolFees {
         }
     }
 
+    /// @dev Read the directional v4 protocol fee from the pool's slot0.
+    /// @param poolManager The v4 PoolManager that stores pool state.
+    /// @param zeroForOne Swap direction; true selects the zero-for-one protocol fee.
+    /// @param poolId The pool whose protocol fee should be read.
+    /// @return protocolFee Directional protocol fee in pips.
     function _getProtocolFee(IPoolManager poolManager, bool zeroForOne, PoolId poolId)
         internal
         view
@@ -112,6 +124,10 @@ abstract contract ALFProtocolFees {
         protocolFee = zeroForOne ? raw.getZeroForOneFee() : raw.getOneForZeroFee();
     }
 
+    /// @dev Resolve the current token jar from the PoolManager's protocol fee controller via a
+    ///      raw `TOKEN_JAR()` staticcall. Returns address(0) when no controller is configured,
+    ///      the controller has no code, the call fails, or the return data is malformed.
+    /// @return currentJar The resolved token-jar address, or address(0) if unavailable.
     function _getTokenJar() internal view returns (address currentJar) {
         IPoolManager poolManager = _protocolFeePoolManager;
         address feeController = poolManager.protocolFeeController();
