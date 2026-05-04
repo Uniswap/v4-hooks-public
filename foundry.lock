@@ -25,8 +25,8 @@
   },
   "lib/protocol-fees": {
     "branch": {
-      "name": "v4-fee-adapter",
-      "rev": "e9262fb5e3553f83ad1fc009183f3455b16e85dd"
+      "name": "v4-adapter",
+      "rev": "6be5e1d0b8ee9b6e3f76150315fd99fde33c2b2d"
     }
   },
   "lib/slipstream": {

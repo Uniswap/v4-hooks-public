@@ -6,18 +6,18 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IV4FeeAdapter} from "@protocol-fees/interfaces/IV4FeeAdapter.sol";
+import {IV4FeePolicy} from "@protocol-fees/interfaces/IV4FeePolicy.sol";
 
 /// @title MockV4FeeAdapter
 /// @notice Minimal mock of IV4FeeAdapter for unit testing protocol fees
-/// @dev Allows setting a fee per pool or a default fee, and stores a configurable TOKEN_JAR.
+/// @dev Returns a configurable fee from getFee and stores a configurable TOKEN_JAR.
 contract MockV4FeeAdapter is IV4FeeAdapter {
     IPoolManager public immutable override POOL_MANAGER;
     address public override TOKEN_JAR;
     uint24 public constant override ZERO_FEE_SENTINEL = type(uint24).max;
 
-    uint24 public override defaultFee;
     address public override feeSetter;
-    mapping(uint24 => uint24) public override feeTierOverrides;
+    IV4FeePolicy public override policy;
     mapping(PoolId => uint24) public override poolOverrides;
 
     /// @notice The fee returned by getFee (settable for tests)
@@ -42,16 +42,11 @@ contract MockV4FeeAdapter is IV4FeeAdapter {
         return mockFee;
     }
 
-    function applyFee(PoolKey memory) external override {}
-    function batchApplyFees(PoolKey[] calldata) external override {}
-    function setDefaultFee(uint24) external override {}
-    function setFeeTierOverride(uint24, uint24) external override {}
-    function setPoolOverride(PoolId, uint24) external override {}
-    function clearFeeTierOverride(uint24) external override {}
-    function clearPoolOverride(PoolId) external override {}
+    function setPolicy(IV4FeePolicy) external override {}
     function setFeeSetter(address) external override {}
-
-    function collectProtocolFees(Currency, uint256) external pure override returns (uint256) {
-        return 0;
-    }
+    function setPoolOverride(PoolId, uint24) external override {}
+    function clearPoolOverride(PoolId) external override {}
+    function triggerFeeUpdate(PoolKey calldata) external override {}
+    function batchTriggerFeeUpdate(PoolKey[] calldata) external override {}
+    function collect(CollectParams[] calldata) external override {}
 }

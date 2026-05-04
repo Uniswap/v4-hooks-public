@@ -13,7 +13,7 @@
 [submodule "lib/protocol-fees"]
 	path = lib/protocol-fees
 	url = https://github.com/Uniswap/protocol-fees
-	branch = v4-fee-adapter
+	branch = v4-adapter
 [submodule "lib/v4-core"]
 	path = lib/v4-core
 	url = https://github.com/Uniswap/v4-core
