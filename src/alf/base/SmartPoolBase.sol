@@ -51,10 +51,7 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_  Initial contract owner. Transferable via OZ's two-step
     ///                {Ownable2Step.transferOwnership} / {Ownable2Step.acceptOwnership} flow.
-    constructor(IPoolManager manager, uint32 maxGas_, address owner_)
-        BaseHook(manager)
-        Ownable(owner_)
-    {
+    constructor(IPoolManager manager, uint32 maxGas_, address owner_) BaseHook(manager) Ownable(owner_) {
         _maxGas = maxGas_;
     }
 

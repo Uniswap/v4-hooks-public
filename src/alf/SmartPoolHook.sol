@@ -213,11 +213,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_  Immutable contract owner. Cannot be changed post-deployment;
     ///                key loss or compromise is unrecoverable. See {SmartPoolBase}.
-    constructor(
-        IPoolManager _pm,
-        uint32 maxGas_,
-        address owner_
-    ) SmartPoolBase(_pm, maxGas_, owner_) {}
+    constructor(IPoolManager _pm, uint32 maxGas_, address owner_) SmartPoolBase(_pm, maxGas_, owner_) {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: POOL INITIALIZATION
@@ -235,11 +231,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee.
     /// @param config Pool configuration including distribution, vaults, and permissions.
     /// @return tick  The initial tick assigned by the PoolManager.
-    function initializePool(PoolKey calldata key, PoolConfig calldata config)
-        external
-        onlyOwner
-        returns (int24 tick)
-    {
+    function initializePool(PoolKey calldata key, PoolConfig calldata config) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeNotSupported();
 
@@ -319,12 +311,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint256 maxAmount0,
         uint256 maxAmount1,
         uint256 deadline
-    )
-        external
-        nonReentrant
-        whenJITNotInProgress
-        returns (uint256 amount0, uint256 amount1)
-    {
+    ) external nonReentrant whenJITNotInProgress returns (uint256 amount0, uint256 amount1) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         _requireDepositAuth(key.toId());
         (amount0, amount1) = _deposit(key, msg.sender, msg.sender, sharesToMint);
@@ -353,12 +340,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint256 minAmount0,
         uint256 minAmount1,
         uint256 deadline
-    )
-        external
-        nonReentrant
-        whenJITNotInProgress
-        returns (uint256 amount0, uint256 amount1)
-    {
+    ) external nonReentrant whenJITNotInProgress returns (uint256 amount0, uint256 amount1) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         (amount0, amount1) = _withdraw(key, msg.sender, msg.sender, sharesToBurn);
         if (amount0 < minAmount0 || amount1 < minAmount1) revert SlippageExceeded();
@@ -389,11 +371,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         `type(uint256).max`. No-op if the pool has no vault configured for `currency`.
     /// @param key      The pool whose vault allowance should be refreshed.
     /// @param currency Which side (currency0 or currency1) to refresh.
-    function refreshVaultApproval(PoolKey calldata key, Currency currency)
-        external
-        onlyOwner
-        whenJITNotInProgress
-    {
+    function refreshVaultApproval(PoolKey calldata key, Currency currency) external onlyOwner whenJITNotInProgress {
         IERC4626 vault = vaults[key.toId()][currency];
         if (address(vault) == address(0)) return;
         IERC20 token = IERC20(Currency.unwrap(currency));
@@ -404,11 +382,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @notice Enable or disable external (non-owner) deposits for a pool.
     /// @param key     The pool to configure.
     /// @param enabled True to permit non-owner `addLiquidity`, false for owner-only.
-    function setExternalDeposits(PoolKey calldata key, bool enabled)
-        external
-        onlyOwner
-        whenJITNotInProgress
-    {
+    function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOwner whenJITNotInProgress {
         externalDepositsEnabled[key.toId()] = enabled;
     }
 
@@ -426,11 +400,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         immediately restores trading at the original rate.
     /// @param key  The pool to toggle.
     /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
-    function setPoolLive(PoolKey calldata key, bool live)
-        external
-        onlyOwner
-        whenJITNotInProgress
-    {
+    function setPoolLive(PoolKey calldata key, bool live) external onlyOwner whenJITNotInProgress {
         livePools[key.toId()] = live;
         emit PoolLivenessUpdated(key.toId(), live);
     }
@@ -444,7 +414,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @notice Assets available for immediate swapping.
     /// @dev    Caps vault-side balance at `vault.maxWithdraw(this)` so paused, capped, or
     ///         utilization-constrained vaults are reflected.
-    function getEffectiveLiquidity(PoolKey calldata key) external view override returns (uint256 token0, uint256 token1) {
+    function getEffectiveLiquidity(PoolKey calldata key)
+        external
+        view
+        override
+        returns (uint256 token0, uint256 token1)
+    {
         return _effectiveAssets(key);
     }
 
@@ -463,12 +438,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     }
 
     /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
-    function swapToPrice(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata)
-        external
-        view
-        override
-        returns (uint256 amountIn, uint256 amountOut)
-    {
+    function swapToPrice(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata
+    ) external view override returns (uint256 amountIn, uint256 amountOut) {
         return _simulateIndicative(key, zeroForOne, amountSpecified, sqrtPriceLimitX96);
     }
 
@@ -523,14 +499,20 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      callback entirely when the hook itself is the caller, so the only path that
     ///      reaches this body is an external `modifyLiquidity` call -- always reject.
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal pure override returns (bytes4)
+        internal
+        pure
+        override
+        returns (bytes4)
     {
         revert LiquidityNotAllowed();
     }
 
     /// @dev External LP removals are blocked. Same `noSelfCall` reasoning as `_beforeAddLiquidity`.
     function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal pure override returns (bytes4)
+        internal
+        pure
+        override
+        returns (bytes4)
     {
         revert LiquidityNotAllowed();
     }
@@ -549,7 +531,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      cycle is still in flight, so the outer `_afterSwap` would short-circuit and leave
     ///      the outer's deployed positions orphaned. Reject up-front.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
-        internal override returns (bytes4, BeforeSwapDelta, uint24)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
         if (_isJITLocked(poolId)) revert JITInProgress();
@@ -566,7 +550,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      is live and reverts when it isn't, so reaching `_afterSwap` implies the lock is
     ///      set; a defensive `_isJITLocked` read is unnecessary.
     function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
-        internal override returns (bytes4, int128)
+        internal
+        override
+        returns (bytes4, int128)
     {
         PoolId poolId = key.toId();
         _removeJIT(poolId, key);
@@ -658,9 +644,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             uint256 weightBps = dist[i].weightBps;
             uint256 weightedBal0 = bal0 * weightBps / 10_000;
             uint256 weightedBal1 = bal1 * weightBps / 10_000;
-            uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96, sqrtLower, sqrtUpper, weightedBal0, weightedBal1
-            );
+            uint128 liq =
+                LiquidityAmounts.getLiquidityForAmounts(sqrtPriceX96, sqrtLower, sqrtUpper, weightedBal0, weightedBal1);
             liqs[i] = liq;
 
             if (liq > 0) {
@@ -701,7 +686,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
                     ""
                 );
                 bytes32 slot;
-                unchecked { slot = bytes32(uint256(base) + i); }
+                unchecked {
+                    slot = bytes32(uint256(base) + i);
+                }
                 assembly ("memory-safe") {
                     tstore(slot, liq)
                 }
@@ -723,7 +710,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
         for (uint256 i; i < n; ++i) {
             bytes32 slot;
-            unchecked { slot = bytes32(uint256(base) + i); }
+            unchecked {
+                slot = bytes32(uint256(base) + i);
+            }
             uint128 liq;
             assembly ("memory-safe") {
                 liq := tload(slot)
@@ -817,11 +806,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     //                        INTERNAL: PRICING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _simulateIndicative(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
-        internal
-        view
-        returns (uint256 amountIn, uint256 amountOut)
-    {
+    function _simulateIndicative(
+        PoolKey calldata key,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96
+    ) internal view returns (uint256 amountIn, uint256 amountOut) {
         PoolId poolId = key.toId();
 
         if (!livePools[poolId]) return (0, 0);
@@ -854,20 +844,18 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         amountOut = stepOut;
     }
 
-    function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne)
-        private
-        pure
-        returns (uint24)
-    {
+    function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne) private pure returns (uint24) {
         uint16 directional = zeroForOne ? protocolFee.getZeroForOneFee() : protocolFee.getOneForZeroFee();
         return directional == 0 ? lpFee : directional.calculateSwapFee(lpFee);
     }
 
-    function _activeIndicativeLiquidity(PoolId poolId, uint160 sqrtPriceX96, int24 currentTick, uint256 bal0, uint256 bal1)
-        internal
-        view
-        returns (uint128 liquidity)
-    {
+    function _activeIndicativeLiquidity(
+        PoolId poolId,
+        uint160 sqrtPriceX96,
+        int24 currentTick,
+        uint256 bal0,
+        uint256 bal1
+    ) internal view returns (uint128 liquidity) {
         LiquidityBucket[] storage dist = _distribution[poolId];
         uint256 n = dist.length;
 

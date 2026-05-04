@@ -122,9 +122,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @param shares   Shares minted to `provider`.
     /// @param amount0  Asset0 transferred from the depositor (post-FoT receipt).
     /// @param amount1  Asset1 transferred from the depositor (post-FoT receipt).
-    event Deposit(
-        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
-    );
+    event Deposit(VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
 
     /// @notice Emitted when a depositor burns shares and receives proportional token amounts.
     /// @param vaultId  The vault being withdrawn from.
@@ -132,9 +130,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     /// @param shares   Shares burned from `provider`.
     /// @param amount0  Asset0 transferred to the withdrawer.
     /// @param amount1  Asset1 transferred to the withdrawer.
-    event Withdraw(
-        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
-    );
+    event Withdraw(VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -281,7 +277,6 @@ abstract contract MultiAssetVault is BlockNumberish {
         emit Withdraw(vaultId, from, shares, amount0, amount1);
     }
 
-
     // ═══════════════════════════════════════════════════════════════════════════
     //                          INTERNAL: SHARE MATH
     // ═══════════════════════════════════════════════════════════════════════════
@@ -293,13 +288,11 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///          amount = shares * (total + 1) / (supply + 10**_decimalsOffset())
     ///
     ///      Reverts if `supply == 0` -- pre-bootstrap vaults have no defined ratio.
-    function _convertToAmounts(
-        VaultId vaultId,
-        address asset0,
-        address asset1,
-        uint256 shares,
-        bool roundUp
-    ) internal view returns (uint256 amount0, uint256 amount1) {
+    function _convertToAmounts(VaultId vaultId, address asset0, address asset1, uint256 shares, bool roundUp)
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
         uint256 supply = _totalShares[vaultId];
         if (supply == 0) revert VaultNotBootstrapped();
 

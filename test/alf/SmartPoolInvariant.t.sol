@@ -75,11 +75,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
         deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
 
         testPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 10,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
         });
         testPoolId = testPoolKey.toId();
 
@@ -119,9 +115,8 @@ contract SmartPoolInvariantTest is Test, Deployers {
         actorList[2] = bob;
         actorList[3] = charlie;
 
-        handler = new SmartPoolHandler(
-            hook, manager, swapRouter, testPoolKey, token0, token1, vault0, vault1, actorList
-        );
+        handler =
+            new SmartPoolHandler(hook, manager, swapRouter, testPoolKey, token0, token1, vault0, vault1, actorList);
 
         // Restrict invariant fuzzing to handler functions — without this, forge-fuzz would
         // try to call any external function on any deployed contract, exploding the search
@@ -205,5 +200,4 @@ contract SmartPoolInvariantTest is Test, Deployers {
             assertGt(dist[i].weightBps, 0, "INV-DIST: zero-weight bucket present");
         }
     }
-
 }

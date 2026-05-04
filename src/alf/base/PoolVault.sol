@@ -162,11 +162,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _convertToAmounts(
-            _vaultIdFor(key.toId()),
-            Currency.unwrap(key.currency0),
-            Currency.unwrap(key.currency1),
-            shares,
-            true
+            _vaultIdFor(key.toId()), Currency.unwrap(key.currency0), Currency.unwrap(key.currency1), shares, true
         );
     }
 
@@ -181,11 +177,7 @@ abstract contract PoolVault is MultiAssetVault {
         returns (uint256 amount0, uint256 amount1)
     {
         return _convertToAmounts(
-            _vaultIdFor(key.toId()),
-            Currency.unwrap(key.currency0),
-            Currency.unwrap(key.currency1),
-            shares,
-            false
+            _vaultIdFor(key.toId()), Currency.unwrap(key.currency0), Currency.unwrap(key.currency1), shares, false
         );
     }
 
@@ -293,8 +285,7 @@ abstract contract PoolVault is MultiAssetVault {
                 uint256 byConvert = vault.convertToAssets(shares);
                 uint256 globalMax = vault.maxWithdraw(address(this));
                 uint256 totalHookShares = IERC20(address(vault)).balanceOf(address(this));
-                uint256 poolMax =
-                    totalHookShares > 0 ? FullMath.mulDiv(globalMax, shares, totalHookShares) : 0;
+                uint256 poolMax = totalHookShares > 0 ? FullMath.mulDiv(globalMax, shares, totalHookShares) : 0;
                 bal += byConvert < poolMax ? byConvert : poolMax;
             }
         }

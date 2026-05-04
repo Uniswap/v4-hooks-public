@@ -203,7 +203,10 @@ contract SmartPoolHandler is Test {
             SwapParams({zeroForOne: zeroForOne, amountSpecified: amount, sqrtPriceLimitX96: limit}),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
-        ) returns (BalanceDelta) {} catch {}
+        ) returns (
+            BalanceDelta
+        ) {}
+            catch {}
     }
 
     /// @notice Inject yield into one of the vaults. Tests that LP shares correctly accrue

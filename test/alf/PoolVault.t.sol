@@ -568,9 +568,7 @@ contract PoolVaultTest is Test, Deployers {
         // Mock vault.maxWithdraw to return 1000 — utilization-constrained scenario.
         // (The vault holds 5000 economic but only 1000 is presently withdrawable.)
         vm.mockCall(
-            address(vault0),
-            abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)),
-            abi.encode(1_000e18)
+            address(vault0), abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)), abi.encode(1_000e18)
         );
 
         // Pool A's effective balance: pro-rata cap = 1000 * 1000/5000 = 200.

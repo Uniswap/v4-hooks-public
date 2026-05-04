@@ -77,11 +77,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     /// @dev Decode ALFHookData and resolve attestation. The base implementation does not
     ///      verify attestations — subclasses that want attestation support override
     ///      `_resolveAttestation` with their own verification logic.
-    function _resolveHookData(bytes calldata hookData)
-        internal
-        view
-        returns (bool isAttested, address attester)
-    {
+    function _resolveHookData(bytes calldata hookData) internal view returns (bool isAttested, address attester) {
         if (hookData.length == 0) return (false, address(0));
         ALFHookData memory hd = abi.decode(hookData, (ALFHookData));
         (isAttested, attester) = _resolveAttestation(hd.attestationData);

@@ -47,11 +47,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
 
         // Create pool key with static fee (`PoolKey.fee`)
         testPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
 
         // Initialize pool at tick 30 via owner-only `initializePool` — direct
@@ -107,11 +103,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     ///      price the operator did not choose.
     function test_directInitialize_reverts() public {
         PoolKey memory unowned = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 30,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 30, hooks: IHooks(address(hook))
         });
         vm.expectRevert();
         manager.initialize(unowned, TickMath.getSqrtPriceAtTick(0));
@@ -121,11 +113,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     ///      hook's own entry point either.
     function test_initializePool_onlyOwner() public {
         PoolKey memory unowned = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 30,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 30, hooks: IHooks(address(hook))
         });
         vm.expectRevert();
         hook.initializePool(unowned, TickMath.getSqrtPriceAtTick(0));
@@ -259,11 +247,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_getIndicativeQuote_noLiquidity_returnsZero() public {
         // Create a fresh pool with no LP
         PoolKey memory emptyPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 10,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
         });
         vm.prank(owner);
         hook.initializePool(emptyPoolKey, Constants.SQRT_PRICE_1_1);
@@ -332,5 +316,4 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.setPoolLive(testPoolKey, false);
     }
-
 }

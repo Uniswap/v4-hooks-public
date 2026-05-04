@@ -51,8 +51,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         token1 = MockERC20(Currency.unwrap(currency1));
 
         uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
@@ -69,9 +69,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
         dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
         dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
-        PoolKey memory key = _initWithDistribution(
-            "Conservative (75/15/10 across [-10,10] [-30,30] [-60,60])", dist, 10
-        );
+        PoolKey memory key =
+            _initWithDistribution("Conservative (75/15/10 across [-10,10] [-30,30] [-60,60])", dist, 10);
         _runSwapSeries(key);
     }
 
@@ -83,9 +82,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
         dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
         dist[3] = SmartPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
-        PoolKey memory key = _initWithDistribution(
-            "Ultra-tight (45/35/15/5 across [-1,1] [-5,5] [-20,20] [-100,100])", dist, 1
-        );
+        PoolKey memory key =
+            _initWithDistribution("Ultra-tight (45/35/15/5 across [-1,1] [-5,5] [-20,20] [-100,100])", dist, 1);
         _runSwapSeries(key);
     }
 
@@ -97,9 +95,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
         dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
         dist[3] = SmartPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
-        PoolKey memory key = _initWithDistribution(
-            "Barbell (50/20/15/15 with [-250,-50] and [50,250] tails)", dist, 5
-        );
+        PoolKey memory key = _initWithDistribution("Barbell (50/20/15/15 with [-250,-50] and [50,250] tails)", dist, 5);
         _runSwapSeries(key);
     }
 
@@ -112,9 +108,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         dist[1] = SmartPoolHook.LiquidityBucket({tickLower: 10, tickUpper: 80, weightBps: 4_000});
         dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 2_000});
         dist[3] = SmartPoolHook.LiquidityBucket({tickLower: -200, tickUpper: -80, weightBps: 500});
-        PoolKey memory key = _initWithDistribution(
-            "Inventory-skewed (token0-heavy, upper sell wall [10,80])", dist, 10
-        );
+        PoolKey memory key = _initWithDistribution("Inventory-skewed (token0-heavy, upper sell wall [10,80])", dist, 10);
         _runSwapSeries(key);
     }
 
@@ -127,9 +121,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -40, tickUpper: -8, weightBps: 2_500});
         dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -120, tickUpper: -40, weightBps: 2_500});
         dist[3] = SmartPoolHook.LiquidityBucket({tickLower: 8, tickUpper: 80, weightBps: 2_000});
-        PoolKey memory key = _initWithDistribution(
-            "Peg-defense ladder (asymmetric, deeper below peg)", dist, 8
-        );
+        PoolKey memory key = _initWithDistribution("Peg-defense ladder (asymmetric, deeper below peg)", dist, 8);
         _runSwapSeries(key);
     }
 
@@ -140,9 +132,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         SmartPoolHook.LiquidityBucket[] memory calm = new SmartPoolHook.LiquidityBucket[](2);
         calm[0] = SmartPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 8_000});
         calm[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 2_000});
-        PoolKey memory key = _initWithDistribution(
-            "Volatility-adaptive: CALM phase (80/20 across [-5,5] [-30,30])", calm, 5
-        );
+        PoolKey memory key =
+            _initWithDistribution("Volatility-adaptive: CALM phase (80/20 across [-5,5] [-30,30])", calm, 5);
 
         _logSwap(key, true, -100 ether, "ZF1 size 100   t0   [calm]");
         _logSwap(key, true, -1_000 ether, "ZF1 size 1000  t0   [calm]");
@@ -197,12 +188,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         (uint256 r0, uint256 r1) = hook.getReserves(key);
         (uint256 e0, uint256 e1) = hook.getEffectiveLiquidity(key);
         console2.log(
-            string.concat(
-                "  getReserves        : t0=",
-                vm.toString(r0 / 1 ether),
-                " t1=",
-                vm.toString(r1 / 1 ether)
-            )
+            string.concat("  getReserves        : t0=", vm.toString(r0 / 1 ether), " t1=", vm.toString(r1 / 1 ether))
         );
         console2.log(
             string.concat(
@@ -250,9 +236,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         conservative[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
         conservative[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
         conservative[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
-        _runQuoteSeries(_initWithDistribution(
-            "Conservative -- single dense bucket, simple drift", conservative, 10
-        ));
+        _runQuoteSeries(_initWithDistribution("Conservative -- single dense bucket, simple drift", conservative, 10));
 
         // (b) Barbell — far one-sided tails should make multi-bucket-crossing drift obvious.
         SmartPoolHook.LiquidityBucket[] memory barbell = new SmartPoolHook.LiquidityBucket[](4);
@@ -260,9 +244,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         barbell[1] = SmartPoolHook.LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
         barbell[2] = SmartPoolHook.LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
         barbell[3] = SmartPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
-        _runQuoteSeries(_initWithDistribution(
-            "Barbell -- multi-bucket crossings expected on big swaps", barbell, 5
-        ));
+        _runQuoteSeries(_initWithDistribution("Barbell -- multi-bucket crossings expected on big swaps", barbell, 5));
 
         // (c) Ultra-tight — narrow active band, drift should grow as swap exits the [-1,1] core.
         SmartPoolHook.LiquidityBucket[] memory tight = new SmartPoolHook.LiquidityBucket[](4);
@@ -270,9 +252,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
         tight[1] = SmartPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
         tight[2] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
         tight[3] = SmartPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
-        _runQuoteSeries(_initWithDistribution(
-            "Ultra-tight -- drift grows once size pushes past micro band", tight, 1
-        ));
+        _runQuoteSeries(_initWithDistribution("Ultra-tight -- drift grows once size pushes past micro band", tight, 1));
     }
 
     function _runQuoteSeries(PoolKey memory key) internal {
@@ -287,14 +267,11 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
     //                              HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _initWithDistribution(
-        string memory name,
-        SmartPoolHook.LiquidityBucket[] memory dist,
-        int24 tickSpacing
-    ) internal returns (PoolKey memory key) {
-        return _initWithDistributionEx(
-            name, dist, tickSpacing, FEE_PIPS, IERC4626(address(0)), IERC4626(address(0))
-        );
+    function _initWithDistribution(string memory name, SmartPoolHook.LiquidityBucket[] memory dist, int24 tickSpacing)
+        internal
+        returns (PoolKey memory key)
+    {
+        return _initWithDistributionEx(name, dist, tickSpacing, FEE_PIPS, IERC4626(address(0)), IERC4626(address(0)));
     }
 
     /// @dev Extended initializer accepting a custom fee and per-currency vaults. Used by the
@@ -441,16 +418,16 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
     ///      so 1024 pips renders as "10.24bps".
     function _bps(uint256 pips) private pure returns (string memory) {
         uint256 frac = pips % 100;
-        string memory fracStr = frac < 10
-            ? string.concat("0", _toStr(frac))
-            : _toStr(frac);
+        string memory fracStr = frac < 10 ? string.concat("0", _toStr(frac)) : _toStr(frac);
         return string.concat(_toStr(pips / 100), ".", fracStr, "bps");
     }
 
     function _toStr(uint256 x) private pure returns (string memory) {
         if (x == 0) return "0";
         uint256 len;
-        for (uint256 t = x; t > 0; t /= 10) len++;
+        for (uint256 t = x; t > 0; t /= 10) {
+            len++;
+        }
         bytes memory b = new bytes(len);
         for (uint256 i = len; i > 0; i--) {
             b[i - 1] = bytes1(uint8(48 + (x % 10)));

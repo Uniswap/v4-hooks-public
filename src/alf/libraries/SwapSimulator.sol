@@ -20,7 +20,6 @@ library SwapSimulator {
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
 
-
     struct SwapState {
         uint160 sqrtPriceX96;
         int24 tick;
@@ -261,7 +260,6 @@ library SwapSimulator {
                     ? (compressed + int24(uint24(BitMath.leastSignificantBit(masked) - bitPos))) * tickSpacing
                     : (compressed + int24(uint24(type(uint8).max - bitPos))) * tickSpacing;
             }
-
         }
     }
 }

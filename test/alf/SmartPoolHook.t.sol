@@ -75,18 +75,14 @@ contract SmartPoolHookTest is Test, Deployers {
 
         // Deploy hook at flag-mined address.
         uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
         deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
 
         testPoolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 10,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
         });
 
         vm.prank(owner);
@@ -149,11 +145,7 @@ contract SmartPoolHookTest is Test, Deployers {
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         key = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         id = key.toId();
 
@@ -203,11 +195,9 @@ contract SmartPoolHookTest is Test, Deployers {
     function _assertCrossPoolSolvency(PoolKey memory keyA, PoolKey memory keyB) internal view {
         (uint256 a0, uint256 a1) = hook.getReserves(keyA);
         (uint256 b0, uint256 b1) = hook.getReserves(keyB);
-        uint256 backing0 = token0.balanceOf(address(hook))
-            + vault0.convertToAssets(vault0.balanceOf(address(hook)))
+        uint256 backing0 = token0.balanceOf(address(hook)) + vault0.convertToAssets(vault0.balanceOf(address(hook)))
             + manager.balanceOf(address(hook), currency0.toId());
-        uint256 backing1 = token1.balanceOf(address(hook))
-            + vault1.convertToAssets(vault1.balanceOf(address(hook)))
+        uint256 backing1 = token1.balanceOf(address(hook)) + vault1.convertToAssets(vault1.balanceOf(address(hook)))
             + manager.balanceOf(address(hook), currency1.toId());
 
         assertLe(a0 + b0, backing0, "currency0 solvency: pools claim more than backed");
@@ -266,11 +256,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_initializePool_revertsOnDirectInit() public {
         PoolKey memory key2 = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 20,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 20, hooks: IHooks(address(hook))
         });
         vm.expectRevert();
         manager.initialize(key2, TickMath.getSqrtPriceAtTick(0));
@@ -278,11 +264,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_initializePool_onlyOwner() public {
         PoolKey memory key2 = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 20,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 20, hooks: IHooks(address(hook))
         });
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
@@ -920,16 +902,8 @@ contract SmartPoolHookTest is Test, Deployers {
 
         // After everyone except the owner has exited, total shares == owner shares
         // (no dead-share lock under virtual-offset inflation defense).
-        assertEq(
-            hook.totalShares(testPoolId),
-            hook.userShares(testPoolId, owner),
-            "pool A share supply matches owner"
-        );
-        assertEq(
-            hook.totalShares(idB),
-            hook.userShares(idB, owner),
-            "pool B share supply matches owner"
-        );
+        assertEq(hook.totalShares(testPoolId), hook.userShares(testPoolId, owner), "pool A share supply matches owner");
+        assertEq(hook.totalShares(idB), hook.userShares(idB, owner), "pool B share supply matches owner");
     }
 
     /// @dev Helper: swap on `subject`, assert `bystander`'s reserves are unchanged.
@@ -1189,11 +1163,7 @@ contract SmartPoolHookTest is Test, Deployers {
         // Use a distinct pool key (different tickSpacing) so we can install the malicious
         // vault from the start; testPoolKey is already initialized in setUp() with a normal vault.
         PoolKey memory key = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 11,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 11, hooks: IHooks(address(hook))
         });
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
@@ -1468,13 +1438,8 @@ contract SmartPoolHookTest is Test, Deployers {
         MockERC4626 v0 = new MockERC4626(ERC20(address(t0)));
         MockERC4626 v1 = new MockERC4626(ERC20(address(t1)));
 
-        PoolKey memory key = PoolKey({
-            currency0: c0,
-            currency1: c1,
-            fee: FEE_PIPS,
-            tickSpacing: 10,
-            hooks: IHooks(address(hook))
-        });
+        PoolKey memory key =
+            PoolKey({currency0: c0, currency1: c1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))});
 
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
@@ -1619,24 +1584,23 @@ contract SmartPoolHookTest is Test, Deployers {
         // Vault wrapping token1 paired with currency0 — mismatch.
         MockERC4626 wrongVault = new MockERC4626(ERC20(address(token1)));
         PoolKey memory key = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: FEE_PIPS,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
 
         vm.prank(owner);
         vm.expectRevert(SmartPoolHook.VaultAssetMismatch.selector);
-        hook.initializePool(key, SmartPoolHook.PoolConfig({
-            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
-            distribution: dist,
-            allowExternalDeposits: false,
-            vault0: IERC4626(address(wrongVault)),
-            vault1: IERC4626(address(vault1))
-        }));
+        hook.initializePool(
+            key,
+            SmartPoolHook.PoolConfig({
+                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+                distribution: dist,
+                allowExternalDeposits: false,
+                vault0: IERC4626(address(wrongVault)),
+                vault1: IERC4626(address(vault1))
+            })
+        );
     }
 
     /// @dev `setDistribution` reverts when a tick is outside `[MIN_TICK, MAX_TICK]`.
@@ -1769,7 +1733,8 @@ contract ReentrantVault {
 
     function deposit(uint256, address) external returns (uint256) {
         if (mode == 0xaaaaaaaa) {
-            SmartPoolHook(targetHook).addLiquidity(targetKey, 1, type(uint256).max, type(uint256).max, type(uint256).max);
+            SmartPoolHook(targetHook)
+                .addLiquidity(targetKey, 1, type(uint256).max, type(uint256).max, type(uint256).max);
         } else if (mode == 0xbbbbbbbb) {
             SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
             dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
@@ -1884,11 +1849,7 @@ contract SwapReentrantVault {
         // because the outer JIT lock is still set.
         manager.swap(
             targetKey,
-            SwapParams({
-                zeroForOne: true,
-                amountSpecified: -1,
-                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-            }),
+            SwapParams({zeroForOne: true, amountSpecified: -1, sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1}),
             ""
         );
         // Unreachable in the success-failure test; included so non-attacking flows work too.
