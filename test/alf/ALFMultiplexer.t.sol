@@ -64,12 +64,12 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterA = SimpleSpreadQuoterHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | quoterFlags))
         );
-        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), ownerA), address(quoterA));
+        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(750_000), ownerA), address(quoterA));
 
         quoterB = SimpleSpreadQuoterHook(
             address(uint160((uint256(type(uint160).max) - (1 << 14)) & clearAllHookPermissionsMask | quoterFlags))
         );
-        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(50_000), ownerB), address(quoterB));
+        deployCodeTo("SimpleSpreadQuoterHook", abi.encode(manager, uint32(150_000), ownerB), address(quoterB));
 
         // ── Create pool keys with static fees: A expensive (5%), B cheap (1%) ──
         quoterAPoolKey = PoolKey({
@@ -418,67 +418,6 @@ contract ALFMultiplexerTest is Test, Deployers {
         targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
 
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
-        assertEq(delta.amount0(), -1e18);
-        assertTrue(delta.amount1() > 0);
-    }
-
-    // ──── tolerance accounts for multiplexer's own protocol fee ────
-    //
-    //  `_extractOutput` reports the candidate-frame delta (pre-multiplexer fee), but the
-    //  swapper's actual receipt is the post-fee delta. The tolerance check must apply the
-    //  fee adjustment before comparing against the candidate-frame `bestQuote`. Without
-    //  this, a swapper setting `strictTolerancePips` below the multiplexer pool's slot0
-    //  protocol fee would silently overpay (exact-out) or under-receive (exact-in).
-
-    /// @dev `TOKEN_JAR()` shim: ALFProtocolFees staticcalls this on the v4 fee controller.
-    ///      Since the test contract acts as the controller, it must expose this selector.
-    function TOKEN_JAR() external view returns (address) {
-        return address(this);
-    }
-
-    /// @dev Configure the multiplexer pool to charge the maximum v4 protocol fee
-    ///      (1000 pips per direction = 0.1%) so the tolerance interaction is observable.
-    function _enableMaxMultiplexerProtocolFee() internal {
-        manager.setProtocolFeeController(address(this));
-        // Encode (oneForZero << 12) | zeroForOne. Both directions = 1000 = 0x3E8.
-        manager.setProtocolFee(multiplexerPoolKey, uint24((uint24(1000) << 12) | uint24(1000)));
-        // Refresh the multiplexer's tokenJar cache.
-        multiplexer.pollTokenJar();
-    }
-
-    function test_strict_tolerance_accountsForProtocolFee_exactInput() public {
-        _enableMaxMultiplexerProtocolFee();
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
-
-        // Tolerance = 100 ppm (0.01%), but the protocol fee on the unspecified side is
-        // 1000 pips (0.1%) — the swapper's actual output is 0.1% below candidate-frame
-        // bestQuote. Without the fix this passed silently; with the fix it must revert.
-        vm.expectRevert();
-        swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 100));
-    }
-
-    function test_strict_tolerance_accountsForProtocolFee_exactOutput() public {
-        _enableMaxMultiplexerProtocolFee();
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
-
-        // Same scenario, exact-output direction. Swapper pays MORE input than the
-        // candidate-frame quote suggested; tolerance must catch the overpayment.
-        vm.expectRevert();
-        swap(multiplexerPoolKey, true, int256(0.5e18), _buildStrictHookDataWithTolerance(targets, 100));
-    }
-
-    function test_strict_tolerance_accountsForProtocolFee_passesWhenLooseEnough() public {
-        _enableMaxMultiplexerProtocolFee();
-
-        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
-        targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
-
-        // Tolerance = 5000 ppm (0.5%) > the 0.1% protocol fee → swap must pass.
-        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 5000));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
     }

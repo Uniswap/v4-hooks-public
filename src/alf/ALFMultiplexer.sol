@@ -14,7 +14,6 @@ import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/Pool
 import {BaseHook} from "../base/BaseHook.sol";
 import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ALFProtocolFees} from "./base/ALFProtocolFees.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
 import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol";
 
@@ -50,12 +49,13 @@ import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol"
 ///         swap, ensuring the multiplexer's net position is zero. The outer caller receives
 ///         the aggregate execution as their swap result.
 ///
-///         ## Protocol Fee
+///         ## Protocol Fees
 ///
-///         The multiplexer reads the v4 protocol fee from the virtual pool's slot0 and
-///         applies it to the unspecified delta after the split fill completes. Fees are
-///         taken directly to the token jar via `poolManager.take()`, matching the same
-///         mechanism used by aggregator hooks and flat quoters.
+///         The multiplexer does not charge a protocol fee on its own virtual pool. v4 charges
+///         the protocol fee natively on each NESTED candidate swap (against the candidate's
+///         own pool), so layering an additional multiplexer-level fee would double-charge
+///         users. Operators who want to collect fees through this routing path SHOULD
+///         configure them on the underlying candidate pools.
 ///
 ///         ## Tolerance Enforcement
 ///
@@ -76,7 +76,7 @@ import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol"
 ///                   ← BalanceDelta
 ///                 ← accumulate delta, update remaining
 ///             ← (totalDelta, primaryQuoter, bestQuote)
-///           ← BeforeSwapDelta (negated totalDelta + fee)
+///           ← BeforeSwapDelta (negated totalDelta)
 ///         ← BalanceDelta (aggregate result for the swapper)
 ///         ```
 ///
@@ -88,7 +88,7 @@ import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol"
 ///         curve update data. The multiplexer constructs per-quoter ALFHookData that pairs the
 ///         shared attestation with each quoter's curve update.
 /// @custom:security-contact security@uniswap.org
-contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
+contract ALFMultiplexer is BaseHook, Ownable {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
@@ -182,11 +182,7 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param _owner       Initial owner.
-    constructor(IPoolManager _poolManager, address _owner)
-        BaseHook(_poolManager)
-        ALFProtocolFees(_poolManager)
-        Ownable(_owner)
-    {}
+    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Ownable(_owner) {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          HOOK PERMISSIONS
@@ -321,44 +317,28 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
         (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote) =
             _multiplexAndSwap(key, params.zeroForOne, params.amountSpecified, hookData);
 
-        // 2. Apply protocol fee from slot0 — takes fee directly to token jar.
-        //    The unspecified delta is the side the swapper doesn't control:
-        //    exact-in → output, exact-out → input.
-        int128 unspecifiedDelta = _extractUnspecified(totalDelta, params);
-        int128 feeAdjustment = _applyProtocolFee(key, params, unspecifiedDelta);
-
-        // 3. Tolerance enforcement (downside-only). The "downside" direction depends on swap
+        // 2. Tolerance enforcement (downside-only). The "downside" direction depends on swap
         //    type: exact-input swappers want MORE output (so executed < bestQuote is bad);
-        //    exact-output swappers want LESS input (so executed > bestQuote is bad).
-        //
-        //    `_extractOutput` is denominated in the candidate-only frame (pre-multiplexer
-        //    protocol fee), so it must be adjusted by `feeAdjustment` to reflect what the
-        //    swapper actually receives/pays. Without this adjustment a swapper setting
-        //    `strictTolerancePips` below the multiplexer's slot0 protocol fee would silently
-        //    overpay (exact-out) or under-receive (exact-in) by up to that fee.
+        //    exact-output swappers want LESS input (so executed > bestQuote is bad). Both
+        //    `executed` and `bestQuote` are in the candidate frame — v4 charges each
+        //    candidate's protocol fee natively on the nested swap and the multiplexer
+        //    itself does not charge a fee on top, so no frame conversion is needed.
         if (hookData.length > 0) {
             uint256 tol = abi.decode(hookData, (MultiplexerHookData)).strictTolerancePips;
             if (tol > 0) {
                 // No baseline ⇒ no protection. Refuse rather than silently accept.
                 if (bestQuote == 0) revert MissingQuoteBaseline();
 
-                uint256 preFee = _extractOutput(totalDelta, params);
-                // `feeAdjustment` is always non-negative (see ALFProtocolFees._applyProtocolFee).
-                uint256 feeMag = uint256(uint128(feeAdjustment));
-                uint256 effective;
+                uint256 executed = _extractOutput(totalDelta, params);
                 if (params.amountSpecified < 0) {
-                    // exact-input: swapper receives `preFee - feeMag` of output.
-                    effective = preFee > feeMag ? preFee - feeMag : 0;
-                    if (effective < bestQuote) {
-                        uint256 dev = bestQuote - effective;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, effective);
+                    if (executed < bestQuote) {
+                        uint256 dev = bestQuote - executed;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                     }
                 } else {
-                    // exact-output: swapper pays `preFee + feeMag` of input.
-                    effective = preFee + feeMag;
-                    if (effective > bestQuote) {
-                        uint256 dev = effective - bestQuote;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, effective);
+                    if (executed > bestQuote) {
+                        uint256 dev = executed - bestQuote;
+                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                     }
                 }
             }
@@ -366,8 +346,8 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
 
         emit MultiplexerExecuted(primaryQuoter, params.zeroForOne, params.amountSpecified, bestQuote);
 
-        // 4. Convert BalanceDelta → BeforeSwapDelta, adjusting for the protocol fee.
-        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params, feeAdjustment), 0);
+        // 3. Convert BalanceDelta → BeforeSwapDelta to offset the virtual pool's swap.
+        return (IHooks.beforeSwap.selector, _toBeforeSwapDelta(totalDelta, params), 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -909,20 +889,10 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
         }
     }
 
-    /// @dev Extract the unspecified delta component for protocol fee calculation.
-    function _extractUnspecified(BalanceDelta delta, SwapParams calldata params) internal pure returns (int128) {
-        bool isExactInput = params.amountSpecified < 0;
-        if (isExactInput) {
-            return params.zeroForOne ? delta.amount1() : delta.amount0();
-        } else {
-            return params.zeroForOne ? delta.amount0() : delta.amount1();
-        }
-    }
-
     /// @dev Convert the accumulated BalanceDelta from nested fills into a BeforeSwapDelta
-    ///      that offsets the virtual pool's swap. The fee adjustment (from _applyProtocolFee)
-    ///      is added to the unspecified component so the swapper pays it.
-    function _toBeforeSwapDelta(BalanceDelta delta, SwapParams calldata params, int128 feeAdjustment)
+    ///      that offsets the virtual pool's swap. The multiplexer charges no fee of its
+    ///      own — protocol fees flow through the candidates' nested v4 swaps natively.
+    function _toBeforeSwapDelta(BalanceDelta delta, SwapParams calldata params)
         internal
         pure
         returns (BeforeSwapDelta)
@@ -932,10 +902,10 @@ contract ALFMultiplexer is BaseHook, ALFProtocolFees, Ownable {
 
         if ((params.amountSpecified < 0) == params.zeroForOne) {
             specified = -delta.amount0();
-            unspecified = -delta.amount1() + feeAdjustment;
+            unspecified = -delta.amount1();
         } else {
             specified = -delta.amount1();
-            unspecified = -delta.amount0() + feeAdjustment;
+            unspecified = -delta.amount0();
         }
 
         return toBeforeSwapDelta(specified, unspecified);
