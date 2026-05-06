@@ -26,6 +26,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     address public immutable factory;
 
+    uint256 internal constant FEE = 3;
+    uint256 internal constant FEE_DENOMINATOR = 1000;
+
     mapping(PoolId => address) public poolIdToExternalPair;
     mapping(address => PoolKey) private _canonicalPoolKeyByAddress;
 
@@ -38,8 +41,6 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     error AmountOutZero();
     error InsufficientLiquidity();
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
-
-    uint256 private _conductSwapEntered;
 
     constructor(IPoolManager manager, address factory_, string memory hookVersion)
         BaseAggregatorHook(manager, hookVersion)
@@ -121,17 +122,12 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = poolIdToExternalPair[poolId];
         if (pairAddr == address(0)) revert PoolDoesNotExist();
 
-        if (_conductSwapEntered != 0) revert Reentrancy();
-        _conductSwapEntered = 1;
-
         poolManager.sync(settleCurrency);
         (amountTake, amountSettle) = _swapOnPair(pairAddr, takeCurrency, settleCurrency, params);
         poolManager.settle();
         hasSettled = true;
 
-        _conductSwapEntered = 0;
-
-        if (params.amountSpecified >= 0 && params.amountSpecified != 0 && amountSettle == 0) {
+        if (params.amountSpecified > 0 && uint256(params.amountSpecified) != amountSettle) {
             revert UnexpectedSwapOutputDelta();
         }
     }
@@ -143,9 +139,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     {
         if (amountIn == 0) revert AmountInZero();
         if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
-        uint256 amountInWithFee = amountIn * 997;
+        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - FEE);
         uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = reserveIn * 1000 + amountInWithFee;
+        uint256 denominator = reserveIn * FEE_DENOMINATOR + amountInWithFee;
         amountOut = numerator / denominator;
     }
 
@@ -155,9 +151,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         returns (uint256 amountIn)
     {
         if (amountOut == 0) revert AmountOutZero();
-        if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
-        uint256 numerator = reserveIn * amountOut * 1000;
-        uint256 denominator = (reserveOut - amountOut) * 997;
+        if (reserveIn == 0 || reserveOut == 0 || amountOut > reserveOut) revert InsufficientLiquidity();
+        uint256 numerator = reserveIn * amountOut * FEE_DENOMINATOR;
+        uint256 denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - FEE);
         amountIn = numerator / denominator + 1;
     }
 

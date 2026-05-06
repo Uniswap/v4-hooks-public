@@ -37,16 +37,13 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
     // The slot holding the expected pool, transiently. bytes32(uint256(keccak256("UniswapV3Aggregator.transient.expectedPool")) - 1)
     bytes32 private constant TRANSIENT_EXPECTED_POOL =
         0x6eabd122407eeebc08f840712abe83f91a845b97d0fe375ce6644f6d5a2cb3a2;
-    // The slot holding whether the current V3 callback is a quote simulation (transient).
-    bytes32 private constant TRANSIENT_QUOTE_SIM =
-        bytes32(uint256(keccak256("UniswapV3Aggregator.transient.quoteSim")) - 1);
     // The slot holding the swap input paid, transiently. bytes32(uint256(keccak256("UniswapV3Aggregator.transient.swapInputPaid")) - 1)
     bytes32 private constant TRANSIENT_SWAP_INPUT_PAID =
         0x582465caaa3a5bc4afb238d59b626acb3a16194fc90d0d5ec69b636bbd73057a;
 
     error NativeCurrencyNotSupported();
     error ExternalPoolNotFound();
-    error ExternalPoolTokenMismatch();
+    error ExternalPoolMismatch();
     error UnauthorizedCallback();
     error CallbackOutsideActiveSwap();
     error Reentrancy();
@@ -131,7 +128,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
             )
         );
         (bool success, bytes memory ret) = poolAddr.call(swapCalldata);
-        if (success) {
+        if (success || ret.length != 68 || bytes4(ret) != QuoteRevert.selector) {
             revert UnexpectedQuoteBehavior();
         }
         return ret;
@@ -173,7 +170,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         returns (address pool)
     {
         pool = IUniswapV3Factory(factory).getPool(token0, token1, key.fee);
-        require(IUniswapV3Pool(pool).fee() == key.fee);
+        if (IUniswapV3Pool(pool).fee() != key.fee) revert ExternalPoolMismatch();
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
@@ -187,7 +184,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
 
         // Defensive programming for untrustable factory.
         if (IUniswapV3Pool(poolAddr).token0() != token0 || IUniswapV3Pool(poolAddr).token1() != token1) {
-            revert ExternalPoolTokenMismatch();
+            revert ExternalPoolMismatch();
         }
 
         PoolKey storage existing = _canonicalPoolKeyByAddress[poolAddr];

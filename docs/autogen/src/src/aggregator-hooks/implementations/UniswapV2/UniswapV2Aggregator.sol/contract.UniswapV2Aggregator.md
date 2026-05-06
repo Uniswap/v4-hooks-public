@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0cc83724d9fa337cd357d09f0bd4d09be719e496/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ac8b880552824842d9a40547a7047b547d9053c3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -20,6 +20,20 @@ address public immutable factory
 ```
 
 
+### FEE
+
+```solidity
+uint256 internal constant FEE = 3
+```
+
+
+### FEE_DENOMINATOR
+
+```solidity
+uint256 internal constant FEE_DENOMINATOR = 1000
+```
+
+
 ### poolIdToExternalPair
 
 ```solidity
@@ -31,13 +45,6 @@ mapping(PoolId => address) public poolIdToExternalPair
 
 ```solidity
 mapping(address => PoolKey) private _canonicalPoolKeyByAddress
-```
-
-
-### _conductSwapEntered
-
-```solidity
-uint256 private _conductSwapEntered
 ```
 
 

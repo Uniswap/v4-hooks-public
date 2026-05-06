@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/adb29379b80d9ef34b021ada72c07961aaf6cc84/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ac8b880552824842d9a40547a7047b547d9053c3/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -55,14 +55,6 @@ uint160 internal constant MAX_SQRT_RATIO_ADJ = TickMath.MAX_SQRT_PRICE - 1
 ```solidity
 bytes32 private constant TRANSIENT_EXPECTED_POOL =
     0x6eabd122407eeebc08f840712abe83f91a845b97d0fe375ce6644f6d5a2cb3a2
-```
-
-
-### TRANSIENT_QUOTE_SIM
-
-```solidity
-bytes32 private constant TRANSIENT_QUOTE_SIM =
-    bytes32(uint256(keccak256("UniswapV3Aggregator.transient.quoteSim")) - 1)
 ```
 
 
@@ -270,10 +262,10 @@ error NativeCurrencyNotSupported();
 error ExternalPoolNotFound();
 ```
 
-### ExternalPoolTokenMismatch
+### ExternalPoolMismatch
 
 ```solidity
-error ExternalPoolTokenMismatch();
+error ExternalPoolMismatch();
 ```
 
 ### UnauthorizedCallback
