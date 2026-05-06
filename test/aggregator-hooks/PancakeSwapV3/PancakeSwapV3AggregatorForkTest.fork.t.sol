@@ -15,7 +15,9 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {
+    PancakeSwapV3Aggregator
+} from "../../../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {IUniswapV3Pool} from "../../../src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3Pool.sol";
 
 /// @notice Fork tests — Base mainnet (chain id 8453) PancakeSwap V3 external pools + Uniswap V4 PoolManager on Base.

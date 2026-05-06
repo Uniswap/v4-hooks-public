@@ -13,7 +13,9 @@ import {StableSwapAggregator} from "../src/aggregator-hooks/implementations/Stab
 import {StableSwapNGAggregator} from "../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
 import {FluidDexT1Aggregator} from "../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {FluidDexLiteAggregator} from "../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
-import {PancakeSwapV3Aggregator} from "../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {
+    PancakeSwapV3Aggregator
+} from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {SlipstreamAggregator} from "../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
 
 import {ICurveStableSwap} from "../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";

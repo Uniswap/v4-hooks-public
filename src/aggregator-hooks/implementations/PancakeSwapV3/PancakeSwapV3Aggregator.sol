@@ -2,7 +2,7 @@
 pragma solidity 0.8.29;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {UniswapV3Aggregator} from "../implementations/UniswapV3/UniswapV3Aggregator.sol";
+import {UniswapV3Aggregator} from "../UniswapV3/UniswapV3Aggregator.sol";
 import {IPancakeSwapV3Callback} from "./interfaces/IPancakeSwapV3Callback.sol";
 
 /// @notice Same as UniswapV3Aggregator but implements PancakeSwap V3 swap callback ABI

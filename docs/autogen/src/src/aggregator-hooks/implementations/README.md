@@ -3,6 +3,7 @@
 # Contents
 - [FluidDexLite](/src/aggregator-hooks/implementations/FluidDexLite)
 - [FluidDexT1](/src/aggregator-hooks/implementations/FluidDexT1)
+- [PancakeSwapV3](/src/aggregator-hooks/implementations/PancakeSwapV3)
 - [Slipstream](/src/aggregator-hooks/implementations/Slipstream)
 - [StableSwap](/src/aggregator-hooks/implementations/StableSwap)
 - [StableSwapNG](/src/aggregator-hooks/implementations/StableSwapNG)

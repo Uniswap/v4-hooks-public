@@ -15,7 +15,9 @@ import {
 } from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
 import {UniswapV3Aggregator} from "../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
 import {SlipstreamAggregator} from "../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
-import {PancakeSwapV3Aggregator} from "../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {
+    PancakeSwapV3Aggregator
+} from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {UniswapV2Aggregator} from "../src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner

@@ -1,8 +1,8 @@
 # PancakeSwapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/adb29379b80d9ef34b021ada72c07961aaf6cc84/src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/dcbc3eebe37e6bd7a961e941367bd261e93d818d/src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol)
 
 **Inherits:**
-[UniswapV3Aggregator](/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol/contract.UniswapV3Aggregator.md), [IPancakeSwapV3Callback](/src/aggregator-hooks/PancakeSwapV3/interfaces/IPancakeSwapV3Callback.sol/interface.IPancakeSwapV3Callback.md)
+[UniswapV3Aggregator](/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol/contract.UniswapV3Aggregator.md), [IPancakeSwapV3Callback](/src/aggregator-hooks/implementations/PancakeSwapV3/interfaces/IPancakeSwapV3Callback.sol/interface.IPancakeSwapV3Callback.md)
 
 Same as UniswapV3Aggregator but implements PancakeSwap V3 swap callback ABI
 

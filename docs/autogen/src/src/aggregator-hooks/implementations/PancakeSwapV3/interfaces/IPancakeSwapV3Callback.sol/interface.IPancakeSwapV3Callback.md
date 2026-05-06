@@ -1,5 +1,5 @@
 # IPancakeSwapV3Callback
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/d636b0c2e723a4f3e275fde691adb8ea9a34eb83/src/aggregator-hooks/PancakeSwapV3/interfaces/IPancakeSwapV3Callback.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/dcbc3eebe37e6bd7a961e941367bd261e93d818d/src/aggregator-hooks/implementations/PancakeSwapV3/interfaces/IPancakeSwapV3Callback.sol)
 
 **Title:**
 IPancakeSwapV3Callback

@@ -13,7 +13,9 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {PancakeSwapV3Aggregator} from "../../../src/aggregator-hooks/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {
+    PancakeSwapV3Aggregator
+} from "../../../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {MockUniV3Pool} from "../UniswapV3/mocks/MockUniV3Pool.sol";
 import {MockUniV3Factory} from "../UniswapV3/mocks/MockUniV3Factory.sol";
 
