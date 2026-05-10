@@ -218,7 +218,8 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         _setTransientExpectedPool(poolAddr);
         _setTransientSwapInputPaid(0);
 
-        // Uniswap V4 uses negative amountSpecified for exact-input swaps; Uniswap V3 `swap` expects positive for exact-input (negative for exact-output).
+        // Uniswap V4 uses negative amountSpecified for exact-input swaps.
+        // Uniswap V3 `swap` expects positive for exact-input (negative for exact-output).
         int256 v3AmountSpecified = -params.amountSpecified;
 
         poolManager.sync(settleCurrency);
