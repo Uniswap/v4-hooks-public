@@ -1,8 +1,8 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/60c534ab89000628923e8fa74a7b12cf8372330d/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
-[IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
+[IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
 
 **Title:**
 BaseAggregatorHook
@@ -126,6 +126,18 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 |----|----|-----------|
 |`permissions`|`Hooks.Permissions`|Permissions struct|
 
+
+### protocolFeeFlags
+
+Returns the hook's self-reported behavioral flags.
+
+Return 0 to indicate no self-classification (falls through to defaultFee).
+Flags are OR'd constants from HookFeeFlags — see that library for the vocabulary.
+
+
+```solidity
+function protocolFeeFlags() external view virtual override returns (uint256);
+```
 
 ### _conductSwap
 

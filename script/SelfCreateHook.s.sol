@@ -13,6 +13,10 @@ import {StableSwapAggregator} from "../src/aggregator-hooks/implementations/Stab
 import {StableSwapNGAggregator} from "../src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol";
 import {FluidDexT1Aggregator} from "../src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol";
 import {FluidDexLiteAggregator} from "../src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol";
+import {
+    PancakeSwapV3Aggregator
+} from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
+import {SlipstreamAggregator} from "../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
 
 import {ICurveStableSwap} from "../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
 import {IMetaRegistry} from "../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
@@ -40,6 +44,8 @@ contract SelfCreateHookScript is Script {
     uint8 constant ID_STABLESWAPNG = 0xC2;
     uint8 constant ID_FLUIDDEXT1 = 0xF1;
     uint8 constant ID_FLUIDDEXLITE = 0xF3;
+    uint8 constant ID_PANCAKE_V3 = 0x93;
+    uint8 constant ID_SLIPSTREAM = 0xA1;
 
     function run() public {
         // Load private key for broadcasting
@@ -50,9 +56,18 @@ contract SelfCreateHookScript is Script {
         bytes32 salt = vm.envBytes32("SALT");
         address poolManager = vm.envAddress("POOL_MANAGER");
 
-        uint24 fee = uint24(vm.envUint("FEE"));
-        int24 tickSpacing = int24(int256(vm.envUint("TICK_SPACING")));
-        uint160 sqrtPriceX96 = uint160(vm.envUint("SQRT_PRICE_X96"));
+        // Singleton protocols (PancakeSwapV3, Slipstream) only deploy the aggregator here;
+        // pool initialization is handled separately by the TypeScript orchestrator.
+        bool isSingleton = (protocolId == ID_PANCAKE_V3 || protocolId == ID_SLIPSTREAM);
+
+        uint24 fee;
+        int24 tickSpacing;
+        uint160 sqrtPriceX96;
+        if (!isSingleton) {
+            fee = uint24(vm.envUint("FEE"));
+            tickSpacing = int24(int256(vm.envUint("TICK_SPACING")));
+            sqrtPriceX96 = uint160(vm.envUint("SQRT_PRICE_X96"));
+        }
 
         address hookAddress;
 
@@ -66,25 +81,31 @@ contract SelfCreateHookScript is Script {
             hookAddress = _deployFluidDexT1(salt, poolManager);
         } else if (protocolId == ID_FLUIDDEXLITE) {
             hookAddress = _deployFluidDexLite(salt, poolManager);
+        } else if (protocolId == ID_PANCAKE_V3) {
+            hookAddress = _deployPancakeSwapV3(salt, poolManager);
+        } else if (protocolId == ID_SLIPSTREAM) {
+            hookAddress = _deploySlipstream(salt, poolManager);
         } else {
             revert("Invalid protocol ID");
         }
 
-        // Initialize one Uniswap pool per token pair. TOKENS is comma-separated (2+ for fluid, 2+ for stableswap).
-        address[] memory tokens = vm.envAddress("TOKENS", ",");
-        require(tokens.length >= 2, "TOKENS must have at least 2 addresses");
-        for (uint256 i = 0; i < tokens.length; i++) {
-            for (uint256 j = i + 1; j < tokens.length; j++) {
-                (address c0, address c1) = tokens[i] < tokens[j] ? (tokens[i], tokens[j]) : (tokens[j], tokens[i]);
-                PoolKey memory poolKey = PoolKey({
-                    currency0: Currency.wrap(c0),
-                    currency1: Currency.wrap(c1),
-                    fee: fee,
-                    tickSpacing: tickSpacing,
-                    hooks: IHooks(hookAddress)
-                });
-                IPoolManager(poolManager).initialize(poolKey, sqrtPriceX96);
-                console.log("Initialized pool:", c0, c1);
+        if (!isSingleton) {
+            // Initialize one Uniswap pool per token pair. TOKENS is comma-separated (2+ for fluid, 2+ for stableswap).
+            address[] memory tokens = vm.envAddress("TOKENS", ",");
+            require(tokens.length >= 2, "TOKENS must have at least 2 addresses");
+            for (uint256 i = 0; i < tokens.length; i++) {
+                for (uint256 j = i + 1; j < tokens.length; j++) {
+                    (address c0, address c1) = tokens[i] < tokens[j] ? (tokens[i], tokens[j]) : (tokens[j], tokens[i]);
+                    PoolKey memory poolKey = PoolKey({
+                        currency0: Currency.wrap(c0),
+                        currency1: Currency.wrap(c1),
+                        fee: fee,
+                        tickSpacing: tickSpacing,
+                        hooks: IHooks(hookAddress)
+                    });
+                    IPoolManager(poolManager).initialize(poolKey, sqrtPriceX96);
+                    console.log("Initialized pool:", c0, c1);
+                }
             }
         }
 
@@ -96,14 +117,11 @@ contract SelfCreateHookScript is Script {
         console.log("Salt:", vm.toString(salt));
         console.log("Protocol ID:", protocolId);
         console.log("Pool Manager:", poolManager);
-        console.log("Tokens:");
-        console.log("Tokens length:", tokens.length);
-        for (uint256 i = 0; i < tokens.length; i++) {
-            console.log("Token:", tokens[i]);
+        if (!isSingleton) {
+            console.log("Fee:", fee);
+            console.log("Tick Spacing:", uint24(tickSpacing));
+            console.log("Sqrt Price X96:", sqrtPriceX96);
         }
-        console.log("Fee:", fee);
-        console.log("Tick Spacing:", uint24(tickSpacing));
-        console.log("Sqrt Price X96:", sqrtPriceX96);
         console.log("================================");
     }
 
@@ -154,6 +172,24 @@ contract SelfCreateHookScript is Script {
         FluidDexLiteAggregator hook = new FluidDexLiteAggregator{salt: salt}(
             IPoolManager(poolManager), IFluidDexLite(fluidDexLite), IFluidDexLiteResolver(fluidDexLiteResolver), dexSalt
         );
+
+        return address(hook);
+    }
+
+    function _deployPancakeSwapV3(bytes32 salt, address poolManager) internal returns (address) {
+        address externalFactory = vm.envAddress("EXTERNAL_FACTORY");
+        string memory hookVersion = vm.envOr("HOOK_VERSION", string("PancakeSwapV3Aggregator v1.0"));
+
+        PancakeSwapV3Aggregator hook =
+            new PancakeSwapV3Aggregator{salt: salt}(IPoolManager(poolManager), externalFactory, hookVersion);
+
+        return address(hook);
+    }
+
+    function _deploySlipstream(bytes32 salt, address poolManager) internal returns (address) {
+        address externalFactory = vm.envAddress("EXTERNAL_FACTORY");
+
+        SlipstreamAggregator hook = new SlipstreamAggregator{salt: salt}(IPoolManager(poolManager), externalFactory);
 
         return address(hook);
     }

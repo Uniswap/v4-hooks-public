@@ -9,7 +9,7 @@ When adding support for a new protocol, you must follow these guidelines:
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
 - Update the MineAggregatorHook script to handle mining hooks for new protocol
-- For testing requirements, see test/aggreagtor-hooks/README.md
+- For testing requirements, see test/aggregator-hooks/README.md
 
 ## ID System
 
@@ -31,6 +31,10 @@ First-byte ID table:
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
 | 71  | TempoExchange      |
+| 03  | Uniswap V3         |
+| A1  | Slipstream         |
+| 93  | Pancakeswap V3     |
+| 02  | Uniswap V2         |
 
 ## Supported Protocols
 
@@ -82,6 +86,33 @@ Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton
 #### Defined interfaces
 
 The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
+
+### Uniswap V2
+
+Singleton hook routes swaps through **Uniswap V2–compatible** pairs (`getReserves`, constant-product `swap`). One deployment serves many Uniswap V4 pools; each external pair is resolved from the immutable factory via **`getPair(tokenA, tokenB)`**. On-chain reserves supply **view quotes**; `PoolKey.fee` and `PoolKey.tickSpacing` **do not** participate in routing (only the currency pair matters).
+
+| Pool Type      | Implementation        | Factory lookup                                                                                   |
+| -------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| **Uniswap V2** | `UniswapV2Aggregator` | `getPair(tokenA, tokenB)` — align `PoolKey` currencies with the pair’s `token0` / `token1` order |
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV2/interfaces/` (`IUniswapV2Pair`, `IUniswapV2Factory`) for the subset of the canonical V2 ABI the hook uses.
+
+### Uniswap V3 / Slipstream
+
+Singleton hooks route swaps through **Uniswap V3–compatible** pools (`swap` + `uniswapV3SwapCallback`). One deployment serves many Uniswap V4 pools; each external pool is keyed by factory plus tokens plus either **fee tier** (Uniswap V3 factory) or **tick spacing** (Slipstream factory).
+
+| Pool Type      | Implementation         | Factory lookup                                                                                |
+| -------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Uniswap V3** | `UniswapV3Aggregator`  | `getPool(tokenA, tokenB, fee)` — align `PoolKey.fee` with the external fee tier               |
+| **Slipstream** | `SlipstreamAggregator` | `getPool(tokenA, tokenB, tickSpacing)` — align `PoolKey.tickSpacing` with the Slipstream pool |
+
+`SlipstreamAggregator` inherits `UniswapV3Aggregator` and overrides only external pool resolution (and canonical secondary key). Quotes use a chain-deployed **Quoter** compatible with `IQuoterV2`.
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV3/interfaces/` and `implementations/Slipstream/interfaces/` (`IUniswapV3Pool`, `IUniswapV3Factory`, `ISlipstreamFactory`, `IQuoterV2`, `IUniswapV3SwapCallback`) so the repo does not require a full `v3-core` submodule.
 
 ## Architecture
 
