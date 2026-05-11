@@ -13,7 +13,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {MockTIP20} from "./mocks/MockTIP20.sol";
 import {
     TempoExchangeAggregator
