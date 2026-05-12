@@ -29,7 +29,6 @@ contract PermissionedHooks is IHooks, BaseHook {
 
     constructor(IPoolManager manager, IPermissionsAdapterFactory permissionsAdapterFactory) BaseHook(manager) {
         PERMISSIONS_ADAPTER_FACTORY = permissionsAdapterFactory;
-        Hooks.validateHookPermissions(this, getHookPermissions());
     }
 
     /// @dev Returns the hook permissions configuration for this contract
