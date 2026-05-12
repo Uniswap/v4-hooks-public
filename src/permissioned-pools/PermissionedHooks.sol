@@ -20,6 +20,9 @@ import {
     PermissionFlag
 } from "@uniswap/v4-periphery/src/hooks/permissionedPools/libraries/PermissionFlags.sol";
 
+/// @title PermissionedHooks
+/// @notice Enforces per-currency allowlist on pools containing permissioned tokens.
+/// @dev Trusts wrapper-reported `msgSender()`; wrappers must be registered in adapter `allowedWrappers`.
 contract PermissionedHooks is IHooks, BaseHook {
     IPermissionsAdapterFactory public immutable PERMISSIONS_ADAPTER_FACTORY;
 
@@ -73,8 +76,10 @@ contract PermissionedHooks is IHooks, BaseHook {
 
     /// @dev checks if the sender is allowed to access both tokens in the pool
     function _verifyAllowlist(IMsgSender sender, PoolKey calldata poolKey, bytes4 selector) internal view {
-        _isAllowed(Currency.unwrap(poolKey.currency0), sender.msgSender(), address(sender), selector);
-        _isAllowed(Currency.unwrap(poolKey.currency1), sender.msgSender(), address(sender), selector);
+        // cache so both currency checks see the same subject
+        address msgSender = sender.msgSender();
+        _isAllowed(Currency.unwrap(poolKey.currency0), msgSender, address(sender), selector);
+        _isAllowed(Currency.unwrap(poolKey.currency1), msgSender, address(sender), selector);
     }
 
     /// @dev checks if the provided token is a permissioned token by checking if it has a verified permissions adapter, if yes, check the allowlist and check whether swapping is enabled
