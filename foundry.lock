@@ -25,12 +25,33 @@
   },
   "lib/protocol-fees": {
     "branch": {
-      "name": "v4-fee-adapter",
-      "rev": "e9262fb5e3553f83ad1fc009183f3455b16e85dd"
+      "name": "v4-adapter",
+      "rev": "6be5e1d0b8ee9b6e3f76150315fd99fde33c2b2d"
     }
+  },
+  "lib/slipstream": {
+    "rev": "f8717faaae6e6717db3c8e3850149c01a79c0603"
   },
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
+  "lib/v2-core": {
+    "tag": {
+      "name": "v1.0.1",
+      "rev": "4dd59067c76dea4a0e8e4bfdda41877a6b16dedc"
+    }
+  },
+  "lib/v3-core": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "e3589b192d0be27e100cd0daaf6c97204fdb1899"
+    }
+  },
+  "lib/v3-periphery": {
+    "tag": {
+      "name": "v1.3.0",
+      "rev": "80f26c86c57b8a5e4b913f42844d4c8bd274d058"
+    }
   },
   "lib/v4-core": {
     "rev": "d153b048868a60c2403a3ef5b2301bb247884d46"

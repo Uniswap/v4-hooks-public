@@ -17,11 +17,13 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
 import {ProtocolFees} from "./ProtocolFees.sol";
+import {IFeeClassifiedHook} from "@protocol-fees/interfaces/IFeeClassifiedHook.sol";
+import {HookFeeFlags} from "@protocol-fees/libraries/HookFeeFlags.sol";
 
 /// @title BaseAggregatorHook
 /// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
 /// @dev Implements the IAggregatorHook interface, leverages the ProtocolFees contract, and extends the BaseHook contract
-abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook, DeltaResolver {
+abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, ProtocolFees, BaseHook, DeltaResolver {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
@@ -78,6 +80,11 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
         permissions.beforeSwapReturnDelta = true;
         permissions.beforeInitialize = true;
         permissions.beforeAddLiquidity = true;
+    }
+
+    /// @inheritdoc IFeeClassifiedHook
+    function protocolFeeFlags() external view virtual override returns (uint256) {
+        return HookFeeFlags.AGGREGATOR;
     }
 
     /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
