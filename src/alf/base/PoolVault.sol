@@ -293,9 +293,17 @@ abstract contract PoolVault is MultiAssetVault {
 
     /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
     function _effectiveAssets(PoolKey calldata key) internal view returns (uint256 amount0, uint256 amount1) {
-        PoolId poolId = key.toId();
-        amount0 = _effectiveBalance(poolId, key.currency0);
-        amount1 = _effectiveBalance(poolId, key.currency1);
+        return _effectiveAssets(key.toId(), key.currency0, key.currency1);
+    }
+
+    /// @dev Pool-level effective assets when the caller already has the PoolId cached.
+    function _effectiveAssets(PoolId poolId, Currency currency0, Currency currency1)
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        amount0 = _effectiveBalance(poolId, currency0);
+        amount1 = _effectiveBalance(poolId, currency1);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -411,6 +419,8 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Deposit the pool's tracked ERC-20 balance of a currency into its vault. No-op
     ///      for non-vaulted pools (the balance stays in `_state.erc20`). Pre-credits
     ///      `_vaultShares` to keep view callers coherent through the deposit callback.
+    ///      Relies on the init-time max approval so swap teardown does not pay an allowance
+    ///      read on every vaulted currency.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) return;
@@ -422,7 +432,6 @@ abstract contract PoolVault is MultiAssetVault {
         s.erc20 = 0;
         _vaultShares[poolId][currency] += sharesPredicted;
 
-        _ensureVaultAllowance(currency, address(vault), amount);
         uint256 sharesActual = vault.deposit(amount, address(this));
         if (sharesActual == 0) revert ZeroSharesMinted();
 

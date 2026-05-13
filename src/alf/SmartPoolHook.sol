@@ -536,10 +536,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
-        if (_isJITLocked(poolId)) revert JITInProgress();
         if (!livePools[poolId]) revert PoolNotLive(poolId);
 
-        _setJITLock(poolId);
+        _enterJITLock(poolId);
         _deployJIT(poolId, key);
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
@@ -591,7 +590,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         // cycle can actually pay for at deploy time. Share math (`_convertToAmounts`) deliberately
         // continues to use `_totalAssets` per INV-POOL-12 — LP pro-rata claims are over true
         // economic stake, not the momentarily-withdrawable subset.
-        (uint256 bal0, uint256 bal1) = _effectiveAssets(key);
+        (uint256 bal0, uint256 bal1) = _effectiveAssets(poolId, key.currency0, key.currency1);
         if (bal0 == 0 && bal1 == 0) return;
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
@@ -601,7 +600,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         if (n == 0) return;
 
         // Phase 1: compute allocations. Loads distribution into memory and caches sqrtPrices.
-        (uint128[] memory liqs, uint256 totalNeed0, uint256 totalNeed1) =
+        (uint128[MAX_BUCKETS] memory liqs, uint256 totalNeed0, uint256 totalNeed1) =
             _computeAllocations(distStorage, n, sqrtPriceX96, bal0, bal1);
 
         if (totalNeed0 == 0 && totalNeed1 == 0) return;
@@ -628,11 +627,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint160 sqrtPriceX96,
         uint256 bal0,
         uint256 bal1
-    ) private view returns (uint128[] memory liqs, uint256 totalNeed0, uint256 totalNeed1) {
-        liqs = new uint128[](n);
-        for (uint256 i; i < n; ++i) {
-            uint160 sqrtLower = TickMath.getSqrtPriceAtTick(dist[i].tickLower);
-            uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(dist[i].tickUpper);
+    ) private view returns (uint128[MAX_BUCKETS] memory liqs, uint256 totalNeed0, uint256 totalNeed1) {
+        for (uint256 i; i < n;) {
+            LiquidityBucket storage bucket = dist[i];
+            int24 tickLower = bucket.tickLower;
+            int24 tickUpper = bucket.tickUpper;
+            uint160 sqrtLower = TickMath.getSqrtPriceAtTick(tickLower);
+            uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(tickUpper);
 
             // Pre-budget the bucket against its weighted share of the balance. The earlier
             // implementation passed the FULL `(bal0, bal1)` to `getLiquidityForAmounts` and
@@ -641,7 +642,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             // summed liquidity (and indicative quote) overstated what the pool could actually
             // deploy. Pre-budgeting eliminates the implicit reuse and makes the indicative
             // path deterministic w.r.t. the JIT cycle's actual allocation.
-            uint256 weightBps = dist[i].weightBps;
+            uint256 weightBps = bucket.weightBps;
             uint256 weightedBal0 = bal0 * weightBps / 10_000;
             uint256 weightedBal1 = bal1 * weightBps / 10_000;
             uint128 liq =
@@ -658,6 +659,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
                     totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, lower, liq, true);
                 }
             }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -669,17 +673,18 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         PoolKey calldata key,
         LiquidityBucket[] storage dist,
         uint256 n,
-        uint128[] memory liqs
+        uint128[MAX_BUCKETS] memory liqs
     ) private {
         bytes32 base = _activeLiqBase(poolId);
-        for (uint256 i; i < n; ++i) {
+        for (uint256 i; i < n;) {
             uint128 liq = liqs[i];
             if (liq > 0) {
+                LiquidityBucket storage bucket = dist[i];
                 poolManager.modifyLiquidity(
                     key,
                     ModifyLiquidityParams({
-                        tickLower: dist[i].tickLower,
-                        tickUpper: dist[i].tickUpper,
+                        tickLower: bucket.tickLower,
+                        tickUpper: bucket.tickUpper,
                         liquidityDelta: int256(uint256(liq)),
                         salt: LP_SALT
                     }),
@@ -692,6 +697,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
                 assembly ("memory-safe") {
                     tstore(slot, liq)
                 }
+            }
+            unchecked {
+                ++i;
             }
         }
     }
@@ -708,7 +716,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint256 n = dist.length;
         bytes32 base = _activeLiqBase(poolId);
 
-        for (uint256 i; i < n; ++i) {
+        for (uint256 i; i < n;) {
             bytes32 slot;
             unchecked {
                 slot = bytes32(uint256(base) + i);
@@ -718,16 +726,20 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
                 liq := tload(slot)
             }
             if (liq > 0) {
+                LiquidityBucket storage bucket = dist[i];
                 poolManager.modifyLiquidity(
                     key,
                     ModifyLiquidityParams({
-                        tickLower: dist[i].tickLower,
-                        tickUpper: dist[i].tickUpper,
+                        tickLower: bucket.tickLower,
+                        tickUpper: bucket.tickUpper,
                         liquidityDelta: -int256(uint256(liq)),
                         salt: LP_SALT
                     }),
                     ""
                 );
+            }
+            unchecked {
+                ++i;
             }
         }
     }
@@ -823,7 +835,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         // or utilization-constrained. Share math (`_convertToAmounts`) deliberately uses
         // `_totalAssets` (uncapped) so LP pro-rata claims are not capped — see
         // INV-POOL-12 for the asymmetry rationale.
-        (uint256 bal0, uint256 bal1) = _effectiveAssets(key);
+        (uint256 bal0, uint256 bal1) = _effectiveAssets(poolId, key.currency0, key.currency1);
         if (bal0 == 0 && bal1 == 0) return (0, 0);
 
         uint160 sqrtPriceX96;
@@ -859,21 +871,26 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         LiquidityBucket[] storage dist = _distribution[poolId];
         uint256 n = dist.length;
 
-        for (uint256 i; i < n; i++) {
-            if (currentTick < dist[i].tickLower || currentTick >= dist[i].tickUpper) continue;
-            // Match `_computeAllocations`: pre-budget each bucket against its weighted share
-            // of the balance so the indicative quote tracks what JIT actually deploys.
-            uint256 weightBps = dist[i].weightBps;
-            uint256 weightedBal0 = bal0 * weightBps / 10_000;
-            uint256 weightedBal1 = bal1 * weightBps / 10_000;
-            uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96,
-                TickMath.getSqrtPriceAtTick(dist[i].tickLower),
-                TickMath.getSqrtPriceAtTick(dist[i].tickUpper),
-                weightedBal0,
-                weightedBal1
-            );
-            liquidity += liq;
+        for (uint256 i; i < n;) {
+            LiquidityBucket storage bucket = dist[i];
+            if (currentTick >= bucket.tickLower && currentTick < bucket.tickUpper) {
+                // Match `_computeAllocations`: pre-budget each bucket against its weighted share
+                // of the balance so the indicative quote tracks what JIT actually deploys.
+                uint256 weightBps = bucket.weightBps;
+                uint256 weightedBal0 = bal0 * weightBps / 10_000;
+                uint256 weightedBal1 = bal1 * weightBps / 10_000;
+                uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
+                    sqrtPriceX96,
+                    TickMath.getSqrtPriceAtTick(bucket.tickLower),
+                    TickMath.getSqrtPriceAtTick(bucket.tickUpper),
+                    weightedBal0,
+                    weightedBal1
+                );
+                liquidity += liq;
+            }
+            unchecked {
+                ++i;
+            }
         }
     }
 

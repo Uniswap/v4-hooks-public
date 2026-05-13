@@ -23,11 +23,10 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 ///         the consumer contract.
 ///
 /// @dev Subclasses MUST guard external user/admin entry points with {whenJITNotInProgress}
-///      and call `_setJITLock(poolId)` / `_clearJITLock(poolId)` exactly once per cycle.
-///      `_isJITLocked(poolId)` should be read at the top of `_beforeSwap` to reject same-
-///      pool reentrancy (which would otherwise corrupt the lifecycle: an inner cycle's
-///      `_clearJITLock` would zero the per-pool slot while the outer cycle is still
-///      mid-flight, orphaning its deployed positions).
+///      and call `_enterJITLock(poolId)` / `_clearJITLock(poolId)` exactly once per cycle.
+///      `_enterJITLock(poolId)` rejects same-pool reentrancy (which would otherwise corrupt
+///      the lifecycle: an inner cycle's `_clearJITLock` would zero the per-pool slot while
+///      the outer cycle is still mid-flight, orphaning its deployed positions).
 /// @custom:security-contact security@uniswap.org
 abstract contract JITLockable {
     /// @dev Transient namespace for per-pool JIT locks. The slot for `poolId` is
@@ -38,7 +37,7 @@ abstract contract JITLockable {
     bytes32 private constant _JIT_LOCK_NAMESPACE = keccak256("alf.jitlockable.lock.v1");
 
     /// @dev Transient slot for the global "any JIT in flight" counter. Incremented on
-    ///      `_setJITLock`, decremented on `_clearJITLock`. Read by `whenJITNotInProgress`
+    ///      `_enterJITLock`, decremented on `_clearJITLock`. Read by `whenJITNotInProgress`
     ///      to reject ANY reentrant user/admin call that originates inside an in-flight
     ///      JIT cycle anywhere in this hook -- closing the cross-pool path that a per-pool
     ///      lock alone would leave open.
@@ -56,11 +55,17 @@ abstract contract JITLockable {
         _;
     }
 
-    /// @dev Set the per-pool JIT lock and increment the global in-flight counter. Call at
-    ///      the top of a JIT cycle (typically `_beforeSwap`).
-    function _setJITLock(PoolId poolId) internal {
+    /// @dev Enter the per-pool JIT lock and increment the global in-flight counter. Call at
+    ///      the top of a JIT cycle (typically `_beforeSwap`). Combines the reentrancy check
+    ///      with the lock write so hot swap paths pay for one slot derivation instead of two.
+    function _enterJITLock(PoolId poolId) internal {
         bytes32 perPool = _jitLockSlot(poolId);
         bytes32 global = _JIT_GLOBAL_COUNTER_SLOT;
+        bool locked;
+        assembly ("memory-safe") {
+            locked := tload(perPool)
+        }
+        if (locked) revert JITInProgress();
         assembly ("memory-safe") {
             tstore(perPool, 1)
             tstore(global, add(tload(global), 1))
@@ -68,22 +73,13 @@ abstract contract JITLockable {
     }
 
     /// @dev Clear the per-pool JIT lock and decrement the global counter. Call at the end of
-    ///      a JIT cycle (typically `_afterSwap`). Callers MUST check `_isJITLocked(poolId)`
-    ///      before invoking, otherwise the counter underflows.
+    ///      a JIT cycle (typically `_afterSwap`) after a successful `_enterJITLock`.
     function _clearJITLock(PoolId poolId) internal {
         bytes32 perPool = _jitLockSlot(poolId);
         bytes32 global = _JIT_GLOBAL_COUNTER_SLOT;
         assembly ("memory-safe") {
             tstore(perPool, 0)
             tstore(global, sub(tload(global), 1))
-        }
-    }
-
-    /// @dev Returns whether the given pool has its own JIT cycle in flight.
-    function _isJITLocked(PoolId poolId) internal view returns (bool locked) {
-        bytes32 slot = _jitLockSlot(poolId);
-        assembly ("memory-safe") {
-            locked := tload(slot)
         }
     }
 
