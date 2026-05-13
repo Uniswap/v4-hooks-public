@@ -85,6 +85,10 @@ contract UniswapV2AggregatorFuzz is Test {
         vm.startPrank(alice);
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
+        // Exact-out path pulls input directly from the payer into the V2 pair via `safeTransferFrom`,
+        // so the payer must approve the hook contract for the input token.
+        token0.approve(address(hook), type(uint256).max);
+        token1.approve(address(hook), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -136,7 +140,7 @@ contract UniswapV2AggregatorFuzz is Test {
             poolKey,
             SwapParams({zeroForOne: true, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MIN_PRICE}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
+            abi.encode(alice)
         );
 
         assertEq(t0Before - token0.balanceOf(alice), expectedIn);
@@ -170,7 +174,7 @@ contract UniswapV2AggregatorFuzz is Test {
             poolKey,
             SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
+            abi.encode(alice)
         );
 
         assertEq(t1Before - token1.balanceOf(alice), expectedIn);
