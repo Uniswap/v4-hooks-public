@@ -41,6 +41,15 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     error AmountOutZero();
     error InsufficientLiquidity();
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
+    error CallerNotV2Pair();
+    error SenderNotSelf();
+
+    struct FlashCallbackData {
+        address pairAddr;
+        Currency takeCurrency;
+        Currency settleCurrency;
+        uint256 amountIn;
+    }
 
     constructor(IPoolManager manager, address factory_, string memory hookVersion)
         BaseAggregatorHook(manager, hookVersion)
@@ -122,9 +131,15 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = poolIdToExternalPair[poolId];
         if (pairAddr == address(0)) revert PoolDoesNotExist();
 
-        poolManager.sync(settleCurrency);
-        (amountTake, amountSettle) = _swapOnPair(pairAddr, takeCurrency, settleCurrency, params);
-        poolManager.settle();
+        if (params.amountSpecified < 0) {
+            // Exact-in: existing path unchanged
+            poolManager.sync(settleCurrency);
+            (amountTake, amountSettle) = _swapOnPair(pairAddr, takeCurrency, settleCurrency, params);
+            poolManager.settle();
+        } else {
+            // Exact-out: sync/settle happen inside uniswapV2Call
+            (amountTake, amountSettle) = _flashSwapExactOut(pairAddr, takeCurrency, settleCurrency, params);
+        }
         hasSettled = true;
 
         if (params.amountSpecified > 0 && uint256(params.amountSpecified) != amountSettle) {
@@ -157,7 +172,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         amountIn = numerator / denominator + 1;
     }
 
-    /// @dev Executes Constant-Product swap on `pair`. Pulls input from PoolManager to `pair` via `take`; pair sends output to PoolManager.
+    /// @dev Executes exact-in Constant-Product swap on `pair`. Pulls input from PoolManager to `pair` via `take`; pair sends output to PoolManager.
     /// @return amountTakeUsed Input amount taken from PoolManager for the pair.
     /// @return amountSettle Output amount sent by the pair to PoolManager (must match `settle` after `sync`).
     function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCurrency, SwapParams calldata params)
@@ -166,13 +181,13 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     {
         bool zeroForOne = params.zeroForOne;
 
-        (uint112 r0Before, uint112 r1Before,) = IUniswapV2Pair(pairAddr).getReserves();
-        (uint256 reserveIn, uint256 reserveOut) =
-            zeroForOne ? (uint256(r0Before), uint256(r1Before)) : (uint256(r1Before), uint256(r0Before));
-        if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolTokenMismatch();
-
         uint256 amountOut;
-        if (params.amountSpecified < 0) {
+        {
+            (uint112 r0Before, uint112 r1Before,) = IUniswapV2Pair(pairAddr).getReserves();
+            (uint256 reserveIn, uint256 reserveOut) =
+                zeroForOne ? (uint256(r0Before), uint256(r1Before)) : (uint256(r1Before), uint256(r0Before));
+            if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolTokenMismatch();
+
             amountTakeUsed = uint256(-params.amountSpecified);
             // FoT: use amount that actually lands on the pair for the quote.
             uint256 balanceTakeBefore = takeCurrency.balanceOf(pairAddr);
@@ -180,11 +195,6 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
             uint256 balanceTakeAfter = takeCurrency.balanceOf(pairAddr);
             uint256 amountArrived = balanceTakeAfter - balanceTakeBefore;
             amountOut = getAmountOut(amountArrived, reserveIn, reserveOut);
-        } else {
-            amountOut = uint256(params.amountSpecified);
-            amountTakeUsed = getAmountIn(amountOut, reserveIn, reserveOut);
-            poolManager.take(takeCurrency, pairAddr, amountTakeUsed);
-            // Fee-on-transfer input is unsupported for exact-out (pair needs full getAmountIn on balance).
         }
 
         uint256 amount0Out;
@@ -199,5 +209,63 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         uint256 balanceSettleAfter = settleCurrency.balanceOf(address(poolManager));
 
         amountSettle = balanceSettleAfter - balanceSettleBefore;
+    }
+
+    /// @dev Executes exact-out Constant-Product swap on `pair` via V2 flash-swap inversion: pair sends output to this hook
+    /// optimistically, then `uniswapV2Call` settles the output into PoolManager and `take`s the input from PoolManager to
+    /// repay the pair. Required for lazy-settlement exact-out routing where PoolManager may not yet hold the input token.
+    /// @return amountTakeUsed Input amount taken from PoolManager to repay the pair.
+    /// @return amountSettle Output amount delivered to PoolManager (must equal `params.amountSpecified`).
+    function _flashSwapExactOut(
+        address pairAddr,
+        Currency takeCurrency,
+        Currency settleCurrency,
+        SwapParams calldata params
+    ) private returns (uint256 amountTakeUsed, uint256 amountSettle) {
+        uint256 amountOut = uint256(params.amountSpecified);
+        {
+            (uint112 r0, uint112 r1,) = IUniswapV2Pair(pairAddr).getReserves();
+            (uint256 reserveIn, uint256 reserveOut) =
+                params.zeroForOne ? (uint256(r0), uint256(r1)) : (uint256(r1), uint256(r0));
+            amountTakeUsed = getAmountIn(amountOut, reserveIn, reserveOut);
+        }
+
+        uint256 pmBalBefore = settleCurrency.balanceOf(address(poolManager));
+
+        IUniswapV2Pair(pairAddr)
+            .swap(
+                params.zeroForOne ? 0 : amountOut,
+                params.zeroForOne ? amountOut : 0,
+                address(this),
+                abi.encode(
+                    FlashCallbackData({
+                        pairAddr: pairAddr,
+                        takeCurrency: takeCurrency,
+                        settleCurrency: settleCurrency,
+                        amountIn: amountTakeUsed
+                    })
+                )
+            );
+        amountSettle = settleCurrency.balanceOf(address(poolManager)) - pmBalBefore;
+    }
+
+    /// @notice Uniswap V2 flash-swap callback. Invoked by the pair after it has optimistically transferred the output
+    ///         token to this hook in an exact-out flow. Settles the output into PoolManager and repays the pair with
+    ///         the input token taken from PoolManager.
+    /// @dev Auth checks are load-bearing: only the encoded pair may invoke this, and only when this hook initiated the
+    ///      flash swap (sender == self). Otherwise an attacker could drain PoolManager via `take`.
+    function uniswapV2Call(address sender, uint256 amount0, uint256 amount1, bytes calldata data) external {
+        FlashCallbackData memory cb = abi.decode(data, (FlashCallbackData));
+        if (msg.sender != cb.pairAddr) revert CallerNotV2Pair();
+        if (sender != address(this)) revert SenderNotSelf();
+
+        // 1. Settle V2's output into PM
+        poolManager.sync(cb.settleCurrency);
+        uint256 received = amount0 > 0 ? amount0 : amount1;
+        IERC20(Currency.unwrap(cb.settleCurrency)).safeTransfer(address(poolManager), received);
+        poolManager.settle();
+
+        // 2. Repay V2 from PM
+        poolManager.take(cb.takeCurrency, msg.sender, cb.amountIn);
     }
 }
