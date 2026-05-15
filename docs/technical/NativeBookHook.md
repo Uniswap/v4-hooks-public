@@ -26,6 +26,19 @@ swaps and do not require router-provided `hookData`.
 - `retirePositions`: public keeper path for a bounded, skip-invalid batch.
 - `claimFees`: public fee-claim path; proceeds are always credited to the recorded
   maker.
+- `IALFHook` metadata: `isLive` and `maxGas` let ALF-aware callers recognize the
+  hook as an ALF hook.
+- `IALFHook` quote methods: `getIndicativeQuote` and `swapToPrice` simulate the
+  native v4 tick-walking swap path, including the same bounded stale-bin
+  retirement that `beforeSwap` applies before execution.
+- Indicative quotes are gas bounded. The quoter returns zero if simulation
+  crosses more than `MAX_QUOTE_TICK_STEPS` initialized tick steps, if a supplied
+  price limit is invalid under v4 swap rules, or if an exact-output request
+  cannot be fully satisfied.
+- `IALFHook` reserve methods: `getReserves` and `getEffectiveLiquidity`
+  intentionally return zero because this hook's executable liquidity is native
+  v4 pool liquidity, not a separate off-pool ALF curve with a cheap pool-scoped
+  reserve view.
 
 ## Core Invariants
 
@@ -58,6 +71,9 @@ swaps and do not require router-provided `hookData`.
   recorded maker's inventory.
 - `beforeSwap` must not depend on router `hookData`. It only enforces pool
   liveness and opportunistically retires a bounded number of stale/crossed bins.
+- The `IALFHook` quote surface must not overstate executable book liquidity. The
+  quote path applies virtual liquidity removals for the same bounded set of
+  expired/crossed bins that `beforeSwap` would retire before the real swap.
 
 ## Security Boundaries
 
@@ -74,6 +90,14 @@ swaps and do not require router-provided `hookData`.
 - `maxRetirePerSwap` bounds both swap-time cleanup removals and inspected
   candidates. `retirePositions(maxRetire)` bounds keeper-paid removals. Stale
   positions can remain active until swaps or keepers retire them.
+- `isLive()` is hook-level liveness for ALF discovery. Pool-level liveness is
+  still `poolLive[poolId]` and is enforced during `beforeSwap`.
+- ALF quotes are whole-pool native-v4 quotes. Routers that also route directly
+  against the same v4 pool must deduplicate by pool id or use a NativeBook-aware
+  adapter; this hook does not expose a separate book-only curve.
+- `getReserves` and `getEffectiveLiquidity` intentionally return zero for this
+  native-liquidity hook. They are not solvency or TVL views for custodied maker
+  inventory.
 
 ## Event Model
 
@@ -109,6 +133,8 @@ systems can track hook-owned native v4 positions without recomputing salts.
   rejection, expiry rejection, and wrong signer rejection.
 - Generic router swaps with empty or arbitrary `hookData`.
 - Pool liveness wrapped errors and reserved book-range wrapped errors.
+- `IALFHook` interface conformance, exact-input/exact-output quote fidelity, and
+  stale-bin retirement during indicative quoting.
 - Expired and crossed retirement, keeper batches, fee claiming, and event
   regressions.
 - A bounded fuzz property for canonical bin tracking after replacement.
@@ -144,6 +170,25 @@ The internal Pashov-style review surfaced these production issues and leads:
 - Fixed: signed replacement could be delayed until just before `deadline` and
   still receive a fresh full TTL. Signed replacement now requires
   `block.timestamp + ttl <= deadline`.
+- Fixed: the ALF quote surface previously returned the unsupported value. It now
+  simulates native v4 swap execution and excludes the same bounded set of
+  retirable bins that `beforeSwap` removes before execution.
+- Fixed: exact-output indicative quotes previously reported partial-fill input
+  as if the full requested output were satisfiable. Exact-output quotes now
+  return zero unless the full output amount can be simulated.
+- Fixed: dynamic-fee NativeBook pools previously passed the dynamic-fee sentinel
+  into quote math. The simulator now resolves the current stored PoolManager LP
+  fee and mirrors v4 protocol-fee composition.
+- Fixed: invalid price limits and 100% exact-output fee cases now fail closed to
+  zero in quote simulation instead of producing impossible results or bubbling a
+  math revert.
+- Fixed: ALF quote simulation now has an initialized-tick step cap so a dense
+  tick bitmap returns zero instead of exceeding the declared quote gas budget.
+- Fixed: `retirePositions` now rejects candidate arrays longer than `maxRetire`,
+  making keeper-paid scan work explicit.
+- Fixed: swap-time hook retirement now enters an internal settlement guard so
+  token callbacks cannot reenter public inventory or ladder mutation paths while
+  balance-diff crediting is in progress.
 - Hardened: PoolManager positive deltas now credit inventory by actual hook
   balance increase, not nominal delta.
 - Hardened: `minBinLiquidity` must be nonzero.
@@ -157,6 +202,9 @@ The internal Pashov-style review surfaced these production issues and leads:
   the current active book bands.
 - Accepted boundary: overlapping broader/narrower passive liquidity can share
   native v4 execution; the hook creates maker workflow, not CLOB priority.
+- Accepted boundary: open-relay signatures do not bind `msg.sender`. A relayer
+  can be front-run, but the maker-authorized state transition and nonce
+  consumption are still enforced.
 
 ## Static Analysis Triage
 

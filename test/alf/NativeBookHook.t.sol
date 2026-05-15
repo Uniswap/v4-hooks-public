@@ -13,10 +13,13 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {NativeBookHook} from "../../src/alf/NativeBookHook.sol";
+import {IALFHook} from "../../src/alf/interfaces/IALFHook.sol";
 
 contract NativeBookHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -129,6 +132,69 @@ contract NativeBookHookTest is Test, Deployers {
         _seedPassiveLiquidity();
         _fundAndApproveMaker(maker);
         _fundAndApproveMaker(maker2);
+    }
+
+    function test_implementsIALFHookIndicativeQuoteSurface() public view {
+        IALFHook alfHook = IALFHook(address(hook));
+
+        assertTrue(alfHook.isLive());
+        assertEq(alfHook.maxGas(), hook.INDICATIVE_QUOTE_GAS());
+        assertGt(alfHook.getIndicativeQuote(testPoolKey, true, -1 ether, ""), 0);
+
+        (uint256 reserves0, uint256 reserves1) = alfHook.getReserves(testPoolKey);
+        assertEq(reserves0, 0);
+        assertEq(reserves1, 0);
+
+        (uint256 effective0, uint256 effective1) = alfHook.getEffectiveLiquidity(testPoolKey);
+        assertEq(effective0, 0);
+        assertEq(effective1, 0);
+
+        (uint256 amountIn, uint256 amountOut) =
+            alfHook.swapToPrice(testPoolKey, true, -1 ether, TickMath.MIN_SQRT_PRICE + 1, "");
+        assertGt(amountIn, 0);
+        assertGt(amountOut, 0);
+    }
+
+    function test_getIndicativeQuote_matchesSwapExactInput() public {
+        _assertQuoteMatchesSwap(true, -1 ether);
+    }
+
+    function test_getIndicativeQuote_matchesSwapExactOutput() public {
+        _assertQuoteMatchesSwap(true, 1 ether);
+    }
+
+    function test_swapToPrice_matchesLimitedSwapExecution() public {
+        uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(-BIN_SPACING);
+
+        (uint256 quotedIn, uint256 quotedOut) = hook.swapToPrice(testPoolKey, true, -10 ether, sqrtPriceLimitX96, "");
+        BalanceDelta delta = swapRouter.swap(
+            testPoolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -10 ether, sqrtPriceLimitX96: sqrtPriceLimitX96}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertApproxEqAbs(quotedIn, uint256(-int256(delta.amount0())), 1);
+        assertApproxEqAbs(quotedOut, uint256(int256(delta.amount1())), 1);
+    }
+
+    function test_getIndicativeQuote_accountsForSwapTimeRetirement() public {
+        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
+        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
+        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+
+        vm.prank(maker);
+        hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
+        vm.warp(block.timestamp + 2);
+
+        uint256 quoted = hook.getIndicativeQuote(testPoolKey, false, -110 ether, "");
+        assertEq(hook.makerPositionCount(testPoolId, maker), 1);
+
+        BalanceDelta delta = swap(testPoolKey, false, -110 ether, "");
+        uint256 actual = uint256(int256(delta.amount0()));
+
+        assertApproxEqAbs(quoted, actual, 1);
+        assertEq(hook.makerPositionCount(testPoolId, maker), 0);
     }
 
     function test_replaceLadder_postsCanonicalBidAndAskBins() public {
@@ -530,11 +596,9 @@ contract NativeBookHookTest is Test, Deployers {
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
-        bytes32[] memory ids = new bytes32[](4);
+        bytes32[] memory ids = new bytes32[](2);
         ids[0] = hook.makerPositionAt(testPoolId, maker, 0);
-        ids[1] = bytes32(uint256(123));
-        ids[2] = hook.makerPositionAt(testPoolId, maker, 1);
-        ids[3] = hook.makerPositionAt(testPoolId, maker, 2);
+        ids[1] = hook.makerPositionAt(testPoolId, maker, 1);
 
         vm.warp(block.timestamp + 2);
         uint256 retired = hook.retirePositions(testPoolKey, ids, 2);
@@ -542,7 +606,9 @@ contract NativeBookHookTest is Test, Deployers {
         assertEq(retired, 2);
         assertEq(hook.makerPositionCount(testPoolId, maker), 1);
 
-        retired = hook.retirePositions(testPoolKey, ids, 4);
+        ids = new bytes32[](1);
+        ids[0] = hook.makerPositionAt(testPoolId, maker, 0);
+        retired = hook.retirePositions(testPoolKey, ids, 1);
         assertEq(retired, 1);
         assertEq(hook.makerPositionCount(testPoolId, maker), 0);
     }
@@ -562,8 +628,17 @@ contract NativeBookHookTest is Test, Deployers {
 
         vm.warp(block.timestamp + 2);
         vm.expectEmit(true, true, false, true, address(hook));
-        emit PositionsRetired(testPoolId, address(this), 3, 2, 2);
-        hook.retirePositions(testPoolKey, ids, 2);
+        emit PositionsRetired(testPoolId, address(this), 3, 3, 2);
+        hook.retirePositions(testPoolKey, ids, 3);
+    }
+
+    function test_retirePositions_revertsWhenCandidatesExceedScanCap() public {
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = bytes32(uint256(1));
+        ids[1] = bytes32(uint256(2));
+
+        vm.expectRevert(abi.encodeWithSelector(NativeBookHook.TooManyRetireCandidates.selector, 2, 1));
+        hook.retirePositions(testPoolKey, ids, 1);
     }
 
     function test_genericSwapExactInputAcceptsArbitraryHookData() public {
@@ -703,6 +778,47 @@ contract NativeBookHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(testPoolKey, params, "");
         params.liquidityDelta = -1 ether;
         modifyLiquidityRouter.modifyLiquidity(testPoolKey, params, "");
+    }
+
+    function test_getIndicativeQuote_returnsZeroForUnfillableExactOutput() public view {
+        uint256 quoted = hook.getIndicativeQuote(testPoolKey, true, 1_000_000_000 ether, "");
+        assertEq(quoted, 0);
+    }
+
+    function test_swapToPrice_returnsZeroForInvalidPriceLimit() public view {
+        (uint256 amountIn, uint256 amountOut) =
+            hook.swapToPrice(testPoolKey, true, -1 ether, TickMath.MAX_SQRT_PRICE - 1, "");
+        assertEq(amountIn, 0);
+        assertEq(amountOut, 0);
+    }
+
+    function test_getIndicativeQuote_matchesSwapForDynamicFeePool() public {
+        PoolKey memory dynamicPoolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+
+        vm.prank(owner);
+        hook.initializePool(dynamicPoolKey, TickMath.getSqrtPriceAtTick(0), _defaultConfig());
+        modifyLiquidityRouter.modifyLiquidity(
+            dynamicPoolKey,
+            ModifyLiquidityParams({
+                tickLower: -10 * BIN_SPACING,
+                tickUpper: 10 * BIN_SPACING,
+                liquidityDelta: 100 ether,
+                salt: bytes32(uint256(888))
+            }),
+            ""
+        );
+
+        uint256 quoted = hook.getIndicativeQuote(dynamicPoolKey, true, -1 ether, "");
+        BalanceDelta delta = swap(dynamicPoolKey, true, -1 ether, "");
+        uint256 actual = uint256(int256(delta.amount1()));
+
+        assertApproxEqAbs(quoted, actual, 1);
     }
 
     function test_cancelLadder_removesAllMakerBins() public {
@@ -970,6 +1086,21 @@ contract NativeBookHookTest is Test, Deployers {
 
         hook.claimFees(testPoolKey, positionId);
         vm.snapshotGasLastCall("NativeBookHook_claimFees_crossedAsk");
+    }
+
+    function _assertQuoteMatchesSwap(bool zeroForOne, int256 amountSpecified) internal {
+        uint256 quoted = hook.getIndicativeQuote(testPoolKey, zeroForOne, amountSpecified, "");
+        assertGt(quoted, 0);
+
+        BalanceDelta delta = swap(testPoolKey, zeroForOne, amountSpecified, "");
+        uint256 actual;
+        if (amountSpecified < 0) {
+            actual = zeroForOne ? uint256(int256(delta.amount1())) : uint256(int256(delta.amount0()));
+        } else {
+            actual = zeroForOne ? uint256(-int256(delta.amount0())) : uint256(-int256(delta.amount1()));
+        }
+
+        assertApproxEqAbs(quoted, actual, 1);
     }
 
     function _defaultConfig() internal pure returns (NativeBookHook.PoolConfig memory) {

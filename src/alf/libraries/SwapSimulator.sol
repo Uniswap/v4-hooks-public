@@ -7,16 +7,18 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BitMath} from "@uniswap/v4-core/src/libraries/BitMath.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {FeeLib} from "./FeeLib.sol";
 
 /// @title SwapSimulator
 /// @author Uniswap Labs
 /// @notice View-only library that replicates Pool.sol's tick-walking swap loop using
 ///         external state reads via StateLibrary.extsload(). Produces indicative quotes
-///         that closely match actual swap execution for a given fee override.
+///         that closely match actual swap execution for the current pool fee.
 /// @custom:security-contact security@uniswap.org
 library SwapSimulator {
     using StateLibrary for IPoolManager;
+    using LPFeeLibrary for uint24;
 
     /// @dev `lpFeePips` exceeds `SwapMath.MAX_SWAP_FEE` (1e6). Forwarding such a value into
     ///      `SwapMath.computeSwapStep`'s unchecked body would underflow `MAX_SWAP_FEE - fee`
@@ -51,6 +53,65 @@ library SwapSimulator {
         int256 amountRemaining;
         int256 amountCalc;
         uint160 sqrtPriceLimitX96;
+        bool completed;
+    }
+
+    /// @notice Virtual change to one initialized tick used during adjusted simulation.
+    /// @param tick Tick whose liquidity should be adjusted.
+    /// @param liquidityNetDelta Signed change to the tick's liquidity net.
+    /// @param liquidityGrossRemoved Gross liquidity removed from the tick.
+    struct TickAdjustment {
+        int24 tick;
+        int128 liquidityNetDelta;
+        uint128 liquidityGrossRemoved;
+    }
+
+    /// @notice Parameters for adjusted swap simulation.
+    /// @param manager PoolManager contract.
+    /// @param poolId Pool to simulate.
+    /// @param zeroForOne Swap direction.
+    /// @param amountSpecified Negative for exact input, positive for exact output.
+    /// @param lpFeePips LP fee to apply in pips.
+    /// @param tickSpacing Pool tick spacing.
+    /// @param sqrtPriceLimitX96 Target sqrt price limit in Q64.96.
+    /// @param activeLiquidityDelta Signed virtual change to current in-range liquidity.
+    /// @param tickAdjustments Virtual tick-level liquidity removals.
+    /// @param tickAdjustmentCount Number of entries in `tickAdjustments` to use.
+    /// @param maxTickSteps Maximum initialized-tick steps to simulate. Zero means unbounded.
+    struct SimulationParams {
+        IPoolManager manager;
+        PoolId poolId;
+        bool zeroForOne;
+        int256 amountSpecified;
+        uint24 lpFeePips;
+        int24 tickSpacing;
+        uint160 sqrtPriceLimitX96;
+        int128 activeLiquidityDelta;
+        TickAdjustment[] tickAdjustments;
+        uint256 tickAdjustmentCount;
+        uint256 maxTickSteps;
+    }
+
+    /// @notice Internal tick-walk parameters.
+    /// @param manager PoolManager contract.
+    /// @param poolId Pool to simulate.
+    /// @param zeroForOne Swap direction.
+    /// @param feePips Effective swap fee in pips.
+    /// @param tickSpacing Pool tick spacing.
+    /// @param exactInput True when `amountSpecified` is exact input.
+    /// @param tickAdjustments Virtual tick-level liquidity removals.
+    /// @param tickAdjustmentCount Number of entries in `tickAdjustments` to use.
+    /// @param maxTickSteps Maximum initialized-tick steps to simulate. Zero means unbounded.
+    struct WalkParams {
+        IPoolManager manager;
+        PoolId poolId;
+        bool zeroForOne;
+        uint24 feePips;
+        int24 tickSpacing;
+        bool exactInput;
+        TickAdjustment[] tickAdjustments;
+        uint256 tickAdjustmentCount;
+        uint256 maxTickSteps;
     }
 
     /// @notice Simulate a swap against a v4 pool's current state.
@@ -117,50 +178,79 @@ library SwapSimulator {
         int24 tickSpacing,
         uint160 sqrtPriceLimitX96
     ) internal view returns (uint256 amountIn, uint256 amountOut) {
-        // Input validation: `SwapMath.computeSwapStep` assumes `lpFeePips <= MAX_SWAP_FEE`
-        // (its body is `unchecked`). A fee carrying `DYNAMIC_FEE_FLAG` (0x800000) or any
-        // other out-of-range value silently corrupts the simulation. Fail fast at the
-        // boundary so the diagnostic doesn't surface as a downstream `FullMath` revert or
-        // an economically invalid quote (i.e., zero-fee where one should be applied).
-        if (lpFeePips > SwapMath.MAX_SWAP_FEE) revert InvalidLpFeePips(lpFeePips);
+        TickAdjustment[] memory tickAdjustments;
+        return simulateSwapToPriceWithAdjustments(
+            SimulationParams({
+                manager: manager,
+                poolId: poolId,
+                zeroForOne: zeroForOne,
+                amountSpecified: amountSpecified,
+                lpFeePips: lpFeePips,
+                tickSpacing: tickSpacing,
+                sqrtPriceLimitX96: sqrtPriceLimitX96,
+                activeLiquidityDelta: 0,
+                tickAdjustments: tickAdjustments,
+                tickAdjustmentCount: 0,
+                maxTickSteps: 0
+            })
+        );
+    }
 
+    /// @notice Simulate a swap with virtual liquidity adjustments applied before the first step.
+    /// @dev Used by hooks that perform bounded pre-swap cleanup in `beforeSwap` and need the
+    ///      indicative quote to reflect the same liquidity that execution will see.
+    ///
+    ///      Shares `simulateSwapToPrice`'s soft-fail contract, with one addition: when
+    ///      `params.maxTickSteps` is non-zero and the walk exhausts that budget before the
+    ///      amount or the price limit, the simulation is incomplete and returns `(0, 0)`
+    ///      rather than pricing a partial fill as if it were the whole swap.
+    /// @param params Adjusted simulation parameters.
+    /// @return amountIn Total input consumed, including fees.
+    /// @return amountOut Total output received.
+    function simulateSwapToPriceWithAdjustments(SimulationParams memory params)
+        internal
+        view
+        returns (uint256 amountIn, uint256 amountOut)
+    {
         SwapState memory s;
         {
             int24 tick;
             uint24 protocolFee;
-            (s.sqrtPriceX96, tick, protocolFee,) = manager.getSlot0(poolId);
+            uint24 storedLpFee;
+            (s.sqrtPriceX96, tick, protocolFee, storedLpFee) = params.manager.getSlot0(params.poolId);
             s.tick = tick;
-            s.sqrtPriceLimitX96 = sqrtPriceLimitX96;
+            s.sqrtPriceLimitX96 = params.sqrtPriceLimitX96;
+            if (s.sqrtPriceX96 == 0 || params.amountSpecified == 0) return (0, 0);
+            if (_invalidPriceLimit(params.zeroForOne, s.sqrtPriceX96, s.sqrtPriceLimitX96)) return (0, 0);
+
+            params.lpFeePips = _resolveLpFee(params.lpFeePips, storedLpFee);
 
             // Combine protocol fee with LP fee override, mirroring Pool.sol's fee calculation.
-            lpFeePips = FeeLib.effectiveSwapFee(lpFeePips, protocolFee, zeroForOne);
+            params.lpFeePips = FeeLib.effectiveSwapFee(params.lpFeePips, protocolFee, params.zeroForOne);
+            // Mirror `Pool.swap`'s `InvalidFeeForExactOut` as a soft-fail: a 100% swap fee
+            // cannot price an exact-output swap (the gross input is unbounded).
+            if (params.amountSpecified > 0 && params.lpFeePips >= SwapMath.MAX_SWAP_FEE) return (0, 0);
         }
-        s.liquidity = manager.getLiquidity(poolId);
+        s.liquidity = _addLiquidityDelta(params.manager.getLiquidity(params.poolId), params.activeLiquidityDelta);
 
-        if (s.sqrtPriceX96 == 0 || amountSpecified == 0) return (0, 0);
+        s.amountRemaining = params.amountSpecified;
+        s.completed = true;
 
-        // Mirror `Pool.swap`'s `sqrtPriceLimitX96` guards but soft-fail to `(0, 0)` instead
-        // of reverting. Without these, three regimes silently diverge from execution:
-        //   - Wrong-side limit: `SwapMath.computeSwapStep` re-derives direction from the
-        //     price ordering, so the loop computes a single opposite-direction step from
-        //     `current` to `limit` and returns a numerically valid but fictional non-zero
-        //     tuple whenever current-tick liquidity > 0. Pool.swap reverts.
-        //   - Limit at MIN/MAX_SQRT_PRICE: simulator walks the entire bitmap to the
-        //     boundary; Pool.swap reverts strictly at equality.
-        //   - Limit past boundary: walk's exit conditions (`amountRemaining == 0` or
-        //     `sqrtPriceX96 == sqrtPriceLimitX96`) can never fire (previously infinite,
-        //     now bounded by `MAX_WALK_STEPS`) but still yields a non-zero tuple.
-        if (zeroForOne) {
-            if (sqrtPriceLimitX96 >= s.sqrtPriceX96) return (0, 0);
-            if (sqrtPriceLimitX96 <= TickMath.MIN_SQRT_PRICE) return (0, 0);
-        } else {
-            if (sqrtPriceLimitX96 <= s.sqrtPriceX96) return (0, 0);
-            if (sqrtPriceLimitX96 >= TickMath.MAX_SQRT_PRICE) return (0, 0);
-        }
-
-        s.amountRemaining = amountSpecified;
-
-        _walkTicks(manager, poolId, s, zeroForOne, lpFeePips, tickSpacing, amountSpecified < 0);
+        _walkTicks(
+            s,
+            WalkParams({
+                manager: params.manager,
+                poolId: params.poolId,
+                zeroForOne: params.zeroForOne,
+                feePips: params.lpFeePips,
+                tickSpacing: params.tickSpacing,
+                exactInput: params.amountSpecified < 0,
+                tickAdjustments: params.tickAdjustments,
+                tickAdjustmentCount: params.tickAdjustmentCount,
+                maxTickSteps: params.maxTickSteps
+            })
+        );
+        if (!s.completed) return (0, 0);
 
         // Mirror `Pool.swap`'s final `toInt128()` cast on both `amountCalculated` and
         // `(amountSpecified - amountSpecifiedRemaining)` (see `Pool.sol` line 455/459).
@@ -169,11 +259,11 @@ library SwapSimulator {
         // parity. Triggerable in pathological combos (fees near `MAX_LP_FEE`, an aggressive
         // correct-side limit, price already adjacent to the limit) where a single step
         // pushes cumulative magnitude past `int128.max`.
-        int256 specifiedFilled = amountSpecified - s.amountRemaining;
+        int256 specifiedFilled = params.amountSpecified - s.amountRemaining;
         if (s.amountCalc < type(int128).min || s.amountCalc > type(int128).max) return (0, 0);
         if (specifiedFilled < type(int128).min || specifiedFilled > type(int128).max) return (0, 0);
 
-        if (amountSpecified < 0) {
+        if (params.amountSpecified < 0) {
             amountIn = uint256(-specifiedFilled);
             amountOut = uint256(s.amountCalc);
         } else {
@@ -189,17 +279,15 @@ library SwapSimulator {
     ///      - Highest: per-iteration next-tick lookup and bitmap masking.
     ///      - Medium: step accumulation and tick-cross liquidity updates.
     ///      - Lower: per-iteration bounds checks and branch bookkeeping.
-    function _walkTicks(
-        IPoolManager manager,
-        PoolId poolId,
-        SwapState memory s,
-        bool zeroForOne,
-        uint24 feePips,
-        int24 tickSpacing,
-        bool exactInput
-    ) private view {
-        uint256 steps = 0;
+    function _walkTicks(SwapState memory s, WalkParams memory p) private view {
+        uint256 steps;
         while (s.amountRemaining != 0 && s.sqrtPriceX96 != s.sqrtPriceLimitX96) {
+            // Caller-declared step budget: hitting it marks the simulation incomplete so
+            // the consumer sees `(0, 0)` rather than a partial fill priced as complete.
+            if (p.maxTickSteps != 0 && steps == p.maxTickSteps) {
+                s.completed = false;
+                return;
+            }
             // Defense against pathological bitmap walks (empty pools, oversized swaps past
             // LP, sparse bitmaps); see `MAX_WALK_STEPS` for rationale. Hitting the cap is a
             // graceful exit: the caller receives the partial output accumulated so far.
@@ -207,7 +295,10 @@ library SwapSimulator {
             unchecked {
                 ++steps;
             }
-            (int24 tickNext, bool initialized) = _nextInitializedTick(manager, poolId, s.tick, tickSpacing, zeroForOne);
+
+            (int24 tickNext, bool initialized) = _nextInitializedTick(
+                p.manager, p.poolId, s.tick, p.tickSpacing, p.zeroForOne, p.tickAdjustments, p.tickAdjustmentCount
+            );
 
             // Clamp tickNext to valid range (MIN_TICK, MAX_TICK)
             assembly ("memory-safe") {
@@ -227,9 +318,9 @@ library SwapSimulator {
             {
                 uint160 sqrtPriceStartX96 = _stepAndAccumulate(
                     s,
-                    SwapMath.getSqrtPriceTarget(zeroForOne, sqrtPriceNextX96, s.sqrtPriceLimitX96),
-                    feePips,
-                    exactInput
+                    SwapMath.getSqrtPriceTarget(p.zeroForOne, sqrtPriceNextX96, s.sqrtPriceLimitX96),
+                    p.feePips,
+                    p.exactInput
                 );
 
                 // Price moved mid-tick (didn't reach boundary): recompute tick
@@ -242,14 +333,16 @@ library SwapSimulator {
             // Cross tick boundary; uses cached sqrtPriceNextX96
             if (s.sqrtPriceX96 == sqrtPriceNextX96) {
                 if (initialized) {
-                    (, int128 liquidityNet) = manager.getTickLiquidity(poolId, tickNext);
+                    (, int128 liquidityNet) = _getAdjustedTickLiquidity(
+                        p.manager, p.poolId, tickNext, p.tickAdjustments, p.tickAdjustmentCount
+                    );
                     unchecked {
-                        if (zeroForOne) liquidityNet = -liquidityNet;
+                        if (p.zeroForOne) liquidityNet = -liquidityNet;
                     }
                     s.liquidity = _addLiquidityDelta(s.liquidity, liquidityNet);
                 }
                 unchecked {
-                    s.tick = zeroForOne ? tickNext - 1 : tickNext;
+                    s.tick = p.zeroForOne ? tickNext - 1 : tickNext;
                 }
             }
         }
@@ -305,12 +398,51 @@ library SwapSimulator {
         }
     }
 
-    /// @dev Find the next initialized tick using external bitmap reads.
-    function _nextInitializedTick(IPoolManager manager, PoolId poolId, int24 tick, int24 tickSpacing, bool lte)
+    /// @dev Resolve the requested LP fee to the fee the simulation should charge, mirroring
+    ///      Pool.sol's resolution order: an override-flagged fee is used with the flag
+    ///      stripped, the dynamic-fee sentinel resolves to the pool's stored LP fee, and a
+    ///      plain value is used as-is. Any resolved value above `SwapMath.MAX_SWAP_FEE`
+    ///      reverts {InvalidLpFeePips}: `SwapMath.computeSwapStep` assumes a bounded fee
+    ///      (its body is `unchecked`), so forwarding an out-of-range value would corrupt
+    ///      the simulation or surface as an opaque downstream `FullMath` revert.
+    function _resolveLpFee(uint24 requestedLpFee, uint24 storedLpFee) private pure returns (uint24 lpFee) {
+        if (requestedLpFee.isOverride()) lpFee = requestedLpFee.removeOverrideFlag();
+        else if (requestedLpFee.isDynamicFee()) lpFee = storedLpFee;
+        else lpFee = requestedLpFee;
+        if (lpFee > SwapMath.MAX_SWAP_FEE) revert InvalidLpFeePips(lpFee);
+    }
+
+    /// @dev Mirror `Pool.swap`'s `sqrtPriceLimitX96` guards; callers soft-fail to `(0, 0)`
+    ///      instead of reverting. Without these, three regimes silently diverge from
+    ///      execution:
+    ///        - Wrong-side limit: `SwapMath.computeSwapStep` re-derives direction from the
+    ///          price ordering, so the loop computes a single opposite-direction step from
+    ///          `current` to `limit` and returns a numerically valid but fictional non-zero
+    ///          tuple whenever current-tick liquidity > 0. Pool.swap reverts.
+    ///        - Limit at MIN/MAX_SQRT_PRICE: simulator walks the entire bitmap to the
+    ///          boundary; Pool.swap reverts strictly at equality.
+    ///        - Limit past boundary: walk's exit conditions (`amountRemaining == 0` or
+    ///          `sqrtPriceX96 == sqrtPriceLimitX96`) can never fire (previously infinite,
+    ///          now bounded by `MAX_WALK_STEPS`) but still yields a non-zero tuple.
+    function _invalidPriceLimit(bool zeroForOne, uint160 sqrtPriceX96, uint160 sqrtPriceLimitX96)
         private
-        view
-        returns (int24 next, bool initialized)
+        pure
+        returns (bool)
     {
+        if (zeroForOne) return sqrtPriceLimitX96 >= sqrtPriceX96 || sqrtPriceLimitX96 <= TickMath.MIN_SQRT_PRICE;
+        return sqrtPriceLimitX96 <= sqrtPriceX96 || sqrtPriceLimitX96 >= TickMath.MAX_SQRT_PRICE;
+    }
+
+    /// @dev Find the next initialized tick using external bitmap reads.
+    function _nextInitializedTick(
+        IPoolManager manager,
+        PoolId poolId,
+        int24 tick,
+        int24 tickSpacing,
+        bool lte,
+        TickAdjustment[] memory tickAdjustments,
+        uint256 tickAdjustmentCount
+    ) private view returns (int24 next, bool initialized) {
         unchecked {
             int24 compressed;
             assembly ("memory-safe") {
@@ -327,8 +459,9 @@ library SwapSimulator {
                     wordPos := sar(8, compressed)
                     bitPos := and(compressed, 0xff)
                 }
-                uint256 masked =
-                    manager.getTickBitmap(poolId, wordPos) & (type(uint256).max >> (uint256(type(uint8).max) - bitPos));
+                uint256 masked = _getAdjustedTickBitmap(
+                    manager, poolId, wordPos, tickSpacing, tickAdjustments, tickAdjustmentCount
+                ) & (type(uint256).max >> (uint256(type(uint8).max) - bitPos));
 
                 initialized = masked != 0;
                 next = initialized
@@ -343,13 +476,98 @@ library SwapSimulator {
                     wordPos := sar(8, compressed)
                     bitPos := and(compressed, 0xff)
                 }
-                uint256 masked = manager.getTickBitmap(poolId, wordPos) & ~((1 << bitPos) - 1);
+                uint256 masked = _getAdjustedTickBitmap(
+                    manager, poolId, wordPos, tickSpacing, tickAdjustments, tickAdjustmentCount
+                ) & ~((1 << bitPos) - 1);
 
                 initialized = masked != 0;
                 next = initialized
                     ? (compressed + int24(uint24(BitMath.leastSignificantBit(masked) - bitPos))) * tickSpacing
                     : (compressed + int24(uint24(type(uint8).max - bitPos))) * tickSpacing;
             }
+        }
+    }
+
+    function _getAdjustedTickBitmap(
+        IPoolManager manager,
+        PoolId poolId,
+        int16 wordPos,
+        int24 tickSpacing,
+        TickAdjustment[] memory tickAdjustments,
+        uint256 tickAdjustmentCount
+    ) private view returns (uint256 bitmap) {
+        bitmap = manager.getTickBitmap(poolId, wordPos);
+        for (uint256 i; i < tickAdjustmentCount;) {
+            int24 adjustedTick = tickAdjustments[i].tick;
+            int24 compressed = _compress(adjustedTick, tickSpacing);
+            int16 adjustedWord;
+            uint8 bitPos;
+            assembly ("memory-safe") {
+                compressed := signextend(2, compressed)
+                adjustedWord := sar(8, compressed)
+                bitPos := and(compressed, 0xff)
+            }
+            if (
+                adjustedWord == wordPos
+                    && _adjustedLiquidityGross(manager, poolId, adjustedTick, tickAdjustments, tickAdjustmentCount) == 0
+            ) {
+                bitmap &= ~(uint256(1) << bitPos);
+            }
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function _getAdjustedTickLiquidity(
+        IPoolManager manager,
+        PoolId poolId,
+        int24 tick,
+        TickAdjustment[] memory tickAdjustments,
+        uint256 tickAdjustmentCount
+    ) private view returns (uint128 liquidityGross, int128 liquidityNet) {
+        (liquidityGross, liquidityNet) = manager.getTickLiquidity(poolId, tick);
+        for (uint256 i; i < tickAdjustmentCount;) {
+            TickAdjustment memory adjustment = tickAdjustments[i];
+            if (adjustment.tick == tick) {
+                liquidityGross = adjustment.liquidityGrossRemoved >= liquidityGross
+                    ? 0
+                    : liquidityGross - adjustment.liquidityGrossRemoved;
+                liquidityNet += adjustment.liquidityNetDelta;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+        if (liquidityGross == 0) liquidityNet = 0;
+    }
+
+    function _adjustedLiquidityGross(
+        IPoolManager manager,
+        PoolId poolId,
+        int24 tick,
+        TickAdjustment[] memory tickAdjustments,
+        uint256 tickAdjustmentCount
+    ) private view returns (uint128 liquidityGross) {
+        (liquidityGross,) = manager.getTickLiquidity(poolId, tick);
+        for (uint256 i; i < tickAdjustmentCount;) {
+            TickAdjustment memory adjustment = tickAdjustments[i];
+            if (adjustment.tick == tick) {
+                liquidityGross = adjustment.liquidityGrossRemoved >= liquidityGross
+                    ? 0
+                    : liquidityGross - adjustment.liquidityGrossRemoved;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function _compress(int24 tick, int24 tickSpacing) private pure returns (int24 compressed) {
+        assembly ("memory-safe") {
+            tick := signextend(2, tick)
+            tickSpacing := signextend(2, tickSpacing)
+            compressed := sub(sdiv(tick, tickSpacing), slt(smod(tick, tickSpacing), 0))
         }
     }
 }
