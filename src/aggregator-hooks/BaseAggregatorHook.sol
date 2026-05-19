@@ -197,6 +197,8 @@ abstract contract BaseAggregatorHook is IAggregatorHook, ProtocolFees, BaseHook,
     }
 
     /// @notice Allows the contract to receive ETH for native currency swaps
-    /// @dev Required for handling native ETH transfers during swap operations
-    receive() external payable {}
+    /// @dev Required for handling native ETH transfers during swap operations.
+    ///      Marked `virtual` so hooks that reject native ETH at initialization (and therefore
+    ///      have no legitimate ETH path) can override to revert and prevent ETH from being stranded.
+    receive() external payable virtual {}
 }

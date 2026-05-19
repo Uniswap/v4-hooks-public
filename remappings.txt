@@ -3,6 +3,7 @@
 @uniswap/blocknumberish/=lib/blocknumberish/
 @openzeppelin/=lib/openzeppelin-contracts/
 @protocol-fees/=lib/protocol-fees/src/
+tstorish/=lib/tstorish/src/
 forge-std/=lib/forge-std/src/
 solmate/=lib/v4-core/lib/solmate/
 solady/=lib/solady/src/

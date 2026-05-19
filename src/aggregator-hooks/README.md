@@ -31,6 +31,7 @@ First-byte ID table:
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
 | 71  | TempoExchange      |
+| E1  | ElfomoFi           |
 
 ## Supported Protocols
 
@@ -82,6 +83,28 @@ Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton
 #### Defined interfaces
 
 The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
+
+### ElfomoFi
+
+ElfomoFi is a PropAMM whose prices are updated each block by an offchain oracle plus onchain signals. A singleton hook supports multiple token pairs (one canonical V4 pool per pair).
+
+| Pool Type     | Implementation        | Description                                           |
+| ------------- | --------------------- | ----------------------------------------------------- |
+| **ElfomoFi**  | `ElfomoFiAggregator`  | Singleton ElfomoFi PropAMM router on Base and BSC     |
+
+#### Key Details
+
+- **Chains**: Base, BSC
+- **Router Address**: `0xf0f0F0F0FB0d738452EfD03A28e8be14C76d5f73` (same on both chains)
+- **Swap Path**: `swapWithCallback` (no standing token approval; ElfomoFi pulls input tokens via the `IElfomoSwapCallback` callback)
+- **Quote Path**: `getAmountOut` / `getAmountIn`; both quote and execution route through the same pricing oracle, so quote-to-execute drift inside one transaction is zero
+- **Partner ID**: constructor-immutable on the hook; defaults to `0` ("not used") until Uniswap is assigned an ElfomoFi partner identifier. **Note**: ElfomoFi's deployed `getAmountOut` / `getAmountIn` hard-code `partnerId = 0`; if a non-zero partner ID is later set on the hook, the public `quote()` may diverge from execution if the ElfomoFi pricing oracle prices partners differently.
+- **Native ETH**: not supported in v1 (reverts in `_beforeInitialize`)
+- **Owner**: holds `deregisterPair` capability only — can evict a squatter that front-ran the team's intended `initialize()`. The owner has no other privileges and cannot move funds.
+
+#### Defined interfaces
+
+ElfomoFi interfaces are derived from the verified deployed source at `0xf0f0F0F0FB0d738452EfD03A28e8be14C76d5f73` on Base and the docs at https://docs.elfomo.fi/integration/.
 
 ## Architecture
 
