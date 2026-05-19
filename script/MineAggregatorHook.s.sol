@@ -14,6 +14,7 @@ import {
     TempoExchangeAggregator
 } from "../src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol";
 import {ElfomoFiAggregator} from "../src/aggregator-hooks/implementations/ElfomoFi/ElfomoFiAggregator.sol";
+import {TesseraAggregator} from "../src/aggregator-hooks/implementations/Tessera/TesseraAggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner
 /// @dev This script finds a salt that produces a hook address with the correct flags and first byte identifier
@@ -24,6 +25,7 @@ contract MineAggregatorHookScript is Script {
     uint8 constant ID_FLUIDDEXT1 = 0xF1;
     uint8 constant ID_FLUIDDEXLITE = 0xF3;
     uint8 constant ID_TEMPO = 0x71;
+    uint8 constant ID_TESSERA = 0x72;
     uint8 constant ID_ELFOMOFI = 0xE1;
 
     function run() public view {
@@ -47,6 +49,7 @@ contract MineAggregatorHookScript is Script {
         // 0xF2 = FluidDexV2 (not yet implemented)
         // 0xF3 = FluidDexLite
         // 0x71 = Tempo (TempoExchange)
+        // 0x72 = Tessera V EVM
         // 0xE1 = ElfomoFi
         uint8 firstByte = uint8(vm.envUint("PROTOCOL_ID"));
         bytes memory creationCode;
@@ -62,6 +65,8 @@ contract MineAggregatorHookScript is Script {
             creationCode = type(FluidDexLiteAggregator).creationCode;
         } else if (firstByte == ID_TEMPO) {
             creationCode = type(TempoExchangeAggregator).creationCode;
+        } else if (firstByte == ID_TESSERA) {
+            creationCode = type(TesseraAggregator).creationCode;
         } else if (firstByte == ID_ELFOMOFI) {
             creationCode = type(ElfomoFiAggregator).creationCode;
         } else {

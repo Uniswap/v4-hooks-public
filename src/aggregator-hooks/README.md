@@ -31,6 +31,7 @@ First-byte ID table:
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
 | 71  | TempoExchange      |
+| 72  | Tessera V EVM      |
 | E1  | ElfomoFi           |
 
 ## Supported Protocols
@@ -105,6 +106,35 @@ ElfomoFi is a PropAMM whose prices are updated each block by an offchain oracle 
 #### Defined interfaces
 
 ElfomoFi interfaces are derived from the verified deployed source at `0xf0f0F0F0FB0d738452EfD03A28e8be14C76d5f73` on Base and the docs at https://docs.elfomo.fi/integration/.
+
+### Tessera V EVM
+
+Tessera V EVM is a frontend-less PropAMM with actively managed liquidity; prices update every block (or flashblock) via the maker oracle. A singleton hook supports multiple token pairs.
+
+| Pool Type    | Implementation       | Description                                        |
+| ------------ | -------------------- | -------------------------------------------------- |
+| **Tessera**  | `TesseraAggregator`  | Singleton Tessera V EVM router on Base and BSC     |
+
+#### Key Details
+
+- **Chains**: Base, BSC
+- **Swap Router Address**: `0x55555522005BcAE1c2424D474BfD5ed477749E3e` (same on both chains)
+- **Manager (Registry) Address**: `0x31e99E05fee3DCE580af777C3fD63eE1B3B40c17` (same on both chains)
+- **Swap Path**: `tesseraSwapWithCallback` (no standing token approval; TesseraSwap pulls input tokens via the `ITesseraSwapCallback` callback)
+- **Quote Path**: `tesseraSwapViewAmounts`; uses the same engine math as execution, so quote-to-execute drift inside one transaction is zero
+- **Pair Validation**: `_beforeInitialize` confirms a direct Tessera pool exists via `ITesseraManager.getTesseraPool` and that `ITesseraPool.tradingEnabled()` is true; multi-hop routing through `baseRoutingAsset` is rejected
+- **Sign convention**: Tessera encodes `amountSpecified > 0` as exact-input (the inverse of Uniswap V4); the hook negates internally
+- **Native ETH**: not supported in v1 (reverts in `_beforeInitialize`)
+
+#### Counterparty trust model
+
+`tesseraEngine` and `tesseraTreasury` are **storage** variables on the deployed `TesseraSwap`, mutable by a single `tesseraOwner` EOA via `changeTesseraEngine` / `changeTesseraTreasury` with **no timelock**. The engine is the sole authority on `(amountIn, amountOut)` returned to the hook's callback. The hook defends against engine *bugs* by asserting the engine reports the EXACT amount the user specified for the side they specified (free, no extra call) — but it cannot defend against an *operator compromise*. **Integrators must enforce slippage on the unspecified side** (the V4 Universal Router and similar swap-routers do this). Direct `PoolManager.swap` callers without slippage protection are exposed to whatever the engine reports for the unspecified side.
+
+`tradingEnabled()` is checked only at pool registration; if Tessera's operator disables a registered pool, swaps revert opaquely inside the engine. The hook's owner can call `deregisterPair` to free the canonical slot for a fresh registration. The owner can also evict a squatter that front-ran the team's intended `initialize()` with poison `fee`/`tickSpacing`/`sqrtPriceX96` parameters if necessary.
+
+#### Defined interfaces
+
+`ITesseraSwap` and `ITesseraSwapCallback` are derived from the verified deployed source at `0x55555522005BcAE1c2424D474BfD5ed477749E3e` on Base. `ITesseraManager` and `ITesseraPool` are minimal interfaces derived from observed interactions and have been validated by the team.
 
 ## Architecture
 
