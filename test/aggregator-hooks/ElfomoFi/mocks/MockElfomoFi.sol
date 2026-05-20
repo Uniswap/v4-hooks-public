@@ -2,8 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {IElfomoFi} from "../../../../src/aggregator-hooks/implementations/ElfomoFi/interfaces/IElfomoFi.sol";
-import {IElfomoSwapCallback} from
-    "../../../../src/aggregator-hooks/implementations/ElfomoFi/interfaces/IElfomoSwapCallback.sol";
+import {
+    IElfomoSwapCallback
+} from "../../../../src/aggregator-hooks/implementations/ElfomoFi/interfaces/IElfomoSwapCallback.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 

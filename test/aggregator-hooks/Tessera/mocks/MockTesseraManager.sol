@@ -25,12 +25,7 @@ contract MockTesseraManager is ITesseraManager {
         _count += 1;
     }
 
-    function getTesseraPool(address tokenA, address tokenB)
-        external
-        view
-        override
-        returns (bool exists, address pool)
-    {
+    function getTesseraPool(address tokenA, address tokenB) external view override returns (bool exists, address pool) {
         pool = _pools[tokenA][tokenB];
         exists = pool != address(0);
     }

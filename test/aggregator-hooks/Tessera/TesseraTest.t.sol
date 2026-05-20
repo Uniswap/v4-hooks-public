@@ -256,8 +256,7 @@ contract TesseraTest is Test {
         MockERC20 b = new MockERC20("B", "B", DECIMALS);
         if (address(a) > address(b)) (a, b) = (b, a);
 
-        MockTesseraPool disabledPool =
-            new MockTesseraPool(address(a), address(b), DECIMALS, DECIMALS, false);
+        MockTesseraPool disabledPool = new MockTesseraPool(address(a), address(b), DECIMALS, DECIMALS, false);
         tesseraManager.registerPool(address(a), address(b), address(disabledPool));
 
         PoolKey memory disabledKey = PoolKey({
@@ -273,11 +272,7 @@ contract TesseraTest is Test {
 
     function test_initialize_DuplicatePair_reverts() public {
         PoolKey memory dupKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: 3000, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         vm.expectRevert();
         manager.initialize(dupKey, SQRT_PRICE_1_1);
@@ -471,11 +466,7 @@ contract TesseraTest is Test {
         assertEq(stored1, address(0));
 
         PoolKey memory freshKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(address(hook))
+            currency0: currency0, currency1: currency1, fee: 3000, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         manager.initialize(freshKey, SQRT_PRICE_1_1);
         (address fresh0, address fresh1,) = hook.poolIdToTokens(freshKey.toId());
@@ -504,9 +495,7 @@ contract TesseraTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: -int256(uint256(amountIn)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: -int256(uint256(amountIn)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
@@ -528,9 +517,7 @@ contract TesseraTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: int256(uint256(amountOut)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: int256(uint256(amountOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""

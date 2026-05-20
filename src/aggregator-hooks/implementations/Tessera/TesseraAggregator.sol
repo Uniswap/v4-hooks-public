@@ -71,10 +71,12 @@ contract TesseraAggregator is BaseAggregatorHook, ITesseraSwapCallback, Ownable,
     uint256 private constant INFLIGHT_SLOT = 0x11a0603b55240a854fd60675cd448f7099007c1401b0c576c7adaf6e4455a553;
     /// @dev Slot that captures the input amount TesseraSwap reports in the callback.
     ///      Value: `uint256(keccak256("aggregator-hooks.tessera.callback-amount-in")) - 1`.
-    uint256 private constant CALLBACK_AMOUNT_IN_SLOT = 0xdb305eccc6a8a82989ca68cc0fc484c898db8ebe32aeda1251ea1898bada2364;
+    uint256 private constant CALLBACK_AMOUNT_IN_SLOT =
+        0xdb305eccc6a8a82989ca68cc0fc484c898db8ebe32aeda1251ea1898bada2364;
     /// @dev Slot that captures the output amount TesseraSwap reports in the callback.
     ///      Value: `uint256(keccak256("aggregator-hooks.tessera.callback-amount-out")) - 1`.
-    uint256 private constant CALLBACK_AMOUNT_OUT_SLOT = 0xf2c0893ae0a70fd8a5cc13e7f46d2b6cf9ff1f1fd3fcfd40c23a292ae5f5ed3e;
+    uint256 private constant CALLBACK_AMOUNT_OUT_SLOT =
+        0xf2c0893ae0a70fd8a5cc13e7f46d2b6cf9ff1f1fd3fcfd40c23a292ae5f5ed3e;
 
     /// @notice Emitted when the owner deregisters a canonical pair, freeing it for a new pool
     /// @param poolId The pool id that was holding the canonical slot for the pair.
@@ -172,8 +174,7 @@ contract TesseraAggregator is BaseAggregatorHook, ITesseraSwapCallback, Ownable,
         address tokenOut = zeroToOne ? tokens.token1 : tokens.token0;
 
         // V4: amountSpecified < 0 = exact-in; Tessera: amountSpecified > 0 = exact-in
-        (uint256 amountIn, uint256 amountOut) =
-            tesseraSwap.tesseraSwapViewAmounts(tokenIn, tokenOut, -amountSpecified);
+        (uint256 amountIn, uint256 amountOut) = tesseraSwap.tesseraSwapViewAmounts(tokenIn, tokenOut, -amountSpecified);
         amountUnspecified = amountSpecified < 0 ? amountOut : amountIn;
     }
 

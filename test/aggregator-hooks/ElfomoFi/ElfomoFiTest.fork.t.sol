@@ -207,9 +207,7 @@ contract ElfomoFiForkedTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: -int256(uint256(amountIn)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: -int256(uint256(amountIn)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""

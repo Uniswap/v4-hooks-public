@@ -89,9 +89,9 @@ The interface is defined based on Tempo's [official documentation](https://docs.
 
 ElfomoFi is a PropAMM whose prices are updated each block by an offchain oracle plus onchain signals. A singleton hook supports multiple token pairs (one canonical V4 pool per pair).
 
-| Pool Type     | Implementation        | Description                                           |
-| ------------- | --------------------- | ----------------------------------------------------- |
-| **ElfomoFi**  | `ElfomoFiAggregator`  | Singleton ElfomoFi PropAMM router on Base and BSC     |
+| Pool Type    | Implementation       | Description                                       |
+| ------------ | -------------------- | ------------------------------------------------- |
+| **ElfomoFi** | `ElfomoFiAggregator` | Singleton ElfomoFi PropAMM router on Base and BSC |
 
 #### Key Details
 
@@ -111,9 +111,9 @@ ElfomoFi interfaces are derived from the verified deployed source at `0xf0f0F0F0
 
 Tessera V EVM is a frontend-less PropAMM with actively managed liquidity; prices update every block (or flashblock) via the maker oracle. A singleton hook supports multiple token pairs.
 
-| Pool Type    | Implementation       | Description                                        |
-| ------------ | -------------------- | -------------------------------------------------- |
-| **Tessera**  | `TesseraAggregator`  | Singleton Tessera V EVM router on Base and BSC     |
+| Pool Type   | Implementation      | Description                                    |
+| ----------- | ------------------- | ---------------------------------------------- |
+| **Tessera** | `TesseraAggregator` | Singleton Tessera V EVM router on Base and BSC |
 
 #### Key Details
 
@@ -128,7 +128,7 @@ Tessera V EVM is a frontend-less PropAMM with actively managed liquidity; prices
 
 #### Counterparty trust model
 
-`tesseraEngine` and `tesseraTreasury` are **storage** variables on the deployed `TesseraSwap`, mutable by a single `tesseraOwner` EOA via `changeTesseraEngine` / `changeTesseraTreasury` with **no timelock**. The engine is the sole authority on `(amountIn, amountOut)` returned to the hook's callback. The hook defends against engine *bugs* by asserting the engine reports the EXACT amount the user specified for the side they specified (free, no extra call) — but it cannot defend against an *operator compromise*. **Integrators must enforce slippage on the unspecified side** (the V4 Universal Router and similar swap-routers do this). Direct `PoolManager.swap` callers without slippage protection are exposed to whatever the engine reports for the unspecified side.
+`tesseraEngine` and `tesseraTreasury` are **storage** variables on the deployed `TesseraSwap`, mutable by a single `tesseraOwner` EOA via `changeTesseraEngine` / `changeTesseraTreasury` with **no timelock**. The engine is the sole authority on `(amountIn, amountOut)` returned to the hook's callback. The hook defends against engine _bugs_ by asserting the engine reports the EXACT amount the user specified for the side they specified (free, no extra call) — but it cannot defend against an _operator compromise_. **Integrators must enforce slippage on the unspecified side** (the V4 Universal Router and similar swap-routers do this). Direct `PoolManager.swap` callers without slippage protection are exposed to whatever the engine reports for the unspecified side.
 
 `tradingEnabled()` is checked only at pool registration; if Tessera's operator disables a registered pool, swaps revert opaquely inside the engine. The hook's owner can call `deregisterPair` to free the canonical slot for a fresh registration. The owner can also evict a squatter that front-ran the team's intended `initialize()` with poison `fee`/`tickSpacing`/`sqrtPriceX96` parameters if necessary.
 

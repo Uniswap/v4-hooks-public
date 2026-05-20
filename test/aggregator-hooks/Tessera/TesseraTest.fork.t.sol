@@ -126,9 +126,8 @@ contract TesseraForkedTest is Test {
         );
         // TesseraSwap treasury on Base (slot 1 of TesseraSwap): 0x3dbe077e7986657e95e1cc50089f17a5a4af0aae
         address tesseraTreasury = vm.envOr("TESSERA_TREASURY", address(0x3dBE077e7986657E95e1CC50089f17a5a4AF0AaE));
-        bytes memory constructorArgs = abi.encode(
-            address(manager), tesseraSwapAddress, tesseraManagerAddress, tesseraTreasury, address(this)
-        );
+        bytes memory constructorArgs =
+            abi.encode(address(manager), tesseraSwapAddress, tesseraManagerAddress, tesseraTreasury, address(this));
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(TesseraAggregator).creationCode, constructorArgs);
         hook = new TesseraAggregator{salt: salt}(
@@ -213,9 +212,7 @@ contract TesseraForkedTest is Test {
         swapRouter.swap(
             poolKey,
             SwapParams({
-                zeroForOne: true,
-                amountSpecified: -int256(uint256(amountIn)),
-                sqrtPriceLimitX96: MIN_PRICE_LIMIT
+                zeroForOne: true, amountSpecified: -int256(uint256(amountIn)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
             }),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""

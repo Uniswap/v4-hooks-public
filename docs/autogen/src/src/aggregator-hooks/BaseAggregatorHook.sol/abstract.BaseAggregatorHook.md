@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/03c6c317e620e2eb32675653ad26bf7faacc5605/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -243,10 +243,12 @@ function _pay(Currency token, address payer, uint256 amount) internal override;
 
 Allows the contract to receive ETH for native currency swaps
 
-Required for handling native ETH transfers during swap operations
+Required for handling native ETH transfers during swap operations.
+Marked `virtual` so hooks that reject native ETH at initialization (and therefore
+have no legitimate ETH path) can override to revert and prevent ETH from being stranded.
 
 
 ```solidity
-receive() external payable;
+receive() external payable virtual;
 ```
 

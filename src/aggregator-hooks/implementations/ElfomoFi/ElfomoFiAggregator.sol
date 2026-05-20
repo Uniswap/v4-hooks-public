@@ -66,10 +66,12 @@ contract ElfomoFiAggregator is BaseAggregatorHook, IElfomoSwapCallback, Ownable,
     uint256 private constant INFLIGHT_SLOT = 0xbf35faecc380af431437a321ef8ef6b194285d57e89943775f424ab582ab8714;
     /// @dev Slot that captures the amount of `fromToken` ElfomoFi reports in the callback.
     ///      Value: `uint256(keccak256("aggregator-hooks.elfomo-fi.callback-amount-in")) - 1`.
-    uint256 private constant CALLBACK_AMOUNT_IN_SLOT = 0xba9cd5fa12de9303ee2a6860411fa6a29fe681192d5c194de5fb3ec2a4f5f0ac;
+    uint256 private constant CALLBACK_AMOUNT_IN_SLOT =
+        0xba9cd5fa12de9303ee2a6860411fa6a29fe681192d5c194de5fb3ec2a4f5f0ac;
     /// @dev Slot that captures the amount of `toToken` ElfomoFi reports in the callback.
     ///      Value: `uint256(keccak256("aggregator-hooks.elfomo-fi.callback-amount-out")) - 1`.
-    uint256 private constant CALLBACK_AMOUNT_OUT_SLOT = 0x0c3c2eaa0f36d92d1462d72fc6eb299bf0f62fd769692de3ac027ff56932f068;
+    uint256 private constant CALLBACK_AMOUNT_OUT_SLOT =
+        0x0c3c2eaa0f36d92d1462d72fc6eb299bf0f62fd769692de3ac027ff56932f068;
 
     /// @notice Emitted when the owner deregisters a canonical pair, freeing it for a new pool
     /// @param poolId The pool id that was holding the canonical slot for the pair.
@@ -117,13 +119,10 @@ contract ElfomoFiAggregator is BaseAggregatorHook, IElfomoSwapCallback, Ownable,
     /// @param _partnerId Partner identifier used on every `swapWithCallback`. Use `0` until Uniswap
     ///        is assigned an official partner ID for ElfomoFi rebates.
     /// @param _owner The address that may deregister squatted canonical pairs.
-    constructor(
-        IPoolManager _manager,
-        IElfomoFi _elfomoFi,
-        address _elfomoFiVault,
-        uint256 _partnerId,
-        address _owner
-    ) BaseAggregatorHook(_manager, "ElfomoFiAggregator v1.0") Ownable(_owner) {
+    constructor(IPoolManager _manager, IElfomoFi _elfomoFi, address _elfomoFiVault, uint256 _partnerId, address _owner)
+        BaseAggregatorHook(_manager, "ElfomoFiAggregator v1.0")
+        Ownable(_owner)
+    {
         if (address(_manager) == address(0)) revert ZeroAddress();
         if (address(_elfomoFi) == address(0)) revert ZeroAddress();
         if (_elfomoFiVault == address(0)) revert ZeroAddress();
