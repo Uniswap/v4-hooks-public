@@ -242,6 +242,10 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         _setTransientExpectedPool(address(0));
         _setTransientSwapInputPaid(0);
 
+        if (params.amountSpecified > 0 && uint256(params.amountSpecified) != amountSettle) {
+            revert UnexpectedSwapOutputDelta();
+        }
+
         poolManager.settle();
         hasSettled = true;
     }
