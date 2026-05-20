@@ -42,7 +42,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     error InsufficientLiquidity();
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 
-    constructor(IPoolManager manager, address factory_,  uint256 fee_, string memory hookVersion)
+    constructor(IPoolManager manager, address factory_, uint256 fee_, string memory hookVersion)
         BaseAggregatorHook(manager, hookVersion)
     {
         factory = factory_;

@@ -109,7 +109,8 @@ contract UniswapV2AggregatorForkTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(address(manager), uniFactory, uint256(3000), "UniswapV2Aggregator v1.0");
+        bytes memory constructorArgs =
+            abi.encode(address(manager), uniFactory, uint256(3000), "UniswapV2Aggregator v1.0");
         (address hookAddress, bytes32 salt) =
             HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
         hook = new UniswapV2Aggregator{salt: salt}(manager, uniFactory, 3000, "UniswapV2Aggregator v1.0");
