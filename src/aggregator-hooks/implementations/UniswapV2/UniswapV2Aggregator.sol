@@ -26,8 +26,8 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     address public immutable factory;
 
-    uint256 internal constant FEE = 3;
-    uint256 internal constant FEE_DENOMINATOR = 1000;
+    uint256 public immutable fee;
+    uint256 internal constant FEE_DENOMINATOR = 1_000_000;
 
     mapping(PoolId => address) public poolIdToExternalPair;
     mapping(address => PoolKey) private _canonicalPoolKeyByAddress;
@@ -42,10 +42,11 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     error InsufficientLiquidity();
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 
-    constructor(IPoolManager manager, address factory_, string memory hookVersion)
+    constructor(IPoolManager manager, address factory_,  uint256 fee_, string memory hookVersion)
         BaseAggregatorHook(manager, hookVersion)
     {
         factory = factory_;
+        fee = fee_;
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -139,7 +140,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     {
         if (amountIn == 0) revert AmountInZero();
         if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
-        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - FEE);
+        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - fee);
         uint256 numerator = amountInWithFee * reserveOut;
         uint256 denominator = reserveIn * FEE_DENOMINATOR + amountInWithFee;
         amountOut = numerator / denominator;
@@ -153,7 +154,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         if (amountOut == 0) revert AmountOutZero();
         if (reserveIn == 0 || reserveOut == 0 || amountOut > reserveOut) revert InsufficientLiquidity();
         uint256 numerator = reserveIn * amountOut * FEE_DENOMINATOR;
-        uint256 denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - FEE);
+        uint256 denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - fee);
         amountIn = numerator / denominator + 1;
     }
 

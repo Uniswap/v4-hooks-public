@@ -135,7 +135,7 @@ contract UniswapV2AggregatorUnitTest is Test {
         );
         bytes memory constructorArgs = abi.encode(poolManager, address(factory), "UniswapV2Aggregator v1.0");
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
-        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), 3000, "UniswapV2Aggregator v1.0");
     }
 
     function _expectedQuote(bool zeroForOne, int256 amountSpecified) internal view returns (uint256) {

@@ -105,7 +105,7 @@ contract UniswapV2AggregatorFuzz is Test {
         );
         bytes memory constructorArgs = abi.encode(poolManager, address(factory), "UniswapV2Aggregator v1.0");
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
-        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), 3000, "UniswapV2Aggregator v1.0");
     }
 
     function testFuzz_swapExactIn_zeroForOne(uint256 amountIn) public {
