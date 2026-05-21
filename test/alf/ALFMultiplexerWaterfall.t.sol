@@ -16,6 +16,7 @@ import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
@@ -131,7 +132,7 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
         quoterB.setPoolLive(quoterBPoolKey, true);
 
         // Vanilla pool: wide LP range straddling spot, deep enough that 1-token swaps stay in-range.
-        _seedVanillaLP(-1200, 1200, 250_000e18, 250_000e18);
+        _seedLP(vanillaPoolKey, -1200, 1200, 250_000e18, 250_000e18);
 
         // MockWaterfallHook: hold inventory directly so flash-accounting transfers succeed.
         MockERC20(Currency.unwrap(currency0)).mint(address(mockHook), 100_000e18);
@@ -288,6 +289,60 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
+    //  TIER 2 — dynamic-fee pool (simulator-safe: no `BEFORE_SWAP_FLAG`) quotes via slot0.lpFee.
+    //
+    //  V4 only allows per-swap fee overrides when the hook has `BEFORE_SWAP_FLAG`. Without that
+    //  flag, the fee applied at swap is exactly `slot0.lpFee`, so the simulator will exactly
+    //  match the execution within the same call frame as `quote()`.
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// @dev V4 requires `hooks != address(0)` for dynamic-fee pools but allows zero permission
+    ///      flags. We use a no-code, high-bit-only address so `_supportsInterface` short-circuits
+    ///      on `code.length == 0` and the manager never tries to call into the hook.
+    function test_tier2_dynamicFeePool_usesSlot0Fee() public {
+        IHooks zeroFlagsHook = IHooks(address(uint160(1 << 20))); // bits 0..13 (permission flags) all clear
+        PoolKey memory dynamicFeeKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: VANILLA_TICK_SPACING,
+            hooks: zeroFlagsHook
+        });
+        manager.initialize(dynamicFeeKey, Constants.SQRT_PRICE_1_1);
+        _seedLP(dynamicFeeKey, -1200, 1200, 250_000e18, 250_000e18);
+
+        // Push a non-zero dynamic fee so the slot0 read is actually meaningful (default is 0).
+        // updateDynamicLPFee is gated on msg.sender == address(key.hooks); impersonate it.
+        uint24 dynamicLpFee = 3000; // 0.3%
+        vm.prank(address(zeroFlagsHook));
+        manager.updateDynamicLPFee(dynamicFeeKey, dynamicLpFee);
+        (,,, uint24 actualSlot0Fee) = manager.getSlot0(dynamicFeeKey.toId());
+        assertEq(actualSlot0Fee, dynamicLpFee, "slot0 fee should reflect the update");
+
+        int256 amountSpecified = -1e18;
+        TargetedQuoter[] memory targets = new TargetedQuoter[](1);
+        targets[0] = TargetedQuoter({poolKey: dynamicFeeKey, amountSpecified: 0});
+
+        // View-side: the multiplexer should hit tier 2 and quote with the slot0 fee, not 0.
+        (,, uint256 bestQuote,) = multiplexer.quote(true, amountSpecified, _buildHookData(targets));
+        uint256 expected = SwapSimulator.simulateSwap(
+            manager, dynamicFeeKey.toId(), true, amountSpecified, dynamicLpFee, VANILLA_TICK_SPACING
+        );
+        assertEq(bestQuote, expected, "tier 2 dynamic-fee quote must use slot0.lpFee");
+        assertGt(bestQuote, 0, "non-zero quote expected");
+
+        // End-to-end: routed execution exactly matches a direct swap on the dynamic-fee pool.
+        uint256 snapId = vm.snapshotState();
+        BalanceDelta direct = swap(dynamicFeeKey, true, amountSpecified, "");
+        uint256 directOut = uint256(int256(direct.amount1()));
+        vm.revertToState(snapId);
+
+        BalanceDelta routed = swap(multiplexerPoolKey, true, amountSpecified, _buildHookData(targets));
+        assertEq(routed.amount0(), amountSpecified);
+        assertEq(uint256(int256(routed.amount1())), directOut, "tier 2 execution matches direct swap exactly");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
     //  TIER 1 baseline — lock the gas profile so a regression that re-adds the reverting-swap
     //  verification step would be caught.
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -328,8 +383,8 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
         );
     }
 
-    function _seedVanillaLP(int24 tickLower, int24 tickUpper, uint256 amount0, uint256 amount1) internal {
-        (uint160 sqrtPriceX96,,,) = manager.getSlot0(vanillaPoolKey.toId());
+    function _seedLP(PoolKey memory key_, int24 tickLower, int24 tickUpper, uint256 amount0, uint256 amount1) internal {
+        (uint160 sqrtPriceX96,,,) = manager.getSlot0(key_.toId());
         uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
             sqrtPriceX96,
             TickMath.getSqrtPriceAtTick(tickLower),
@@ -338,7 +393,7 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
             amount1
         );
         modifyLiquidityRouter.modifyLiquidity(
-            vanillaPoolKey,
+            key_,
             ModifyLiquidityParams({tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: int128(liq), salt: 0}),
             ""
         );

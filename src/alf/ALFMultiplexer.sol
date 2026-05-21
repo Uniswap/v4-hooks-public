@@ -502,13 +502,29 @@ contract ALFMultiplexer is BaseHook, Ownable {
             return _queryViaIALFHook(hook, target.poolKey, attestationData, zeroForOne, amountSpecified);
         }
 
-        // Tier 2: simulator-safe pool (vanilla CFMM or hook that doesn't override the curve)
+        // Tier 2: simulator-safe pool (vanilla CFMM or hook that doesn't override the curve).
+        // For dynamic-fee pools, `_isSimulatorSafe` guarantees the hook can't push an
+        // `lpFeeOverride` per-swap (no `BEFORE_SWAP_FLAG`), so `slot0.lpFee` IS the
+        // execution-time fee in this call frame. Cross-block freshness is the router's
+        // slippage-protection concern, not ours.
         if (_isSimulatorSafe(target.poolKey)) {
-            uint24 lpFee = LPFeeLibrary.isDynamicFee(target.poolKey.fee) ? 0 : target.poolKey.fee;
-            uint256 indicative = SwapSimulator.simulateSwap(
-                poolManager, target.poolKey.toId(), zeroForOne, amountSpecified, lpFee, target.poolKey.tickSpacing
+            uint24 lpFee;
+            if (LPFeeLibrary.isDynamicFee(target.poolKey.fee)) {
+                (,,, lpFee) = poolManager.getSlot0(target.poolKey.toId());
+            } else {
+                lpFee = target.poolKey.fee;
+            }
+            return (
+                SwapSimulator.simulateSwap(
+                    poolManager,
+                    target.poolKey.toId(),
+                    zeroForOne,
+                    amountSpecified,
+                    lpFee,
+                    target.poolKey.tickSpacing
+                ),
+                ""
             );
-            return (indicative, "");
         }
 
         // Tier 3: IIndicativeQuote (aggregator hooks, PropAMMs, etc.).
@@ -576,9 +592,16 @@ contract ALFMultiplexer is BaseHook, Ownable {
         }
     }
 
-    /// @dev True when `SwapSimulator.simulateSwap` will produce an exact quote for the pool:
-    ///      no `beforeSwap`-returns-delta hook, no `afterSwap`-returns-delta hook, and no
-    ///      hook-driven dynamic LP fee. Vanilla v4 pools (no hook) qualify trivially.
+    /// @dev True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
+    ///      pool. The hook (if any) must NOT:
+    ///        - return a `beforeSwap` delta (could override curve output)
+    ///        - return an `afterSwap` delta (could adjust post-swap delta)
+    ///        - have `BEFORE_SWAP_FLAG` set AND be a dynamic-fee pool (would let the hook push an
+    ///          `lpFeeOverride` per-swap that we can't observe from view context)
+    ///      For dynamic-fee pools that DON'T have `BEFORE_SWAP_FLAG`, the fee applied at swap is
+    ///      exactly `slot0.lpFee` (V4 doesn't allow per-swap overrides without that flag), so the
+    ///      simulator IS exact in the same call frame. Cross-block freshness is a router-level
+    ///      slippage concern, not ours. Vanilla v4 pools (no hook) qualify trivially.
     ///      Pure function; reads only the address-encoded hook permission bits and the pool fee.
     function _isSimulatorSafe(PoolKey memory key) internal pure returns (bool) {
         if (address(key.hooks) == address(0)) return true;
