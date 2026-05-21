@@ -63,8 +63,16 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         if (pool == address(0)) revert ExternalPoolNotFound();
     }
 
-    /// @inheritdoc BaseAggregatorHook
-    function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
+    /// @notice Returns the raw quote from the underlying liquidity source without protocol fees
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @return amountUnspecified The raw unspecified amount before protocol fee adjustment
+    /// @dev Prices the swap using reserve math (matching canonical V2 getAmountsOut) and does not account for
+    ///      fee-on-transfer input tokens. For such tokens the actual output is lower than quoted because the pair
+    ///      receives less than the nominal input amount. Integrators that pass the quoted value as a router
+    ///      minimum-output check will see the swap revert on shortfall; no funds are lost.
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
         view
         override
