@@ -25,6 +25,7 @@ contract SlipstreamAggregator is UniswapV3Aggregator {
         returns (address pool)
     {
         pool = ISlipstreamFactory(factory).getPool(token0, token1, key.tickSpacing);
-        require(IUniswapV3Pool(pool).tickSpacing() == key.tickSpacing);
+        if (pool == address(0)) revert ExternalPoolNotFound();
+        if (IUniswapV3Pool(pool).tickSpacing() != key.tickSpacing) revert ExternalPoolMismatch();
     }
 }
