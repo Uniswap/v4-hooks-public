@@ -1,5 +1,5 @@
 # IMetaRegistry
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/6be38dd5678e1d660f50a3887dafdab8514893da/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol)
 
 **Title:**
 IMetaRegistry

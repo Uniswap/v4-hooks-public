@@ -26,10 +26,31 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///
 /// @notice Stateless atomic multiplexer deployed on a virtual (zero-liquidity) pool.
 ///
-///         The multiplexer provides onchain competitive execution across multiple ALF quoter
-///         hooks. It receives a set of targeted quoters from the router via hookData, simulates
-///         each candidate through the real v4 swap path, and executes a **greedy split fill**
-///         that distributes swap flow across candidates in order of indicative quality.
+///         The multiplexer provides onchain competitive execution across an arbitrary mix of v4
+///         pools: ALF-native quoter hooks (with the rich liveness / gas-budget / attestation
+///         surface), vanilla CFMM pools, and third-party hooks that override the AMM curve. It
+///         receives a set of targeted candidate pools from the router via hookData, sizes each
+///         via a tiered quote waterfall, and executes a **greedy split fill** that distributes
+///         swap flow across candidates in order of indicative quality.
+///
+///         ## Tiered Quote Waterfall
+///
+///         Per candidate, the multiplexer probes for indicative pricing in order of richness.
+///         Tier selection is purely a property of the candidate's PoolKey (hook flags +
+///         ERC-165 advertisement); the router doesn't need to know which tier will fire.
+///
+///           1. **IALFHook** (ERC-165 detected) — the rich path: liveness check, gas budget,
+///              attestation, and per-candidate ALFHookData.
+///           2. **SwapSimulator** — for vanilla CFMM pools and hooks that don't override the
+///              swap curve (no `beforeSwap` / `afterSwap` returns-delta flags, no dynamic-fee
+///              hook with `BEFORE_SWAP_FLAG`). Walks the pool's real state via extsload;
+///              exact in-frame.
+///           3. **IIndicativeQuote** (ERC-165 detected) — minimal view-style quote surface for
+///              hooks that override the curve (PropAMM hooks, aggregator hooks). Invoked via
+///              low-level `staticcall` so non-`view` implementations can satisfy the interface,
+///              but state writes revert.
+///           4. **Reverting self-swap** — universal fallback for opaque hooks; only reached
+///              from the execution path (view-side `quote()` returns no quote for these).
 ///
 ///         ## Execution Model: Greedy Split Fill
 ///
@@ -73,13 +94,13 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         ```
 ///         Router → poolManager.swap(multiplexerPool, hookData=[targets])
 ///           → ALFMultiplexer._beforeSwap()
-///             → _prepareCandidates(): simulate all targets, sort by indicative
+///             → _prepareCandidates(): waterfall-quote each target, sort by indicative
 ///             → _executeFills(): for each candidate (best to worst):
 ///                 → poolManager.swap(candidate.pool, remaining, sqrtPriceLimit=next.price)
-///                   → CandidateHook._beforeSwap() [curve update, fee override]
+///                   → CandidateHook._beforeSwap() [if any: curve update, fee override]
 ///                   ← BalanceDelta
 ///                 ← accumulate delta, update remaining
-///             ← (totalDelta, primaryQuoter, bestQuote)
+///             ← (totalDelta, primaryCandidate, bestQuote)
 ///           ← BeforeSwapDelta (negated totalDelta)
 ///         ← BalanceDelta (aggregate result for the swapper)
 ///         ```
@@ -88,20 +109,24 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         accumulate in transient storage and must net to zero before the unlock completes.
 ///
 /// @dev    Callers MUST encode hookData as `abi.encode(MultiplexerHookData(...))` with a non-empty
-///         `targets` array. Each target specifies a quoter's PoolKey and optional per-quoter
-///         curve update data. The multiplexer constructs per-quoter ALFHookData that pairs the
-///         shared attestation with each quoter's curve update.
+///         `targets` array. Each target specifies a candidate pool's PoolKey. The shared
+///         attestation payload is only forwarded to tier-1 (IALFHook) candidates as part of
+///         the per-candidate ALFHookData the multiplexer constructs for them; tier-2/3/4
+///         candidates receive empty hookData and any required hook input must be encoded into
+///         the candidate's own pool design.
 /// @custom:security-contact security@uniswap.org
 contract ALFMultiplexer is BaseHook, Ownable {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
 
-    /// @dev Tracks a quoter candidate during the split fill process. Built during
+    /// @dev Tracks a candidate pool during the split fill process. Built during
     ///      `_prepareCandidates`, sorted by indicative quality, and consumed sequentially by
     ///      `_executeFills`.
     /// @param poolKey The candidate's pool key (hook address embedded in `poolKey.hooks`).
-    /// @param hookData Constructed ALFHookData for this candidate (attestation + curve update).
+    /// @param hookData hookData forwarded to the candidate's swap. For tier-1 (IALFHook)
+    ///                 candidates this is the per-candidate ALFHookData (attestation + curve
+    ///                 update); for tier-2/3/4 candidates this is empty.
     /// @param sqrtPriceX96 The candidate's pool price at query time, used for price limits.
     /// @param indicative Indicative quote for the full swap amount, used for sorting.
     struct FillCandidate {
