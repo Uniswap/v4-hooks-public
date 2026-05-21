@@ -16,6 +16,8 @@ import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
 import {MockUniV3Pool} from "./mocks/MockUniV3Pool.sol";
 import {MockUniV3Factory} from "./mocks/MockUniV3Factory.sol";
+import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
+import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";
 
 contract UniswapV3AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -25,6 +27,7 @@ contract UniswapV3AggregatorUnitTest is Test {
     MockUniV3Factory public factory;
     MockUniV3Pool public extPool;
     UniswapV3Aggregator public hook;
+    IV4Quoter public quoter;
 
     MockERC20 public token0;
     MockERC20 public token1;
@@ -66,6 +69,8 @@ contract UniswapV3AggregatorUnitTest is Test {
         poolId = poolKey.toId();
 
         poolManager.initialize(poolKey, SQRT_PRICE_1_1);
+
+        quoter = Deploy.v4Quoter(address(poolManager), hex"00");
 
         token0.mint(alice, 1000 ether);
         token1.mint(alice, 1000 ether);
@@ -206,6 +211,52 @@ contract UniswapV3AggregatorUnitTest is Test {
     function test_pseudoTotalValueLocked_nonZero() public view {
         (uint256 a0, uint256 a1) = hook.pseudoTotalValueLocked(poolId);
         assertTrue(a0 > 0 || a1 > 0);
+    }
+
+    // ── V4Quoter tests ────────────────────────────────────────────────────────
+
+    function test_v4Quoter_exactInput_zeroForOne() public {
+        uint128 amtIn = 100 ether;
+        uint256 hookQuote = hook.quote(true, -int256(uint256(amtIn)), poolId);
+
+        (uint256 quotedOut,) = quoter.quoteExactInputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: true, exactAmount: amtIn, hookData: ""})
+        );
+
+        assertEq(quotedOut, hookQuote);
+    }
+
+    function test_v4Quoter_exactInput_oneForZero() public {
+        uint128 amtIn = 100 ether;
+        uint256 hookQuote = hook.quote(false, -int256(uint256(amtIn)), poolId);
+
+        (uint256 quotedOut,) = quoter.quoteExactInputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: false, exactAmount: amtIn, hookData: ""})
+        );
+
+        assertEq(quotedOut, hookQuote);
+    }
+
+    function test_v4Quoter_exactOutput_zeroForOne() public {
+        uint128 amtOut = 99 ether;
+        uint256 hookQuote = hook.quote(true, int256(uint256(amtOut)), poolId);
+
+        (uint256 quotedIn,) = quoter.quoteExactOutputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: true, exactAmount: amtOut, hookData: ""})
+        );
+
+        assertEq(quotedIn, hookQuote);
+    }
+
+    function test_v4Quoter_exactOutput_oneForZero() public {
+        uint128 amtOut = 99 ether;
+        uint256 hookQuote = hook.quote(false, int256(uint256(amtOut)), poolId);
+
+        (uint256 quotedIn,) = quoter.quoteExactOutputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: false, exactAmount: amtOut, hookData: ""})
+        );
+
+        assertEq(quotedIn, hookQuote);
     }
 
     receive() external payable {}

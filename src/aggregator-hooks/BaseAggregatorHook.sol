@@ -64,6 +64,9 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
         if (protocolFee == 0) return amountUnspecified;
 
+        if (tokenJar == address(0)) pollTokenJar();
+        if (tokenJar == address(0)) return amountUnspecified;
+
         bool isExactInput = amountSpecified < 0;
         uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
 
