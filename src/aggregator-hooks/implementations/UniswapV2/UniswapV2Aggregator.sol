@@ -83,7 +83,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
         (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pairAddr).getReserves();
         (uint256 reserveIn, uint256 reserveOut) =
-            zeroForOne ? (uint256(reserve0), uint256(reserve1)) : (uint256(reserve1), uint256(reserve0));
+            zeroToOne ? (uint256(reserve0), uint256(reserve1)) : (uint256(reserve1), uint256(reserve0));
 
         if (amountSpecified < 0) {
             uint256 amtIn = uint256(-amountSpecified);

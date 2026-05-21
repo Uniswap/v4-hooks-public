@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/784f0c01a0546d29403ea685825a91766558964d/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/918bff7b2cc510721b43e2750ca118588a2bfaa3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -75,9 +75,14 @@ function _resolveExternalPool(address token0, address token1) internal view retu
 
 Returns the raw quote from the underlying liquidity source without protocol fees
 
+Prices the swap using reserve math (matching canonical V2 getAmountsOut) and does not account for
+fee-on-transfer input tokens. For such tokens the actual output is lower than quoted because the pair
+receives less than the nominal input amount. Integrators that pass the quoted value as a router
+minimum-output check will see the swap revert on shortfall; no funds are lost.
+
 
 ```solidity
-function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
+function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
     internal
     view
     override
@@ -87,7 +92,7 @@ function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
 
 |Name|Type|Description|
 |----|----|-----------|
-|`zeroForOne`|`bool`||
+|`zeroToOne`|`bool`|Whether the swap is from token0 to token1|
 |`amountSpecified`|`int256`|The amount specified (negative for exact-in, positive for exact-out)|
 |`poolId`|`PoolId`|The pool ID|
 
