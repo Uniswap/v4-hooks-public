@@ -54,8 +54,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = poolIdToExternalPair[poolId];
         if (pairAddr == address(0)) revert PoolDoesNotExist();
         PoolKey storage poolKey = _canonicalPoolKeyByAddress[pairAddr];
-        amount0 = poolKey.currency0.balanceOf(pairAddr);
-        amount1 = poolKey.currency1.balanceOf(pairAddr);
+        (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pairAddr).getReserves();
+        amount0 = uint256(reserve0);
+        amount1 = uint256(reserve1);
     }
 
     function _resolveExternalPool(address token0, address token1) internal view returns (address pool) {
