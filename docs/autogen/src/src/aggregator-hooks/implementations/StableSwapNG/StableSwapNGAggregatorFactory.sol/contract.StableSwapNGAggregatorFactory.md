@@ -1,5 +1,5 @@
 # StableSwapNGAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/8ff278587c0e1dc5132910482c532180ce16546b/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/510f5fe7d91535158cac5795bb284c347ddb8126/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
 
 **Title:**
 StableSwapNGAggregatorFactory

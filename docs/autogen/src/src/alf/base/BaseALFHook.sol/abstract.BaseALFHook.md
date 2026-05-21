@@ -1,5 +1,5 @@
 # BaseALFHook
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/0a317c27dcab11b55acb839bccd006c6ffa8744c/src/alf/base/BaseALFHook.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/510f5fe7d91535158cac5795bb284c347ddb8126/src/alf/base/BaseALFHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver, [IALFHook](/src/alf/interfaces/IALFHook.sol/interface.IALFHook.md)
@@ -54,6 +54,18 @@ Callers use this to set gas limits on staticcall invocations.
 
 ```solidity
 function maxGas() external view override returns (uint32);
+```
+
+### supportsInterface
+
+ERC-165 advertisement for the interfaces this contract implements.
+
+Stateless implementation (no inherited `ERC165` storage). Subclasses that implement
+additional interfaces should override this and OR-in their own selectors.
+
+
+```solidity
+function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool);
 ```
 
 ### getIndicativeQuote

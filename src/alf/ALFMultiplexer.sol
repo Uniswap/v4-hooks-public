@@ -516,12 +516,7 @@ contract ALFMultiplexer is BaseHook, Ownable {
             }
             return (
                 SwapSimulator.simulateSwap(
-                    poolManager,
-                    target.poolKey.toId(),
-                    zeroForOne,
-                    amountSpecified,
-                    lpFee,
-                    target.poolKey.tickSpacing
+                    poolManager, target.poolKey.toId(), zeroForOne, amountSpecified, lpFee, target.poolKey.tickSpacing
                 ),
                 ""
             );
@@ -572,8 +567,11 @@ contract ALFMultiplexer is BaseHook, Ownable {
         // 3. Build per-quoter hookData and query the indicative
         quoterHookData = abi.encode(ALFHookData({attestationData: attestationData}));
 
-        try IALFHook(hook).getIndicativeQuote{gas: gasLimit}(poolKey, zeroForOne, amountSpecified, quoterHookData)
-        returns (uint256 indicative) {
+        try IALFHook(hook).getIndicativeQuote{gas: gasLimit}(
+            poolKey, zeroForOne, amountSpecified, quoterHookData
+        ) returns (
+            uint256 indicative
+        ) {
             q = indicative;
         } catch {}
     }
@@ -585,8 +583,7 @@ contract ALFMultiplexer is BaseHook, Ownable {
     ///      bypasses `try/catch` for hookless pools.
     function _supportsInterface(address hook, bytes4 interfaceId) internal view returns (bool ok) {
         if (hook.code.length == 0) return false;
-        (bool success, bytes memory ret) =
-            hook.staticcall(abi.encodeCall(IERC165.supportsInterface, (interfaceId)));
+        (bool success, bytes memory ret) = hook.staticcall(abi.encodeCall(IERC165.supportsInterface, (interfaceId)));
         if (success && ret.length >= 32) {
             ok = abi.decode(ret, (bool));
         }
@@ -640,9 +637,12 @@ contract ALFMultiplexer is BaseHook, Ownable {
 
         // Tier 4: universal reverting-swap fallback. Only fires for hooks that override the AMM
         // AND don't expose IALFHook / IIndicativeQuote.
-        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (uint256) {
-            // quoteTargetBySwap always reverts with QuoteSwap on success.
-        } catch (bytes memory reason) {
+        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (
+            uint256
+        ) {
+        // quoteTargetBySwap always reverts with QuoteSwap on success.
+        }
+        catch (bytes memory reason) {
             q = _parseQuoteOrZero(reason);
         }
     }

@@ -1,5 +1,5 @@
 # ALFMultiplexer
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/0a317c27dcab11b55acb839bccd006c6ffa8744c/src/alf/ALFMultiplexer.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/510f5fe7d91535158cac5795bb284c347ddb8126/src/alf/ALFMultiplexer.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
@@ -306,6 +306,19 @@ without reverting the entire multiplexer.
 Constructs the per-quoter ALFHookData by pairing the shared attestation data
 with the target's quoter-specific curve update data.
 
+Resolve an indicative quote for a single target via the cheapest accurate path
+available. Waterfall, in order of preference:
+1. **IALFHook** (ERC-165 detected) — full liveness/gas-budget/attestation path.
+2. **SwapSimulator** (vanilla CFMM or light hook) — tick-walks the pool's real
+state via `extsload`. Exact when nothing outside the AMM curve modifies the
+swap result. See `_isSimulatorSafe` for the gate.
+3. **IIndicativeQuote** (ERC-165 detected) — cheap view-style quote exposed by
+hooks that override the AMM curve (e.g. PropAMM aggregators).
+4. **Reverting self-swap** — signaled by returning `q == 0` here; the actual swap
+attempt happens in `_queryTargetBySwap`.
+The caller (`_queryTargetBySwap`) uses tiers 1–3's result directly when non-zero
+and only falls back to tier 4 when this returns `(0, "")`.
+
 
 ```solidity
 function _queryTargetView(
@@ -332,12 +345,60 @@ function _queryTargetView(
 |`quoterHookData`|`bytes`|The constructed ALFHookData for nested execution.|
 
 
+### _queryViaIALFHook
+
+Existing IALFHook quote path, extracted out of `_queryTargetView`.
+
+
+```solidity
+function _queryViaIALFHook(
+    address hook,
+    PoolKey memory poolKey,
+    bytes memory attestationData,
+    bool zeroForOne,
+    int256 amountSpecified
+) internal view returns (uint256 q, bytes memory quoterHookData);
+```
+
+### _supportsInterface
+
+Defensive ERC-165 probe. Returns `false` if the target has no code (vanilla v4 pool
+with `hooks = address(0)`), the call reverts for any reason, the call returns
+malformed data, or the target returns `false`. Uses low-level `staticcall` because
+Solidity's typed-call wrapper raises a "call to non-contract address" check that
+bypasses `try/catch` for hookless pools.
+
+
+```solidity
+function _supportsInterface(address hook, bytes4 interfaceId) internal view returns (bool ok);
+```
+
+### _isSimulatorSafe
+
+True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
+pool. The hook (if any) must NOT:
+- return a `beforeSwap` delta (could override curve output)
+- return an `afterSwap` delta (could adjust post-swap delta)
+- have `BEFORE_SWAP_FLAG` set AND be a dynamic-fee pool (would let the hook push an
+`lpFeeOverride` per-swap that we can't observe from view context)
+For dynamic-fee pools that DON'T have `BEFORE_SWAP_FLAG`, the fee applied at swap is
+exactly `slot0.lpFee` (V4 doesn't allow per-swap overrides without that flag), so the
+simulator IS exact in the same call frame. Cross-block freshness is a router-level
+slippage concern, not ours. Vanilla v4 pools (no hook) qualify trivially.
+Pure function; reads only the address-encoded hook permission bits and the pool fee.
+
+
+```solidity
+function _isSimulatorSafe(PoolKey memory key) internal pure returns (bool);
+```
+
 ### _queryTargetBySwap
 
-Query a single target by simulating its real v4 swap path in a reverting self-call.
-This is non-view and intended for the multiplexer execution path, where the PoolManager
-is already unlocked. It supports hooks that do not carry their own on-chain quote
-simulator, such as SmartPoolHook.
+Resolve a per-target quote. First tries the cheap waterfall in `_queryTargetView`
+(tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
+the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
+hooks that override the AMM and do not advertise any indicative interface (e.g.
+SmartPoolHook predecessors, custom one-off integrations).
 
 
 ```solidity
