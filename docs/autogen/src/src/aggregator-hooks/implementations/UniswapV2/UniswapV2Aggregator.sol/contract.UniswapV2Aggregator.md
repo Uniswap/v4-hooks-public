@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ac8b880552824842d9a40547a7047b547d9053c3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5133bc30df837672685f6ac90d6e8215fc591a38/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -20,17 +20,17 @@ address public immutable factory
 ```
 
 
-### FEE
+### fee
 
 ```solidity
-uint256 internal constant FEE = 3
+uint256 public immutable fee
 ```
 
 
 ### FEE_DENOMINATOR
 
 ```solidity
-uint256 internal constant FEE_DENOMINATOR = 1000
+uint256 internal constant FEE_DENOMINATOR = 1_000_000
 ```
 
 
@@ -53,7 +53,7 @@ mapping(address => PoolKey) private _canonicalPoolKeyByAddress
 
 
 ```solidity
-constructor(IPoolManager manager, address factory_, string memory hookVersion)
+constructor(IPoolManager manager, address factory_, uint256 fee_, string memory hookVersion)
     BaseAggregatorHook(manager, hookVersion);
 ```
 
@@ -144,7 +144,7 @@ function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams
 ```solidity
 function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
     internal
-    pure
+    view
     returns (uint256 amountOut);
 ```
 
@@ -154,7 +154,7 @@ function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
 ```solidity
 function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
     internal
-    pure
+    view
     returns (uint256 amountIn);
 ```
 
