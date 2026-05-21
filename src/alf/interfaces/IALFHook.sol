@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 /// @notice Standard hookData encoding for ALF hooks.
@@ -17,7 +18,7 @@ struct ALFHookData {
 ///      and hook metadata. Hooks expose their own capabilities directly rather than
 ///      relying on a separate registry contract.
 /// @custom:security-contact security@uniswap.org
-interface IALFHook {
+interface IALFHook is IERC165 {
     /// @notice Get an indicative quote for routing purposes.
     /// @dev MUST be a view function. Callers invoke via staticcall.
     /// @dev MUST NOT revert under normal conditions. If the quoter cannot

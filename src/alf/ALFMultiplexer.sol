@@ -11,11 +11,15 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {toBeforeSwapDelta, BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BaseHook} from "../base/BaseHook.sol";
 import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
+import {SwapSimulator} from "./libraries/SwapSimulator.sol";
 import {MultiplexerHookData, TargetedQuoter} from "./types/MultiplexerTypes.sol";
+import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 
 /// @title ALFMultiplexer
 /// @author Uniswap Labs
@@ -471,6 +475,20 @@ contract ALFMultiplexer is BaseHook, Ownable {
     /// @param amountSpecified The swap amount.
     /// @return q              The indicative quote (0 if invalid/failed).
     /// @return quoterHookData The constructed ALFHookData for nested execution.
+    /// @dev Resolve an indicative quote for a single target via the cheapest accurate path
+    ///      available. Waterfall, in order of preference:
+    ///
+    ///        1. **IALFHook** (ERC-165 detected) — full liveness/gas-budget/attestation path.
+    ///        2. **SwapSimulator** (vanilla CFMM or light hook) — tick-walks the pool's real
+    ///           state via `extsload`. Exact when nothing outside the AMM curve modifies the
+    ///           swap result. See `_isSimulatorSafe` for the gate.
+    ///        3. **IIndicativeQuote** (ERC-165 detected) — cheap view-style quote exposed by
+    ///           hooks that override the AMM curve (e.g. PropAMM aggregators).
+    ///        4. **Reverting self-swap** — signaled by returning `q == 0` here; the actual swap
+    ///           attempt happens in `_queryTargetBySwap`.
+    ///
+    ///      The caller (`_queryTargetBySwap`) uses tiers 1–3's result directly when non-zero
+    ///      and only falls back to tier 4 when this returns `(0, "")`.
     function _queryTargetView(
         TargetedQuoter memory target,
         bytes memory attestationData,
@@ -479,6 +497,47 @@ contract ALFMultiplexer is BaseHook, Ownable {
     ) internal view returns (uint256 q, bytes memory quoterHookData) {
         address hook = address(target.poolKey.hooks);
 
+        // Tier 1: IALFHook
+        if (_supportsInterface(hook, type(IALFHook).interfaceId)) {
+            return _queryViaIALFHook(hook, target.poolKey, attestationData, zeroForOne, amountSpecified);
+        }
+
+        // Tier 2: simulator-safe pool (vanilla CFMM or hook that doesn't override the curve)
+        if (_isSimulatorSafe(target.poolKey)) {
+            uint24 lpFee = LPFeeLibrary.isDynamicFee(target.poolKey.fee) ? 0 : target.poolKey.fee;
+            uint256 indicative = SwapSimulator.simulateSwap(
+                poolManager, target.poolKey.toId(), zeroForOne, amountSpecified, lpFee, target.poolKey.tickSpacing
+            );
+            return (indicative, "");
+        }
+
+        // Tier 3: IIndicativeQuote (aggregator hooks, PropAMMs, etc.).
+        // `indicativeQuote` is declared non-view in the interface so that hooks whose underlying
+        // resolvers happen to lack the `view` keyword can satisfy it. We invoke through
+        // `staticcall` so the EVM rejects any actual state write at runtime — read-only
+        // implementations succeed; any implementation that tries to mutate state reverts and we
+        // treat that as "no quote available".
+        if (_supportsInterface(hook, type(IIndicativeQuote).interfaceId)) {
+            (bool ok, bytes memory ret) = hook.staticcall(
+                abi.encodeCall(IIndicativeQuote.indicativeQuote, (target.poolKey, zeroForOne, amountSpecified))
+            );
+            if (ok && ret.length >= 32) {
+                return (abi.decode(ret, (uint256)), "");
+            }
+        }
+
+        // Tier 4 signal: return (0, "") so `_queryTargetBySwap` runs the reverting self-swap.
+        return (0, "");
+    }
+
+    /// @dev Existing IALFHook quote path, extracted out of `_queryTargetView`.
+    function _queryViaIALFHook(
+        address hook,
+        PoolKey memory poolKey,
+        bytes memory attestationData,
+        bool zeroForOne,
+        int256 amountSpecified
+    ) internal view returns (uint256 q, bytes memory quoterHookData) {
         // 1. Liveness check — skip offline quoters
         try IALFHook(hook).isLive() returns (bool live) {
             if (!live) return (0, "");
@@ -497,19 +556,41 @@ contract ALFMultiplexer is BaseHook, Ownable {
         // 3. Build per-quoter hookData and query the indicative
         quoterHookData = abi.encode(ALFHookData({attestationData: attestationData}));
 
-        try IALFHook(hook).getIndicativeQuote{gas: gasLimit}(
-            target.poolKey, zeroForOne, amountSpecified, quoterHookData
-        ) returns (
-            uint256 indicative
-        ) {
+        try IALFHook(hook).getIndicativeQuote{gas: gasLimit}(poolKey, zeroForOne, amountSpecified, quoterHookData)
+        returns (uint256 indicative) {
             q = indicative;
         } catch {}
     }
 
-    /// @dev Query a single target by simulating its real v4 swap path in a reverting self-call.
-    ///      This is non-view and intended for the multiplexer execution path, where the PoolManager
-    ///      is already unlocked. It supports hooks that do not carry their own on-chain quote
-    ///      simulator, such as SmartPoolHook.
+    /// @dev Defensive ERC-165 probe. Returns `false` if the target is not ERC-165 compliant, the
+    ///      call reverts for any reason, or the target returns `false`.
+    function _supportsInterface(address hook, bytes4 interfaceId) internal view returns (bool ok) {
+        try IERC165(hook).supportsInterface(interfaceId) returns (bool s) {
+            ok = s;
+        } catch {}
+    }
+
+    /// @dev True when `SwapSimulator.simulateSwap` will produce an exact quote for the pool:
+    ///      no `beforeSwap`-returns-delta hook, no `afterSwap`-returns-delta hook, and no
+    ///      hook-driven dynamic LP fee. Vanilla v4 pools (no hook) qualify trivially.
+    ///      Pure function; reads only the address-encoded hook permission bits and the pool fee.
+    function _isSimulatorSafe(PoolKey memory key) internal pure returns (bool) {
+        if (address(key.hooks) == address(0)) return true;
+        uint160 flags = uint160(address(key.hooks)) & Hooks.ALL_HOOK_MASK;
+        if (flags & (Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG) != 0) {
+            return false;
+        }
+        if (LPFeeLibrary.isDynamicFee(key.fee) && (flags & Hooks.BEFORE_SWAP_FLAG) != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    /// @dev Resolve a per-target quote. First tries the cheap waterfall in `_queryTargetView`
+    ///      (tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
+    ///      the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
+    ///      hooks that override the AMM and do not advertise any indicative interface (e.g.
+    ///      SmartPoolHook predecessors, custom one-off integrations).
     function _queryTargetBySwap(
         TargetedQuoter memory target,
         bytes memory attestationData,
@@ -522,14 +603,17 @@ contract ALFMultiplexer is BaseHook, Ownable {
         if (address(target.poolKey.hooks) == address(this)) return (0, "");
 
         (q, quoterHookData) = _queryTargetView(target, attestationData, zeroForOne, amountSpecified);
-        if (q == 0) return (0, "");
 
-        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (
-            uint256
-        ) {
-        // quoteTargetBySwap always reverts with QuoteSwap on success.
-        }
-        catch (bytes memory reason) {
+        // Tiers 1–3 produced a usable quote: trust it and skip the expensive reverting-swap.
+        // The split-fill execution path runs the real swap anyway and reconciles deltas, so the
+        // indicative is only used for sorting + tolerance baseline.
+        if (q != 0) return (q, quoterHookData);
+
+        // Tier 4: universal reverting-swap fallback. Only fires for hooks that override the AMM
+        // AND don't expose IALFHook / IIndicativeQuote.
+        try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (uint256) {
+            // quoteTargetBySwap always reverts with QuoteSwap on success.
+        } catch (bytes memory reason) {
             q = _parseQuoteOrZero(reason);
         }
     }

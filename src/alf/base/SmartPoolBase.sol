@@ -7,6 +7,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {IALFHook} from "../interfaces/IALFHook.sol";
 
@@ -58,6 +59,13 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @inheritdoc IALFHook
     function maxGas() external view override returns (uint32) {
         return _maxGas;
+    }
+
+    /// @notice ERC-165 advertisement for the interfaces this contract implements.
+    /// @dev Stateless implementation; mirrors `BaseALFHook.supportsInterface`. Subclasses that
+    ///      implement additional interfaces should override and OR-in their own selectors.
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @inheritdoc IALFHook

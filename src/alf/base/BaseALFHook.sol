@@ -6,6 +6,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IALFHook, ALFHookData} from "../interfaces/IALFHook.sol";
 
 /// @title BaseALFHook
@@ -30,6 +31,13 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     /// @inheritdoc IALFHook
     function maxGas() external view override returns (uint32) {
         return _maxGas;
+    }
+
+    /// @notice ERC-165 advertisement for the interfaces this contract implements.
+    /// @dev Stateless implementation (no inherited `ERC165` storage). Subclasses that implement
+    ///      additional interfaces should override this and OR-in their own selectors.
+    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
+        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @inheritdoc IALFHook
