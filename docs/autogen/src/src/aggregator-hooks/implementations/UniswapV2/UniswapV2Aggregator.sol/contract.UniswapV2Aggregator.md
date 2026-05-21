@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/784f0c01a0546d29403ea685825a91766558964d/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -175,6 +175,13 @@ function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCur
 |`amountTakeUsed`|`uint256`|Input amount taken from PoolManager for the pair.|
 |`amountSettle`|`uint256`|Output amount sent by the pair to PoolManager (must match `settle` after `sync`).|
 
+
+### receive
+
+
+```solidity
+receive() external payable override;
+```
 
 ## Errors
 ### NativeCurrencyNotSupported

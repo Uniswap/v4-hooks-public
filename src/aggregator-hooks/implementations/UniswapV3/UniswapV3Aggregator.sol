@@ -280,4 +280,8 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
             amt := tload(slot)
         }
     }
+
+    receive() external payable override {
+        revert NativeCurrencyNotSupported();
+    }
 }

@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/60c534ab89000628923e8fa74a7b12cf8372330d/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -90,10 +90,7 @@ might be simulated but not finalized. Applies protocol fee on top of the raw quo
 
 
 ```solidity
-function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-    external
-    payable
-    returns (uint256 amountUnspecified);
+function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external returns (uint256 amountUnspecified);
 ```
 **Parameters**
 
@@ -259,6 +256,6 @@ Required for handling native ETH transfers during swap operations
 
 
 ```solidity
-receive() external payable;
+receive() external payable virtual;
 ```
 

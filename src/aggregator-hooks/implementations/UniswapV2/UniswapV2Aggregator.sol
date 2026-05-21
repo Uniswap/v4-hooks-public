@@ -201,4 +201,8 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
         amountSettle = balanceSettleAfter - balanceSettleBefore;
     }
+
+    receive() external payable override {
+        revert NativeCurrencyNotSupported();
+    }
 }
