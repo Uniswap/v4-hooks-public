@@ -24,7 +24,7 @@ contract UniswapV2AggregatorFuzz is Test {
     string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/UniswapV2/precompile/UniswapV2Factory.bin";
 
     uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_SPACING = 60;
+    int24 constant TICK_SPACING = 1;
 
     IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;

@@ -171,6 +171,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
     {
         pool = IUniswapV3Factory(factory).getPool(token0, token1, key.fee);
         if (IUniswapV3Pool(pool).fee() != key.fee) revert ExternalPoolMismatch();
+        if (IUniswapV3Pool(pool).tickSpacing() != key.tickSpacing) revert ExternalPoolMismatch();
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {

@@ -87,7 +87,11 @@ contract UniswapV2AggregatorForkTest is Test {
         _deployHook(uniFactory);
 
         poolKey = PoolKey({
-            currency0: currency0, currency1: currency1, fee: 3000, tickSpacing: 60, hooks: IHooks(address(hook))
+            currency0: currency0,
+            currency1: currency1,
+            fee: uint24(hook.fee()),
+            tickSpacing: 1,
+            hooks: IHooks(address(hook))
         });
         poolId = poolKey.toId();
 
