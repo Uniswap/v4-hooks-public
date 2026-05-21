@@ -562,12 +562,18 @@ contract ALFMultiplexer is BaseHook, Ownable {
         } catch {}
     }
 
-    /// @dev Defensive ERC-165 probe. Returns `false` if the target is not ERC-165 compliant, the
-    ///      call reverts for any reason, or the target returns `false`.
+    /// @dev Defensive ERC-165 probe. Returns `false` if the target has no code (vanilla v4 pool
+    ///      with `hooks = address(0)`), the call reverts for any reason, the call returns
+    ///      malformed data, or the target returns `false`. Uses low-level `staticcall` because
+    ///      Solidity's typed-call wrapper raises a "call to non-contract address" check that
+    ///      bypasses `try/catch` for hookless pools.
     function _supportsInterface(address hook, bytes4 interfaceId) internal view returns (bool ok) {
-        try IERC165(hook).supportsInterface(interfaceId) returns (bool s) {
-            ok = s;
-        } catch {}
+        if (hook.code.length == 0) return false;
+        (bool success, bytes memory ret) =
+            hook.staticcall(abi.encodeCall(IERC165.supportsInterface, (interfaceId)));
+        if (success && ret.length >= 32) {
+            ok = abi.decode(ret, (bool));
+        }
     }
 
     /// @dev True when `SwapSimulator.simulateSwap` will produce an exact quote for the pool:
