@@ -189,6 +189,20 @@ contract UniswapV3AggregatorUnitTest is Test {
         assertEq(t1Before - token1.balanceOf(alice), expectedIn);
     }
 
+    function test_swapExactOutput_underfill_reverts() public {
+        uint256 amountOut = 99 ether;
+        extPool.setIsUnderfill(true);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
     function test_secondInitialize_same_external_pool_reverts() public {
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
