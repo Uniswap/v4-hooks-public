@@ -13,6 +13,7 @@ contract MockUniV3Pool is IUniswapV3Pool {
     address public immutable token1;
     uint24 public immutable fee;
     int24 private immutable _tickSpacing;
+    bool isUnderfill;
 
     constructor(address _token0, address _token1, uint24 _fee, int24 tickSpacing_) {
         token0 = _token0;
@@ -23,6 +24,10 @@ contract MockUniV3Pool is IUniswapV3Pool {
 
     function tickSpacing() external view override returns (int24) {
         return _tickSpacing;
+    }
+
+    function setIsUnderfill(bool _isUnderfill) external {
+        isUnderfill = _isUnderfill;
     }
 
     function swap(
@@ -51,6 +56,9 @@ contract MockUniV3Pool is IUniswapV3Pool {
             }
         } else {
             uint256 amtOut = uint256(-amountSpecified);
+            if (isUnderfill) {
+                amtOut = amtOut / 2;
+            }
             if (zeroForOne) {
                 uint256 amtIn = _computeInForExactOut(amtOut);
                 IUniswapV3SwapCallback(hook).uniswapV3SwapCallback(int256(amtIn), -int256(amtOut), data);
