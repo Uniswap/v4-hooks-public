@@ -27,7 +27,7 @@ import {
 import {
     ICurveStableSwapFactoryNG
 } from "../../../src/aggregator-hooks/implementations/StableSwapNG/interfaces/ICurveStableSwapFactoryNG.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
 contract StableSwapNGForkedTest is Test {
     using PoolIdLibrary for PoolKey;
