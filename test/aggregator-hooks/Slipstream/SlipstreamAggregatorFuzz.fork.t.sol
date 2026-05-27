@@ -9,6 +9,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -92,12 +93,11 @@ contract SlipstreamAggregatorFuzz is Test {
 
         hook = _deployHook(slipFactory);
 
-        IUniswapV3Pool p = IUniswapV3Pool(extPool);
         poolKey = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
-            fee: p.fee(),
-            tickSpacing: p.tickSpacing(),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: IUniswapV3Pool(extPool).tickSpacing(),
             hooks: IHooks(address(hook))
         });
         poolId = poolKey.toId();

@@ -196,10 +196,10 @@ error NativeCurrencyNotSupported();
 error ExternalPoolNotFound();
 ```
 
-### ExternalPoolTokenMismatch
+### ExternalPoolMismatch
 
 ```solidity
-error ExternalPoolTokenMismatch();
+error ExternalPoolMismatch();
 ```
 
 ### Reentrancy

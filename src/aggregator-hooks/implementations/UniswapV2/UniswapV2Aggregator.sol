@@ -34,7 +34,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     error NativeCurrencyNotSupported();
     error ExternalPoolNotFound();
-    error ExternalPoolTokenMismatch();
+    error ExternalPoolMismatch();
     error Reentrancy();
     error UnexpectedSwapOutputDelta();
     error AmountInZero();
@@ -88,6 +88,8 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeCurrencyNotSupported();
+        if (key.fee != fee) revert ExternalPoolMismatch();
+        if (key.tickSpacing != 1) revert ExternalPoolMismatch();
 
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
@@ -95,7 +97,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = _resolveExternalPool(token0, token1);
 
         if (IUniswapV2Pair(pairAddr).token0() != token0 || IUniswapV2Pair(pairAddr).token1() != token1) {
-            revert ExternalPoolTokenMismatch();
+            revert ExternalPoolMismatch();
         }
 
         PoolKey storage existing = _canonicalPoolKeyByAddress[pairAddr];
@@ -170,7 +172,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         (uint112 r0Before, uint112 r1Before,) = IUniswapV2Pair(pairAddr).getReserves();
         (uint256 reserveIn, uint256 reserveOut) =
             zeroForOne ? (uint256(r0Before), uint256(r1Before)) : (uint256(r1Before), uint256(r0Before));
-        if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolTokenMismatch();
+        if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolMismatch();
 
         uint256 amountOut;
         if (params.amountSpecified < 0) {

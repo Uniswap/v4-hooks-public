@@ -35,8 +35,8 @@ contract UniswapV2AggregatorUnitTest is Test {
     MockERC20 public token1;
 
     uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_SPACING_A = 60;
-    int24 constant TICK_SPACING_B = 200;
+    int24 constant TICK_SPACING_A = 1;
+    int24 constant TICK_SPACING_B = 1;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
