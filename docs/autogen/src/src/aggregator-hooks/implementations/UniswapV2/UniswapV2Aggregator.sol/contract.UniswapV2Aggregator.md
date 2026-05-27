@@ -181,6 +181,13 @@ function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCur
 |`amountSettle`|`uint256`|Output amount sent by the pair to PoolManager (must match `settle` after `sync`).|
 
 
+### receive
+
+
+```solidity
+receive() external payable override;
+```
+
 ## Errors
 ### NativeCurrencyNotSupported
 
@@ -194,10 +201,10 @@ error NativeCurrencyNotSupported();
 error ExternalPoolNotFound();
 ```
 
-### ExternalPoolTokenMismatch
+### ExternalPoolMismatch
 
 ```solidity
-error ExternalPoolTokenMismatch();
+error ExternalPoolMismatch();
 ```
 
 ### Reentrancy

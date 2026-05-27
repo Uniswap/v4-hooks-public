@@ -11,6 +11,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
@@ -72,7 +73,6 @@ contract SlipstreamAggregatorForkTest is Test {
         IUniswapV3Pool extPool = IUniswapV3Pool(externalPoolAddr);
         token0Address = extPool.token0();
         token1Address = extPool.token1();
-        uint24 feeTier = extPool.fee();
         token0Decimals = IERC20Metadata(token0Address).decimals();
         token1Decimals = IERC20Metadata(token1Address).decimals();
 
@@ -92,7 +92,11 @@ contract SlipstreamAggregatorForkTest is Test {
         _deployHook(slipFactory);
 
         poolKey = PoolKey({
-            currency0: currency0, currency1: currency1, fee: feeTier, tickSpacing: ts, hooks: IHooks(address(hook))
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: ts,
+            hooks: IHooks(address(hook))
         });
         poolId = poolKey.toId();
 
