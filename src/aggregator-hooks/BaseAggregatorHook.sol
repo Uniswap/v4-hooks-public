@@ -53,11 +53,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
     function pseudoTotalValueLocked(PoolId poolId) external virtual returns (uint256 amount0, uint256 amount1);
 
     /// @inheritdoc IAggregatorHook
-    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-        external
-        payable
-        returns (uint256 amountUnspecified)
-    {
+    function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external returns (uint256 amountUnspecified) {
         amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
 
         uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
@@ -208,5 +204,5 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @notice Allows the contract to receive ETH for native currency swaps
     /// @dev Required for handling native ETH transfers during swap operations
-    receive() external payable {}
+    receive() external payable virtual {}
 }
