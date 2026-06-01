@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ac8b880552824842d9a40547a7047b547d9053c3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/918bff7b2cc510721b43e2750ca118588a2bfaa3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -20,17 +20,17 @@ address public immutable factory
 ```
 
 
-### FEE
+### fee
 
 ```solidity
-uint256 internal constant FEE = 3
+uint256 public immutable fee
 ```
 
 
 ### FEE_DENOMINATOR
 
 ```solidity
-uint256 internal constant FEE_DENOMINATOR = 1000
+uint256 internal constant FEE_DENOMINATOR = 1_000_000
 ```
 
 
@@ -53,7 +53,7 @@ mapping(address => PoolKey) private _canonicalPoolKeyByAddress
 
 
 ```solidity
-constructor(IPoolManager manager, address factory_, string memory hookVersion)
+constructor(IPoolManager manager, address factory_, uint256 fee_, string memory hookVersion)
     BaseAggregatorHook(manager, hookVersion);
 ```
 
@@ -75,9 +75,14 @@ function _resolveExternalPool(address token0, address token1) internal view retu
 
 Returns the raw quote from the underlying liquidity source without protocol fees
 
+Prices the swap using reserve math (matching canonical V2 getAmountsOut) and does not account for
+fee-on-transfer input tokens. For such tokens the actual output is lower than quoted because the pair
+receives less than the nominal input amount. Integrators that pass the quoted value as a router
+minimum-output check will see the swap revert on shortfall; no funds are lost.
+
 
 ```solidity
-function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
+function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
     internal
     view
     override
@@ -87,7 +92,7 @@ function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
 
 |Name|Type|Description|
 |----|----|-----------|
-|`zeroForOne`|`bool`||
+|`zeroToOne`|`bool`|Whether the swap is from token0 to token1|
 |`amountSpecified`|`int256`|The amount specified (negative for exact-in, positive for exact-out)|
 |`poolId`|`PoolId`|The pool ID|
 
@@ -144,7 +149,7 @@ function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams
 ```solidity
 function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
     internal
-    pure
+    view
     returns (uint256 amountOut);
 ```
 
@@ -154,7 +159,7 @@ function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
 ```solidity
 function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
     internal
-    pure
+    view
     returns (uint256 amountIn);
 ```
 
@@ -176,6 +181,13 @@ function _swapOnPair(address pairAddr, Currency takeCurrency, Currency settleCur
 |`amountSettle`|`uint256`|Output amount sent by the pair to PoolManager (must match `settle` after `sync`).|
 
 
+### receive
+
+
+```solidity
+receive() external payable override;
+```
+
 ## Errors
 ### NativeCurrencyNotSupported
 
@@ -189,10 +201,10 @@ error NativeCurrencyNotSupported();
 error ExternalPoolNotFound();
 ```
 
-### ExternalPoolTokenMismatch
+### ExternalPoolMismatch
 
 ```solidity
-error ExternalPoolTokenMismatch();
+error ExternalPoolMismatch();
 ```
 
 ### Reentrancy

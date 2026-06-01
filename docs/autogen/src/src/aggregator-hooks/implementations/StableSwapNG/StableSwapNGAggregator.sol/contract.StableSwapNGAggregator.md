@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -156,7 +156,20 @@ function _handleSwap(
 function _getBuffer(uint256 amount) internal pure returns (uint256);
 ```
 
+### receive
+
+
+```solidity
+receive() external payable override;
+```
+
 ## Errors
+### NativeCurrencyNotSupported
+
+```solidity
+error NativeCurrencyNotSupported();
+```
+
 ### AmountOutExceeded
 
 ```solidity

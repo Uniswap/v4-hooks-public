@@ -35,8 +35,8 @@ contract UniswapV2AggregatorUnitTest is Test {
     MockERC20 public token1;
 
     uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_SPACING_A = 60;
-    int24 constant TICK_SPACING_B = 200;
+    int24 constant TICK_SPACING_A = 1;
+    int24 constant TICK_SPACING_B = 1;
 
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
     uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
@@ -133,9 +133,10 @@ contract UniswapV2AggregatorUnitTest is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        bytes memory constructorArgs =
+            abi.encode(poolManager, address(factory), uint256(3000), "UniswapV2Aggregator v1.0");
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
-        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), 3000, "UniswapV2Aggregator v1.0");
     }
 
     function _expectedQuote(bool zeroForOne, int256 amountSpecified) internal view returns (uint256) {

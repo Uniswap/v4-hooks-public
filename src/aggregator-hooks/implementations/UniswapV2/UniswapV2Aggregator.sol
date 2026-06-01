@@ -26,15 +26,15 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     address public immutable factory;
 
-    uint256 internal constant FEE = 3;
-    uint256 internal constant FEE_DENOMINATOR = 1000;
+    uint256 public immutable fee;
+    uint256 internal constant FEE_DENOMINATOR = 1_000_000;
 
     mapping(PoolId => address) public poolIdToExternalPair;
     mapping(address => PoolKey) private _canonicalPoolKeyByAddress;
 
     error NativeCurrencyNotSupported();
     error ExternalPoolNotFound();
-    error ExternalPoolTokenMismatch();
+    error ExternalPoolMismatch();
     error Reentrancy();
     error UnexpectedSwapOutputDelta();
     error AmountInZero();
@@ -42,10 +42,11 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     error InsufficientLiquidity();
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 
-    constructor(IPoolManager manager, address factory_, string memory hookVersion)
+    constructor(IPoolManager manager, address factory_, uint256 fee_, string memory hookVersion)
         BaseAggregatorHook(manager, hookVersion)
     {
         factory = factory_;
+        fee = fee_;
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -53,8 +54,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = poolIdToExternalPair[poolId];
         if (pairAddr == address(0)) revert PoolDoesNotExist();
         PoolKey storage poolKey = _canonicalPoolKeyByAddress[pairAddr];
-        amount0 = poolKey.currency0.balanceOf(pairAddr);
-        amount1 = poolKey.currency1.balanceOf(pairAddr);
+        (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pairAddr).getReserves();
+        amount0 = uint256(reserve0);
+        amount1 = uint256(reserve1);
     }
 
     function _resolveExternalPool(address token0, address token1) internal view returns (address pool) {
@@ -62,8 +64,16 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         if (pool == address(0)) revert ExternalPoolNotFound();
     }
 
-    /// @inheritdoc BaseAggregatorHook
-    function _rawQuote(bool zeroForOne, int256 amountSpecified, PoolId poolId)
+    /// @notice Returns the raw quote from the underlying liquidity source without protocol fees
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @return amountUnspecified The raw unspecified amount before protocol fee adjustment
+    /// @dev Prices the swap using reserve math (matching canonical V2 getAmountsOut) and does not account for
+    ///      fee-on-transfer input tokens. For such tokens the actual output is lower than quoted because the pair
+    ///      receives less than the nominal input amount. Integrators that pass the quoted value as a router
+    ///      minimum-output check will see the swap revert on shortfall; no funds are lost.
+    function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
         view
         override
@@ -74,7 +84,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
         (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pairAddr).getReserves();
         (uint256 reserveIn, uint256 reserveOut) =
-            zeroForOne ? (uint256(reserve0), uint256(reserve1)) : (uint256(reserve1), uint256(reserve0));
+            zeroToOne ? (uint256(reserve0), uint256(reserve1)) : (uint256(reserve1), uint256(reserve0));
 
         if (amountSpecified < 0) {
             uint256 amtIn = uint256(-amountSpecified);
@@ -87,6 +97,8 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeCurrencyNotSupported();
+        if (key.fee != fee) revert ExternalPoolMismatch();
+        if (key.tickSpacing != 1) revert ExternalPoolMismatch();
 
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
@@ -94,7 +106,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         address pairAddr = _resolveExternalPool(token0, token1);
 
         if (IUniswapV2Pair(pairAddr).token0() != token0 || IUniswapV2Pair(pairAddr).token1() != token1) {
-            revert ExternalPoolTokenMismatch();
+            revert ExternalPoolMismatch();
         }
 
         PoolKey storage existing = _canonicalPoolKeyByAddress[pairAddr];
@@ -134,12 +146,12 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
         internal
-        pure
+        view
         returns (uint256 amountOut)
     {
         if (amountIn == 0) revert AmountInZero();
         if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
-        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - FEE);
+        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - fee);
         uint256 numerator = amountInWithFee * reserveOut;
         uint256 denominator = reserveIn * FEE_DENOMINATOR + amountInWithFee;
         amountOut = numerator / denominator;
@@ -147,13 +159,13 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
 
     function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
         internal
-        pure
+        view
         returns (uint256 amountIn)
     {
         if (amountOut == 0) revert AmountOutZero();
         if (reserveIn == 0 || reserveOut == 0 || amountOut > reserveOut) revert InsufficientLiquidity();
         uint256 numerator = reserveIn * amountOut * FEE_DENOMINATOR;
-        uint256 denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - FEE);
+        uint256 denominator = (reserveOut - amountOut) * (FEE_DENOMINATOR - fee);
         amountIn = numerator / denominator + 1;
     }
 
@@ -169,7 +181,7 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         (uint112 r0Before, uint112 r1Before,) = IUniswapV2Pair(pairAddr).getReserves();
         (uint256 reserveIn, uint256 reserveOut) =
             zeroForOne ? (uint256(r0Before), uint256(r1Before)) : (uint256(r1Before), uint256(r0Before));
-        if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolTokenMismatch();
+        if (reserveIn == 0 || reserveOut == 0) revert ExternalPoolMismatch();
 
         uint256 amountOut;
         if (params.amountSpecified < 0) {
@@ -199,5 +211,9 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
         uint256 balanceSettleAfter = settleCurrency.balanceOf(address(poolManager));
 
         amountSettle = balanceSettleAfter - balanceSettleBefore;
+    }
+
+    receive() external payable override {
+        revert NativeCurrencyNotSupported();
     }
 }

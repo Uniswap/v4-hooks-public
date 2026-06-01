@@ -17,6 +17,8 @@ import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {UniswapV3Aggregator} from "../../../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
 import {IUniswapV3Pool} from "../../../src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3Pool.sol";
+import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
+import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";
 
 /// @notice Fork tests — Ethereum mainnet (chain id 1).
 /// @dev `FORK_RPC_URL_1` and optional `FORK_BLOCK_NUMBER_1`. Skips when RPC unset.
@@ -34,6 +36,7 @@ contract UniswapV3AggregatorForkTest is Test {
     IPoolManager public manager;
     SafePoolSwapTest public swapRouter;
     UniswapV3Aggregator public hook;
+    IV4Quoter public quoter;
 
     address public token0Address;
     address public token1Address;
@@ -91,6 +94,8 @@ contract UniswapV3AggregatorForkTest is Test {
         poolId = poolKey.toId();
 
         manager.initialize(poolKey, SQRT_PRICE_1_1);
+
+        quoter = Deploy.v4Quoter(address(manager), hex"00");
 
         uint256 bal0 = 1_000_000 * (10 ** token0Decimals);
         uint256 bal1 = 1_000_000 * (10 ** token1Decimals);
@@ -199,6 +204,96 @@ contract UniswapV3AggregatorForkTest is Test {
         uint256 amtIn = 1000 * (10 ** token1Decimals);
         uint256 out = hook.quote(false, -int256(amtIn), poolId);
         assertGt(out, 0);
+    }
+
+    // ── V4Quoter tests ────────────────────────────────────────────────────────
+
+    function test_fork_v4Quoter_exactInput_matchesSwap_zeroForOne() public {
+        uint128 amtIn = uint128(100 * (10 ** token0Decimals));
+
+        uint256 hookQuote = hook.quote(true, -int256(uint256(amtIn)), poolId);
+        (uint256 quotedOut,) = quoter.quoteExactInputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: true, exactAmount: amtIn, hookData: ""})
+        );
+        assertEq(quotedOut, hookQuote, "V4Quoter should match hook.quote");
+
+        uint256 t1Before = IERC20(token1Address).balanceOf(alice);
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: true, amountSpecified: -int256(uint256(amtIn)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        assertEq(IERC20(token1Address).balanceOf(alice) - t1Before, quotedOut, "actual output should match V4Quoter");
+    }
+
+    function test_fork_v4Quoter_exactInput_matchesSwap_oneForZero() public {
+        uint128 amtIn = uint128(100 * (10 ** token1Decimals));
+
+        uint256 hookQuote = hook.quote(false, -int256(uint256(amtIn)), poolId);
+        (uint256 quotedOut,) = quoter.quoteExactInputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: false, exactAmount: amtIn, hookData: ""})
+        );
+        assertEq(quotedOut, hookQuote, "V4Quoter should match hook.quote");
+
+        uint256 t0Before = IERC20(token0Address).balanceOf(alice);
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: false, amountSpecified: -int256(uint256(amtIn)), sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        assertEq(IERC20(token0Address).balanceOf(alice) - t0Before, quotedOut, "actual output should match V4Quoter");
+    }
+
+    function test_fork_v4Quoter_exactOutput_matchesSwap_zeroForOne() public {
+        uint128 amtOut = uint128(50 * (10 ** token1Decimals));
+
+        uint256 hookQuote = hook.quote(true, int256(uint256(amtOut)), poolId);
+        (uint256 quotedIn,) = quoter.quoteExactOutputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: true, exactAmount: amtOut, hookData: ""})
+        );
+        assertEq(quotedIn, hookQuote, "V4Quoter should match hook.quote");
+
+        uint256 t0Before = IERC20(token0Address).balanceOf(alice);
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: true, amountSpecified: int256(uint256(amtOut)), sqrtPriceLimitX96: MIN_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        assertEq(t0Before - IERC20(token0Address).balanceOf(alice), quotedIn, "actual input should match V4Quoter");
+    }
+
+    function test_fork_v4Quoter_exactOutput_matchesSwap_oneForZero() public {
+        uint128 amtOut = uint128(50 * (10 ** token0Decimals));
+
+        uint256 hookQuote = hook.quote(false, int256(uint256(amtOut)), poolId);
+        (uint256 quotedIn,) = quoter.quoteExactOutputSingle(
+            IV4Quoter.QuoteExactSingleParams({poolKey: poolKey, zeroForOne: false, exactAmount: amtOut, hookData: ""})
+        );
+        assertEq(quotedIn, hookQuote, "V4Quoter should match hook.quote");
+
+        uint256 t1Before = IERC20(token1Address).balanceOf(alice);
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: false, amountSpecified: int256(uint256(amtOut)), sqrtPriceLimitX96: MAX_PRICE_LIMIT
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        assertEq(t1Before - IERC20(token1Address).balanceOf(alice), quotedIn, "actual input should match V4Quoter");
     }
 
     receive() external payable {}

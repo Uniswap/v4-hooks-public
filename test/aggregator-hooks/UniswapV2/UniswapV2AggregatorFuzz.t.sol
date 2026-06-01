@@ -24,7 +24,7 @@ contract UniswapV2AggregatorFuzz is Test {
     string constant FACTORY_BYTECODE_PATH = "test/aggregator-hooks/UniswapV2/precompile/UniswapV2Factory.bin";
 
     uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_SPACING = 60;
+    int24 constant TICK_SPACING = 1;
 
     IPoolManager public poolManager;
     SafePoolSwapTest public swapRouter;
@@ -103,9 +103,10 @@ contract UniswapV2AggregatorFuzz is Test {
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        bytes memory constructorArgs =
+            abi.encode(poolManager, address(factory), uint256(3000), "UniswapV2Aggregator v1.0");
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapV2Aggregator).creationCode, constructorArgs);
-        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), "UniswapV2Aggregator v1.0");
+        return new UniswapV2Aggregator{salt: salt}(poolManager, address(factory), 3000, "UniswapV2Aggregator v1.0");
     }
 
     function testFuzz_swapExactIn_zeroForOne(uint256 amountIn) public {

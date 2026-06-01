@@ -170,7 +170,9 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         returns (address pool)
     {
         pool = IUniswapV3Factory(factory).getPool(token0, token1, key.fee);
+        if (pool == address(0)) revert ExternalPoolNotFound();
         if (IUniswapV3Pool(pool).fee() != key.fee) revert ExternalPoolMismatch();
+        if (IUniswapV3Pool(pool).tickSpacing() != key.tickSpacing) revert ExternalPoolMismatch();
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
@@ -180,7 +182,6 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         address token1 = Currency.unwrap(key.currency1);
 
         address poolAddr = _resolveExternalPool(token0, token1, key);
-        if (poolAddr == address(0)) revert ExternalPoolNotFound();
 
         // Defensive programming for untrustable factory.
         if (IUniswapV3Pool(poolAddr).token0() != token0 || IUniswapV3Pool(poolAddr).token1() != token1) {
@@ -242,6 +243,10 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         _setTransientExpectedPool(address(0));
         _setTransientSwapInputPaid(0);
 
+        if (params.amountSpecified > 0 && uint256(params.amountSpecified) != amountSettle) {
+            revert UnexpectedSwapOutputDelta();
+        }
+
         poolManager.settle();
         hasSettled = true;
     }
@@ -275,5 +280,9 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         assembly ("memory-safe") {
             amt := tload(slot)
         }
+    }
+
+    receive() external payable override {
+        revert NativeCurrencyNotSupported();
     }
 }

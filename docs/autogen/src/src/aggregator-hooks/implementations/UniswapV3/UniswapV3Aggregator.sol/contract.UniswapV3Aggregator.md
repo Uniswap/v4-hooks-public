@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ac8b880552824842d9a40547a7047b547d9053c3/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -247,6 +247,13 @@ function _setTransientSwapInputPaid(uint256 amt) private;
 
 ```solidity
 function _getTransientSwapInputPaid() private view returns (uint256 amt);
+```
+
+### receive
+
+
+```solidity
+receive() external payable override;
 ```
 
 ## Errors

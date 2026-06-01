@@ -9,6 +9,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
@@ -30,8 +31,8 @@ contract SlipstreamAggregatorUnitTest is Test {
     MockERC20 public token0;
     MockERC20 public token1;
 
-    uint24 constant POOL_FEE = 3000;
-    /// @dev Different fee in PoolKey only; Slipstream factory lookup ignores fee — same external pool.
+    uint24 constant POOL_FEE = LPFeeLibrary.DYNAMIC_FEE_FLAG;
+    /// @dev Non-sentinel fee; will revert with ExternalPoolMismatch — confirms only DYNAMIC_FEE_FLAG is accepted.
     uint24 constant POOL_FEE_ALT = 500;
     int24 constant TICK_SPACING = 100;
 
