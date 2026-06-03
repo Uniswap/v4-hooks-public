@@ -534,6 +534,10 @@ contract CappedMockERC4626 is ERC20 {
         return gross < withdrawCap ? gross : withdrawCap;
     }
 
+    function previewDeposit(uint256 assets) external view returns (uint256) {
+        return convertToShares(assets);
+    }
+
     /// @dev Effective max-withdraw is the lesser of the economic share value and the cap.
     ///      Mirrors how Aave-style vaults reduce maxWithdraw when underlying is utilised.
     function maxWithdraw(address owner_) external view returns (uint256) {

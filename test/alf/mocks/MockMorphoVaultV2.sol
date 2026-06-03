@@ -30,6 +30,9 @@ contract MockMorphoVaultV2 is ERC20 {
     /// @notice Per-redeem exit fee in basis points (max 10_000). Applies only to
     ///         `previewRedeem`; `convertToAssets` returns the gross value unchanged.
     uint16 public exitFeeBps;
+    /// @notice Per-deposit entry fee in basis points (max 10_000). Applies only to
+    ///         `previewDeposit`; `convertToShares` returns the gross value unchanged.
+    uint16 public entryFeeBps;
     /// @notice When > 0, `withdraw` reverts if `assets > maxWithdrawable`. Emulates a curated
     ///         vault whose idle reserves are smaller than its accounting `totalAssets`
     ///         (because the rest is allocated out to non-idle positions). `0` disables the cap.
@@ -38,6 +41,7 @@ contract MockMorphoVaultV2 is ERC20 {
     error WithdrawShortfall();
     error WithdrawExceedsIdleReserves(uint256 requested, uint256 maxWithdrawable);
     error ExitFeeTooLarge();
+    error EntryFeeTooLarge();
 
     constructor(ERC20 _asset)
         ERC20(
@@ -64,6 +68,12 @@ contract MockMorphoVaultV2 is ERC20 {
     function setExitFeeBps(uint16 bps) external {
         if (bps > 10_000) revert ExitFeeTooLarge();
         exitFeeBps = bps;
+    }
+
+    /// @notice Set the per-deposit entry fee in basis points. Capped at 10_000.
+    function setEntryFeeBps(uint16 bps) external {
+        if (bps > 10_000) revert EntryFeeTooLarge();
+        entryFeeBps = bps;
     }
 
     /// @notice Mint additional underlying directly into the vault, simulating yield accrual.
@@ -131,6 +141,14 @@ contract MockMorphoVaultV2 is ERC20 {
         uint256 gross = convertToAssets(shares);
         if (exitFeeBps == 0) return gross;
         return gross - (gross * exitFeeBps) / 10_000;
+    }
+
+    /// @notice `previewDeposit` reports the net shares minted after applying `entryFeeBps`,
+    ///         so `previewDeposit <= convertToShares`. Used by PoolVault's feeless-vault probe.
+    function previewDeposit(uint256 assets) public view returns (uint256) {
+        uint256 gross = convertToShares(assets);
+        if (entryFeeBps == 0) return gross;
+        return gross - (gross * entryFeeBps) / 10_000;
     }
 
     function previewWithdraw(uint256 assets) external view returns (uint256) {

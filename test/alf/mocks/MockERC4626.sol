@@ -66,6 +66,10 @@ contract MockERC4626 is ERC20 {
         return convertToAssets(balanceOf[owner_]);
     }
 
+    function previewDeposit(uint256 assets) external view returns (uint256) {
+        return convertToShares(assets);
+    }
+
     function previewWithdraw(uint256 assets) external view returns (uint256) {
         return convertToShares(assets);
     }

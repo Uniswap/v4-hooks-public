@@ -71,6 +71,22 @@ import {VaultId} from "../types/VaultId.sol";
 ///         trust not to enable a denial gate against the hook. See `_depositToVault` for
 ///         the broader vault-trust model.
 ///
+///         **Fee-on-entry / fee-on-exit vaults are NOT supported** and are rejected at
+///         pool initialization by `_requireFeelessVault`. Two reasons compound:
+///
+///           1. JIT-cycle bleed. Every swap does `_ensureERC20` (vault withdraw) → swap →
+///              `_depositAllToVaults` (vault deposit). A vault with `f_in + f_out = 20bps`
+///              of round-trip fee bleeds 20bps of the JIT-deployed notional PER SWAP,
+///              charged entirely to LPs. At typical hook utilization this dwarfs the LP
+///              fee revenue.
+///
+///           2. LP share-math socialization. `_assetBalanceV4` reads `convertToAssets`
+///              (gross per EIP-4626), but actual `vault.deposit`/`vault.withdraw` net out
+///              the fee. The mismatch is socialized: a depositor underpays the entry fee
+///              (existing LPs subsidize), and a withdrawer over-extracts the gross
+///              valuation (remaining LPs pay the exit fee). Manifests as a
+///              first-out-wins / last-out-loses redemption race.
+///
 /// @dev    See `MultiAssetVault` for the share-math + lifecycle. This contract is the V4
 ///         binding: it translates `PoolKey` / `PoolId` / `Currency` into the base's
 ///         `VaultId` / `address asset` plumbing, and adds the V4-specific helpers
@@ -146,6 +162,16 @@ abstract contract PoolVault is MultiAssetVault {
     ///      vault is misconfigured. Reverting fail-fast prevents asset loss into a vault
     ///      that gives no claim back.
     error ZeroSharesMinted();
+
+    /// @dev The configured ERC-4626 vault applies an entry fee (`previewDeposit < convertToShares`).
+    ///      PoolVault deliberately does not support fee-on-entry vaults: see the contract-level
+    ///      `Vault Compatibility` NatSpec for the structural reasons (JIT-cycle bleed + share-math
+    ///      socialization). Detected at pool init via the probe in `_requireFeelessVault`.
+    error VaultChargesEntryFee();
+
+    /// @dev The configured ERC-4626 vault applies an exit fee (`previewRedeem < convertToAssets`).
+    ///      Same rationale as `VaultChargesEntryFee`; see contract-level `Vault Compatibility`.
+    error VaultChargesExitFee();
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                  TYPED VIEWS (PoolKey / PoolId wrappers)
@@ -555,6 +581,31 @@ abstract contract PoolVault is MultiAssetVault {
         if (token.allowance(address(this), vault) == 0) {
             token.forceApprove(vault, type(uint256).max);
         }
+    }
+
+    /// @dev Reject ERC-4626 vaults that apply entry or exit fees. Called once per vault at
+    ///      pool initialization; no-ops for `address(0)` (non-vaulted currency).
+    ///
+    ///      Detection leverages the EIP-4626 contract that `convertToShares`/`convertToAssets`
+    ///      MUST NOT factor in fees, while `previewDeposit`/`previewRedeem` MUST. For a feeless
+    ///      vault:
+    ///        - `previewDeposit(probe) == convertToShares(probe)` (both round DOWN)
+    ///        - `previewRedeem(probe)  == convertToAssets(probe)` (both round DOWN)
+    ///      Any divergence is an honest report of a fee. The probe is `10**vault.decimals()`
+    ///      so any per-mille-or-larger fee shows up well above rounding noise.
+    ///
+    ///      Note that this guard only catches honest fee disclosures. An adversarial vault
+    ///      could lie at the preview level and charge fees only on actual deposit/withdraw;
+    ///      `_depositToVault`'s `sharesActual != sharesPredicted` reconciliation absorbs the
+    ///      share count, but the LP-side socialization documented in the contract-level
+    ///      `Vault Compatibility` NatSpec still applies. Operators are trusted to pick
+    ///      curated vaults whose preview functions reflect ground truth.
+    function _requireFeelessVault(IERC4626 vault) internal view {
+        if (address(vault) == address(0)) return;
+        uint256 probe = 10 ** uint256(vault.decimals());
+        uint256 sharesPredicted = vault.convertToShares(probe);
+        if (vault.previewDeposit(probe) != sharesPredicted) revert VaultChargesEntryFee();
+        if (vault.previewRedeem(probe) != sharesPredicted) revert VaultChargesExitFee();
     }
 
     /// @dev Ensure the hook's allowance to `vault` for `currency` is at least `amount` for the

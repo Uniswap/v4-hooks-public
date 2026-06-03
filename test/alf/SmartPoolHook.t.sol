@@ -388,6 +388,56 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.initializePool(dynKey, cfg);
     }
 
+    /// @dev Fee-on-entry vaults are rejected at init: the JIT cycle would bleed the entry
+    ///      fee on every swap (after-swap re-deposit), and LP deposit math socializes the
+    ///      entry-fee shortfall against existing shareholders. See PoolVault's
+    ///      `Vault Compatibility` NatSpec for the structural rationale.
+    function test_initializePool_revertsOnEntryFeeVault() public {
+        MockMorphoVaultV2 feeVault0 = new MockMorphoVaultV2(ERC20(address(token0)));
+        feeVault0.setEntryFeeBps(10); // 10 bps entry fee — well above any rounding noise
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory feeKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(feeVault0)),
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        vm.expectRevert(PoolVault.VaultChargesEntryFee.selector);
+        hook.initializePool(feeKey, cfg);
+    }
+
+    /// @dev Fee-on-exit vaults are rejected at init: same JIT-bleed pathology plus a
+    ///      first-out-wins / last-out-loses LP redemption race.
+    function test_initializePool_revertsOnExitFeeVault() public {
+        MockMorphoVaultV2 feeVault1 = new MockMorphoVaultV2(ERC20(address(token1)));
+        feeVault1.setExitFeeBps(10); // 10 bps exit fee
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory feeKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(feeVault1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        vm.expectRevert(PoolVault.VaultChargesExitFee.selector);
+        hook.initializePool(feeKey, cfg);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          VAULT CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1978,6 +2028,20 @@ contract PausableVault {
         if (paused) revert("vault paused");
         return 0;
     }
+
+    function previewDeposit(uint256) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function convertToShares(uint256) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
+    }
 }
 
 /// @dev ERC4626-shaped vault that re-enters the hook from inside `deposit`. Configurable
@@ -2038,6 +2102,18 @@ contract ReentrantVault {
     function convertToAssets(uint256 s) external pure returns (uint256) {
         return s;
     }
+
+    function convertToShares(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function previewDeposit(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
+    }
 }
 
 /// @dev ERC-4626-like mock that reports a fixed `maxWithdraw` cap regardless of share balance.
@@ -2091,6 +2167,14 @@ contract CappedVault {
 
     function redeem(uint256, address, address) external pure returns (uint256) {
         return 0;
+    }
+
+    function previewDeposit(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
     }
 }
 
@@ -2148,5 +2232,13 @@ contract SwapReentrantVault {
 
     function previewRedeem(uint256 s) external pure returns (uint256) {
         return s;
+    }
+
+    function previewDeposit(uint256 a) external pure returns (uint256) {
+        return a;
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
     }
 }

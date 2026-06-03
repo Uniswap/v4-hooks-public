@@ -304,6 +304,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         _requireVaultMatchesCurrency(config.vault0, key.currency0);
         _requireVaultMatchesCurrency(config.vault1, key.currency1);
 
+        // Reject ERC-4626 vaults that apply entry/exit fees. Such vaults are structurally
+        // incompatible with the JIT-cycle (per-swap round-trip drag) and with the
+        // gross-balance share math (first-out-wins, last-out-loses). See PoolVault's
+        // `Vault Compatibility` NatSpec for the full rationale.
+        _requireFeelessVault(config.vault0);
+        _requireFeelessVault(config.vault1);
+
         if (config.minDepositBlocks > maxMinDepositBlocks) {
             revert MinDepositBlocksTooLarge(config.minDepositBlocks, maxMinDepositBlocks);
         }
