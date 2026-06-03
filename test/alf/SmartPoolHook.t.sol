@@ -12,6 +12,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
@@ -809,8 +810,26 @@ contract SmartPoolHookTest is Test, Deployers {
         assertLt(tickAfter, tickBefore, "zeroForOne should drop tick");
     }
 
-    function test_swap_noopWithoutDeposits() public {
-        // No bootstrap → swap must not revert (just produces no output).
+    /// @dev Swaps on a pool that's been `initializePool`'d but not yet `bootstrap`'d are
+    ///      rejected. Liveness is now gated on bootstrap: `initializePool` creates the pool
+    ///      with `livePools[poolId] = false`, and `bootstrap` flips it true after the first
+    ///      shares mint. Without this, a swapper could shift slot0's `sqrtPriceX96` against
+    ///      a zero-liquidity pool in the init→bootstrap window and extract value from the
+    ///      first real swap afterwards.
+    function test_swap_revertsBeforeBootstrap() public {
+        // testPoolKey is initialized in setUp() but never bootstrapped here. v4 wraps the
+        // hook's revert in CustomRevert.WrappedError; assert the full envelope so a future
+        // change that swaps the inner error (e.g., PoolNotLive -> PoolNotBootstrapped) is
+        // caught instead of silently passing under a generic `vm.expectRevert()`.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(SmartPoolHook.PoolNotLive.selector, testPoolId),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
         swap(testPoolKey, true, -100e18, "");
     }
 
@@ -1432,8 +1451,19 @@ contract SmartPoolHookTest is Test, Deployers {
     //  Pool fees are static (`PoolKey.fee`) and immutable post-init. Owner has only
     //  a per-pool liveness flag (`livePools`) for emergency pause/resume.
 
-    function test_livePool_initializePool_setsLive() public view {
-        assertTrue(hook.livePools(testPoolId));
+    /// @dev `initializePool` no longer flips the live flag -- it stays false until the
+    ///      first `bootstrap`. This closes the post-init pre-bootstrap window in which a
+    ///      swapper could shift slot0's price against zero JIT liquidity.
+    function test_livePool_initializePool_leavesPoolNotLive() public view {
+        assertFalse(hook.livePools(testPoolId));
+    }
+
+    /// @dev Bootstrap is the sole flip-to-live trigger. After init the pool is paused;
+    ///      a successful first `bootstrap` enables swaps.
+    function test_livePool_bootstrap_flipsLiveOn() public {
+        assertFalse(hook.livePools(testPoolId), "pre-bootstrap: not live");
+        _depositAsOperator(1_000e18);
+        assertTrue(hook.livePools(testPoolId), "post-bootstrap: live");
     }
 
     function test_livePool_setPoolLiveFalse_clearsLiveFlag() public {

@@ -271,9 +271,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         permanent — set at creation and cannot be changed. The distribution can be
     ///         updated later via `setDistribution`.
     ///         Native ETH (currency `address(0)`) is rejected — wrap as WETH instead.
-    ///         The pool is initialized as live; toggle via `setPoolLive` for emergency pause.
-    ///         The pool is **not seeded** by `initializePool`; the owner must call `bootstrap`
-    ///         to mint the first shares before any swaps or external deposits can occur.
+    ///         The pool is created **not live**: swaps revert with `PoolNotLive` until the
+    ///         owner calls `bootstrap`, which mints the first shares AND flips liveness on.
+    ///         This closes the post-init, pre-bootstrap window in which a swapper could
+    ///         shift `slot0.sqrtPriceX96` against a zero-liquidity pool. After bootstrap,
+    ///         the owner can pause/unpause via `setPoolLive`.
     ///
     ///         `config.minDepositBlocks` is recorded once and immutable thereafter. Its unit
     ///         is defined as blocks; this works consistently across chains by way of the
@@ -322,8 +324,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         _setDistribution(poolId, config.distribution, key.tickSpacing);
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
-        livePools[poolId] = true;
-        emit PoolLivenessUpdated(poolId, true);
+        // Pool starts NOT live: liveness is gated on `bootstrap` so the post-init,
+        // pre-bootstrap window cannot be swapped through. Without this, a swap in that
+        // window would deploy zero JIT liquidity yet may still shift slot0's
+        // `sqrtPriceX96`, letting an attacker push the price away from the intended
+        // bootstrap value before the owner's bootstrap TX lands. `bootstrap` flips
+        // liveness to true after the first deposit succeeds.
         emit PoolCreated(poolId);
     }
 
@@ -332,13 +338,17 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Seed a pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares
-    ///         to the owner.
+    ///         to the owner AND flips the pool to live, enabling swaps for the first time.
     /// @dev    Only the owner may bootstrap. The owner-supplied amounts set the initial
     ///         share/asset ratio, which is critical for asymmetric-decimal pairs (e.g.,
     ///         USDC/WETH) where a naïve 1-wei-of-each bootstrap would either be unaffordable
     ///         or set a meaningless price. Inflation defense is provided by virtual-shares
     ///         offsets in the conversion math (see {PoolVault._convertToAmounts}). Reverts
     ///         if the pool is already bootstrapped or if `sqrt(amount0 * amount1) == 0`.
+    ///
+    ///         Bootstrap is the sole trigger that flips a newly-initialized pool to live:
+    ///         this closes the init→bootstrap window in which a swap could move slot0's
+    ///         `sqrtPriceX96` against a zero-liquidity pool.
     /// @param key     The pool to bootstrap.
     /// @param amount0 Currency0 to deposit.
     /// @param amount1 Currency1 to deposit.
@@ -350,7 +360,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         whenJITNotInProgress
         returns (uint256 shares)
     {
-        return _bootstrap(key, msg.sender, msg.sender, amount0, amount1);
+        shares = _bootstrap(key, msg.sender, msg.sender, amount0, amount1);
+        // First successful bootstrap flips the pool to live. `_bootstrap` reverts on a
+        // re-bootstrap attempt, so this branch fires exactly once per pool. The owner
+        // can subsequently toggle liveness via `setPoolLive` (emergency pause).
+        PoolId poolId = key.toId();
+        livePools[poolId] = true;
+        emit PoolLivenessUpdated(poolId, true);
     }
 
     /// @notice Deposit token0 and token1 proportional to the pool's current asset ratio.
