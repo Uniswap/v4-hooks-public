@@ -9,7 +9,6 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
-import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
 import {VaultId} from "../types/VaultId.sol";
 
@@ -51,6 +50,26 @@ import {VaultId} from "../types/VaultId.sol";
 ///         at pool initialization. PoolVault calls `IERC20.safeTransferFrom(address(0), ...)`
 ///         which would revert; the subclass-level rejection makes the failure mode explicit
 ///         at init.
+///
+///         ## Vault Compatibility
+///
+///         PoolVault interacts with the configured per-currency vault solely through the
+///         ERC-4626 interface (`deposit`, `withdraw`, `convertToAssets`, `convertToShares`,
+///         `previewRedeem`). It deliberately does NOT read `maxWithdraw` on the hot paths
+///         (`_effectiveBalance`, `_withdrawFromVault`, `_ensureERC20`) — curated/gated vaults
+///         such as Morpho VaultV2 return `0` from `maxWithdraw` by construction because they
+///         cannot honestly bound a single-block withdrawal cap across their internal
+///         allocations. Effective-liquidity sizing instead uses `previewRedeem(shares)`,
+///         which on every conformant vault reflects the realizable exit value per share
+///         (net of any exit fee), and `withdraw` is called optimistically — if the vault
+///         cannot satisfy the request from its current allocation, the revert bubbles up
+///         through `_pushAsset` → swap callback → `beforeSwap`. Routers and aggregators
+///         see an explicit failure and route elsewhere.
+///
+///         For curated/gated vaults (Morpho VaultV2 and similar), the curator gate is an
+///         accepted trust assumption: operators MUST select vaults whose curators they
+///         trust not to enable a denial gate against the hook. See `_depositToVault` for
+///         the broader vault-trust model.
 ///
 /// @dev    See `MultiAssetVault` for the share-math + lifecycle. This contract is the V4
 ///         binding: it translates `PoolKey` / `PoolId` / `Currency` into the base's
@@ -103,12 +122,17 @@ abstract contract PoolVault is MultiAssetVault {
     ///                       to ERC-20 in the next beforeSwap via `_redeemPoolClaims`.
     mapping(PoolId => mapping(Currency => CurrencyState)) internal _state;
 
+    /// @notice Per-pool minimum deposit-lock duration, measured in `BlockNumberish`-clock blocks.
+    /// @dev    Returned by `_minDepositBlocks(VaultId)` and consumed by the base
+    ///         `MultiAssetVault._withdraw` guard. `0` means no lock (same-block withdraw allowed);
+    ///         `1` reproduces the legacy same-block ban; `N > 1` requires `N` blocks to elapse
+    ///         between the depositor's last `_deposit` and any `_withdraw`. Set at pool
+    ///         initialization and immutable thereafter.
+    mapping(PoolId => uint64) public minDepositBlocks;
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev The vault cannot satisfy the requested withdrawal amount (e.g., paused or capped).
-    error VaultLiquidityShortfall();
 
     /// @dev A vault redemption returned more shares than the pool owns. Defensive check --
     ///      should never trigger if `_vaultShares` accounting is consistent.
@@ -239,20 +263,35 @@ abstract contract PoolVault is MultiAssetVault {
     ///      ERC4626 vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool
     ///      ERC-20 holdings.
     ///
-    ///      DELIBERATE CAP-ASYMMETRY (do NOT "fix"): this function does NOT cap the vault
-    ///      contribution by `maxWithdraw`, while `_effectiveBalance` does. The asymmetry
-    ///      is load-bearing for share math — LP shares represent the pool's TOTAL economic
-    ///      claim, including capital temporarily locked in a paused, capped, or
-    ///      utilization-constrained vault. Capping here would let vault throttling reduce
-    ///      LP exit value even though the pool's underlying stake is unchanged. Callers
-    ///      that want the immediately-withdrawable subset (JIT deployment sizing, indicative
-    ///      quotes) MUST use `_effectiveBalance` instead.
+    ///      DELIBERATE VIEW-ASYMMETRY WITH `_effectiveBalance`:
+    ///        - `_assetBalanceV4` uses `vault.convertToAssets(shares)` -- the gross per-share
+    ///          economic value of the pool's vault stake, ignoring any vault-side exit fee
+    ///          or temporary throttle.
+    ///        - `_effectiveBalance` uses `vault.previewRedeem(shares)` -- the net amount the
+    ///          vault would deliver right now if the hook called `withdraw`/`redeem` for
+    ///          those shares (i.e., after exit fees, but still subject to single-block
+    ///          liquidity races on curated/gated vaults).
     ///
-    ///      The trade-off: a vault that overstates `convertToAssets` (unrealised yield not
+    ///      Why the asymmetry: LP shares represent the pool's TRUE economic claim, including
+    ///      capital that is temporarily locked behind a vault pause, a not-yet-realized exit
+    ///      fee, or a curated allocation. Sizing LP share math by `previewRedeem` would let
+    ///      a vault unilaterally tax LP exits (a vault that raises its exit-fee parameter
+    ///      between an LP deposit and an LP withdraw would shrink LP value even though the
+    ///      underlying economic stake is unchanged). The JIT cycle, by contrast, MUST size
+    ///      against what `vault.withdraw` will actually return mid-swap, which is exactly
+    ///      what `previewRedeem` reports.
+    ///
+    ///      Note that `previewRedeem` is a view at read-time; vault state could shift
+    ///      between the read and the actual `vault.withdraw` call mid-swap. When that
+    ///      happens, the vault reverts and the revert bubbles through `_pushAsset` →
+    ///      `beforeSwap` per the documented vault-compatibility model.
+    ///
+    ///      The trade-off: a vault that overstates `convertToAssets` (unrealized yield not
     ///      actually withdrawable, buggy/adversarial vault) inflates `_assetBalanceV4` →
     ///      inflates `previewDeposit`/`previewWithdraw` → dilutes new depositors and may
-    ///      brick withdrawals at `_ensureERC20`'s maxWithdraw cap. This is bounded by the
-    ///      documented vault-trust assumption: operators must use trusted ERC-4626 vaults.
+    ///      cause `_ensureERC20` to revert mid-swap when the vault cannot satisfy the
+    ///      requested withdrawal. This is bounded by the documented vault-trust assumption:
+    ///      operators must use trusted ERC-4626 vaults.
     function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         // Single SLOAD reads both packed fields.
         CurrencyState storage s = _state[poolId][currency];
@@ -264,30 +303,28 @@ abstract contract PoolVault is MultiAssetVault {
         }
     }
 
-    /// @dev Liquidity-ready balance for a single (pool, currency) pair. Same composition as
-    ///      `_assetBalanceV4`, but caps the vault contribution at this pool's PRO-RATA share
-    ///      of `vault.maxWithdraw(this)` so callers requesting "what can be deployed right
-    ///      now" see the truth even when the vault is paused, capped, or
-    ///      utilization-constrained.
+    /// @dev Net realizable balance for a single (pool, currency) pair. Same composition as
+    ///      `_assetBalanceV4`, but the vault contribution is the per-share `previewRedeem`
+    ///      output -- the amount the vault would deliver if the hook redeemed exactly the
+    ///      pool's share count right now. Used by callers that need "what can actually be
+    ///      delivered to a swapper this block": JIT deployment sizing and indicative quotes.
     ///
-    ///      Pro-rata cap detail: `maxWithdraw(this)` is hook-wide across all pools sharing
-    ///      this vault. A naive cap at the global value would let pool A see liquidity that
-    ///      actually belongs to pool B (or vice versa), enabling cross-pool DoS during vault
-    ///      utilization spikes. The fix scales the global cap by this pool's share of total
-    ///      hook-held vault shares: `poolMax = globalMax * poolShares / totalVaultShares`.
+    ///      Why `previewRedeem` and not `maxWithdraw`: curated/gated vaults like Morpho
+    ///      VaultV2 return `0` from `maxWithdraw` by construction (they cannot honestly
+    ///      bound a single-block withdrawal cap across their internal allocations), so a
+    ///      `maxWithdraw`-based sizing would silently degrade every such pool to zero
+    ///      deployable liquidity. `previewRedeem` is exact on VaultV2 (== `convertToAssets`)
+    ///      and on fee-charging vaults correctly reports the post-fee realizable value.
+    ///      Cross-pool isolation is automatic: `previewRedeem` is per-share, so pool A's
+    ///      reported balance is its own share-count × per-share value, independent of
+    ///      what other pools sharing the same vault hold.
     function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
         CurrencyState storage s = _state[poolId][currency];
         bal = uint256(s.erc20) + uint256(s.claims);
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) != address(0)) {
             uint256 shares = _vaultShares[poolId][currency];
-            if (shares > 0) {
-                uint256 byConvert = vault.convertToAssets(shares);
-                uint256 globalMax = vault.maxWithdraw(address(this));
-                uint256 totalHookShares = IERC20(address(vault)).balanceOf(address(this));
-                uint256 poolMax = totalHookShares > 0 ? FullMath.mulDiv(globalMax, shares, totalHookShares) : 0;
-                bal += byConvert < poolMax ? byConvert : poolMax;
-            }
+            if (shares > 0) bal += vault.previewRedeem(shares);
         }
     }
 
@@ -363,6 +400,12 @@ abstract contract PoolVault is MultiAssetVault {
         return _assetBalanceV4(PoolId.wrap(VaultId.unwrap(vaultId)), Currency.wrap(asset));
     }
 
+    /// @inheritdoc MultiAssetVault
+    /// @dev Looks up the per-pool lock duration set at pool initialization.
+    function _minDepositBlocks(VaultId vaultId) internal view override returns (uint64) {
+        return minDepositBlocks[PoolId.wrap(VaultId.unwrap(vaultId))];
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          INTERNAL: VAULT OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -379,6 +422,11 @@ abstract contract PoolVault is MultiAssetVault {
     ///      the hook's full balance of X -- including raw ERC-20 attributed to unrelated
     ///      pools that share that currency. Operators MUST select vaults whose security
     ///      properties they understand (immutable / non-upgradeable preferred).
+    ///
+    ///      Curated/gated vaults (e.g., Morpho VaultV2) add a third trust dimension on top
+    ///      of share-price and allowance trust: the curator can enable a gate that denies
+    ///      future deposits or withdrawals from the hook. Operators MUST trust the chosen
+    ///      vault's curator not to weaponize the gate against the pool.
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = vaults[poolId][currency];
@@ -445,28 +493,34 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @dev Withdraw `amount` of `currency` from the pool's vault, crediting per-pool ERC-20.
-    ///      Caps at `vault.maxWithdraw` to handle paused or utilization-constrained vaults
-    ///      gracefully.
+    ///      Calls `vault.withdraw` optimistically -- if the vault cannot satisfy the request
+    ///      (paused, utilization-constrained, curated-allocation shortfall), the vault's own
+    ///      revert bubbles up through `_pushAsset` → swap callback → `beforeSwap`. The
+    ///      `CrossPoolShareLeak` defensive check stays to catch a vault that consumes more
+    ///      shares than the pool owns.
     function _withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) return; // already in _state.erc20
 
-        uint256 maxWithdrawable = vault.maxWithdraw(address(this));
-        uint256 toWithdraw = amount > maxWithdrawable ? maxWithdrawable : amount;
-        if (toWithdraw == 0) return;
-
-        uint256 sharesUsed = vault.withdraw(toWithdraw, address(this), address(this));
+        uint256 sharesUsed = vault.withdraw(amount, address(this), address(this));
         uint256 poolShares = _vaultShares[poolId][currency];
         if (sharesUsed > poolShares) revert CrossPoolShareLeak();
         _vaultShares[poolId][currency] -= sharesUsed;
         CurrencyState storage s = _state[poolId][currency];
-        s.erc20 = (uint256(s.erc20) + toWithdraw).toUint128();
+        s.erc20 = (uint256(s.erc20) + amount).toUint128();
     }
 
     /// @dev Ensure the pool's tracked ERC-20 balance is at least `amount`, then debit it.
-    ///      Withdraws from the vault for any shortfall, reverts with `VaultLiquidityShortfall`
-    ///      if the vault can't cover.
+    ///      Withdraws any shortfall from the configured vault by calling `vault.withdraw`
+    ///      directly; on vault failure (paused, curated shortfall, etc.) the revert bubbles
+    ///      up through `_pushAsset` → swap callback → `beforeSwap`. Routers / aggregators
+    ///      see the vault-side error (e.g., Morpho's `NotEnoughLiquidity`) rather than a
+    ///      uniform PoolVault sentinel.
+    ///
+    ///      For non-vaulted pools the `bal - amount` subtraction below panics on underflow
+    ///      when the pool has no configured vault and insufficient ERC-20 -- there is no
+    ///      separate sentinel revert.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         CurrencyState storage s = _state[poolId][currency];
@@ -478,15 +532,13 @@ abstract contract PoolVault is MultiAssetVault {
 
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) {
-            // Non-vaulted pool with insufficient erc20 -- underflow reverts cleanly below.
+            // Non-vaulted pool with insufficient erc20 -- the `bal - amount` subtraction
+            // panics on underflow.
             s.erc20 = uint128(bal - amount);
             return;
         }
 
         uint256 shortfall = amount - bal;
-        uint256 maxWithdrawable = vault.maxWithdraw(address(this));
-        if (shortfall > maxWithdrawable) revert VaultLiquidityShortfall();
-
         uint256 sharesUsed = vault.withdraw(shortfall, address(this), address(this));
         uint256 poolShares = _vaultShares[poolId][currency];
         if (sharesUsed > poolShares) revert CrossPoolShareLeak();

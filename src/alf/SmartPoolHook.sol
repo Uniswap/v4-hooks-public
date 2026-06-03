@@ -126,12 +126,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param allowExternalDeposits Whether non-owner addresses may call `addLiquidity`.
     /// @param vault0               ERC4626 vault for currency0 (address(0) to hold as ERC-20).
     /// @param vault1               ERC4626 vault for currency1 (address(0) to hold as ERC-20).
+    /// @param minDepositBlocks     Per-pool deposit lock duration. `0` (default) means NO lock
+    ///                             and same-block deposit-then-withdraw is allowed. Must be
+    ///                             `<= maxMinDepositBlocks`. Immutable after `initializePool`.
     struct PoolConfig {
         uint160 sqrtPriceX96;
         LiquidityBucket[] distribution;
         bool allowExternalDeposits;
         IERC4626 vault0;
         IERC4626 vault1;
+        uint64 minDepositBlocks;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -150,10 +154,17 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Emitted when a new pool is initialized via `initializePool`.
+    /// @param poolId The pool that was created.
     event PoolCreated(PoolId indexed poolId);
 
     /// @notice Emitted when the liquidity distribution is replaced via `setDistribution`.
+    /// @param poolId The pool whose distribution was updated.
     event DistributionUpdated(PoolId indexed poolId);
+
+    /// @notice Emitted when external deposits are enabled or disabled via `setExternalDeposits`.
+    /// @param poolId The pool whose external deposits were enabled or disabled.
+    /// @param enabled Whether external deposits are enabled.
+    event ExternalDepositsUpdated(PoolId indexed poolId, bool enabled);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
@@ -205,15 +216,35 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param poolId The pool whose live flag is currently false.
     error PoolNotLive(PoolId poolId);
 
+    /// @dev Operator-supplied `PoolConfig.minDepositBlocks` exceeds the per-deployment upper
+    ///      bound (`maxMinDepositBlocks`).
+    /// @param supplied The value the operator provided in `PoolConfig`.
+    /// @param max      The deployment-wide ceiling set at construction.
+    error MinDepositBlocksTooLarge(uint64 supplied, uint64 max);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              IMMUTABLES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Per-deployment upper bound on `PoolConfig.minDepositBlocks`, in
+    ///         `BlockNumberish`-clock blocks. Set at construction so each chain deployment
+    ///         can pick a chain-appropriate ceiling at deployment, immutable thereafter.
+    uint64 public immutable maxMinDepositBlocks;
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @param _pm     The Uniswap v4 PoolManager.
-    /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_  Immutable contract owner. Cannot be changed post-deployment;
-    ///                key loss or compromise is unrecoverable. See {SmartPoolBase}.
-    constructor(IPoolManager _pm, uint32 maxGas_, address owner_) SmartPoolBase(_pm, maxGas_, owner_) {}
+    /// @param _pm                 The Uniswap v4 PoolManager.
+    /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
+    /// @param owner_              Immutable contract owner. Cannot be changed post-deployment;
+    ///                            key loss or compromise is unrecoverable. See {SmartPoolBase}.
+    /// @param _maxMinDepositBlocks Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
+    constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepositBlocks)
+        SmartPoolBase(_pm, maxGas_, owner_)
+    {
+        maxMinDepositBlocks = _maxMinDepositBlocks;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: POOL INITIALIZATION
@@ -228,8 +259,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         The pool is initialized as live; toggle via `setPoolLive` for emergency pause.
     ///         The pool is **not seeded** by `initializePool`; the owner must call `bootstrap`
     ///         to mint the first shares before any swaps or external deposits can occur.
+    ///
+    ///         `config.minDepositBlocks` is recorded once and immutable thereafter. Its unit
+    ///         is defined as blocks; this works consistently across chains by way of the
+    ///         `BlockNumberish` library which returns the L2 sequencer's local block number
+    ///         on Arbitrum and `block.number` elsewhere. A value of `0` means NO lock applies
+    ///         and same-block deposit-then-withdraw is allowed; for a same-block ban set `1`.
+    ///         Values above `maxMinDepositBlocks` are disallowed.
     /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee.
-    /// @param config Pool configuration including distribution, vaults, and permissions.
+    /// @param config Pool configuration including distribution, vaults, permissions, and
+    ///               the deposit-lock duration.
     /// @return tick  The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, PoolConfig calldata config) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
@@ -242,10 +281,15 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         _requireVaultMatchesCurrency(config.vault0, key.currency0);
         _requireVaultMatchesCurrency(config.vault1, key.currency1);
 
+        if (config.minDepositBlocks > maxMinDepositBlocks) {
+            revert MinDepositBlocksTooLarge(config.minDepositBlocks, maxMinDepositBlocks);
+        }
+
         PoolId poolId = key.toId();
         externalDepositsEnabled[poolId] = config.allowExternalDeposits;
         vaults[poolId][key.currency0] = config.vault0;
         vaults[poolId][key.currency1] = config.vault1;
+        minDepositBlocks[poolId] = config.minDepositBlocks;
 
         // Approve once at init time so JIT-cycle vault deposits can skip the runtime
         // allowance read. Allowance set to `type(uint256).max` is never decremented by
@@ -367,16 +411,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @notice Refresh the max-approval the hook grants to a pool's ERC-4626 vault.
     /// @dev    Recovery path for vaults whose allowance is unexpectedly consumed or reset.
-    ///         Zeroes the existing allowance first (USDT-safe) before re-approving to
-    ///         `type(uint256).max`. No-op if the pool has no vault configured for `currency`.
+    ///         `forceApprove` internally zeroes-then-sets for USDT-style tokens whose
+    ///         `approve` reverts on a non-zero existing allowance, so a single call covers
+    ///         both the well-behaved and the zero-out-first cases. No-op if the pool has no
+    ///         vault configured for `currency`.
     /// @param key      The pool whose vault allowance should be refreshed.
     /// @param currency Which side (currency0 or currency1) to refresh.
     function refreshVaultApproval(PoolKey calldata key, Currency currency) external onlyOwner whenJITNotInProgress {
         IERC4626 vault = vaults[key.toId()][currency];
         if (address(vault) == address(0)) return;
-        IERC20 token = IERC20(Currency.unwrap(currency));
-        token.forceApprove(address(vault), 0);
-        token.forceApprove(address(vault), type(uint256).max);
+        IERC20(Currency.unwrap(currency)).forceApprove(address(vault), type(uint256).max);
     }
 
     /// @notice Enable or disable external (non-owner) deposits for a pool.
@@ -384,6 +428,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param enabled True to permit non-owner `addLiquidity`, false for owner-only.
     function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOwner whenJITNotInProgress {
         externalDepositsEnabled[key.toId()] = enabled;
+        emit ExternalDepositsUpdated(key.toId(), enabled);
     }
 
     /// @notice Disabled: SmartPool uses distribution buckets instead of one active LP tick.
@@ -412,8 +457,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     }
 
     /// @notice Assets available for immediate swapping.
-    /// @dev    Caps vault-side balance at `vault.maxWithdraw(this)` so paused, capped, or
-    ///         utilization-constrained vaults are reflected.
+    /// @dev    Sizes vault-side balance via `vault.previewRedeem(shares)` so the reported
+    ///         number reflects the net realizable exit value (accounting for any vault-side
+    ///         exit fee) rather than the gross `convertToAssets` figure. Curated/gated
+    ///         vaults that return `0` from `maxWithdraw` (Morpho VaultV2 and similar) are
+    ///         correctly sized via `previewRedeem` instead.
     function getEffectiveLiquidity(PoolKey calldata key)
         external
         view
@@ -588,8 +636,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         // and the `_deployBuckets` settle would revert mid-cycle. Sizing against `_effectiveAssets`
         // matches both `getEffectiveLiquidity` (the routing/aggregator view) and what the JIT
         // cycle can actually pay for at deploy time. Share math (`_convertToAmounts`) deliberately
-        // continues to use `_totalAssets` per INV-POOL-12 — LP pro-rata claims are over true
-        // economic stake, not the momentarily-withdrawable subset.
+        // continues to use `_totalAssets` to ensure that LP pro-rata claims are over true economic
+        // stake, not the momentarily-withdrawable subset of that stake.
         (uint256 bal0, uint256 bal1) = _effectiveAssets(poolId, key.currency0, key.currency1);
         if (bal0 == 0 && bal1 == 0) return;
 

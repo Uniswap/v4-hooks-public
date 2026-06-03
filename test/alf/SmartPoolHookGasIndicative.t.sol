@@ -44,7 +44,7 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
     }
 
     function test_gas_singleBucket_noVault() public {
@@ -119,7 +119,8 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: withVault ? IERC4626(address(vault0)) : IERC4626(address(0)),
-            vault1: withVault ? IERC4626(address(vault1)) : IERC4626(address(0))
+            vault1: withVault ? IERC4626(address(vault1)) : IERC4626(address(0)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         hook.initializePool(key, cfg);

@@ -55,7 +55,7 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -296,7 +296,8 @@ contract SmartPoolHookDistributionDemoTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: vault0,
-            vault1: vault1
+            vault1: vault1,
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         hook.initializePool(key, cfg);
@@ -522,6 +523,15 @@ contract CappedMockERC4626 is ERC20 {
     function convertToAssets(uint256 shares) public view returns (uint256) {
         uint256 supply = totalSupply;
         return supply == 0 ? shares : (shares * totalAssets()) / supply;
+    }
+
+    /// @dev `previewRedeem` reports the realizable amount after applying the same withdraw
+    ///      cap as `maxWithdraw`. With the cap binding, `previewRedeem` returns
+    ///      `min(convertToAssets(shares), cap)` so callers using `previewRedeem` for
+    ///      deployable-now sizing see the constrained value.
+    function previewRedeem(uint256 shares) public view returns (uint256) {
+        uint256 gross = convertToAssets(shares);
+        return gross < withdrawCap ? gross : withdrawCap;
     }
 
     /// @dev Effective max-withdraw is the lesser of the economic share value and the cap.

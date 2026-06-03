@@ -72,7 +72,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
 
         testPoolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
@@ -90,7 +90,8 @@ contract SmartPoolInvariantTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: true, // Critical: handler actors are external addresses
             vault0: IERC4626(address(vault0)),
-            vault1: IERC4626(address(vault1))
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: 0
         });
 
         vm.prank(owner);

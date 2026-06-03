@@ -15,6 +15,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
+import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
 /// @dev Concrete test harness that exposes PoolVault's internal functions as external calls.
 contract MockPoolVault is PoolVault {
@@ -72,6 +73,14 @@ contract MockPoolVault is PoolVault {
         // Mirror production's init-time approval so hot-path deposits don't need a
         // runtime allowance read.
         _approveVault(currency, address(vault));
+    }
+
+    function setMinDepositBlocks(PoolId poolId, uint64 blocks) external {
+        minDepositBlocks[poolId] = blocks;
+    }
+
+    function withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) external {
+        _withdrawFromVault(poolId, currency, amount);
     }
 
     function getVaultShares(PoolId poolId, Currency currency) external view returns (uint256) {
@@ -329,9 +338,13 @@ contract PoolVaultTest is Test, Deployers {
         vault.withdraw(poolKeyA, alice, alice, aliceShares + 1);
     }
 
-    function test_withdraw_revertsInSameBlockAsDeposit() public {
+    function test_withdraw_revertsBeforeUnlockBlock() public {
+        // Configure a non-trivial 5-block lock so the test covers the general case, not just
+        // the same-block-ban degenerate.
+        vault.setMinDepositBlocks(poolIdA, 5);
         _bootstrap(alice, 1000e18);
-        // Bob deposits subsequent shares, attempts withdraw same block.
+
+        // Bob deposits subsequent shares, attempts withdraw before the unlock block.
         (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
         token0.mint(bob, need0);
         token1.mint(bob, need1);
@@ -339,14 +352,18 @@ contract PoolVaultTest is Test, Deployers {
         token0.approve(address(vault), need0);
         token1.approve(address(vault), need1);
         vault.deposit(poolKeyA, bob, bob, 100e18);
-        // No vm.roll — same block.
-        vm.expectRevert(MultiAssetVault.SameBlockWithdraw.selector);
+        uint256 unlockBlock = block.number + 5;
+        // Roll just below the unlock block.
+        vm.roll(unlockBlock - 1);
+        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.DepositLocked.selector, unlockBlock));
         vault.withdraw(poolKeyA, bob, bob, 100e18);
         vm.stopPrank();
     }
 
-    function test_withdraw_succeedsNextBlock() public {
+    function test_withdraw_succeedsAtUnlockBlock() public {
+        vault.setMinDepositBlocks(poolIdA, 5);
         _bootstrap(alice, 1000e18);
+
         (uint256 need0, uint256 need1) = vault.previewDeposit(poolKeyA, 100e18);
         token0.mint(bob, need0);
         token1.mint(bob, need1);
@@ -355,8 +372,27 @@ contract PoolVaultTest is Test, Deployers {
         token1.approve(address(vault), need1);
         vault.deposit(poolKeyA, bob, bob, 100e18);
         vm.stopPrank();
-        vm.roll(block.number + 1);
+        // Roll exactly to the unlock block; lock should clear.
+        vm.roll(block.number + 5);
         vault.withdraw(poolKeyA, bob, bob, 100e18);
+    }
+
+    /// @notice Regression: `minDepositBlocks: 0` permits same-block withdraw. This is a
+    ///         deliberate semantic change from the legacy unconditional same-block ban; the
+    ///         test locks the new semantics into CI so anyone tightening the default in the
+    ///         future is forced to update it.
+    function test_withdraw_succeedsWhenMinDepositBlocksIsZero() public {
+        // Default minDepositBlocks for poolIdA is 0 (no setter call). Bootstrap and immediately
+        // withdraw in the same block.
+        token0.mint(alice, 1000e18);
+        token1.mint(alice, 1000e18);
+        vm.startPrank(alice);
+        token0.approve(address(vault), 1000e18);
+        token1.approve(address(vault), 1000e18);
+        vault.bootstrap(poolKeyA, alice, alice, 1000e18, 1000e18);
+        // No vm.roll -- same block as the deposit. The lock-of-zero permits this.
+        vault.withdraw(poolKeyA, alice, alice, 500e18);
+        vm.stopPrank();
     }
 
     // ══════════════════════════════════════════════════════════
@@ -545,45 +581,143 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  Per-pool vault maxWithdraw cap
+    //  Per-pool previewRedeem sizing
     // ══════════════════════════════════════════════════════════
 
-    /// @dev When two pools share the same vault and the vault is utilization-constrained
-    ///      (`maxWithdraw` < `convertToAssets(totalShares)`), each pool's effective balance
-    ///      must reflect its PRO-RATA share of the constrained capacity, not the full
-    ///      hook-wide cap. Without the per-pool cap, pool B's `_effectiveBalance` would see
-    ///      the full cap and over-state available liquidity → cross-pool DoS when pool A's
-    ///      parallel JIT cycle consumes the global capacity first.
-    function test_effectiveBalance_perPoolMaxWithdrawCap() public {
-        // Pool A bootstraps 1000, pool B bootstraps 4000 — pool B owns 80% of vault shares.
+    /// @dev `_effectiveBalance` reports the per-pool `previewRedeem(shares)` value. Two pools
+    ///      sharing the same vault each see their own share-pro-rata exit value with no
+    ///      cross-pool interference -- the per-share quantity is intrinsic to the vault, so
+    ///      no per-pool capping math is needed in PoolVault.
+    function test_effectiveBalance_usesPreviewRedeemPerShare() public {
         _bootstrap(alice, 1_000e18);
-        // Configure pool B to share the same vault for currency0.
         vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
         vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
         _bootstrapPool(poolKeyB, bob, 4_000e18);
 
-        // Pool A holds 1000e18 / 5000e18 = 20% of vault shares.
-        // Pool B holds 4000e18 / 5000e18 = 80% of vault shares.
+        // Pool A owns 1000 vault shares; pool B owns 4000. 1:1 share/asset ratio in MockERC4626,
+        // so previewRedeem on the underlying simply tracks balance.
+        uint256 effA = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+        uint256 effB = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
+        assertEq(effA, 1_000e18, "pool A sees its own share-pro-rata previewRedeem");
+        assertEq(effB, 4_000e18, "pool B sees its own share-pro-rata previewRedeem");
 
-        // Mock vault.maxWithdraw to return 1000 — utilization-constrained scenario.
-        // (The vault holds 5000 economic but only 1000 is presently withdrawable.)
+        // Mock the per-share `previewRedeem` to return a constrained per-pool figure (e.g.,
+        // an exit-fee-adjusted value). Each pool should reflect its share count * mock output.
         vm.mockCall(
-            address(vault0), abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)), abi.encode(1_000e18)
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.previewRedeem.selector, uint256(1_000e18)),
+            abi.encode(500e18)
+        );
+        vm.mockCall(
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.previewRedeem.selector, uint256(4_000e18)),
+            abi.encode(2_000e18)
         );
 
-        // Pool A's effective balance: pro-rata cap = 1000 * 1000/5000 = 200.
-        // byConvert for pool A's 1000 shares = 1000 (1:1 vault).
-        // min(byConvert, poolMax) = min(1000, 200) = 200.
-        uint256 effA = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+        uint256 effAFee = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+        uint256 effBFee = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
+        assertEq(effAFee, 500e18, "pool A reflects mocked previewRedeem");
+        assertEq(effBFee, 2_000e18, "pool B reflects mocked previewRedeem");
+    }
 
-        // Pool B's effective balance: pro-rata cap = 1000 * 4000/5000 = 800.
-        // byConvert for pool B's 4000 shares = 4000.
-        // min(byConvert, poolMax) = min(4000, 800) = 800.
-        uint256 effB = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
+    // ══════════════════════════════════════════════════════════
+    //  Morpho VaultV2 compatibility (maxWithdraw == 0 vaults)
+    // ══════════════════════════════════════════════════════════
 
-        assertEq(effA, 200e18, "pool A capped at its 20% pro-rata share");
-        assertEq(effB, 800e18, "pool B capped at its 80% pro-rata share");
-        // Sum must not exceed the global cap (the load-bearing safety property).
-        assertLe(effA + effB, 1_000e18, "sum of effective balances must not exceed global cap");
+    /// @dev With a VaultV2-shaped vault (`maxWithdraw == 0`), `_effectiveBalance` MUST still
+    ///      reflect the pool's share-redemption value via `previewRedeem`. A pre-change
+    ///      `maxWithdraw`-based sizing would have returned 0 here, silently degrading every
+    ///      VaultV2 pool to zero deployable liquidity.
+    function test_effectiveBalance_zeroMaxWithdraw_usesPreviewRedeem() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+        // vault1 is untouched (still vault1).
+
+        _bootstrap(alice, 1_000e18);
+
+        uint256 mwd = vv2.maxWithdraw(address(vault));
+        assertEq(mwd, 0, "VaultV2 mock: maxWithdraw is hard-zero");
+
+        uint256 eff = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+        assertGt(eff, 0, "effective balance must be non-zero despite maxWithdraw == 0");
+    }
+
+    /// @dev When the vault reverts on `withdraw` (Morpho's NotEnoughLiquidity, paused, etc.),
+    ///      the revert bubbles up through `_ensureERC20` to the caller -- there is no longer
+    ///      a uniform PoolVault sentinel sitting in the way.
+    function test_ensureERC20_bubblesVaultRevert() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+
+        _bootstrap(alice, 1_000e18);
+        vv2.setWithdrawShortfall(true);
+
+        // The pool's tracked ERC-20 is zero (all in vault); ensureERC20(100) must call
+        // vault.withdraw and surface the vault's revert.
+        vm.expectRevert(MockMorphoVaultV2.WithdrawShortfall.selector);
+        vault.ensureERC20(poolIdA, poolKeyA.currency0, 100e18);
+    }
+
+    /// @dev `_withdrawFromVault` also bubbles vault reverts now that the maxWithdraw
+    ///      pre-flight cap is gone.
+    function test_withdrawFromVault_bubblesVaultRevert() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+
+        _bootstrap(alice, 1_000e18);
+        vv2.setWithdrawShortfall(true);
+
+        vm.expectRevert(MockMorphoVaultV2.WithdrawShortfall.selector);
+        vault.withdrawFromVault(poolIdA, poolKeyA.currency0, 100e18);
+    }
+
+    /// @dev Deposits MUST proceed when `maxWithdraw == 0` -- the deposit path does not read
+    ///      it. Regression for the VaultV2 onboarding flow.
+    function test_addLiquidity_proceedsWhenMaxWithdrawIsZero() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+        _bootstrap(alice, 1_000e18);
+        vm.roll(block.number + 1);
+
+        // Bob deposits subsequent shares; the deposit path must not read maxWithdraw.
+        (uint256 a0, uint256 a1) = _depositA(bob, 100e18);
+        assertGt(a0, 0);
+        assertGt(a1, 0);
+        assertEq(vault.userShares(poolIdA, bob), 100e18);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Asymmetry: _assetBalanceV4 vs _effectiveBalance under exit fees
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev Verifies the deliberate asymmetry between `_assetBalanceV4` (uses `convertToAssets`,
+    ///      reflects LP economic stake) and `_effectiveBalance` (uses `previewRedeem`, reflects
+    ///      the realizable-now value). On a vault that charges a withdrawal fee, the two views
+    ///      MUST diverge; LP share math must NOT shrink by the exit-fee delta.
+    function test_assetBalanceV4_vs_effectiveBalance_withExitFee() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+
+        _bootstrap(alice, 1_000e18);
+
+        // Snapshot: total assets and per-share previewWithdraw BEFORE any exit fee.
+        (uint256 totalBefore,) = vault.totalAssets(poolKeyA);
+        (uint256 perShareBefore,) = vault.previewWithdraw(poolKeyA, 100e18);
+
+        // Apply a 5% exit fee on the vault. `previewRedeem` shrinks by 5%; `convertToAssets`
+        // is unchanged -- exactly the asymmetry the contract relies on.
+        vv2.setExitFeeBps(500);
+
+        (uint256 totalAfter,) = vault.totalAssets(poolKeyA);
+        (uint256 perShareAfter,) = vault.previewWithdraw(poolKeyA, 100e18);
+
+        assertEq(totalBefore, totalAfter, "(a) LP share math unaffected by exit-fee change");
+        assertEq(perShareBefore, perShareAfter, "(a) LP per-share withdraw amount unaffected by exit-fee change");
+
+        // (b) `_effectiveBalance` reflects the post-fee realizable value.
+        uint256 effective = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
+        // Bootstrap deposited 1000e18 vault shares at 1:1, so previewRedeem = 1000 * (1 - 5%) = 950.
+        assertEq(effective, 950e18, "(b) _effectiveBalance reflects previewRedeem net of exit fee");
+        assertLt(effective, totalAfter, "(b) effective < totalAssets when exit fee is active");
     }
 }

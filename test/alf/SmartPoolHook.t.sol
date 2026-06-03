@@ -79,7 +79,7 @@ contract SmartPoolHookTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
         hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner), address(hook));
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
 
         testPoolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
@@ -103,7 +103,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(vault0)),
-            vault1: IERC4626(address(vault1))
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: 0
         });
     }
 
@@ -154,7 +155,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: true,
             vault0: vaulted ? IERC4626(address(vault0)) : IERC4626(address(0)),
-            vault1: vaulted ? IERC4626(address(vault1)) : IERC4626(address(0))
+            vault1: vaulted ? IERC4626(address(vault1)) : IERC4626(address(0)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         hook.initializePool(key, cfg);
@@ -278,7 +280,8 @@ contract SmartPoolHookTest is Test, Deployers {
                 distribution: dist,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(vault0)),
-                vault1: IERC4626(address(vault1))
+                vault1: IERC4626(address(vault1)),
+                minDepositBlocks: 0
             })
         );
     }
@@ -299,7 +302,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
-            vault1: IERC4626(address(0))
+            vault1: IERC4626(address(0)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
@@ -323,7 +327,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
-            vault1: IERC4626(address(0))
+            vault1: IERC4626(address(0)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
@@ -346,7 +351,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
-            vault1: IERC4626(address(0))
+            vault1: IERC4626(address(0)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         vm.expectRevert();
@@ -507,41 +513,135 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.removeLiquidity(testPoolKey, 2_000e18, 0, 0, block.timestamp);
     }
 
-    /// @dev Atomic deposit-then-withdraw in the same block is rejected — defends against
-    ///      atomic JIT-fee/yield sniping.
-    function test_removeLiquidity_revertsInSameBlockAsDeposit() public {
-        _depositAsOperator(1_000e18); // bootstrap (advances block)
-        vm.prank(owner);
-        hook.setExternalDeposits(testPoolKey, true);
+    /// @dev Deposit-then-withdraw within the configured lock duration is rejected --
+    ///      defends against atomic JIT-fee/yield sniping. Uses a pool initialized with
+    ///      `minDepositBlocks: 5` so the test exercises the general case, not just the
+    ///      degenerate same-block ban.
+    function test_removeLiquidity_revertsBeforeUnlockBlock() public {
+        (PoolKey memory lockedKey,) = _initLockedPool(5);
+        _bootstrapLockedPool(lockedKey, 1_000e18);
 
         token0.mint(bob, 100e18);
         token1.mint(bob, 100e18);
         vm.startPrank(bob);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
+        hook.addLiquidity(lockedKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
+        uint256 unlockBlock = block.number + 5;
 
-        vm.expectRevert(MultiAssetVault.SameBlockWithdraw.selector);
-        hook.removeLiquidity(testPoolKey, 100e18, 0, 0, block.timestamp);
+        // Roll just below the unlock block.
+        vm.roll(unlockBlock - 1);
+        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.DepositLocked.selector, unlockBlock));
+        hook.removeLiquidity(lockedKey, 100e18, 0, 0, block.timestamp);
         vm.stopPrank();
     }
 
-    function test_removeLiquidity_succeedsNextBlock() public {
-        _depositAsOperator(1_000e18);
-        vm.prank(owner);
-        hook.setExternalDeposits(testPoolKey, true);
+    function test_removeLiquidity_succeedsAtUnlockBlock() public {
+        (PoolKey memory lockedKey,) = _initLockedPool(5);
+        _bootstrapLockedPool(lockedKey, 1_000e18);
 
         token0.mint(bob, 100e18);
         token1.mint(bob, 100e18);
         vm.startPrank(bob);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
+        hook.addLiquidity(lockedKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
 
-        vm.roll(block.number + 1);
+        // Roll past the 5-block lock.
+        vm.roll(block.number + 5);
         vm.prank(bob);
-        hook.removeLiquidity(testPoolKey, 100e18, 0, 0, block.timestamp);
+        hook.removeLiquidity(lockedKey, 100e18, 0, 0, block.timestamp);
+    }
+
+    /// @dev Regression: a pool initialized with `minDepositBlocks: 0` permits same-block
+    ///      deposit-then-withdraw. This is a deliberate semantic change from the legacy
+    ///      unconditional same-block ban; the test locks the new default into CI so anyone
+    ///      tightening it in the future is forced to update this assertion.
+    function test_removeLiquidity_succeedsWhenMinDepositBlocksIsZero() public {
+        // testPoolKey is initialized with minDepositBlocks: 0 via _defaultConfig.
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        // Bootstrap (advances one block in the helper); now bob deposits AND withdraws in the
+        // same block -- the zero-lock default permits this.
+        _depositAsOperator(1_000e18);
+        token0.mint(bob, 100e18);
+        token1.mint(bob, 100e18);
+        vm.startPrank(bob);
+        token0.approve(address(hook), 100e18);
+        token1.approve(address(hook), 100e18);
+        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
+        // No vm.roll -- same block as the deposit.
+        hook.removeLiquidity(testPoolKey, 50e18, 0, 0, block.timestamp);
+        vm.stopPrank();
+    }
+
+    /// @dev `initializePool` rejects `minDepositBlocks > maxMinDepositBlocks`. Deploys a
+    ///      dedicated hook with a small `_maxMinDepositBlocks` so we don't have to rebuild
+    ///      `testPoolKey`.
+    function test_initializePool_revertsOnMinDepositBlocksTooLarge() public {
+        // Deploy a fresh hook with maxMinDepositBlocks=100 at a non-conflicting address.
+        uint160 flags = uint160(
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+        );
+        // Vary the base address slightly so it differs from the setUp hook.
+        address tightAddr = address(uint160(uint256(type(uint160).max - 1) & clearAllHookPermissionsMask | flags));
+        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, uint64(100)), tightAddr);
+        SmartPoolHook tight = SmartPoolHook(tightAddr);
+
+        PoolKey memory key = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 11, hooks: IHooks(tightAddr)
+        });
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: 101 // one over the bound
+        });
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(SmartPoolHook.MinDepositBlocksTooLarge.selector, uint64(101), uint64(100))
+        );
+        tight.initializePool(key, cfg);
+    }
+
+    /// @dev Helper: deploy a fresh pool with the given lock duration. The pool uses a
+    ///      distinct tickSpacing so its PoolId differs from `testPoolKey`'s.
+    function _initLockedPool(uint64 lockBlocks) internal returns (PoolKey memory key, PoolId id) {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -12, tickUpper: 12, weightBps: 10_000});
+        key = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 12, hooks: IHooks(address(hook))
+        });
+        id = key.toId();
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: true,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: lockBlocks
+        });
+        vm.prank(owner);
+        hook.initializePool(key, cfg);
+    }
+
+    function _bootstrapLockedPool(PoolKey memory key, uint256 amount) internal {
+        token0.mint(owner, amount);
+        token1.mint(owner, amount);
+        vm.startPrank(owner);
+        token0.approve(address(hook), amount);
+        token1.approve(address(hook), amount);
+        hook.bootstrap(key, amount, amount);
+        vm.stopPrank();
+        // Step past the bootstrap lock.
+        vm.roll(block.number + hook.minDepositBlocks(key.toId()));
     }
 
     /// @dev External actors cannot touch v4 LP positions directly — only the hook may.
@@ -1066,7 +1166,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(0)),
-            vault1: IERC4626(address(0))
+            vault1: IERC4626(address(0)),
+            minDepositBlocks: 0
         });
 
         vm.startPrank(owner);
@@ -1179,7 +1280,8 @@ contract SmartPoolHookTest is Test, Deployers {
             allowExternalDeposits: false,
             // currency0 = uncapped MockERC4626 (vault0 from setUp), currency1 = malicious.
             vault0: IERC4626(address(vault0)),
-            vault1: IERC4626(address(evilVault1))
+            vault1: IERC4626(address(evilVault1)),
+            minDepositBlocks: 0
         });
         vm.prank(owner);
         hook.initializePool(key, cfg);
@@ -1449,7 +1551,8 @@ contract SmartPoolHookTest is Test, Deployers {
             distribution: dist,
             allowExternalDeposits: false,
             vault0: IERC4626(address(v0)),
-            vault1: IERC4626(address(v1))
+            vault1: IERC4626(address(v1)),
+            minDepositBlocks: 0
         });
 
         vm.prank(owner);
@@ -1510,8 +1613,11 @@ contract SmartPoolHookTest is Test, Deployers {
         assertGt(actualInput, actualOutput, "input should exceed output (fees + spread)");
     }
 
-    /// @dev `getEffectiveLiquidity` caps vault contribution at `maxWithdraw`; `getReserves` does not.
-    function test_effectiveLiquidity_capsAtMaxWithdraw() public {
+    /// @dev `getEffectiveLiquidity` sizes vault contribution via `previewRedeem`; `getReserves`
+    ///      reports the gross `convertToAssets` value. When the vault charges an exit fee, the
+    ///      two views diverge -- `getEffectiveLiquidity` drops, `getReserves` does not. Routers
+    ///      and the JIT cycle MUST plan against the smaller number to avoid mid-swap reverts.
+    function test_effectiveLiquidity_reflectsPreviewRedeem() public {
         _depositAsOperator(10_000e18);
 
         // With healthy vault: effective == reserves.
@@ -1520,17 +1626,20 @@ contract SmartPoolHookTest is Test, Deployers {
         assertEq(e0, r0, "healthy vault: effective0 == reserves0");
         assertEq(e1, r1, "healthy vault: effective1 == reserves1");
 
-        // Swap a CappedVault in for vault0 — caps maxWithdraw at 1e18 while convertToAssets
-        // still reports the full balance. Effective should drop, reserves should not.
-        CappedVault capped = new CappedVault(ERC20(address(token0)), 1e18);
-        vm.etch(address(vault0), address(capped).code);
-        // Re-store the cap variable in the etched contract.
-        CappedVault(address(vault0)).setCap(1e18);
+        // Mock the live vault0's previewRedeem to return half of the pool's vault shares,
+        // simulating a vault that just applied an exit fee. Reserves stay put (LP economic
+        // stake is unchanged); effective drops.
+        uint256 vaultShares = vault0.balanceOf(address(hook));
+        vm.mockCall(
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.previewRedeem.selector, vaultShares),
+            abi.encode(vaultShares / 2)
+        );
 
         (uint256 r0_after,) = hook.getReserves(testPoolKey);
         (uint256 e0_after,) = hook.getEffectiveLiquidity(testPoolKey);
-        assertEq(r0_after, r0, "reserves unaffected by maxWithdraw cap");
-        assertLt(e0_after, r0, "effective should be capped below reserves");
+        assertEq(r0_after, r0, "reserves unaffected by previewRedeem mock");
+        assertLt(e0_after, r0, "effective drops to the previewRedeem-sized value");
     }
 
     /// @dev `addLiquidity` reverts when actual amount exceeds `maxAmount{0,1}` bound.
@@ -1598,7 +1707,8 @@ contract SmartPoolHookTest is Test, Deployers {
                 distribution: dist,
                 allowExternalDeposits: false,
                 vault0: IERC4626(address(wrongVault)),
-                vault1: IERC4626(address(vault1))
+                vault1: IERC4626(address(vault1)),
+                minDepositBlocks: 0
             })
         );
     }
@@ -1710,6 +1820,11 @@ contract PausableVault {
         if (paused) revert("vault paused");
         return 0;
     }
+
+    function previewRedeem(uint256) external view returns (uint256) {
+        if (paused) revert("vault paused");
+        return 0;
+    }
 }
 
 /// @dev ERC4626-shaped vault that re-enters the hook from inside `deposit`. Configurable
@@ -1763,6 +1878,10 @@ contract ReentrantVault {
         return a;
     }
 
+    function previewRedeem(uint256 s) external pure returns (uint256) {
+        return s;
+    }
+
     function convertToAssets(uint256 s) external pure returns (uint256) {
         return s;
     }
@@ -1803,6 +1922,10 @@ contract CappedVault {
 
     function previewWithdraw(uint256 a) external pure returns (uint256) {
         return a;
+    }
+
+    function previewRedeem(uint256 s) external pure returns (uint256) {
+        return s;
     }
 
     function deposit(uint256, address) external pure returns (uint256) {
@@ -1867,6 +1990,10 @@ contract SwapReentrantVault {
     }
 
     function convertToAssets(uint256 s) external pure returns (uint256) {
+        return s;
+    }
+
+    function previewRedeem(uint256 s) external pure returns (uint256) {
         return s;
     }
 }

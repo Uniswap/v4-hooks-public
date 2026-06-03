@@ -70,6 +70,10 @@ contract MockERC4626 is ERC20 {
         return convertToShares(assets);
     }
 
+    function previewRedeem(uint256 shares) external view returns (uint256) {
+        return convertToAssets(shares);
+    }
+
     /// @notice Simulate yield accrual by minting additional underlying to the vault.
     function simulateYield(uint256 amount) external {
         // Mint extra underlying to the vault to increase share value

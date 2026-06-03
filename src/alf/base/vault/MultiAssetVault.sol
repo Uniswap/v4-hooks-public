@@ -51,8 +51,14 @@ import {VaultId} from "../../types/VaultId.sol";
 ///             initial share-asset ratio.
 ///           - Subsequent deposits / withdraws go through `_deposit` / `_withdraw`. Deposits
 ///             round UP (depositor pays slightly more); withdrawals round DOWN (withdrawer
-///             receives slightly less). Same-block deposit-then-withdraw on the same
-///             `(vaultId, user)` is rejected to defend against atomic fee/yield sniping.
+///             receives slightly less). A configurable per-vault `_minDepositBlocks(vaultId)`
+///             lock rejects withdrawals that arrive earlier than
+///             `lastDepositBlock + _minDepositBlocks(vaultId)` (measured on the
+///             `BlockNumberish` clock) to defend against atomic fee/yield sniping. The
+///             default implementation returns `0`, which means NO lock -- same-block
+///             deposit-then-withdraw is allowed. Subclasses that need the legacy same-block
+///             ban override `_minDepositBlocks` to return `1`; values `> 1` enforce a
+///             longer lock.
 ///
 ///         The base owns the share state, the share math, and the lifecycle. Subclasses
 ///         own asset I/O via three hooks:
@@ -95,11 +101,11 @@ abstract contract MultiAssetVault is BlockNumberish {
     mapping(VaultId vaultId => mapping(address user => uint256)) internal _userShares;
 
     /// @dev Block number of the last `_deposit` for each (vaultId, user). `_withdraw`
-    ///      reverts when called in the same block, defending against atomic fee/yield
-    ///      sniping. Read via `_getBlockNumberish()` (Uniswap's `BlockNumberish`) so the
-    ///      value reflects the chain's fastest block clock; on Arbitrum One, `block.number`
-    ///      returns the L1 block number which makes many sequencer transactions share the
-    ///      same value, defeating the lock.
+    ///      reverts until `_getBlockNumberish() >= lastDepositBlock + _minDepositBlocks(vaultId)`,
+    ///      defending against atomic fee/yield sniping. Read via `BlockNumberish` so the value
+    ///      reflects the chain's fastest block clock; on Arbitrum One, `block.number` returns the
+    ///      L1 block number which makes many sequencer transactions share the same value, which
+    ///      would defeat the lock.
     mapping(VaultId vaultId => mapping(address user => uint256)) internal _lastDepositBlock;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -144,9 +150,11 @@ abstract contract MultiAssetVault is BlockNumberish {
     error VaultAlreadyBootstrapped();
     /// @dev Bootstrap amounts produce zero shares (one or both received amounts is zero).
     error InsufficientBootstrap();
-    /// @dev `_withdraw` was called in the same block as the depositor's last `_deposit`.
+    /// @dev `_withdraw` was called before the depositor's lock duration elapsed
+    ///      (`_getBlockNumberish() < lastDepositBlock + _minDepositBlocks(vaultId)`).
     ///      Prevents atomic deposit-swap-withdraw fee/yield sniping.
-    error SameBlockWithdraw();
+    /// @param unlockBlock The `BlockNumberish`-clock block at which the lock clears.
+    error DepositLocked(uint256 unlockBlock);
     /// @dev `_pullAsset` for a deposit/bootstrap delivered fewer tokens than requested
     ///      (typically a fee-on-transfer or rebasing token). The deposit path mints shares
     ///      against the requested amount, so accepting under-receipt would dilute existing
@@ -262,7 +270,8 @@ abstract contract MultiAssetVault is BlockNumberish {
         internal
         returns (uint256 amount0, uint256 amount1)
     {
-        if (_getBlockNumberish() == _lastDepositBlock[vaultId][from]) revert SameBlockWithdraw();
+        uint256 unlockBlock = _lastDepositBlock[vaultId][from] + _minDepositBlocks(vaultId);
+        if (_getBlockNumberish() < unlockBlock) revert DepositLocked(unlockBlock);
         if (_userShares[vaultId][from] < shares) revert InsufficientShares();
 
         Assets memory pair = _assets[vaultId];
@@ -324,6 +333,20 @@ abstract contract MultiAssetVault is BlockNumberish {
     function _decimalsOffset(VaultId vaultId) internal view virtual returns (uint8) {
         vaultId; // silence unused-parameter warning
         return 12;
+    }
+
+    /// @notice Minimum number of `BlockNumberish`-clock blocks that must elapse between a
+    ///         depositor's last `_deposit` and any subsequent `_withdraw` on the same vault.
+    /// @dev    Default: `0`, meaning NO lock -- the depositor may withdraw in the same block
+    ///         as their deposit. This is a deliberate semantic: subclasses opt INTO a lock
+    ///         (typically `1` to reproduce the legacy "same-block ban", or `N > 1` for a
+    ///         longer hold) rather than the base imposing one. PoolVault overrides this to
+    ///         read a per-pool storage value set at pool initialization.
+    /// @param  vaultId The vault to look up the lock for. Default impl ignores it.
+    /// @return blocks  Number of `BlockNumberish`-clock blocks the lock spans.
+    function _minDepositBlocks(VaultId vaultId) internal view virtual returns (uint64) {
+        vaultId; // silence unused-parameter warning
+        return 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
