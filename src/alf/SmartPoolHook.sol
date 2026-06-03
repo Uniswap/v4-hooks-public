@@ -16,6 +16,7 @@ import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientSta
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -89,6 +90,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     using TransientStateLibrary for IPoolManager;
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
+    using LPFeeLibrary for uint24;
     using SafeERC20 for IERC20;
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
@@ -228,6 +230,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      behalf of our own `poolManager.unlock` call) may invoke it.
     error UnauthorizedCallback();
 
+    /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SmartPool is
+    ///      designed around a static fee fixed at pool creation; dynamic-fee pools would
+    ///      require the hook to maintain its own fee state and route every swap through a
+    ///      fee-update callback, which the contract is explicitly not built for. Use a
+    ///      concrete `uint24` fee value below `MAX_LP_FEE` instead.
+    error DynamicFeeNotSupported();
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              IMMUTABLES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -272,13 +281,19 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         on Arbitrum and `block.number` elsewhere. A value of `0` means NO lock applies
     ///         and same-block deposit-then-withdraw is allowed; for a same-block ban set `1`.
     ///         Values above `maxMinDepositBlocks` are disallowed.
-    /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee.
+    /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee;
+    ///               pools with the `LPFeeLibrary.DYNAMIC_FEE_FLAG` set are rejected.
     /// @param config Pool configuration including distribution, vaults, permissions, and
     ///               the deposit-lock duration.
     /// @return tick  The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, PoolConfig calldata config) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeNotSupported();
+        // SmartPool enforces a static fee that is fixed at pool creation. Reject dynamic-fee
+        // pools at init so the contract-level invariant ("pricing is fully static, set at
+        // deploy time via PoolKey.fee") is enforced at the boundary instead of merely
+        // documented. See contract-level NatSpec.
+        if (key.fee.isDynamicFee()) revert DynamicFeeNotSupported();
 
         // Vaults are immutable per (pool, currency) post-init. Verify the configured ERC-4626
         // vault wraps the same underlying as the currency before storing — a mismatch would

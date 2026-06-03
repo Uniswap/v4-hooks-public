@@ -360,6 +360,33 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.initializePool(key2, bad);
     }
 
+    /// @dev SmartPool's pricing is statically fixed at pool creation via `PoolKey.fee`. The
+    ///      v4 PoolManager treats `fee == DYNAMIC_FEE_FLAG (0x800000)` as a signal that the
+    ///      hook will set the fee dynamically each swap, which this hook does NOT implement.
+    ///      Reject at init so the static-fee contract invariant is enforced at the boundary.
+    function test_initializePool_revertsOnDynamicFeeFlag() public {
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory dynKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(vault1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolHook.DynamicFeeNotSupported.selector);
+        hook.initializePool(dynKey, cfg);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          VAULT CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
