@@ -5,6 +5,7 @@ import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
@@ -81,7 +82,7 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///         `JIT_LOCK` transient slot and the LP entries reject calls while it is set. This
 ///         blocks an owner-configured ERC4626 vault from re-entering LP entry points mid-JIT.
 /// @custom:security-contact security@uniswap.org
-contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient {
+contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -221,6 +222,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param supplied The value the operator provided in `PoolConfig`.
     /// @param max      The deployment-wide ceiling set at construction.
     error MinDepositBlocksTooLarge(uint64 supplied, uint64 max);
+
+    /// @dev `unlockCallback` was invoked by an address other than the PoolManager. The callback
+    ///      reads encoded arguments and triggers an LP withdraw; only the PoolManager (acting on
+    ///      behalf of our own `poolManager.unlock` call) may invoke it.
+    error UnauthorizedCallback();
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              IMMUTABLES
@@ -386,8 +392,41 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint256 deadline
     ) external nonReentrant whenJITNotInProgress returns (uint256 amount0, uint256 amount1) {
         if (block.timestamp > deadline) revert DeadlineExpired();
-        (amount0, amount1) = _withdraw(key, msg.sender, msg.sender, sharesToBurn);
+
+        // Route through `poolManager.unlock` so the callback can redeem any pending ERC-6909
+        // claims into `s.erc20` BEFORE the withdraw math runs. Between swaps,
+        // `_depositAllToVaults` has swept `s.erc20` to 0 and `afterSwap` has minted positive
+        // hook deltas as claims, so the LP's pro-rata `amount` (priced against
+        // `s.erc20 + s.claims + vault`) cannot be sourced from `s.erc20` alone, and the vault
+        // does not hold the claim portion — without pre-redeem, exits would brick or force an
+        // unnecessary vault withdrawal that can itself revert on paused / illiquid vaults.
+        bytes memory result = poolManager.unlock(abi.encode(key, msg.sender, sharesToBurn));
+        (amount0, amount1) = abi.decode(result, (uint256, uint256));
+
         if (amount0 < minAmount0 || amount1 < minAmount1) revert SlippageExceeded();
+    }
+
+    /// @inheritdoc IUnlockCallback
+    /// @dev Only callable by the PoolManager as a re-entrant continuation of our own
+    ///      `poolManager.unlock` call inside `removeLiquidity`. Anyone calling this directly
+    ///      with crafted data could trigger an arbitrary LP withdraw, so the `msg.sender`
+    ///      check is critical.
+    ///
+    ///      The encoded payload is `(PoolKey key, address owner, uint256 sharesToBurn)`. The
+    ///      callback redeems both currencies' ERC-6909 claims first (cheap inside an unlock
+    ///      context, satisfies the `s.erc20`-only inspection in `_ensureERC20`), then runs
+    ///      `_withdraw` to mint payouts to `owner`.
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
+
+        (PoolKey memory key, address owner, uint256 sharesToBurn) = abi.decode(data, (PoolKey, address, uint256));
+        PoolId poolId = key.toId();
+
+        _redeemPoolClaims(poolId, key.currency0);
+        _redeemPoolClaims(poolId, key.currency1);
+
+        (uint256 amount0, uint256 amount1) = _withdraw(_vaultIdFor(poolId), owner, owner, sharesToBurn);
+        return abi.encode(amount0, amount1);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

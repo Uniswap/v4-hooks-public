@@ -25,6 +25,7 @@ import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
+import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
 /// @title SmartPoolHookTest
 /// @notice End-to-end tests for SmartPoolHook covering pool lifecycle, JIT execution,
@@ -609,6 +610,101 @@ contract SmartPoolHookTest is Test, Deployers {
             abi.encodeWithSelector(SmartPoolHook.MinDepositBlocksTooLarge.selector, uint64(101), uint64(100))
         );
         tight.initializePool(key, cfg);
+    }
+
+    /// @dev Regression: after a swap, `afterSwap` mints positive hook deltas as ERC-6909
+    ///      claims and `_depositAllToVaults` sweeps `s.erc20` to 0. An LP withdrawing in
+    ///      this between-swaps window is owed an amount priced against the (erc20 + claims
+    ///      + vault) total, but `_ensureERC20` historically inspected `s.erc20` and the
+    ///      vault only -- so `vault.withdraw(amount)` could be called with `amount` larger
+    ///      than the vault's idle reserves (because the claim portion isn't actually held
+    ///      by the vault), bricking exits whenever the vault is even mildly capacity-bound.
+    ///
+    ///      To prove the bug, we use a `MockMorphoVaultV2` with an explicit
+    ///      `maxWithdrawable` cap set BELOW the LP's full pro-rata payout but ABOVE
+    ///      `payout - claims`. Pre-fix `_ensureERC20` would call `vault.withdraw(payout)`
+    ///      and revert; post-fix the unlock-callback redeems claims first, the
+    ///      `_ensureERC20` early-return path covers the claim portion from `s.erc20`, and
+    ///      `vault.withdraw` is called only for the residual `payout - claims`, which fits
+    ///      within the cap.
+    function test_removeLiquidity_succeedsWithPendingClaims_postSwap() public {
+        // Fresh pool with VaultV2-shaped vaults so we can configure `maxWithdrawable`.
+        MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
+        MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory mvKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        PoolId mvId = mvKey.toId();
+
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: true,
+            vault0: IERC4626(address(mv0)),
+            vault1: IERC4626(address(mv1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        hook.initializePool(mvKey, cfg);
+
+        // Bootstrap with 10_000 each; owner is sole LP for the bug-exposure scenario.
+        uint256 bootstrapAmount = 10_000e18;
+        token0.mint(owner, bootstrapAmount);
+        token1.mint(owner, bootstrapAmount);
+        vm.startPrank(owner);
+        token0.approve(address(hook), bootstrapAmount);
+        token1.approve(address(hook), bootstrapAmount);
+        hook.bootstrap(mvKey, bootstrapAmount, bootstrapAmount);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // Swap to seed an ERC-6909 claim on the positive-delta side. After this, the
+        // afterSwap settlement leaves `s.claims[currency_with_positive_delta] > 0` and
+        // `_depositAllToVaults` has reset both `s.erc20` slots to 0.
+        swap(mvKey, true, -100e18, "");
+
+        // Snapshot the vault's actual underlying balances and the implied pro-rata payouts.
+        uint256 vaultBal0 = token0.balanceOf(address(mv0));
+        uint256 vaultBal1 = token1.balanceOf(address(mv1));
+        uint256 ownerShares = hook.userShares(mvId, owner);
+        (uint256 expectedAmount0, uint256 expectedAmount1) = hook.previewWithdraw(mvKey, ownerShares);
+
+        // Without the fix, `_ensureERC20` would call `vault.withdraw(expectedAmount)` on the
+        // claim-side currency. Cap the vault at exactly the idle balance so any oversized
+        // request (i.e., one that includes the claim portion) reverts.
+        mv0.setMaxWithdrawable(vaultBal0);
+        mv1.setMaxWithdrawable(vaultBal1);
+
+        // Sanity-check that the cap actually bites the un-patched path: at least one side's
+        // expected payout must exceed its vault's idle balance, otherwise the test wouldn't
+        // distinguish the fix from the bug.
+        assertTrue(
+            expectedAmount0 > vaultBal0 || expectedAmount1 > vaultBal1,
+            "test fixture must produce a claim-induced shortfall"
+        );
+
+        // With the fix in place: unlock-callback redeems claims, `_ensureERC20` consumes
+        // the claim portion from `s.erc20`, and `vault.withdraw` is called for only the
+        // residual that fits within the cap. Without the fix, this would revert.
+        vm.prank(owner);
+        (uint256 amount0, uint256 amount1) = hook.removeLiquidity(mvKey, ownerShares, 0, 0, block.timestamp);
+
+        assertEq(hook.userShares(mvId, owner), 0, "shares burned");
+        assertEq(amount0, expectedAmount0, "currency0 payout matches preview");
+        assertEq(amount1, expectedAmount1, "currency1 payout matches preview");
+    }
+
+    /// @dev `unlockCallback` is `external` and decodes its argument into an LP withdraw.
+    ///      Only the PoolManager (acting as a re-entrant continuation of our own
+    ///      `poolManager.unlock` call) may invoke it; a direct call from anyone else with
+    ///      crafted data must revert.
+    function test_unlockCallback_revertsForUnauthorizedCaller() public {
+        bytes memory payload = abi.encode(testPoolKey, owner, uint256(1));
+        vm.expectRevert(SmartPoolHook.UnauthorizedCallback.selector);
+        hook.unlockCallback(payload);
     }
 
     /// @dev Helper: deploy a fresh pool with the given lock duration. The pool uses a

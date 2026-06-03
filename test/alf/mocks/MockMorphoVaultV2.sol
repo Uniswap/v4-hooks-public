@@ -30,8 +30,13 @@ contract MockMorphoVaultV2 is ERC20 {
     /// @notice Per-redeem exit fee in basis points (max 10_000). Applies only to
     ///         `previewRedeem`; `convertToAssets` returns the gross value unchanged.
     uint16 public exitFeeBps;
+    /// @notice When > 0, `withdraw` reverts if `assets > maxWithdrawable`. Emulates a curated
+    ///         vault whose idle reserves are smaller than its accounting `totalAssets`
+    ///         (because the rest is allocated out to non-idle positions). `0` disables the cap.
+    uint256 public maxWithdrawable;
 
     error WithdrawShortfall();
+    error WithdrawExceedsIdleReserves(uint256 requested, uint256 maxWithdrawable);
     error ExitFeeTooLarge();
 
     constructor(ERC20 _asset)
@@ -44,9 +49,15 @@ contract MockMorphoVaultV2 is ERC20 {
 
     // ─── Configuration knobs (test-only) ────────────────────────────────────────
 
-    /// @notice Arm or disarm the `withdraw`-shortfall revert.
+    /// @notice Arm or disarm the `withdraw`-shortfall revert (unconditional).
     function setWithdrawShortfall(bool armed) external {
         _withdrawShortfall = armed;
+    }
+
+    /// @notice Cap the per-call withdrawable amount. When non-zero, `withdraw(assets, ...)`
+    ///         reverts with `WithdrawExceedsIdleReserves` if `assets > maxWithdrawable`.
+    function setMaxWithdrawable(uint256 cap) external {
+        maxWithdrawable = cap;
     }
 
     /// @notice Set the per-redeem exit fee in basis points. Capped at 10_000.
@@ -70,6 +81,9 @@ contract MockMorphoVaultV2 is ERC20 {
 
     function withdraw(uint256 assets, address receiver, address owner_) external returns (uint256 shares) {
         if (_withdrawShortfall) revert WithdrawShortfall();
+        if (maxWithdrawable > 0 && assets > maxWithdrawable) {
+            revert WithdrawExceedsIdleReserves(assets, maxWithdrawable);
+        }
         shares = convertToShares(assets);
         if (msg.sender != owner_) {
             uint256 allowed = allowance[owner_][msg.sender];
@@ -84,6 +98,9 @@ contract MockMorphoVaultV2 is ERC20 {
     function redeem(uint256 shares, address receiver, address owner_) external returns (uint256 assets) {
         if (_withdrawShortfall) revert WithdrawShortfall();
         assets = previewRedeem(shares);
+        if (maxWithdrawable > 0 && assets > maxWithdrawable) {
+            revert WithdrawExceedsIdleReserves(assets, maxWithdrawable);
+        }
         if (msg.sender != owner_) {
             uint256 allowed = allowance[owner_][msg.sender];
             if (allowed != type(uint256).max) {
