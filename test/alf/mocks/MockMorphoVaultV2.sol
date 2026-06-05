@@ -27,6 +27,7 @@ contract MockMorphoVaultV2 is ERC20 {
 
     uint256 internal _yieldAccrued;
     bool internal _withdrawShortfall;
+    bool internal _depositShortfall;
     /// @notice Per-redeem exit fee in basis points (max 10_000). Applies only to
     ///         `previewRedeem`; `convertToAssets` returns the gross value unchanged.
     uint16 public exitFeeBps;
@@ -39,6 +40,7 @@ contract MockMorphoVaultV2 is ERC20 {
     uint256 public maxWithdrawable;
 
     error WithdrawShortfall();
+    error DepositShortfall();
     error WithdrawExceedsIdleReserves(uint256 requested, uint256 maxWithdrawable);
     error ExitFeeTooLarge();
     error EntryFeeTooLarge();
@@ -56,6 +58,12 @@ contract MockMorphoVaultV2 is ERC20 {
     /// @notice Arm or disarm the `withdraw`-shortfall revert (unconditional).
     function setWithdrawShortfall(bool armed) external {
         _withdrawShortfall = armed;
+    }
+
+    /// @notice Arm or disarm the `deposit`-shortfall revert (unconditional). Emulates a vault
+    ///         that has hit its `maxDeposit` cap or whose curated allocator rejects the deposit.
+    function setDepositShortfall(bool armed) external {
+        _depositShortfall = armed;
     }
 
     /// @notice Cap the per-call withdrawable amount. When non-zero, `withdraw(assets, ...)`
@@ -84,6 +92,7 @@ contract MockMorphoVaultV2 is ERC20 {
     // ─── ERC-4626 surface ───────────────────────────────────────────────────────
 
     function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+        if (_depositShortfall) revert DepositShortfall();
         shares = convertToShares(assets);
         asset.transferFrom(msg.sender, address(this), assets);
         _mint(receiver, shares);

@@ -855,7 +855,7 @@ contract SmartPoolHookTest is Test, Deployers {
     ///      same pool within one tx share state. The fix clears each slot after read in
     ///      `_removeJIT`, so subsequent swaps see a clean slate.
     ///
-    ///      This smoke test exercises the cleared-slot code path and ensures basic 
+    ///      This smoke test exercises the cleared-slot code path and ensures basic
     ///      multi-swap-per-tx liveness; correctness of the fix is verifiable by reading
     ///      the pool's liquidity after the last swap lands (should be zero).
     function test_swap_multipleInSameTx_succeeds() public {
@@ -1412,16 +1412,73 @@ contract SmartPoolHookTest is Test, Deployers {
     //  operational tradeoff — the hook delegates to the vault and surfaces the
     //  failure cleanly rather than silently degrading.
 
-    function test_vaultRevertOnDeposit_swapFails() public {
+    /// @dev When the vault is broken on *every* path (paused → reverts on previewRedeem,
+    ///      convertToAssets, deposit, withdraw, ...), the swap fails at `_deployJIT`'s
+    ///      effective-balance read in beforeSwap — long before the afterSwap deposit guard
+    ///      could help. This test pins that behavior: a fully-paused vault is fatal because
+    ///      sizing the JIT cycle requires reading vault state. The deposit-only failure
+    ///      mode (cap reached, allocator rejection) is covered separately in
+    ///      `test_swap_succeedsWhenVaultDepositCapped`.
+    function test_vaultRevertOnEverything_swapFails() public {
         _depositAsOperator(1_000e18);
 
         PausableVault paused = new PausableVault();
         vm.etch(address(vault0), address(paused).code);
         PausableVault(address(vault0)).pause();
 
-        // afterSwap → _depositAllToVault(currency0) → vault.deposit reverts → swap reverts.
+        // beforeSwap → _deployJIT → _effectiveAssets → vault.previewRedeem reverts → swap reverts.
         vm.expectRevert();
         swap(testPoolKey, true, -1e18, "");
+    }
+
+    /// @dev Regression for the deposit-cap bug. A real vault (Morpho VaultV2 with full
+    ///      idle allocations, OZ ERC4626Cap at capacity, paused vault, etc.) reverts on
+    ///      `deposit` once the cap is reached. Pre-fix, this bricked every swap on the pool
+    ///      because `_afterSwap → _depositAllToVaults` propagated the revert. Post-fix the
+    ///      try/catch keeps the swap live and parks the ERC-20 in `s.erc20` for retry.
+    function test_swap_succeedsWhenVaultDepositCapped() public {
+        // Use a dedicated pool with VaultV2-shaped mocks so we can arm the deposit shortfall.
+        MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
+        MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory mvKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        PoolId mvId = mvKey.toId();
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(mv0)),
+            vault1: IERC4626(address(mv1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        hook.initializePool(mvKey, cfg);
+
+        // Bootstrap; this initial deposit must succeed because shortfall isn't armed yet.
+        token0.mint(owner, 1_000e18);
+        token1.mint(owner, 1_000e18);
+        vm.startPrank(owner);
+        token0.approve(address(hook), 1_000e18);
+        token1.approve(address(hook), 1_000e18);
+        hook.bootstrap(mvKey, 1_000e18, 1_000e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // Now arm both vaults to reject deposits. Subsequent swap's afterSwap re-deposit
+        // will hit these reverts; the try/catch must keep the swap alive.
+        mv0.setDepositShortfall(true);
+        mv1.setDepositShortfall(true);
+
+        // Swap. Pre-fix: vault.deposit revert bubbles up, swap reverts. Post-fix: swap completes.
+        swap(mvKey, true, -1e18, "");
+
+        // Sanity: reserves intact, pool still functional.
+        (uint256 r0, uint256 r1) = hook.getReserves(mvKey);
+        assertGt(r0 + r1, 0, "reserves intact after capped-vault swap");
     }
 
     function test_vaultRevertOnWithdraw_removeLiquidityFails() public {
@@ -1444,8 +1501,15 @@ contract SmartPoolHookTest is Test, Deployers {
     //  An owner-configured ERC4626 vault is an external dependency. If a malicious
     //  vault re-enters the hook from inside `vault.deposit` (called during JIT
     //  teardown), the JIT lock prevents the inner LP entry-point from succeeding.
+    //
+    //  `_depositAllToVault` wraps `vault.deposit` in try/catch (so a vault with a
+    //  full `maxDeposit` cap doesn't brick swaps; see PoolVault), which means the
+    //  inner revert is CAUGHT rather than bubbled up. The outer swap completes, the
+    //  un-deposited ERC-20 stays in `s.erc20`, and a `VaultDepositSkipped` event
+    //  surfaces the rejected reentry to operators. State is unchanged from the
+    //  reentry attempt itself.
 
-    function test_vaultReentryIntoAddLiquidity_rejected() public {
+    function test_vaultReentryIntoAddLiquidity_caughtByDepositGuard() public {
         _depositAsOperator(1_000e18);
         vm.prank(owner);
         hook.setExternalDeposits(testPoolKey, true);
@@ -1454,20 +1518,31 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.etch(address(vault0), address(evil).code);
         ReentrantVault(address(vault0)).configure(address(hook), testPoolKey);
 
-        // Swap → afterSwap → vault.deposit → reentrant addLiquidity → JIT lock revert.
-        vm.expectRevert();
+        uint256 sharesBefore = hook.totalShares(testPoolId);
+
+        // Swap → afterSwap → vault.deposit → reentrant addLiquidity → JIT-lock revert
+        // → CAUGHT by `_depositAllToVault` try/catch. Swap succeeds; no inner state change.
         swap(testPoolKey, true, -1e18, "");
+
+        // Inner addLiquidity never minted shares, proving the JIT lock blocked the reentry.
+        assertEq(hook.totalShares(testPoolId), sharesBefore, "no shares minted by reentry attempt");
     }
 
-    function test_vaultReentryIntoSetDistribution_rejected() public {
+    function test_vaultReentryIntoSetDistribution_caughtByDepositGuard() public {
         _depositAsOperator(1_000e18);
+        uint256 bucketsBefore = hook.getDistribution(testPoolId).length;
 
         ReentrantVault evil = new ReentrantVault();
         vm.etch(address(vault0), address(evil).code);
         ReentrantVault(address(vault0)).configureSetDistribution(address(hook), testPoolKey);
 
-        vm.expectRevert();
+        // Same flow: inner setDistribution rejected by JIT lock, the revert is caught by the
+        // deposit guard, outer swap completes without state corruption.
         swap(testPoolKey, true, -1e18, "");
+
+        // Distribution unchanged; the reentry's attempted overwrite (would have shrunk to a
+        // single bucket per ReentrantVault.configureSetDistribution) never landed.
+        assertEq(hook.getDistribution(testPoolId).length, bucketsBefore, "distribution not overwritten by reentry");
     }
 
     /// @dev Closes the same-pool reentrancy variant: a malicious vault re-enters via

@@ -147,6 +147,22 @@ abstract contract PoolVault is MultiAssetVault {
     mapping(PoolId => uint64) public minDepositBlocks;
 
     // ═══════════════════════════════════════════════════════════════════════════
+    //                              EVENTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The JIT cycle's post-swap `vault.deposit` reverted (typically because the
+    ///         vault's `maxDeposit` cap is reached, or a curated allocator declined). The
+    ///         underlying ERC-20 stays in `_state.erc20` and is retried on the next swap.
+    ///         LP share math remains correct because `_assetBalanceV4` reads
+    ///         `s.erc20 + s.claims + vault` -- LPs simply forgo vault yield on the
+    ///         non-deposited portion until the cap loosens or operator intervention.
+    /// @param poolId   The pool whose afterSwap re-deposit was skipped.
+    /// @param currency The currency whose vault rejected the deposit.
+    /// @param amount   The asset amount that could not be deposited (kept in `s.erc20`).
+    /// @param reason   The raw revert data from `vault.deposit` (for operator diagnostics).
+    event VaultDepositSkipped(PoolId indexed poolId, Currency indexed currency, uint256 amount, bytes reason);
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -462,25 +478,12 @@ abstract contract PoolVault is MultiAssetVault {
             return;
         }
 
-        // Pre-credit predicted shares so view callers during a vault callback (e.g.,
-        // `getReserves`, `previewWithdraw`, `getIndicativeQuote`) observe a coherent total.
-        uint256 sharesPredicted = vault.convertToShares(amount);
-        _vaultShares[poolId][currency] += sharesPredicted;
-
         _ensureVaultAllowance(currency, address(vault), amount);
         uint256 sharesActual = vault.deposit(amount, address(this));
 
         // Fail-fast on a vault that swallows assets without minting shares.
         if (sharesActual == 0) revert ZeroSharesMinted();
-
-        // Reconcile predicted-vs-actual divergence.
-        if (sharesActual != sharesPredicted) {
-            if (sharesActual > sharesPredicted) {
-                _vaultShares[poolId][currency] += (sharesActual - sharesPredicted);
-            } else {
-                _vaultShares[poolId][currency] -= (sharesPredicted - sharesActual);
-            }
-        }
+        _vaultShares[poolId][currency] += sharesActual;
     }
 
     /// @dev Deposit all of the pool's tracked ERC-20 balance for both currencies into vaults.
@@ -491,10 +494,19 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @dev Deposit the pool's tracked ERC-20 balance of a currency into its vault. No-op
-    ///      for non-vaulted pools (the balance stays in `_state.erc20`). Pre-credits
-    ///      `_vaultShares` to keep view callers coherent through the deposit callback.
-    ///      Relies on the init-time max approval so swap teardown does not pay an allowance
-    ///      read on every vaulted currency.
+    ///      for non-vaulted pools (the balance stays in `_state.erc20`). Relies on the
+    ///      init-time max approval so swap teardown does not pay an allowance read on every
+    ///      vaulted currency.
+    ///
+    ///      Unlike `_depositToVault` (LP deposit path, surfaces vault rejection directly to
+    ///      the caller), this function wraps `vault.deposit` in `try/catch`. The caller here
+    ///      is the JIT cycle's afterSwap settlement -- the swap itself has already executed
+    ///      and a deposit-side revert would gratuitously brick swaps for an operator-vault
+    ///      misconfiguration (e.g., `maxDeposit` cap reached, curated allocator rejection,
+    ///      paused vault). On failure the `try` block's state changes atomically revert, so
+    ///      `s.erc20` and `_vaultShares` are untouched; we just emit `VaultDepositSkipped`
+    ///      and continue. LPs forgo vault yield on the un-deposited amount until the next
+    ///      cycle retries, but trading remains live.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
         IERC4626 vault = vaults[poolId][currency];
         if (address(vault) == address(0)) return;
@@ -502,19 +514,12 @@ abstract contract PoolVault is MultiAssetVault {
         uint256 amount = s.erc20;
         if (amount == 0) return;
 
-        uint256 sharesPredicted = vault.convertToShares(amount);
-        s.erc20 = 0;
-        _vaultShares[poolId][currency] += sharesPredicted;
-
-        uint256 sharesActual = vault.deposit(amount, address(this));
-        if (sharesActual == 0) revert ZeroSharesMinted();
-
-        if (sharesActual != sharesPredicted) {
-            if (sharesActual > sharesPredicted) {
-                _vaultShares[poolId][currency] += (sharesActual - sharesPredicted);
-            } else {
-                _vaultShares[poolId][currency] -= (sharesPredicted - sharesActual);
-            }
+        try vault.deposit(amount, address(this)) returns (uint256 sharesActual) {
+            if (sharesActual == 0) revert ZeroSharesMinted();
+            s.erc20 = 0;
+            _vaultShares[poolId][currency] += sharesActual;
+        } catch (bytes memory reason) {
+            emit VaultDepositSkipped(poolId, currency, amount, reason);
         }
     }
 
@@ -596,10 +601,9 @@ abstract contract PoolVault is MultiAssetVault {
     ///
     ///      Note that this guard only catches honest fee disclosures. An adversarial vault
     ///      could lie at the preview level and charge fees only on actual deposit/withdraw;
-    ///      `_depositToVault`'s `sharesActual != sharesPredicted` reconciliation absorbs the
-    ///      share count, but the LP-side socialization documented in the contract-level
-    ///      `Vault Compatibility` NatSpec still applies. Operators are trusted to pick
-    ///      curated vaults whose preview functions reflect ground truth.
+    ///      the LP-side socialization documented in the contract-level `Vault Compatibility`
+    ///      NatSpec would still apply in that case. Operators are trusted to pick curated
+    ///      vaults whose preview functions reflect ground truth.
     function _requireFeelessVault(IERC4626 vault) internal view {
         if (address(vault) == address(0)) return;
         uint256 probe = 10 ** uint256(vault.decimals());
