@@ -64,6 +64,23 @@ contract LitePSMAggregator is BaseAggregatorHook {
     }
 
     /// @inheritdoc BaseAggregatorHook
+    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
+        PoolTokens storage tokens = poolIdToTokens[poolId];
+        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
+
+        uint256 gemBalance = IERC20(gemToken).balanceOf(litePSM.pocket());
+        uint256 usdsBalance = IERC20(usdsToken).balanceOf(address(litePSM));
+
+        if (tokens.token0 == gemToken) {
+            amount0 = gemBalance;
+            amount1 = usdsBalance;
+        } else {
+            amount0 = usdsBalance;
+            amount1 = gemBalance;
+        }
+    }
+
+    /// @inheritdoc BaseAggregatorHook
     /// @dev Quotes without fees; BaseAggregatorHook.quote() applies protocol fees on top.
     ///      Reads tin/tout fresh each call since governance can change them.
     function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
@@ -100,23 +117,6 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 // Exact-out USDC: required USDS = ceil(gemOut * to18 * (WAD + tout) / WAD)
                 amountUnspecified = (amountOut * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
             }
-        }
-    }
-
-    /// @inheritdoc BaseAggregatorHook
-    function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
-        PoolTokens storage tokens = poolIdToTokens[poolId];
-        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
-
-        uint256 gemBalance = IERC20(gemToken).balanceOf(litePSM.pocket());
-        uint256 usdsBalance = IERC20(usdsToken).balanceOf(address(litePSM));
-
-        if (tokens.token0 == gemToken) {
-            amount0 = gemBalance;
-            amount1 = usdsBalance;
-        } else {
-            amount0 = usdsBalance;
-            amount1 = gemBalance;
         }
     }
 
@@ -188,13 +188,6 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 poolManager.take(takeCurrency, address(this), usdsNeeded);
                 uint256 actualUsdsIn = litePSM.buyGem(address(this), amountSettle);
                 amountTake = actualUsdsIn;
-
-                uint256 excess = usdsNeeded - actualUsdsIn;
-                if (excess > 0) {
-                    poolManager.sync(takeCurrency);
-                    IERC20(tokenIn).safeTransfer(address(poolManager), excess);
-                    poolManager.settle();
-                }
             }
         }
 
