@@ -832,8 +832,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @dev Remove all active JIT positions deployed in `_deployJIT`. Iterates the distribution
     ///      and removes each bucket that has non-zero active liquidity (read from transient
     ///      storage). After removal, the hook's cumulative delta reflects the net position from
-    ///      the deploy-swap-remove cycle. Transient slots auto-clear at end of transaction, so
-    ///      we don't bother zeroing them — saves a TSTORE per bucket.
+    ///      the deploy-swap-remove cycle.
+    ///
+    ///      Slots are cleared after read (`tstore(slot, 0)`), NOT relied on to auto-clear at
+    ///      end of transaction. Transient storage scopes to the transaction, not the unlock —
+    ///      so for multiple swaps on the same pool within one transaction, slot values would
+    ///      otherwise persist across cycles. If bucket `i` deployed `liq = 100` in swap 1 and
+    ///      the price moved such that bucket `i` deploys `liq = 0` in swap 2,
+    ///      `_deployBuckets` skips the write (guarded by `liq > 0`), leaving `slot[i] = 100`
+    ///      from swap 1. Without the clear here, swap 2's `_removeJIT` would tload `100` and
+    ///      try to remove a position that doesn't exist, reverting the swap.
     /// @param poolId The pool to remove JIT positions from.
     /// @param key    The pool key (for modifyLiquidity calls).
     function _removeJIT(PoolId poolId, PoolKey calldata key) internal {
@@ -849,6 +857,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             uint128 liq;
             assembly ("memory-safe") {
                 liq := tload(slot)
+                tstore(slot, 0)
             }
             if (liq > 0) {
                 LiquidityBucket storage bucket = dist[i];

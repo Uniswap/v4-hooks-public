@@ -850,6 +850,28 @@ contract SmartPoolHookTest is Test, Deployers {
         assertGt(reserves0 + reserves1, 0);
     }
 
+    /// @dev Coverage test for the multi-swap-per-tx code path. `_removeJIT`'s per-bucket
+    ///      transient slots scope to the transaction, not the unlock, so two swaps on the
+    ///      same pool within one tx share state. The fix clears each slot after read in
+    ///      `_removeJIT`, so subsequent swaps see a clean slate.
+    ///
+    ///      This smoke test exercises the cleared-slot code path and ensures basic 
+    ///      multi-swap-per-tx liveness; correctness of the fix is verifiable by reading
+    ///      the pool's liquidity after the last swap lands (should be zero).
+    function test_swap_multipleInSameTx_succeeds() public {
+        _depositAsOperator(10_000e18);
+
+        // Two swaps in the same test transaction. Each invokes a fresh unlock but shares
+        // the tx-scoped transient namespace.
+        swap(testPoolKey, true, -100e18, "");
+        swap(testPoolKey, true, -100e18, "");
+
+        // Sanity: both swaps left the pool in a coherent state.
+        (uint256 r0, uint256 r1) = hook.getReserves(testPoolKey);
+        assertGt(r0 + r1, 0, "reserves intact after consecutive swaps");
+        assertEq(manager.getLiquidity(testPoolId), 0, "no orphaned LP after tx ends");
+    }
+
     function test_swap_movesPrice() public {
         _depositAsOperator(10_000e18);
 
