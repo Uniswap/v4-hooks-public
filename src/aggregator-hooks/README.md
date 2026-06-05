@@ -104,9 +104,9 @@ Minimal interfaces live under `implementations/UniswapV2/interfaces/` (`IUniswap
 
 Singleton hook routes swaps through **MakerDAO's LitePSM** (or `LitePSMWrapper`), which maintains a 1:1 peg between a gem token (e.g., USDC) and USDS. Because the PSM offers zero-slippage, fixed-fee conversion, no external factory lookup is needed — the hook addresses the PSM directly.
 
-| Pool Type    | Implementation      | Routing                                                                                        |
-| ------------ | ------------------- | ---------------------------------------------------------------------------------------------- |
-| **LitePSM**  | `LitePSMAggregator` | Singleton; gem ↔ USDS via `sellGem` / `buyGem`. One pool per gem/USDS pair enforced at init. |
+| Pool Type   | Implementation      | Routing                                                                                       |
+| ----------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| **LitePSM** | `LitePSMAggregator` | Singleton; gem ↔ USDS via `sellGem` / `buyGem`. One pool per gem/USDS pair enforced at init. |
 
 #### Key Details
 
