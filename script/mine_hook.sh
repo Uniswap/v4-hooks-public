@@ -19,6 +19,7 @@ show_help() {
     echo "                       0x03 - Uniswap V3"
     echo "                       0xA1 - Slipstream"
     echo "                       0x93 - PancakeSwap V3"
+    echo "                       0x95 - LitePSM"
     echo "                       0x02 - Uniswap V2"
     echo "  max_attempts       Optional. Maximum mining attempts (default: 500)"
     echo "  deployer_address   Optional. Address that will deploy the hook."

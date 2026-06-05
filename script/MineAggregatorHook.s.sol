@@ -19,6 +19,7 @@ import {
     PancakeSwapV3Aggregator
 } from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {UniswapV2Aggregator} from "../src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol";
+import {LitePSMAggregator} from "../src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner
 /// @dev This script finds a salt that produces a hook address with the correct flags and first byte identifier
@@ -32,6 +33,7 @@ contract MineAggregatorHookScript is Script {
     uint8 constant ID_UNISWAP_V3 = 0x03;
     uint8 constant ID_SLIPSTREAM = 0xA1;
     uint8 constant ID_PANCAKE_V3 = 0x93;
+    uint8 constant ID_LITEPSM = 0x95;
     uint8 constant ID_UNISWAP_V2 = 0x02;
 
     function run() public view {
@@ -58,6 +60,7 @@ contract MineAggregatorHookScript is Script {
         // 0x03 = Uniswap V3
         // 0xA1 = Slipstream
         // 0x93 = PancakeSwap V3
+        // 0x95 = LitePSM
         // 0x02 = Uniswap V2
 
         uint8 firstByte = uint8(vm.envUint("PROTOCOL_ID"));
@@ -80,6 +83,8 @@ contract MineAggregatorHookScript is Script {
             creationCode = type(SlipstreamAggregator).creationCode;
         } else if (firstByte == ID_PANCAKE_V3) {
             creationCode = type(PancakeSwapV3Aggregator).creationCode;
+        } else if (firstByte == ID_LITEPSM) {
+            creationCode = type(LitePSMAggregator).creationCode;
         } else if (firstByte == ID_UNISWAP_V2) {
             creationCode = type(UniswapV2Aggregator).creationCode;
         } else {
