@@ -207,6 +207,14 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     /// @notice Set the active lower tick for LP concentration.
+    /// @dev    Relocates the band that NEW LP adds will be enforced to (via
+    ///         `_enforceActiveTick` in subclasses). Existing positions at the prior active
+    ///         tick remain in the pool and remain removable by their v4 owners -- this call
+    ///         does not migrate them. For the multi-LP trust trade-offs (revocation locking
+    ///         prior-band positions, etc.) see the consuming subclass's `Trust model`
+    ///         NatSpec, e.g. `SimpleSpreadQuoterHook`. Operators relocating the active tick
+    ///         SHOULD drain or migrate old-band liquidity around the call to keep accounting
+    ///         clean.
     function setActiveTick(PoolKey calldata key, int24 newActiveLowerTick) external virtual onlyOwner {
         if (newActiveLowerTick % key.tickSpacing != 0) revert InvalidTickRange();
         activeLowerTick[key.toId()] = newActiveLowerTick;
