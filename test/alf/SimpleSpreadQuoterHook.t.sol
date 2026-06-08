@@ -322,6 +322,40 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertEq(output, 0);
     }
 
+    /// @dev Regression for `SwapSimulator._walkTicks`'s `MAX_WALK_STEPS` cap. Pre-cap, an
+    ///      empty pool with `tickSpacing=1` would walk roughly 7K bitmap words from the init
+    ///      tick to `MIN_SQRT_PRICE + 1`, burning tens of millions of gas on a single
+    ///      `getIndicativeQuote`. Wrap the call in a tight gas envelope (well below what an
+    ///      unbounded walk would need) and assert it completes and returns 0; a regression
+    ///      that removes the cap would OOG and surface here.
+    function test_getIndicativeQuote_boundedGas_onEmptyPool() public {
+        PoolKey memory emptyPoolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: FEE_PIPS,
+            tickSpacing: 1, // worst case for the bitmap walk
+            hooks: IHooks(address(hook))
+        });
+        vm.prank(owner);
+        hook.initializePool(emptyPoolKey, Constants.SQRT_PRICE_1_1);
+        vm.prank(owner);
+        hook.setPoolLive(emptyPoolKey, true);
+
+        // 25M gas comfortably exceeds the cap's ~20M worst case but is well below the
+        // ~35M+ an unbounded walk would consume at tickSpacing=1.
+        (bool ok, bytes memory data) = address(hook).staticcall{gas: 25_000_000}(
+            abi.encodeWithSignature(
+                "getIndicativeQuote((address,address,uint24,int24,address),bool,int256,bytes)",
+                emptyPoolKey,
+                true,
+                int256(-1e18),
+                bytes("")
+            )
+        );
+        assertTrue(ok, "quote must complete within bounded gas");
+        assertEq(abi.decode(data, (uint256)), 0, "empty pool quote must be 0");
+    }
+
     function test_getIndicativeQuote_matchesSwapExecution() public {
         // Indicative quote should closely match actual swap output
         uint256 indicative = hook.getIndicativeQuote(testPoolKey, true, -1e18, "");

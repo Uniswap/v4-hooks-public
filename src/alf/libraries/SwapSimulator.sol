@@ -20,6 +20,23 @@ library SwapSimulator {
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
 
+    /// @dev Hard cap on `_walkTicks` iterations. Bounds the worst-case gas for pathological
+    ///      scenarios (unseeded pool, oversized swap walking past LP into empty tick space,
+    ///      sparse-bitmap walks) regardless of whether the caller honors `BaseALFHook.maxGas`.
+    ///      The loop exits early on `amountRemaining == 0` or hitting the price limit; this
+    ///      cap only fires for runaway walks.
+    ///
+    ///      4_096 covers every legitimate use of the library:
+    ///        - SpreadQuoter single-band: <10 steps
+    ///        - SmartPoolHook 8-bucket distributions at typical spacings: <100 steps
+    ///        - Extreme wide-bucket configs spanning many bitmap words: still well under
+    ///      while still bounding the worst case to ~20M gas at ~5K gas/iter (well under one
+    ///      block, so an on-chain caller without a `{gas:}` envelope OOGs the call, not the
+    ///      block). Hitting the cap returns the partial output computed so far; for a quote
+    ///      consumer this surfaces as a smaller-than-expected output, which the caller can
+    ///      detect via slippage bounds.
+    uint256 internal constant MAX_WALK_STEPS = 4_096;
+
     struct SwapState {
         uint160 sqrtPriceX96;
         int24 tick;
@@ -120,7 +137,15 @@ library SwapSimulator {
         int24 tickSpacing,
         bool exactInput
     ) private view {
+        uint256 steps = 0;
         while (s.amountRemaining != 0 && s.sqrtPriceX96 != s.sqrtPriceLimitX96) {
+            // Defense against pathological bitmap walks (empty pools, oversized swaps past
+            // LP, sparse bitmaps); see `MAX_WALK_STEPS` for rationale. Hitting the cap is a
+            // graceful exit -- the caller receives the partial output accumulated so far.
+            if (steps == MAX_WALK_STEPS) break;
+            unchecked {
+                ++steps;
+            }
             (int24 tickNext, bool initialized) = _nextInitializedTick(manager, poolId, s.tick, tickSpacing, zeroForOne);
 
             // Clamp tickNext to valid range (MIN_TICK, MAX_TICK)
