@@ -67,19 +67,19 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     // ──── Hook Permissions ────
 
     /// @notice The v4 hook permissions for this contract.
-    /// @dev    `beforeInitialize` blocks direct PM init (force operator to use
-    ///         `initializePool`); `afterInitialize` registers the active tick;
-    ///         `beforeAddLiquidity` / `beforeRemoveLiquidity` enforce the LP allowlist;
-    ///         `beforeSwap` applies the LP fee override.
+    /// @dev    `beforeInitialize` blocks direct PM init (forces operator to use
+    ///         `initializePool`); `beforeAddLiquidity` / `beforeRemoveLiquidity` enforce the LP
+    ///         allowlist; `beforeSwap` enforces the liveness flag. Pricing is fully static
+    ///         (`key.fee`) -- no LP fee override is returned from `_beforeSwap`.
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true, // block direct init (force initializePool)
-            afterInitialize: true, // register in index + auto-set active tick
+            afterInitialize: false,
             beforeAddLiquidity: true, // LP authorization + tick enforcement
             beforeRemoveLiquidity: true, // LP authorization
             afterAddLiquidity: false,
             afterRemoveLiquidity: false,
-            beforeSwap: true, // fee override
+            beforeSwap: true, // liveness check (no fee override; static key.fee)
             afterSwap: false,
             beforeDonate: false,
             afterDonate: false,

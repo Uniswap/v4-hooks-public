@@ -6,6 +6,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -23,6 +24,7 @@ import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 /// @custom:security-contact security@uniswap.org
 abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     using PoolIdLibrary for PoolKey;
+    using LPFeeLibrary for uint24;
 
     /// @notice Whether each pool is currently quoting and executing swaps. Pools default to
     ///         paused (`false`) after `manager.initialize`; the owner enables them via
@@ -38,8 +40,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @param isLive The new liveness state.
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
 
-    /// @notice Emitted when the active lower tick is changed via `setActiveTick` or
-    ///         `_afterInitialize`.
+    /// @notice Emitted when the active lower tick is changed via `setActiveTick`. The initial
+    ///         tick set by `initializePool` does NOT emit -- the tick is observable via the
+    ///         `activeLowerTick` getter and `setActiveTick` is the canonical mutation event.
     /// @param poolId           The pool whose active range changed.
     /// @param activeLowerTick  The new lower tick (always aligned to `tickSpacing`).
     event ActiveTickUpdated(PoolId indexed poolId, int24 activeLowerTick);
@@ -54,6 +57,15 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     ///      to paused after `manager.initialize`; the owner enables a pool via {setPoolLive}.
     /// @param poolId The pool whose live flag is currently false.
     error PoolNotLive(PoolId poolId);
+
+    /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SpreadQuoter is
+    ///      designed around a static fee fixed at pool creation; dynamic-fee pools require the
+    ///      hook to maintain its own fee state and route every swap through a fee-update
+    ///      callback, which this contract is explicitly NOT built for. If a dynamic-fee pool
+    ///      slipped through, `slot0.lpFee` would stay at its `0` default for the pool's
+    ///      lifetime and every swap would charge zero LP fee. Use a concrete `uint24` fee
+    ///      value below `MAX_LP_FEE` instead.
+    error DynamicFeeNotSupported();
 
     /// @dev Direct `poolManager.initialize` for any SpreadQuoter-hooked pool is rejected;
     ///      callers MUST go through the subclass's owner-only `initializePool` entry point so
@@ -124,39 +136,38 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     /// @notice Initialize a new SpreadQuoter pool at the operator's chosen price.
     /// @dev    `onlyOwner`-gated and routes through `poolManager.initialize` so v4's
-    ///         `Hooks.noSelfCall` exempts the call from `_beforeInitialize`'s revert. The pool
-    ///         starts paused (`livePools[id] == false`); enable via {setPoolLive} after
-    ///         seeding LP at the auto-derived active tick.
-    /// @param key            The PoolKey (must reference this hook).
+    ///         `Hooks.noSelfCall` exempts the call from `_beforeInitialize`'s revert. The
+    ///         active-tick derivation is performed inline from the tick returned by
+    ///         `poolManager.initialize`. The pool starts paused (`livePools[id] == false`);
+    ///         enable via {setPoolLive} after seeding LP at the derived active tick.
+    ///         Dynamic-fee pools are rejected.
+    /// @param key            The PoolKey (must reference this hook; `key.fee` must NOT carry
+    ///                       the `LPFeeLibrary.DYNAMIC_FEE_FLAG`).
     /// @param sqrtPriceX96   Initial sqrt price (Q64.96). This price is permanent for the pool's
     ///                       lifetime.
     /// @return tick          The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, uint160 sqrtPriceX96) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
-        return poolManager.initialize(key, sqrtPriceX96);
+        if (key.fee.isDynamicFee()) revert DynamicFeeNotSupported();
+        tick = poolManager.initialize(key, sqrtPriceX96);
+        _setActiveTickFromInitialTick(key, tick);
     }
 
-    /// @dev Auto-derive the active lower tick from the initial pool tick at initialization.
-    ///      Floor-aligns to `tickSpacing` and clamps to the v4 usable tick range so the
-    ///      resulting LP range `[activeLowerTick, activeLowerTick + tickSpacing]` is always
-    ///      a valid v4 LP position — even at the extremes near MIN/MAX_TICK.
-    ///      Emits no event — `setActiveTick` is the canonical source for `ActiveTickUpdated`
-    ///      events post-init.
-    function _afterInitialize(address, PoolKey calldata key, uint160, int24 tick) internal override returns (bytes4) {
-        // Auto-set active tick aligned to tickSpacing (floor division)
+    /// @dev Floor-align `tick` to `key.tickSpacing` and clamp into the v4 usable tick range so
+    ///      the resulting LP range `[activeLowerTick, activeLowerTick + tickSpacing]` is always
+    ///      a valid v4 LP position -- even at the extremes near MIN/MAX_TICK. Emits no event;
+    ///      `setActiveTick` is the canonical source for `ActiveTickUpdated` post-init.
+    function _setActiveTickFromInitialTick(PoolKey calldata key, int24 tick) private {
         int24 compressed = tick / key.tickSpacing;
         if (tick < 0 && tick % key.tickSpacing != 0) compressed--;
         int24 candidate = compressed * key.tickSpacing;
 
-        // Clamp into [minUsableTick, maxUsableTick - tickSpacing] so the LP range fits.
         int24 minUsable = TickMath.minUsableTick(key.tickSpacing);
         int24 maxLower = TickMath.maxUsableTick(key.tickSpacing) - key.tickSpacing;
         if (candidate < minUsable) candidate = minUsable;
         else if (candidate > maxLower) candidate = maxLower;
 
         activeLowerTick[key.toId()] = candidate;
-
-        return IHooks.afterInitialize.selector;
     }
 
     /// @dev Reverts when the pool is paused; otherwise no-ops. v4 charges the static fee from

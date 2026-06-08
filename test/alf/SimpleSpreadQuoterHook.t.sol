@@ -11,11 +11,11 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 
@@ -36,10 +36,10 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        // Deploy hook at flag-mined address
+        // Deploy hook at flag-mined address.
         uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG
         );
         hook =
             SimpleSpreadQuoterHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
@@ -50,10 +50,16 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
 
-        // Initialize pool at tick 30 via owner-only `initializePool` — direct
-        // `manager.initialize` is now blocked.
+        // Initialize pool at tick 90 via owner-only `initializePool` — direct
+        // `manager.initialize` is now blocked. The choice of 90 (with tickSpacing=60)
+        // floor-aligns to 60 -- deliberately NOT 0 so subsequent assertions on
+        // `activeLowerTick` distinguish a working derivation from the mapping's `int24(0)`
+        // default. A historical setup used tick 30 here, which floor-aligned to 0 and
+        // silently passed the active-tick assertion even when the derivation never ran.
+        // 90 is also mid-range within [60, 120], and the price (~1.009) is close enough
+        // to 1 that the existing swap-fee tests' price-impact tolerances still hold.
         vm.prank(owner);
-        hook.initializePool(testPoolKey, TickMath.getSqrtPriceAtTick(30));
+        hook.initializePool(testPoolKey, TickMath.getSqrtPriceAtTick(90));
 
         // Authorize the modifyLiquidityRouter for LP operations
         vm.prank(owner);
@@ -88,11 +94,67 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         );
     }
 
-    // ──── afterInitialize ────
+    // ──── initializePool active-tick derivation ────
 
-    function test_afterInitialize_setsActiveLowerTick() public view {
-        // Init tick 30, tickSpacing 60 → floor(30/60)*60 = 0 → activeLowerTick = 0
-        assertEq(hook.activeLowerTick(testPoolKey.toId()), int24(0));
+    /// @dev `initializePool` derives `activeLowerTick` inline from the tick returned by
+    ///      `poolManager.initialize`. With tickSpacing=60 and init tick 90, floor(90/60)*60 = 60
+    ///      -- a value that is distinguishable from the mapping's `int24(0)` default, so this
+    ///      assertion fails if the derivation ever stops running.
+    function test_initializePool_setsActiveLowerTick() public view {
+        assertEq(hook.activeLowerTick(testPoolKey.toId()), int24(60));
+    }
+
+    /// @dev Cover multiple initial ticks to confirm `_setActiveTickFromInitialTick`'s
+    ///      floor-align + clamp logic, including the negative-tick floor adjustment and
+    ///      the MIN/MAX-usable clamp. Boundary ticks use `MIN_TICK + 1` / `MAX_TICK - 1`
+    ///      because `poolManager.initialize` rejects `sqrtPrice == MIN_SQRT_PRICE` and
+    ///      `sqrtPrice == MAX_SQRT_PRICE` (the bound is strict).
+    function test_initializePool_setsActiveLowerTick_acrossTicks() public {
+        int24[5] memory inits = [int24(-887271), int24(-150), int24(0), int24(150), int24(887271)];
+        // -887271: negative non-aligned → compressed `--` → candidate -887280, below minUsable(60)=-887220 → clamp UP
+        // -150:    floor(-150/60)*60 with negative adjustment → -180
+        //  0:      floor(0/60)*60 = 0
+        //  150:    floor(150/60)*60 = 120
+        //  887271: floor(887271/60)*60 = 887220, ABOVE maxLower = maxUsable(60)-60 = 887160 → clamp DOWN
+        int24 minUsable = TickMath.minUsableTick(60);
+        int24 maxLower = TickMath.maxUsableTick(60) - 60;
+        int24[5] memory expected = [minUsable, int24(-180), int24(0), int24(120), maxLower];
+
+        for (uint256 i; i < inits.length; i++) {
+            PoolKey memory k = PoolKey({
+                currency0: currency0,
+                currency1: currency1,
+                fee: FEE_PIPS,
+                tickSpacing: 60,
+                // Vary salt-like field by using a different tickSpacing per iteration would
+                // change PoolId; instead use a different hooks pointer? No -- need same hook.
+                // Easier: vary fee by index so each iteration is a distinct PoolId.
+                hooks: IHooks(address(hook))
+            });
+            // Bump fee per iteration to get a distinct PoolId; offset by 100 so iteration 0
+            // doesn't collide with `testPoolKey` (which uses `fee = FEE_PIPS`).
+            k.fee = FEE_PIPS + 100 + uint24(i);
+
+            vm.prank(owner);
+            hook.initializePool(k, TickMath.getSqrtPriceAtTick(inits[i]));
+            assertEq(hook.activeLowerTick(k.toId()), expected[i], "active tick mismatch");
+        }
+    }
+
+    /// @dev `key.fee = LPFeeLibrary.DYNAMIC_FEE_FLAG` would leave `slot0.lpFee` at 0 forever
+    ///      (no fee-update entry point exists) and every swap would charge zero LP fee.
+    ///      `initializePool` rejects the configuration at the boundary.
+    function test_initializePool_revertsOnDynamicFeeFlag() public {
+        PoolKey memory dynKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(hook))
+        });
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.DynamicFeeNotSupported.selector);
+        hook.initializePool(dynKey, TickMath.getSqrtPriceAtTick(0));
     }
 
     // ──── init gating ────

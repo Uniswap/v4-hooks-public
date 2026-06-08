@@ -69,8 +69,8 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
 
         // ── Two ALF quoters (used only for the gas-baseline test) ──
         uint160 quoterFlags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-                | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG
         );
         quoterA = SimpleSpreadQuoterHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | quoterFlags))
