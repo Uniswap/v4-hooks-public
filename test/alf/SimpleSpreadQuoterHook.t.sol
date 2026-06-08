@@ -367,6 +367,83 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertEq(indicative, actual);
     }
 
+    // ──── swapToPrice: soft-fail on invalid sqrtPriceLimitX96 ────
+    //
+    //  `Pool.swap` rejects limits on the wrong side of the current price or at/past
+    //  `MIN_SQRT_PRICE` / `MAX_SQRT_PRICE` with `PriceLimitAlreadyExceeded` /
+    //  `PriceLimitOutOfBounds`. `SwapSimulator.simulateSwapToPrice` mirrors those guards
+    //  but soft-fails to `(0, 0)` so off-chain planners can rely on the invariant
+    //  `(0, 0) ⇔ untradable`. Without these checks, a wrong-side limit returned a
+    //  numerically valid but fictional non-zero tuple describing a swap that could never
+    //  execute, leading planners to schedule unfillable legs.
+
+    /// @dev Positive control: with a valid limit, swapToPrice returns non-zero -- confirms
+    ///      the soft-fail guards don't accidentally zero out legitimate quotes.
+    function test_swapToPrice_returnsNonZero_whenLimitIsValid() public view {
+        (uint160 current,,,) = manager.getSlot0(testPoolKey.toId());
+        // zeroForOne: valid limit must be strictly between MIN_SQRT_PRICE and current.
+        uint160 validZeroForOneLimit = uint160(uint256(current) - 1);
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -1e18, validZeroForOneLimit, "");
+        assertGt(ain + aout, 0, "valid zeroForOne limit must produce a quote");
+
+        // oneForZero: valid limit must be strictly between current and MAX_SQRT_PRICE.
+        uint160 validOneForZeroLimit = uint160(uint256(current) + 1);
+        (uint256 bin, uint256 bout) = hook.swapToPrice(testPoolKey, false, -1e18, validOneForZeroLimit, "");
+        assertGt(bin + bout, 0, "valid oneForZero limit must produce a quote");
+    }
+
+    /// @dev Regime 1: limit on the wrong side of the current price. Pre-fix, the simulator
+    ///      computed a fictional opposite-direction step and returned non-zero whenever
+    ///      current-tick liquidity was non-zero (which it is in this fixture). Post-fix,
+    ///      both directions soft-fail.
+    function test_swapToPrice_returnsZero_whenLimitOnWrongSide() public view {
+        (uint160 current,,,) = manager.getSlot0(testPoolKey.toId());
+
+        // zeroForOne (price moves DOWN) with limit at/above current is wrong-side.
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -1e18, current, "");
+        assertEq(ain, 0, "zeroForOne, limit == current");
+        assertEq(aout, 0, "zeroForOne, limit == current");
+        (ain, aout) = hook.swapToPrice(testPoolKey, true, -1e18, uint160(uint256(current) + 1), "");
+        assertEq(ain, 0, "zeroForOne, limit > current");
+        assertEq(aout, 0, "zeroForOne, limit > current");
+
+        // oneForZero (price moves UP) with limit at/below current is wrong-side.
+        (ain, aout) = hook.swapToPrice(testPoolKey, false, -1e18, current, "");
+        assertEq(ain, 0, "oneForZero, limit == current");
+        assertEq(aout, 0, "oneForZero, limit == current");
+        (ain, aout) = hook.swapToPrice(testPoolKey, false, -1e18, uint160(uint256(current) - 1), "");
+        assertEq(ain, 0, "oneForZero, limit < current");
+        assertEq(aout, 0, "oneForZero, limit < current");
+    }
+
+    /// @dev Regime 2: limit exactly at `MIN_SQRT_PRICE` / `MAX_SQRT_PRICE`. `Pool.swap`'s
+    ///      bounds are strict (`<= MIN_SQRT_PRICE` and `>= MAX_SQRT_PRICE` both revert), so
+    ///      the simulator soft-fails at equality to maintain parity.
+    function test_swapToPrice_returnsZero_whenLimitAtBoundary() public view {
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -1e18, TickMath.MIN_SQRT_PRICE, "");
+        assertEq(ain, 0);
+        assertEq(aout, 0);
+
+        (ain, aout) = hook.swapToPrice(testPoolKey, false, -1e18, TickMath.MAX_SQRT_PRICE, "");
+        assertEq(ain, 0);
+        assertEq(aout, 0);
+    }
+
+    /// @dev Regime 3: limit past the representable boundary. Pre-fix, the tick-walk could
+    ///      not terminate (target price unreachable), running to the iteration cap and
+    ///      returning a non-zero tuple. Post-fix, soft-fails immediately.
+    function test_swapToPrice_returnsZero_whenLimitPastBoundary() public view {
+        // For zeroForOne, "past MIN" means any value below MIN_SQRT_PRICE down to 0.
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -1e18, uint160(0), "");
+        assertEq(ain, 0);
+        assertEq(aout, 0);
+
+        // For oneForZero, "past MAX" means any value above MAX_SQRT_PRICE up to uint160.max.
+        (ain, aout) = hook.swapToPrice(testPoolKey, false, -1e18, type(uint160).max, "");
+        assertEq(ain, 0);
+        assertEq(aout, 0);
+    }
+
     // ──── beforeSwap: fee override ────
 
     function test_beforeSwap_zeroForOne_appliesFee() public {

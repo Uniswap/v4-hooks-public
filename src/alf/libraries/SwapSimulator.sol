@@ -71,6 +71,18 @@ library SwapSimulator {
     /// @notice Simulate a swap up to a target price, returning both amounts.
     /// @dev Walks ticks until the price limit is reached or the specified amount is exhausted.
     ///      Mirrors Pool.sol's swap loop with protocol fee handling.
+    ///
+    ///      Soft-fail contract: returns `(0, 0)` -- never reverts -- for every input shape
+    ///      `Pool.swap` would reject with `PriceLimitAlreadyExceeded` or `PriceLimitOutOfBounds`.
+    ///      Routers and aggregators that take the output at face value can rely on the
+    ///      invariant `(amountIn, amountOut) == (0, 0)` ⇔ "untradable at these parameters".
+    ///      Pre-loop rejection cases:
+    ///        - uninitialized pool (`slot0.sqrtPriceX96 == 0`)
+    ///        - `amountSpecified == 0`
+    ///        - `sqrtPriceLimitX96` on the wrong side of the current price for the chosen
+    ///          direction (no swap can move price toward the limit)
+    ///        - `sqrtPriceLimitX96` at or past `MIN_SQRT_PRICE` / `MAX_SQRT_PRICE`
+    ///          (`Pool.swap` rejects the boundary value strictly)
     /// @param manager The PoolManager contract.
     /// @param poolId The pool to simulate against.
     /// @param zeroForOne The swap direction.
@@ -107,6 +119,25 @@ library SwapSimulator {
         s.liquidity = manager.getLiquidity(poolId);
 
         if (s.sqrtPriceX96 == 0 || amountSpecified == 0) return (0, 0);
+
+        // Mirror `Pool.swap`'s `sqrtPriceLimitX96` guards but soft-fail to `(0, 0)` instead
+        // of reverting. Without these, three regimes silently diverge from execution:
+        //   - Wrong-side limit: `SwapMath.computeSwapStep` re-derives direction from the
+        //     price ordering, so the loop computes a single opposite-direction step from
+        //     `current` to `limit` and returns a numerically valid but fictional non-zero
+        //     tuple whenever current-tick liquidity > 0. Pool.swap reverts.
+        //   - Limit at MIN/MAX_SQRT_PRICE: simulator walks the entire bitmap to the
+        //     boundary; Pool.swap reverts strictly at equality.
+        //   - Limit past boundary: walk's exit conditions (`amountRemaining == 0` or
+        //     `sqrtPriceX96 == sqrtPriceLimitX96`) can never fire -- previously infinite,
+        //     now bounded by `MAX_WALK_STEPS` but still yields a non-zero tuple.
+        if (zeroForOne) {
+            if (sqrtPriceLimitX96 >= s.sqrtPriceX96) return (0, 0);
+            if (sqrtPriceLimitX96 <= TickMath.MIN_SQRT_PRICE) return (0, 0);
+        } else {
+            if (sqrtPriceLimitX96 <= s.sqrtPriceX96) return (0, 0);
+            if (sqrtPriceLimitX96 >= TickMath.MAX_SQRT_PRICE) return (0, 0);
+        }
 
         s.amountRemaining = amountSpecified;
 
