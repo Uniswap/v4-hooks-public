@@ -108,7 +108,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── DeltaResolver: _pay ────
 
-    function _pay(Currency token, address, uint256 amount) internal override {
+    function _pay(Currency token, address, uint256 amount) internal virtual override {
         token.transfer(address(poolManager), amount);
     }
 }
