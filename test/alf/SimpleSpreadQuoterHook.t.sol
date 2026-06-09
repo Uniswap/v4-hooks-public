@@ -267,11 +267,50 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         );
     }
 
-    function test_setActiveTick_updatesAndEmits() public {
-        int24 newTick = int24(60);
+    /// @dev Setting the same active tick is an idempotent no-op -- the band-empty guard is
+    ///      bypassed because no relocation is happening. This is the only valid call shape
+    ///      while LP is seeded at the current active tick.
+    function test_setActiveTick_sameTickIsIdempotentNoOp() public {
+        int24 currentActive = hook.activeLowerTick(testPoolKey.toId());
         vm.prank(owner);
-        hook.setActiveTick(testPoolKey, newTick);
-        assertEq(hook.activeLowerTick(testPoolKey.toId()), newTick);
+        hook.setActiveTick(testPoolKey, currentActive);
+        assertEq(hook.activeLowerTick(testPoolKey.toId()), currentActive);
+    }
+
+    /// @dev Operator footgun guard: refusing to relocate the active band while liquidity
+    ///      still references the old tick prevents an orphaned-position scenario where the
+    ///      old-band LP sits in v4 outside the hook's enforced range. setUp seeds LP at
+    ///      tick 60 (the initial active tick); a relocation to 120 must revert.
+    function test_setActiveTick_revertsWhenOldBandHasLiquidity() public {
+        int24 oldActive = hook.activeLowerTick(testPoolKey.toId());
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(SpreadQuoterBase.ActiveTickBandNonEmpty.selector, oldActive));
+        hook.setActiveTick(testPoolKey, oldActive + int24(60));
+    }
+
+    /// @dev After fully draining the prior band, relocation succeeds. Confirms the guard is
+    ///      gated on the liquidity-gross check, not a permanent lock.
+    function test_setActiveTick_succeedsAfterDrainingOldBand() public {
+        int24 oldActive = hook.activeLowerTick(testPoolKey.toId());
+
+        // Drain all LP at the old band. The setUp seeded via `_seedAtActiveTick` with the
+        // modifyLiquidityRouter as authorized LP; remove the position entirely.
+        uint128 currentLiq = manager.getLiquidity(testPoolKey.toId());
+        modifyLiquidityRouter.modifyLiquidity(
+            testPoolKey,
+            ModifyLiquidityParams({
+                tickLower: oldActive,
+                tickUpper: oldActive + testPoolKey.tickSpacing,
+                liquidityDelta: -int128(currentLiq),
+                salt: 0
+            }),
+            ""
+        );
+
+        int24 newActive = oldActive + int24(60);
+        vm.prank(owner);
+        hook.setActiveTick(testPoolKey, newActive);
+        assertEq(hook.activeLowerTick(testPoolKey.toId()), newActive);
     }
 
     function test_setActiveTick_unaligned_reverts() public {

@@ -7,6 +7,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -25,6 +26,7 @@ import {SwapSimulator} from "../libraries/SwapSimulator.sol";
 abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
+    using StateLibrary for IPoolManager;
 
     /// @notice Whether each pool is currently quoting and executing swaps. Pools default to
     ///         paused (`false`) after `manager.initialize`; the owner enables them via
@@ -52,6 +54,14 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     error InvalidTickRange();
     /// @dev LP add-liquidity range is correctly shaped but not at the configured `activeLowerTick`.
     error WrongActiveTick();
+
+    /// @dev `setActiveTick` was called while the prior active band still holds liquidity.
+    ///      Relocating without draining would orphan that liquidity in a range no longer
+    ///      enforced by the hook, leaving multiple unmigrated bands coexisting and diverging
+    ///      on-chain liquidity from the hook's single-band policy. Drain the old band first
+    ///      (have authorized LPs remove all positions at the old tick), then relocate.
+    /// @param activeLowerTick The prior active tick that still has liquidity referenced at it.
+    error ActiveTickBandNonEmpty(int24 activeLowerTick);
 
     /// @dev `_beforeSwap` was invoked on a pool whose `livePools` flag is false. Pools default
     ///      to paused after `manager.initialize`; the owner enables a pool via {setPoolLive}.
@@ -233,16 +243,31 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     /// @notice Set the active lower tick for LP concentration.
     /// @dev    Relocates the band that NEW LP adds will be enforced to (via
-    ///         `_enforceActiveTick` in subclasses). Existing positions at the prior active
-    ///         tick remain in the pool and remain removable by their v4 owners -- this call
-    ///         does not migrate them. For the multi-LP trust trade-offs (revocation locking
-    ///         prior-band positions, etc.) see the consuming subclass's `Trust model`
-    ///         NatSpec, e.g. `SimpleSpreadQuoterHook`. Operators relocating the active tick
-    ///         SHOULD drain or migrate old-band liquidity around the call to keep accounting
-    ///         clean.
+    ///         `_enforceActiveTick` in subclasses). Refuses to relocate while the prior
+    ///         active band still references liquidity in v4 -- operators must drain the old
+    ///         band first (have authorized LPs remove all positions at the old tick) before
+    ///         calling this with a different `newActiveLowerTick`. Setting the same tick is
+    ///         always permitted (idempotent no-op). For the multi-LP trust trade-offs (e.g.
+    ///         revocation locking prior-band positions) see the consuming subclass's
+    ///         `Trust model` NatSpec.
     function setActiveTick(PoolKey calldata key, int24 newActiveLowerTick) external virtual onlyOwner {
         if (newActiveLowerTick % key.tickSpacing != 0) revert InvalidTickRange();
-        activeLowerTick[key.toId()] = newActiveLowerTick;
-        emit ActiveTickUpdated(key.toId(), newActiveLowerTick);
+
+        PoolId poolId = key.toId();
+        int24 oldActiveLowerTick = activeLowerTick[poolId];
+        if (newActiveLowerTick != oldActiveLowerTick) {
+            // Operator footgun guard: relocating while positions still reference the old
+            // band would leave them outside the enforced range, silently diverging on-chain
+            // liquidity from the hook's single-band policy. `liquidityGross` at
+            // `oldActiveLowerTick` is non-zero iff at least one position has either its
+            // lower or upper tick on that boundary -- and the hook enforces every position
+            // as exactly `[activeLowerTick, activeLowerTick + tickSpacing]`, so this catches
+            // every position opened under the old policy.
+            (uint128 liquidityGross,) = poolManager.getTickLiquidity(poolId, oldActiveLowerTick);
+            if (liquidityGross != 0) revert ActiveTickBandNonEmpty(oldActiveLowerTick);
+        }
+
+        activeLowerTick[poolId] = newActiveLowerTick;
+        emit ActiveTickUpdated(poolId, newActiveLowerTick);
     }
 }

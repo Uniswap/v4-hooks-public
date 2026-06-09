@@ -30,12 +30,11 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///              authorization check. A's funds remain locked until re-authorization. Owners
 ///              MUST sequence "drain then revoke" when retiring an LP address.
 ///
-///           2. **`setActiveTick` does not strand prior-band liquidity by itself**, but it
-///              does mean LP A's existing position at the old active tick is no longer
-///              fungible with new adds (which are forced to the new active tick by
-///              `_enforceActiveTick`). A can still remove the old-band position as long as
-///              authorization is intact. Owners SHOULD drain or migrate old-band liquidity
-///              around active-tick relocations to keep accounting clean.
+///           2. **`setActiveTick` enforces drain-before-relocate.** The base now refuses to
+///              move `activeLowerTick` while liquidity is still referenced at the prior band
+///              (reverts with `ActiveTickBandNonEmpty`). Operators MUST have the authorized
+///              LP remove its position at the old tick before calling `setActiveTick` with a
+///              different value. Setting the same tick remains an idempotent no-op.
 ///
 ///         Use cases that need genuine multi-tenant LP (independent users supplying
 ///         liquidity, hook manages spread) are OUT OF SCOPE for this contract and would
