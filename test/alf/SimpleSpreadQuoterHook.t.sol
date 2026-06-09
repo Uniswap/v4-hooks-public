@@ -18,6 +18,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
+import {SwapSimulator} from "../../src/alf/libraries/SwapSimulator.sol";
 
 contract SimpleSpreadQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -444,6 +445,30 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertEq(aout, 0);
     }
 
+    /// @dev Defense-in-depth: `SwapSimulator` validates `lpFeePips <= MAX_SWAP_FEE` (1e6)
+    ///      directly so out-of-range fees fail fast with a clear `InvalidLpFeePips` error
+    ///      instead of corrupting `SwapMath.computeSwapStep`'s unchecked subtraction.
+    ///      Triggered here by forcing the hook to forward a `DYNAMIC_FEE_FLAG`-bearing fee
+    ///      via `_staticFee`'s pre-strip being bypassed -- we exercise the library directly
+    ///      through a low-level call with a synthetic out-of-range fee.
+    function test_simulateSwapToPrice_revertsOnInvalidFee() public {
+        // Drive the library through a thin wrapper: deploy a tiny helper that exposes
+        // simulateSwapToPrice with caller-controlled lpFeePips, bypassing the hook's
+        // `_staticFee` strip. We use vm.expectRevert with the library's typed selector.
+        SwapSimulatorHarness harness = new SwapSimulatorHarness();
+        uint24 invalidFee = LPFeeLibrary.MAX_LP_FEE + 1; // exactly one over the bound
+        vm.expectRevert(abi.encodeWithSelector(SwapSimulator.InvalidLpFeePips.selector, invalidFee));
+        harness.simulateSwapToPrice(
+            manager,
+            testPoolKey.toId(),
+            true,
+            -1e18,
+            invalidFee,
+            testPoolKey.tickSpacing,
+            TickMath.MIN_SQRT_PRICE + 1
+        );
+    }
+
     // ──── beforeSwap: fee override ────
 
     function test_beforeSwap_zeroForOne_appliesFee() public {
@@ -488,5 +513,25 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_setPoolLive_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.setPoolLive(testPoolKey, false);
+    }
+}
+
+/// @dev Exposes `SwapSimulator.simulateSwapToPrice` directly so tests can exercise the
+///      library's input validation (`InvalidLpFeePips`) without going through the hook's
+///      `_staticFee` strip on `key.fee`. Internal-only in production -- only used for
+///      regression coverage of library-level invariants.
+contract SwapSimulatorHarness {
+    function simulateSwapToPrice(
+        IPoolManager manager,
+        PoolId poolId,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint24 lpFeePips,
+        int24 tickSpacing,
+        uint160 sqrtPriceLimitX96
+    ) external view returns (uint256 amountIn, uint256 amountOut) {
+        return SwapSimulator.simulateSwapToPrice(
+            manager, poolId, zeroForOne, amountSpecified, lpFeePips, tickSpacing, sqrtPriceLimitX96
+        );
     }
 }

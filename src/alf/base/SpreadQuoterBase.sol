@@ -108,7 +108,11 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
-    /// @dev Delegates to `SwapSimulator.simulateSwapToPrice` using `key.fee`.
+    /// @dev Delegates to `SwapSimulator.simulateSwapToPrice`. The `DYNAMIC_FEE_FLAG` and
+    ///      `OVERRIDE_FEE_FLAG` bits are stripped from `key.fee` before forwarding -- both
+    ///      sit above `MAX_LP_FEE`, so the strip is a no-op for any valid static fee and a
+    ///      belt-and-suspenders guard against a misconfigured pool slipping a flag bit past
+    ///      `initializePool`'s rejection.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
@@ -119,7 +123,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         if (!livePools[key.toId()]) return (0, 0);
 
         return SwapSimulator.simulateSwapToPrice(
-            poolManager, key.toId(), zeroForOne, amountSpecified, key.fee, key.tickSpacing, sqrtPriceLimitX96
+            poolManager, key.toId(), zeroForOne, amountSpecified, _staticFee(key.fee), key.tickSpacing, sqrtPriceLimitX96
         );
     }
 
@@ -194,8 +198,18 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         returns (uint256 outputAmount)
     {
         if (!livePools[key.toId()]) return 0;
-        outputAmount =
-            SwapSimulator.simulateSwap(poolManager, key.toId(), zeroForOne, amountSpecified, key.fee, key.tickSpacing);
+        outputAmount = SwapSimulator.simulateSwap(
+            poolManager, key.toId(), zeroForOne, amountSpecified, _staticFee(key.fee), key.tickSpacing
+        );
+    }
+
+    /// @dev Strip `DYNAMIC_FEE_FLAG` and `OVERRIDE_FEE_FLAG` from a raw `key.fee` before
+    ///      forwarding to `SwapSimulator`, which assumes `fee <= MAX_SWAP_FEE`. Both flag
+    ///      bits sit above `MAX_LP_FEE`, so the strip is a no-op for any valid static fee
+    ///      and a belt-and-suspenders guard against a flag bit slipping past
+    ///      `initializePool`'s dynamic-fee rejection.
+    function _staticFee(uint24 rawFee) private pure returns (uint24) {
+        return rawFee & ~(LPFeeLibrary.DYNAMIC_FEE_FLAG | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
     // ──── LP Tick Enforcement ────

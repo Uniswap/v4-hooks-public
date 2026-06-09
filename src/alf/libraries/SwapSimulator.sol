@@ -20,6 +20,15 @@ library SwapSimulator {
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
 
+    /// @dev `lpFeePips` exceeds `SwapMath.MAX_SWAP_FEE` (1e6). Forwarding such a value into
+    ///      `SwapMath.computeSwapStep`'s unchecked body would underflow `MAX_SWAP_FEE - fee`
+    ///      and produce either an empty revert at `FullMath.mulDiv`'s overflow guard
+    ///      (exact-input path with large amounts) or a numerically meaningless quote
+    ///      equivalent to a 0% fee swap (smaller amounts, exact-output path). Reverting
+    ///      cleanly here gives callers an unambiguous diagnostic.
+    /// @param supplied The invalid fee value the caller passed.
+    error InvalidLpFeePips(uint24 supplied);
+
     /// @dev Hard cap on `_walkTicks` iterations. Bounds the worst-case gas for pathological
     ///      scenarios (unseeded pool, oversized swap walking past LP into empty tick space,
     ///      sparse-bitmap walks) regardless of whether the caller honors `BaseALFHook.maxGas`.
@@ -102,6 +111,13 @@ library SwapSimulator {
         int24 tickSpacing,
         uint160 sqrtPriceLimitX96
     ) internal view returns (uint256 amountIn, uint256 amountOut) {
+        // Input validation: `SwapMath.computeSwapStep` assumes `lpFeePips <= MAX_SWAP_FEE`
+        // (its body is `unchecked`). A fee carrying `DYNAMIC_FEE_FLAG` (0x800000) or any
+        // other out-of-range value silently corrupts the simulation. Fail fast at the
+        // boundary so the diagnostic doesn't surface as a downstream `FullMath` revert or
+        // an economically invalid quote (i.e., zero-fee where one should be applied).
+        if (lpFeePips > SwapMath.MAX_SWAP_FEE) revert InvalidLpFeePips(lpFeePips);
+
         SwapState memory s;
         {
             int24 tick;
