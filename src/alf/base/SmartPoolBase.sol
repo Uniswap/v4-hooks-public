@@ -41,11 +41,28 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     ///      pricing, distribution, and vault config are validated before PM init runs.
     error DirectInitializeBlocked();
 
+    /// @dev `renounceOwnership` was called. Renouncing would permanently disable every
+    ///      `onlyOwner` entry point in this hook (`initializePool`, `setPoolLive`,
+    ///      `setExternalDeposits`, `setDistribution`, `refreshVaultApproval`, etc.) and
+    ///      orphan every pool referencing this hook. The operator is the single trust
+    ///      principal in this contract's model; their continuing presence is load-bearing.
+    error RenounceOwnershipDisabled();
+
     /// @dev Reject direct `poolManager.initialize`. Per v4 `Hooks.noSelfCall`, the hook's own
     ///      `poolManager.initialize` from `initializePool` skips this callback, so the only
     ///      caller path that reaches here is an external party's direct attempt.
     function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
         revert DirectInitializeBlocked();
+    }
+
+    /// @notice Disabled. The hook's design requires a live owner indefinitely; renouncing
+    ///         would permanently brick every `onlyOwner` entry point and orphan every pool
+    ///         referencing this hook. Use `Ownable2Step.transferOwnership` to rotate to a
+    ///         new operator address; never call this.
+    /// @dev    Mirrors the standard OZ pattern for contracts where administrative recovery
+    ///         is load-bearing. See `RenounceOwnershipDisabled` for the rationale.
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
     }
 
     /// @param manager The Uniswap v4 PoolManager.

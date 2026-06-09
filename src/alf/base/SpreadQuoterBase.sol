@@ -63,6 +63,14 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @param activeLowerTick The prior active tick that still has liquidity referenced at it.
     error ActiveTickBandNonEmpty(int24 activeLowerTick);
 
+    /// @dev `renounceOwnership` was called. Renouncing would permanently disable every
+    ///      `onlyOwner` entry point (`initializePool`, `setPoolLive`, `setActiveTick`, and
+    ///      any subclass-added owner functions like `setAuthorizedLP`). Recovery would
+    ///      require redeploying the hook at a new flag-mined address and orphaning every
+    ///      existing pool. The operator is the single trust principal in this contract's
+    ///      model; their continuing presence is load-bearing.
+    error RenounceOwnershipDisabled();
+
     /// @dev `_beforeSwap` was invoked on a pool whose `livePools` flag is false. Pools default
     ///      to paused after `manager.initialize`; the owner enables a pool via {setPoolLive}.
     /// @param poolId The pool whose live flag is currently false.
@@ -133,7 +141,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         if (!livePools[key.toId()]) return (0, 0);
 
         return SwapSimulator.simulateSwapToPrice(
-            poolManager, key.toId(), zeroForOne, amountSpecified, _staticFee(key.fee), key.tickSpacing, sqrtPriceLimitX96
+            poolManager,
+            key.toId(),
+            zeroForOne,
+            amountSpecified,
+            _staticFee(key.fee),
+            key.tickSpacing,
+            sqrtPriceLimitX96
         );
     }
 
@@ -231,6 +245,16 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     // ──── Owner Functions ────
+
+    /// @notice Disabled. The hook's design requires a live owner indefinitely; renouncing
+    ///         would permanently brick every `onlyOwner` entry point and orphan every pool
+    ///         referencing this hook. Use `Ownable2Step.transferOwnership` to rotate to a
+    ///         new operator address; never call this.
+    /// @dev    Mirrors the standard OZ pattern for contracts where administrative recovery
+    ///         is load-bearing. See `RenounceOwnershipDisabled` for the rationale.
+    function renounceOwnership() public pure override {
+        revert RenounceOwnershipDisabled();
+    }
 
     /// @notice Toggle liveness for a pool.
     /// @dev Pools default to paused (`false`) immediately after `manager.initialize`. The

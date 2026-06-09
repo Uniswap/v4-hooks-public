@@ -288,6 +288,17 @@ contract SmartPoolHookTest is Test, Deployers {
         );
     }
 
+    /// @dev `renounceOwnership` is overridden in `SmartPoolBase` to revert. Renouncing
+    ///      would permanently brick every onlyOwner entry point (initializePool, bootstrap,
+    ///      setPoolLive, setExternalDeposits, setDistribution, refreshVaultApproval,
+    ///      setActiveTick, etc.) and orphan every pool referencing this hook. The operator
+    ///      must use `transferOwnership` to rotate, never renounce.
+    function test_renounceOwnership_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(SmartPoolBase.RenounceOwnershipDisabled.selector);
+        hook.renounceOwnership();
+    }
+
     function test_initializePool_revertsOnNativeCurrency0() public {
         SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
         dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});

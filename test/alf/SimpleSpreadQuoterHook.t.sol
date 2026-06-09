@@ -498,13 +498,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         uint24 invalidFee = LPFeeLibrary.MAX_LP_FEE + 1; // exactly one over the bound
         vm.expectRevert(abi.encodeWithSelector(SwapSimulator.InvalidLpFeePips.selector, invalidFee));
         harness.simulateSwapToPrice(
-            manager,
-            testPoolKey.toId(),
-            true,
-            -1e18,
-            invalidFee,
-            testPoolKey.tickSpacing,
-            TickMath.MIN_SQRT_PRICE + 1
+            manager, testPoolKey.toId(), true, -1e18, invalidFee, testPoolKey.tickSpacing, TickMath.MIN_SQRT_PRICE + 1
         );
     }
 
@@ -552,6 +546,16 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     function test_setPoolLive_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         hook.setPoolLive(testPoolKey, false);
+    }
+
+    /// @dev `renounceOwnership` is overridden to revert. Renouncing would permanently brick
+    ///      every onlyOwner entry point (initializePool, setPoolLive, setActiveTick,
+    ///      setAuthorizedLP) and orphan every pool referencing this hook. The operator must
+    ///      use `transferOwnership` to rotate, never renounce.
+    function test_renounceOwnership_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.RenounceOwnershipDisabled.selector);
+        hook.renounceOwnership();
     }
 }
 
