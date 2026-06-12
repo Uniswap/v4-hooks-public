@@ -19,6 +19,10 @@ contract MockLitePSM is ILitePSM {
 
     uint256 public tin; // fee on sellGem (USDC → USDS)
     uint256 public tout; // fee on buyGem (USDS → USDC)
+    /// @dev buf mirrors the real PSM's pre-minted stablecoin buffer (WAD units).
+    ///      Defaults to type(uint256).max (effectively uncapped) so existing tests are unaffected.
+    ///      Set via setBuf() to simulate a constrained debt ceiling / buffer in capacity tests.
+    uint256 public buf = type(uint256).max;
 
     constructor(address gem_, address usds_) {
         _gem = gem_;
@@ -57,5 +61,11 @@ contract MockLitePSM is ILitePSM {
 
     function setTout(uint256 tout_) external {
         tout = tout_;
+    }
+
+    /// @notice Set the buf (pre-minted buffer) in WAD units to simulate sellGem capacity limits.
+    ///         e.g. setBuf(500_000 * 1e18) caps sellGem at 500k USDC (500k * 1e18 / 1e12 = 500k USDC).
+    function setBuf(uint256 buf_) external {
+        buf = buf_;
     }
 }

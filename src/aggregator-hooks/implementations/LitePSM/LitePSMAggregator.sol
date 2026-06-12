@@ -83,6 +83,17 @@ contract LitePSMAggregator is BaseAggregatorHook {
     /// @inheritdoc BaseAggregatorHook
     /// @dev Quotes without fees; BaseAggregatorHook.quote() applies protocol fees on top.
     ///      Reads tin/tout fresh each call since governance can change them.
+    ///
+    ///      Capacity limits are applied to prevent quoting liquidity that the PSM cannot fill:
+    ///      - sellGem (gem→USDS): capped at `buf / to18ConversionFactor` (gem units). This uses
+    ///        `buf` as a proxy for the true cap of `min(buf, lineRoom) / to18`, since `lineRoom`
+    ///        is only accessible via the Vat and is not exposed by the LitePSMWrapper. In practice
+    ///        buf is kept below the debt ceiling, so this proxy is conservative and accurate.
+    ///      - buyGem (USDS→gem): capped at the gem balance held in `pocket()`. This is exact.
+    ///
+    ///      When an amount exceeds available capacity:
+    ///      - Exact-in: returns 0 (the full input cannot be processed)
+    ///      - Exact-out: returns type(uint256).max (the desired output cannot be sourced)
     function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
         view
@@ -98,23 +109,35 @@ contract LitePSMAggregator is BaseAggregatorHook {
         uint256 tin = litePSM.tin();
         uint256 tout = litePSM.tout();
 
+        // sellGem capacity in gem units: buf (WAD) / to18ConversionFactor
+        uint256 sellGemCap = litePSM.buf() / to18ConversionFactor;
+        // buyGem capacity: exact gem balance available in the pocket
+        uint256 buyGemCap = IERC20(gemToken).balanceOf(litePSM.pocket());
+
         if (amountSpecified < 0) {
             uint256 amountIn = uint256(-amountSpecified);
             if (isSellingGem) {
-                // Exact-in USDC → USDS: usdsOut = gemAmt * to18 * (WAD - tin) / WAD
+                // Exact-in gem → USDS
+                if (amountIn > sellGemCap) return 0;
                 amountUnspecified = amountIn * to18ConversionFactor * (WAD - tin) / WAD;
             } else {
-                // Exact-in USDS → USDC: gemOut = floor(usdsIn * WAD / (to18 * (WAD + tout)))
-                amountUnspecified = amountIn * WAD / (to18ConversionFactor * (WAD + tout));
+                // Exact-in USDS → gem: compute gem output then check cap
+                uint256 gemOut = amountIn * WAD / (to18ConversionFactor * (WAD + tout));
+                if (gemOut > buyGemCap) return 0;
+                amountUnspecified = gemOut;
             }
         } else {
             uint256 amountOut = uint256(amountSpecified);
             if (isSellingGem) {
-                // Exact-out USDS: required USDC = ceil(usdsOut * WAD / (to18 * (WAD - tin)))
+                // Exact-out USDS: convert to required gem input and compare against sellGemCap.
+                // Division-first avoids overflow when sellGemCap is large (e.g. buf = type(uint256).max).
                 uint256 denom = to18ConversionFactor * (WAD - tin);
-                amountUnspecified = (amountOut * WAD + denom - 1) / denom;
+                uint256 gemRequired = (amountOut * WAD + denom - 1) / denom;
+                if (gemRequired > sellGemCap) return type(uint256).max;
+                amountUnspecified = gemRequired;
             } else {
-                // Exact-out USDC: required USDS = ceil(gemOut * to18 * (WAD + tout) / WAD)
+                // Exact-out gem: check directly against pocket balance
+                if (amountOut > buyGemCap) return type(uint256).max;
                 amountUnspecified = (amountOut * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
             }
         }
@@ -182,7 +205,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 litePSM.sellGem(address(this), amountTake);
                 // Any USDS excess (< 1 µUSDS) over amountSettle stays in hook as dust
             } else {
-                // USDS → USDC: take ceiling USDS from PM, return any excess after buyGem
+                // USDS → USDC: take ceiling USDS from PM
                 uint256 tout = litePSM.tout();
                 uint256 usdsNeeded = (amountSettle * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
                 poolManager.take(takeCurrency, address(this), usdsNeeded);

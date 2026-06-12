@@ -340,6 +340,62 @@ contract LitePSMAggregatorUnitTest is Test {
         assertGt(amount0 + amount1, 0, "Hook has PSM liquidity");
     }
 
+    // ── Capacity limit tests ──────────────────────────────────────────────────
+
+    /// @dev sellGemCap = buf / to18ConversionFactor. With buf = 500k * 1e18, cap = 500k USDC.
+    function test_quote_exactIn_sellGem_exceedsSellGemCap_returnsZero() public {
+        uint256 capUsdc = 500_000 * 1e6;
+        psm.setBuf(capUsdc * 1e12); // buf in WAD = capUsdc * to18ConversionFactor
+        bool usdcToUsds = _isUsdcCurrency0();
+
+        // Exactly at cap: should quote > 0
+        uint256 quotedAtCap = hook.quote(usdcToUsds, -int256(capUsdc), poolId);
+        assertGt(quotedAtCap, 0, "Quote at cap > 0");
+
+        // One unit over cap: must return 0
+        uint256 quotedOverCap = hook.quote(usdcToUsds, -int256(capUsdc + 1), poolId);
+        assertEq(quotedOverCap, 0, "Quote over sellGemCap == 0");
+    }
+
+    function test_quote_exactOut_sellGem_exceedsSellGemCap_returnsMaxUint() public {
+        uint256 capUsdc = 500_000 * 1e6;
+        psm.setBuf(capUsdc * 1e12);
+        bool usdcToUsds = _isUsdcCurrency0();
+
+        // Max USDS out from the cap (no fee): capUsdc * 1e12
+        uint256 maxUsdsOut = capUsdc * 1e12;
+        uint256 quotedAtMax = hook.quote(usdcToUsds, int256(maxUsdsOut), poolId);
+        assertLt(quotedAtMax, type(uint256).max, "Quote at max USDS out is not maxUint");
+
+        // One wei over the max USDS capacity: must return type(uint256).max
+        uint256 quotedOver = hook.quote(usdcToUsds, int256(maxUsdsOut + 1), poolId);
+        assertEq(quotedOver, type(uint256).max, "Quote over sellGem USDS cap == maxUint");
+    }
+
+    function test_quote_exactIn_buyGem_exceedsBuyGemCap_returnsZero() public {
+        // buyGemCap = gem balance in pocket = psm's USDC balance (MockLitePSM is its own pocket)
+        uint256 psmUsdcBalance = usdc.balanceOf(address(psm));
+        // Input USDS that would require more USDC out than the pocket holds (no fee)
+        uint256 usdsIn = (psmUsdcBalance + 1) * 1e12; // would yield psmUsdcBalance + 1 USDC out
+        bool usdsToUsdc = !_isUsdcCurrency0();
+
+        uint256 quoted = hook.quote(usdsToUsdc, -int256(usdsIn), poolId);
+        assertEq(quoted, 0, "Quote over buyGemCap == 0");
+    }
+
+    function test_quote_exactOut_buyGem_exceedsBuyGemCap_returnsMaxUint() public {
+        uint256 psmUsdcBalance = usdc.balanceOf(address(psm));
+        bool usdsToUsdc = !_isUsdcCurrency0();
+
+        // At cap: should return a finite USDS cost
+        uint256 quotedAtCap = hook.quote(usdsToUsdc, int256(psmUsdcBalance), poolId);
+        assertLt(quotedAtCap, type(uint256).max, "Quote at buyGemCap is finite");
+
+        // One unit over cap: must return maxUint
+        uint256 quotedOver = hook.quote(usdsToUsdc, int256(psmUsdcBalance + 1), poolId);
+        assertEq(quotedOver, type(uint256).max, "Quote over buyGemCap == maxUint");
+    }
+
     // ── Fuzz tests ────────────────────────────────────────────────────────────
 
     function testFuzz_exactIn_UsdcToUsds(uint64 amountIn) public {

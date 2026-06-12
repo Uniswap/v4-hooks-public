@@ -35,4 +35,12 @@ interface ILitePSM {
 
     /// @notice The pocket contract that holds USDC liquidity
     function pocket() external view returns (address);
+
+    /// @notice Pre-minted stablecoin buffer target held in this PSM (WAD, 18 decimals)
+    /// @dev Used as a conservative proxy for sellGem capacity.
+    ///      The true sellGem cap is `min(buf, line - Art*RAY) / to18ConversionFactor` (gem units),
+    ///      but line/Art are only available on the underlying Vat and are not exposed by the wrapper.
+    ///      Using buf alone may overestimate capacity when the debt ceiling is simultaneously binding,
+    ///      but in normal operation buf is kept well below the ceiling.
+    function buf() external view returns (uint256);
 }
