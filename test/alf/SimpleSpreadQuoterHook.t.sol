@@ -19,6 +19,8 @@ import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.so
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 import {SwapSimulator} from "../../src/alf/libraries/SwapSimulator.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 
 contract SimpleSpreadQuoterHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -500,6 +502,65 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         harness.simulateSwapToPrice(
             manager, testPoolKey.toId(), true, -1e18, invalidFee, testPoolKey.tickSpacing, TickMath.MIN_SQRT_PRICE + 1
         );
+    }
+
+    /// @dev Regression for the post-loop `int128` bounds check that mirrors `Pool.swap`'s
+    ///      final `toInt128()` cast (`SafeCastOverflow`). The trigger: a near-`MAX_LP_FEE`
+    ///      pool (fee multiplier `MAX_SWAP_FEE / (MAX_SWAP_FEE - fee) ≈ 1e6`) seeded with
+    ///      `uint128.max` liquidity. A modest exact-output ask drives a base `amountIn`
+    ///      that, once multiplied by the fee factor, pushes cumulative `amountIn +
+    ///      feeAmount` past `int128.max`. `Pool.swap` reverts (`SafeCastOverflow`); the
+    ///      simulator must soft-fail to `(0, 0)` rather than return the pre-cast int256
+    ///      garbage value that would slip past the limit guards.
+    function test_simulateSwapToPrice_softFailsOnInt128Overflow() public {
+        uint24 nearMaxFee = uint24(LPFeeLibrary.MAX_LP_FEE - 1); // 999_999 = 99.9999%
+        // tickSpacing 600 lets `maxLiquidityPerTick` reach ~1.15e35 (vs ~1.15e34 at
+        // spacing 60), which combined with the wider band [0, 600] produces a base
+        // amountIn large enough to overflow int128 once multiplied by the fee factor.
+        PoolKey memory extremeKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: nearMaxFee, tickSpacing: 600, hooks: IHooks(address(hook))
+        });
+
+        vm.prank(owner);
+        hook.initializePool(extremeKey, TickMath.getSqrtPriceAtTick(0));
+
+        // Math: oneForZero from `tick 0` to `tick 600` has `Δ_sqrtP / 2^96 ≈ 0.03`, so
+        // base `amount1_in ≈ L * 0.03`. With L = 1e34: base ≈ 3e32. At fee 999_999
+        // (multiplier ≈ 1e6), cumulative `amountIn + feeAmount ≈ 3e38` -- past
+        // `int128.max` (~1.7e38), so Pool.swap reverts at its final `toInt128()` cast.
+        int256 hugeLiquidity = 1e34;
+        uint256 hugeBalance = type(uint256).max / 2;
+        deal(Currency.unwrap(currency0), address(this), hugeBalance);
+        deal(Currency.unwrap(currency1), address(this), hugeBalance);
+        modifyLiquidityRouter.modifyLiquidity(
+            extremeKey,
+            ModifyLiquidityParams({
+                tickLower: 0, tickUpper: extremeKey.tickSpacing, liquidityDelta: hugeLiquidity, salt: 0
+            }),
+            ""
+        );
+
+        vm.prank(owner);
+        hook.setPoolLive(extremeKey, true);
+
+        // oneForZero exact-output. Ask for an amount large enough to push price all the
+        // way to the band's upper edge, draining the LP capacity. With L=1e35, full-band
+        // drain produces ~3e32 base input → ~3e38 with fee multiplier → overflows int128.
+        int256 modestOutput = int256(type(int128).max); // ensures we drain the band
+        uint160 limit = TickMath.MAX_SQRT_PRICE - 1; // unbounded — drain LP, don't clamp at tick 60
+
+        // Leg 1: the live `Pool.swap` rejects this configuration. The revert path is
+        // `SafeCast.toInt128()` inside `Pool.swap`'s final delta construction -- this is
+        // PoolManager-internal, NOT a hook callback, so v4's `Hooks.callHook` wrapping
+        // does not apply and the bare `SafeCastOverflow()` selector reaches the caller.
+        vm.expectRevert(SafeCast.SafeCastOverflow.selector);
+        swap(extremeKey, false, modestOutput, "");
+
+        // Leg 2: the simulator soft-fails to `(0, 0)` instead of returning the
+        // pre-`toInt128()` int256 value that PoolManager would reject.
+        (uint256 ain, uint256 aout) = hook.swapToPrice(extremeKey, false, modestOutput, limit, "");
+        assertEq(ain, 0, "amountIn must soft-fail to 0 on int128 overflow");
+        assertEq(aout, 0, "amountOut must soft-fail to 0 on int128 overflow");
     }
 
     // ──── beforeSwap: fee override ────

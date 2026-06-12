@@ -92,6 +92,11 @@ library SwapSimulator {
     ///          direction (no swap can move price toward the limit)
     ///        - `sqrtPriceLimitX96` at or past `MIN_SQRT_PRICE` / `MAX_SQRT_PRICE`
     ///          (`Pool.swap` rejects the boundary value strictly)
+    ///      Post-loop rejection case:
+    ///        - cumulative `amountCalc` or `(amountSpecified - amountRemaining)` exceeds
+    ///          `int128` range. Mirrors `Pool.swap`'s final `toInt128()` cast which would
+    ///          `SafeCastOverflow()` -- triggerable with fees near `MAX_LP_FEE`, an aggressive
+    ///          correct-side limit, and the price already adjacent to the limit.
     /// @param manager The PoolManager contract.
     /// @param poolId The pool to simulate against.
     /// @param zeroForOne The swap direction.
@@ -159,12 +164,23 @@ library SwapSimulator {
 
         _walkTicks(manager, poolId, s, zeroForOne, lpFeePips, tickSpacing, amountSpecified < 0);
 
+        // Mirror `Pool.swap`'s final `toInt128()` cast on both `amountCalculated` and
+        // `(amountSpecified - amountSpecifiedRemaining)` (see `Pool.sol` line 455/459).
+        // If either cumulative exceeds `int128` range, the real swap reverts with
+        // `SafeCastOverflow()`; soft-fail to `(0, 0)` here so the simulator stays in
+        // parity. Triggerable in pathological combos (fees near `MAX_LP_FEE`, an aggressive
+        // correct-side limit, price already adjacent to the limit) where a single step
+        // pushes cumulative magnitude past `int128.max`.
+        int256 specifiedFilled = amountSpecified - s.amountRemaining;
+        if (s.amountCalc < type(int128).min || s.amountCalc > type(int128).max) return (0, 0);
+        if (specifiedFilled < type(int128).min || specifiedFilled > type(int128).max) return (0, 0);
+
         if (amountSpecified < 0) {
-            amountIn = uint256(s.amountRemaining - amountSpecified);
+            amountIn = uint256(-specifiedFilled);
             amountOut = uint256(s.amountCalc);
         } else {
             amountIn = uint256(-s.amountCalc);
-            amountOut = uint256(amountSpecified - s.amountRemaining);
+            amountOut = uint256(specifiedFilled);
         }
     }
 
