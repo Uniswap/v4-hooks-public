@@ -13,11 +13,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title LitePSMAggregator
-/// @notice Singleton Uniswap V4 hook that routes USDC ↔ USDS swaps through MakerDAO's LitePSM
-/// @dev Supports pools containing exactly the PSM's gem (USDC) and USDS token pair.
-///      Because the PSM uses 6-decimal USDC (gem) and 18-decimal USDS, all amount conversions
+/// @notice Singleton Uniswap V4 hook that routes gem ↔ stable swaps through a MakerDAO LitePSM
+/// @dev Compatible with both LitePSMWrapper (USDS/USDC) and the underlying LitePSM-DAI-USDC.
+///      The gem token (USDC) is resolved from litePSM.gem() at construction; the counterpart
+///      stable (USDS or DAI) is passed in by the deployer.
+///      Because the PSM uses 6-decimal gem and 18-decimal stable, all amount conversions
 ///      use the immutable to18ConversionFactor read from the PSM at construction time.
-///      tin  = fee on USDC→USDS (sellGem); tout = fee on USDS→USDC (buyGem). Both in WAD units.
+///      tin  = fee on gem→stable (sellGem); tout = fee on stable→gem (buyGem). Both in WAD units.
 contract LitePSMAggregator is BaseAggregatorHook {
     using SafeERC20 for IERC20;
 
@@ -29,8 +31,8 @@ contract LitePSMAggregator is BaseAggregatorHook {
     /// @notice The USDC (gem) token address — pulled from litePSM.gem() at construction
     address public immutable gemToken;
 
-    /// @notice The USDS token address — supplied by the deployer
-    address public immutable usdsToken;
+    /// @notice The stable token address (USDS or DAI) — supplied by the deployer
+    address public immutable stableToken;
 
     /// @notice Decimal conversion factor from gem to 18 decimals (10^12 for USDC)
     /// @dev Cached from litePSM.to18ConversionFactor() to avoid repeated SLOADs
@@ -53,13 +55,13 @@ contract LitePSMAggregator is BaseAggregatorHook {
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _litePSM The LitePSM or LitePSMWrapper contract
-    /// @param _usdsToken The USDS token address (18 decimals)
-    constructor(IPoolManager _manager, ILitePSM _litePSM, address _usdsToken)
+    /// @param _stableToken The stable token address — USDS for LitePSMWrapper, DAI for LitePSM-DAI-USDC (18 decimals)
+    constructor(IPoolManager _manager, ILitePSM _litePSM, address _stableToken)
         BaseAggregatorHook(_manager, "LitePSMAggregator v1.0")
     {
         litePSM = _litePSM;
         gemToken = _litePSM.gem();
-        usdsToken = _usdsToken;
+        stableToken = _stableToken;
         to18ConversionFactor = _litePSM.to18ConversionFactor();
     }
 
@@ -69,13 +71,13 @@ contract LitePSMAggregator is BaseAggregatorHook {
         if (tokens.token0 == address(0)) revert PoolDoesNotExist();
 
         uint256 gemBalance = IERC20(gemToken).balanceOf(litePSM.pocket());
-        uint256 usdsBalance = IERC20(usdsToken).balanceOf(address(litePSM));
+        uint256 stableBalance = IERC20(stableToken).balanceOf(address(litePSM));
 
         if (tokens.token0 == gemToken) {
             amount0 = gemBalance;
-            amount1 = usdsBalance;
+            amount1 = stableBalance;
         } else {
-            amount0 = usdsBalance;
+            amount0 = stableBalance;
             amount1 = gemBalance;
         }
     }
@@ -147,7 +149,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
 
-        bool validPair = (token0 == gemToken && token1 == usdsToken) || (token0 == usdsToken && token1 == gemToken);
+        bool validPair = (token0 == gemToken && token1 == stableToken) || (token0 == stableToken && token1 == gemToken);
         if (!validPair) revert TokensNotSupported(token0, token1);
 
         bytes32 pairKey = _canonicalPairKey(token0, token1);
@@ -161,7 +163,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
 
         // Max-approve PSM once; forceApprove handles the case where approval was previously set
         IERC20(gemToken).forceApprove(address(litePSM), type(uint256).max);
-        IERC20(usdsToken).forceApprove(address(litePSM), type(uint256).max);
+        IERC20(stableToken).forceApprove(address(litePSM), type(uint256).max);
 
         emit AggregatorPoolRegistered(key.toId());
         pollTokenJar();
