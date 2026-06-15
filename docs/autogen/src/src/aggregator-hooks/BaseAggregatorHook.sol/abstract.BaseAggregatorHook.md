@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/396c7ee0f0e458881657d92ca6d17cb49381d408/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -31,7 +31,7 @@ Initializes the hook with required dependencies
 
 
 ```solidity
-constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager);
+constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(10);
 ```
 **Parameters**
 

@@ -34,7 +34,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @notice Initializes the hook with required dependencies
     /// @param _manager The Uniswap V4 PoolManager contract
-    constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) {
+    constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(10) {
         aggregatorHookVersion = _aggregatorHookVersion;
     }
 
