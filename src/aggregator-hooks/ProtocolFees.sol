@@ -90,6 +90,7 @@ abstract contract ProtocolFees {
         protocolFee = zeroToOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+        protocolFee *= 10;
     }
 
     function _getTokenJar(IPoolManager poolManager) internal view returns (address currentJar) {
