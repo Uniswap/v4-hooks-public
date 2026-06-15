@@ -86,6 +86,7 @@ abstract contract ProtocolFees {
         }
     }
 
+    /// @dev The protocol fee is multiplied by the protocol fee multiplier
     function _getProtocolFee(IPoolManager poolManager, bool zeroToOne, PoolId poolId)
         internal
         view
