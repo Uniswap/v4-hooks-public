@@ -1,5 +1,5 @@
 # LitePSMAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/a4dd8463f7e31d29785c1d924a63dbe40a10ac05/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/307b1b2cf75bf77abe89e8a25717902b77f19142/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -7,12 +7,14 @@
 **Title:**
 LitePSMAggregator
 
-Singleton Uniswap V4 hook that routes USDC ↔ USDS swaps through MakerDAO's LitePSM
+Singleton Uniswap V4 hook that routes gem ↔ stable swaps through a MakerDAO LitePSM
 
-Supports pools containing exactly the PSM's gem (USDC) and USDS token pair.
-Because the PSM uses 6-decimal USDC (gem) and 18-decimal USDS, all amount conversions
+Compatible with both LitePSMWrapper (USDS/USDC) and the underlying LitePSM-DAI-USDC.
+The gem token (USDC) is resolved from litePSM.gem() at construction; the counterpart
+stable (USDS or DAI) is passed in by the deployer.
+Because the PSM uses 6-decimal gem and 18-decimal stable, all amount conversions
 use the immutable to18ConversionFactor read from the PSM at construction time.
-tin  = fee on USDC→USDS (sellGem); tout = fee on USDS→USDC (buyGem). Both in WAD units.
+tin  = fee on gem→stable (sellGem); tout = fee on stable→gem (buyGem). Both in WAD units.
 
 
 ## State Variables
@@ -41,12 +43,12 @@ address public immutable gemToken
 ```
 
 
-### usdsToken
-The USDS token address — supplied by the deployer
+### stableToken
+The stable token address (USDS or DAI) — supplied by the deployer
 
 
 ```solidity
-address public immutable usdsToken
+address public immutable stableToken
 ```
 
 
@@ -84,7 +86,7 @@ mapping(bytes32 => PoolId) private _canonicalPoolByPair
 
 
 ```solidity
-constructor(IPoolManager _manager, ILitePSM _litePSM, address _usdsToken)
+constructor(IPoolManager _manager, ILitePSM _litePSM, address _stableToken)
     BaseAggregatorHook(_manager, "LitePSMAggregator v1.0");
 ```
 **Parameters**
@@ -93,7 +95,7 @@ constructor(IPoolManager _manager, ILitePSM _litePSM, address _usdsToken)
 |----|----|-----------|
 |`_manager`|`IPoolManager`|The Uniswap V4 PoolManager contract|
 |`_litePSM`|`ILitePSM`|The LitePSM or LitePSMWrapper contract|
-|`_usdsToken`|`address`|The USDS token address (18 decimals)|
+|`_stableToken`|`address`|The stable token address — USDS for LitePSMWrapper, DAI for LitePSM-DAI-USDC (18 decimals)|
 
 
 ### pseudoTotalValueLocked
@@ -109,6 +111,15 @@ Returns the raw quote from the underlying liquidity source without protocol fees
 
 Quotes without fees; BaseAggregatorHook.quote() applies protocol fees on top.
 Reads tin/tout fresh each call since governance can change them.
+Capacity limits are applied to prevent quoting liquidity that the PSM cannot fill:
+- sellGem (gem→USDS): capped at `buf / to18ConversionFactor` (gem units). This uses
+`buf` as a proxy for the true cap of `min(buf, lineRoom) / to18`, since `lineRoom`
+is only accessible via the Vat and is not exposed by the LitePSMWrapper. In practice
+buf is kept below the debt ceiling, so this proxy is conservative and accurate.
+- buyGem (USDS→gem): capped at the gem balance held in `pocket()`. This is exact.
+When an amount exceeds available capacity:
+- Exact-in: returns 0 (the full input cannot be processed)
+- Exact-out: returns type(uint256).max (the desired output cannot be sourced)
 
 
 ```solidity

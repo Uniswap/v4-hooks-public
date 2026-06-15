@@ -1,5 +1,5 @@
 # FluidDexT1Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/307b1b2cf75bf77abe89e8a25717902b77f19142/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IDexCallback](/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
@@ -62,6 +62,20 @@ PoolId public localPoolId
 
 ```solidity
 bool private _isReversed
+```
+
+
+### _currency0IsNative
+
+```solidity
+bool private _currency0IsNative
+```
+
+
+### _currency1IsNative
+
+```solidity
+bool private _currency1IsNative
 ```
 
 
