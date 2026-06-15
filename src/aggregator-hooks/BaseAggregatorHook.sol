@@ -18,7 +18,6 @@ import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IAggregatorHook} from "./interfaces/IAggregatorHook.sol";
 import {ProtocolFees} from "./ProtocolFees.sol";
 import {IFeeClassifiedHook} from "@protocol-fees/interfaces/IFeeClassifiedHook.sol";
-import {HookFeeFlags} from "@protocol-fees/libraries/HookFeeFlags.sol";
 
 /// @title BaseAggregatorHook
 /// @notice Abstract contract for implementing aggregator hooks in Uniswap V4
@@ -83,7 +82,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @inheritdoc IFeeClassifiedHook
     function protocolFeeFlags() external view virtual override returns (uint256) {
-        return HookFeeFlags.AGGREGATOR;
+        return 1;
     }
 
     /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
