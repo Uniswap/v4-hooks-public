@@ -43,14 +43,20 @@ contract MockLitePSM is ILitePSM {
 
     /// @notice Sell gemAmt USDC, receive USDS at (WAD - tin) rate
     function sellGem(address usr, uint256 gemAmt) external override returns (uint256 usdsAmt) {
-        usdsAmt = gemAmt * 1e12 * (WAD - tin) / WAD;
+        // Compute fee with floor division then subtract, matching the real PSM.
+        // gemAmt * 1e12 * (WAD - tin) / WAD would instead ceil the fee because
+        // floor((A*WAD - B) / WAD) = A - ceil(B/WAD).
+        uint256 fee = gemAmt * 1e12 * tin / WAD;
+        usdsAmt = gemAmt * 1e12 - fee;
         IERC20(_gem).safeTransferFrom(msg.sender, address(this), gemAmt);
         IERC20(_usds).safeTransfer(usr, usdsAmt);
     }
 
     /// @notice Buy gemAmt USDC, pay USDS at (WAD + tout) rate
     function buyGem(address usr, uint256 gemAmt) external override returns (uint256 usdsAmt) {
-        usdsAmt = gemAmt * 1e12 * (WAD + tout) / WAD;
+        // fee uses floor division; adding to a WAD-aligned base keeps the whole expression floor.
+        uint256 fee = gemAmt * 1e12 * tout / WAD;
+        usdsAmt = gemAmt * 1e12 + fee;
         IERC20(_usds).safeTransferFrom(msg.sender, address(this), usdsAmt);
         IERC20(_gem).safeTransfer(usr, gemAmt);
     }
