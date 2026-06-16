@@ -245,12 +245,12 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
         token0.approve(address(swapRouter), type(uint256).max);
         token1.approve(address(swapRouter), type(uint256).max);
         uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
-        try swapRouter.swap(
-            testKey,
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: amount, sqrtPriceLimitX96: limit}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        ) returns (BalanceDelta) {} catch {}
+        SwapParams memory params =
+            SwapParams({zeroForOne: zeroForOne, amountSpecified: amount, sqrtPriceLimitX96: limit});
+        PoolSwapTest.TestSettings memory settings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        try swapRouter.swap(testKey, params, settings, "") returns (BalanceDelta) {} catch {}
         vm.stopPrank();
 
         assertEq(manager.getLiquidity(poolId), 0, "pool retained liquidity after swap");

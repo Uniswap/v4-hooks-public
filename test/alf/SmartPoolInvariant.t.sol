@@ -125,12 +125,13 @@ contract SmartPoolInvariantTest is Test, Deployers {
         targetContract(address(handler));
 
         // Selectors the handler exposes. Forge will pick from this set uniformly.
-        bytes4[] memory selectors = new bytes4[](5);
+        bytes4[] memory selectors = new bytes4[](6);
         selectors[0] = SmartPoolHandler.addLiquidity.selector;
         selectors[1] = SmartPoolHandler.removeLiquidity.selector;
         selectors[2] = SmartPoolHandler.swap.selector;
         selectors[3] = SmartPoolHandler.simulateYield.selector;
         selectors[4] = SmartPoolHandler.warpTime.selector;
+        selectors[5] = SmartPoolHandler.setDistribution.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -199,6 +200,37 @@ contract SmartPoolInvariantTest is Test, Deployers {
         SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         for (uint256 i; i < dist.length; i++) {
             assertGt(dist[i].weightBps, 0, "INV-DIST: zero-weight bucket present");
+        }
+    }
+
+    /// @notice INV-JIT-1: no persistent v4 liquidity remains between operations. JIT positions
+    ///         are deployed and torn down inside a single swap; the hook blocks all external
+    ///         `modifyLiquidity`, and LP deposits/withdrawals never touch the v4 pool. So the
+    ///         pool's liquidity in every observed post-state must be exactly zero — the core
+    ///         property routers depend on (capacity comes from the ALF views, not pool depth).
+    function invariant_noPersistentLiquidity() public view {
+        assertEq(manager.getLiquidity(testPoolId), 0, "INV-JIT-1: pool retained liquidity between swaps");
+    }
+
+    /// @notice INV-EFF-1: effective (immediately-deployable) liquidity never exceeds total
+    ///         reserves, on either side. `getEffectiveLiquidity` caps each leg at the
+    ///         withdrawable/redeemable amount; it can only ever be <= the gross economic
+    ///         reserves reported by `getReserves`.
+    function invariant_effectiveLeReserves() public view {
+        (uint256 res0, uint256 res1) = hook.getReserves(testPoolKey);
+        (uint256 eff0, uint256 eff1) = hook.getEffectiveLiquidity(testPoolKey);
+        assertLe(eff0, res0, "INV-EFF-1: effective0 > reserves0");
+        assertLe(eff1, res1, "INV-EFF-1: effective1 > reserves1");
+    }
+
+    /// @notice INV-SHARE-2: no single actor ever holds more shares than the total supply.
+    /// @dev    A per-actor strengthening of INV-SHARE-1 that would catch an accounting bug
+    ///         crediting one user beyond the pool's outstanding supply.
+    function invariant_userSharesNeverExceedTotal() public view {
+        uint256 total = hook.totalShares(testPoolId);
+        uint256 n = handler.actorsLength();
+        for (uint256 i; i < n; i++) {
+            assertLe(hook.userShares(testPoolId, handler.actors(i)), total, "INV-SHARE-2: userShares > totalShares");
         }
     }
 }

@@ -64,6 +64,7 @@ contract SmartPoolHandler is Test {
     uint256 public ghost_swapCalls;
     uint256 public ghost_yieldCalls;
     uint256 public ghost_warpCalls;
+    uint256 public ghost_setDistributionCalls;
 
     constructor(
         SmartPoolHook _hook,
@@ -228,6 +229,31 @@ contract SmartPoolHandler is Test {
             vault1.simulateYield(amount);
             ghost_totalYieldInjected1 += amount;
         }
+    }
+
+    /// @notice Rotate the pool's liquidity distribution to a fresh, valid shape. Exercises
+    ///         `setDistribution` interleaved with the JIT lifecycle and makes the distribution
+    ///         invariants (weights sum to 10_000, bounded bucket count, non-zero weights)
+    ///         non-trivial — without this the distribution never changes after setUp.
+    /// @dev    Always constructs a well-formed distribution (so the call succeeds), pranked as
+    ///         the hook owner. `whenJITNotInProgress` holds between handler calls.
+    function setDistribution(uint256 nSeed, uint256 widthSeed) external {
+        ghost_setDistributionCalls++;
+
+        uint256 n = bound(nSeed, 1, 8);
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](n);
+        uint256 base = 10_000 / n;
+        uint256 assigned;
+        for (uint256 i; i < n; i++) {
+            uint16 w = (i == n - 1) ? uint16(10_000 - assigned) : uint16(base);
+            if (i != n - 1) assigned += base;
+            uint256 mult = bound(widthSeed, 1, 1_000) + i;
+            int24 hw = int24(uint24(mult)) * key.tickSpacing;
+            dist[i] = SmartPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
+        }
+
+        vm.prank(hook.owner());
+        try hook.setDistribution(key, dist) {} catch {}
     }
 
     /// @notice Advance time and block number — exercises any time-dependent paths (deposit-block
