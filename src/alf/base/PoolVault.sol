@@ -607,9 +607,10 @@ abstract contract PoolVault is MultiAssetVault {
     function _requireFeelessVault(IERC4626 vault) internal view {
         if (address(vault) == address(0)) return;
         uint256 probe = 10 ** uint256(vault.decimals());
-        uint256 sharesPredicted = vault.convertToShares(probe);
-        if (vault.previewDeposit(probe) != sharesPredicted) revert VaultChargesEntryFee();
-        if (vault.previewRedeem(probe) != sharesPredicted) revert VaultChargesExitFee();
+        // Entry side maps assets → shares: `previewDeposit` and `convertToShares` must agree.
+        if (vault.previewDeposit(probe) != vault.convertToShares(probe)) revert VaultChargesEntryFee();
+        // Exit side maps shares → assets: `previewRedeem` and `convertToAssets` must agree.
+        if (vault.previewRedeem(probe) != vault.convertToAssets(probe)) revert VaultChargesExitFee();
     }
 
     /// @dev Ensure the hook's allowance to `vault` for `currency` is at least `amount` for the

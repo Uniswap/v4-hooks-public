@@ -449,6 +449,50 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.initializePool(feeKey, cfg);
     }
 
+    /// @dev Regression: a *feeless* vault whose share price has drifted from 1:1 (any vault
+    ///      that has accrued yield) must still pass `_requireFeelessVault`. The exit-side probe
+    ///      compares `previewRedeem` (shares → assets) against `convertToAssets` (shares →
+    ///      assets); these coincide with `convertToShares` only at a 1:1 ratio, so an exit
+    ///      check baselined on `convertToShares` would spuriously revert with
+    ///      `VaultChargesExitFee` once the vault has yield.
+    function test_initializePool_acceptsFeelessVaultAtNonUnitySharePrice() public {
+        MockMorphoVaultV2 yieldVault1 = new MockMorphoVaultV2(ERC20(address(token1)));
+
+        // Drive the vault to a 2:1 share price while keeping it strictly feeless: deposit
+        // 1_000 assets (mints 1_000 shares at the initial 1:1), then accrue an equal amount of
+        // underlying as yield so totalAssets == 2 * totalSupply.
+        token1.mint(address(this), 1_000e18);
+        token1.approve(address(yieldVault1), 1_000e18);
+        yieldVault1.deposit(1_000e18, address(this));
+        yieldVault1.simulateYield(1_000e18);
+
+        // Preconditions: share price is genuinely non-1:1, and the vault charges no exit fee.
+        uint256 probe = 10 ** uint256(yieldVault1.decimals());
+        assertTrue(
+            yieldVault1.convertToShares(probe) != yieldVault1.convertToAssets(probe),
+            "precondition: share price must be non-1:1 to exercise the bug"
+        );
+        assertEq(yieldVault1.previewRedeem(probe), yieldVault1.convertToAssets(probe), "vault is feeless on exit");
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory feeKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(vault0)),
+            vault1: IERC4626(address(yieldVault1)),
+            minDepositBlocks: 0
+        });
+
+        // Must NOT revert: the vault is feeless despite the non-1:1 ratio.
+        vm.prank(owner);
+        hook.initializePool(feeKey, cfg);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          VAULT CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
