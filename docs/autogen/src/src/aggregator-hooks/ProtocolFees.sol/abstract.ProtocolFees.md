@@ -1,5 +1,5 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/396c7ee0f0e458881657d92ca6d17cb49381d408/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/128fc9a33528d43f0743cb4bf9892353c4df0af3/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
@@ -79,6 +79,8 @@ function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint
 ```
 
 ### _getProtocolFee
+
+The protocol fee is multiplied by the protocol fee multiplier
 
 
 ```solidity
