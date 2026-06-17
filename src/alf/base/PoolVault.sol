@@ -7,6 +7,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
@@ -100,6 +101,24 @@ abstract contract PoolVault is MultiAssetVault {
     using SafeCast for uint256;
 
     // ═══════════════════════════════════════════════════════════════════════════
+    //                              CONSTANTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Default virtual-shares offset (also the upper clamp for the per-pool derivation).
+    ///      Correct for 18-decimal pairs; matches the base `MultiAssetVault` default.
+    uint8 private constant DEFAULT_DECIMALS_OFFSET = 12;
+
+    /// @dev Lower clamp on the per-pool offset, keeping the inflation defense at >= `1e6`
+    ///      virtual shares even for low-decimal pairs.
+    uint8 private constant MIN_DECIMALS_OFFSET = 6;
+
+    /// @dev Subtracted from a pair's average decimals so an 18/18 pair maps to the default 12.
+    uint8 private constant DECIMALS_OFFSET_MARGIN = 6;
+
+    /// @dev Assumed decimals for tokens that don't implement the optional `decimals()` metadata.
+    uint8 private constant FALLBACK_DECIMALS = 18;
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //                              TYPES
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -145,6 +164,12 @@ abstract contract PoolVault is MultiAssetVault {
     ///         between the depositor's last `_deposit` and any `_withdraw`. Set at pool
     ///         initialization and immutable thereafter.
     mapping(PoolId => uint64) public minDepositBlocks;
+
+    /// @dev Per-pool virtual-shares offset, derived from the pair's token decimals at pool
+    ///      initialization and immutable thereafter. See {_decimalsOffset} and
+    ///      {_initDecimalsOffset} for the rationale and formula. `0` means "not initialized",
+    ///      which `_decimalsOffset` maps to the base default of 12.
+    mapping(PoolId => uint8) internal _poolDecimalsOffset;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              EVENTS
@@ -223,6 +248,16 @@ abstract contract PoolVault is MultiAssetVault {
     /// @return shares Non-transferable pool shares held by `user`.
     function userShares(PoolId poolId, address user) external view returns (uint256) {
         return _userShares[_vaultIdFor(poolId)][user];
+    }
+
+    /// @notice The virtual-shares offset used by a pool's bootstrap floor and share-price
+    ///         inflation defense (`100 * 10**offset` minimum bootstrap shares; `10**offset`
+    ///         virtual shares in the conversion math). Derived from the pair's token decimals
+    ///         at initialization. Useful for off-chain bootstrap sizing.
+    /// @param poolId The pool to read the offset for.
+    /// @return The pool's decimals offset (12 if the pool was never initialized).
+    function decimalsOffset(PoolId poolId) external view returns (uint8) {
+        return _decimalsOffset(_vaultIdFor(poolId));
     }
 
     /// @notice Returns the total managed assets for a pool across both currencies. Sums
@@ -463,6 +498,53 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Looks up the per-pool lock duration set at pool initialization.
     function _minDepositBlocks(VaultId vaultId) internal view override returns (uint64) {
         return minDepositBlocks[PoolId.wrap(VaultId.unwrap(vaultId))];
+    }
+
+    /// @inheritdoc MultiAssetVault
+    /// @dev Returns the per-pool offset derived from the pair's token decimals at init (see
+    ///      {_initDecimalsOffset}). The base default `12` is correct for 18-decimal pairs but
+    ///      makes the bootstrap floor (`100 * 10**12` base units) absurdly large for low-decimal
+    ///      pairs — e.g. ~100M tokens/side for a 6/6 stablecoin pair — so without this override
+    ///      common stablecoin pools could not be bootstrapped at a realistic size. A pool that
+    ///      was never initialized maps to `12`.
+    function _decimalsOffset(VaultId vaultId) internal view override returns (uint8) {
+        uint8 offset = _poolDecimalsOffset[PoolId.wrap(VaultId.unwrap(vaultId))];
+        return offset == 0 ? DEFAULT_DECIMALS_OFFSET : offset;
+    }
+
+    /// @dev Derive and cache a pool's virtual-shares offset from its currencies' `decimals()`:
+    ///      `clamp((d0 + d1) / 2 - 6, 6, 12)`. This keeps the bootstrap floor (`100 * 10**offset`
+    ///      base units) at a realistic per-side seed for the pair while keeping the `10**offset`
+    ///      virtual-share inflation defense at least `1e6`:
+    ///
+    ///        - 18/18 → 12 (floor ~1e-4 token/side; unchanged from the prior hardcoded default)
+    ///        - 6/6   → 6  (floor ~100 tokens/side, e.g. ~100 USDC, vs. ~100M before)
+    ///        - 6/18  → 6, 8/8 → 6, etc.
+    ///
+    ///      The drift at the floor is ~1% regardless of offset (the floor is defined to give
+    ///      ~1% drift); the offset only sets the absolute minimum seed and the defense strength,
+    ///      which move together. Tokens that don't implement `decimals()` fall back to 18.
+    ///      Called once per pool at initialization; the result is immutable thereafter, so the
+    ///      conversion math reads a stable value for the pool's lifetime.
+    /// @param poolId    The pool whose offset to derive and store.
+    /// @param currency0 The pool's first currency.
+    /// @param currency1 The pool's second currency.
+    function _initDecimalsOffset(PoolId poolId, Currency currency0, Currency currency1) internal {
+        uint256 avg = (uint256(_tokenDecimals(currency0)) + uint256(_tokenDecimals(currency1))) / 2;
+        uint256 raw = avg > DECIMALS_OFFSET_MARGIN ? avg - DECIMALS_OFFSET_MARGIN : 0;
+        if (raw < MIN_DECIMALS_OFFSET) raw = MIN_DECIMALS_OFFSET;
+        if (raw > DEFAULT_DECIMALS_OFFSET) raw = DEFAULT_DECIMALS_OFFSET;
+        _poolDecimalsOffset[poolId] = uint8(raw);
+    }
+
+    /// @dev Read a token's `decimals()`, defaulting to `FALLBACK_DECIMALS` for tokens that do
+    ///      not implement the optional metadata extension. Used only at pool initialization.
+    function _tokenDecimals(Currency currency) private view returns (uint8) {
+        try IERC20Metadata(Currency.unwrap(currency)).decimals() returns (uint8 d) {
+            return d;
+        } catch {
+            return FALLBACK_DECIMALS;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

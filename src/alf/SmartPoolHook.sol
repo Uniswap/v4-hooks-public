@@ -329,6 +329,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         vaults[poolId][key.currency1] = config.vault1;
         minDepositBlocks[poolId] = config.minDepositBlocks;
 
+        // Derive the virtual-shares offset from the pair's decimals so the bootstrap floor stays
+        // a realistic seed for low-decimal pairs (e.g. ~100 USDC for a 6/6 pool instead of the
+        // ~100M the hardcoded default would require). Immutable once set. See
+        // {PoolVault._decimalsOffset}.
+        _initDecimalsOffset(poolId, key.currency0, key.currency1);
+
         // Approve once at init time so JIT-cycle vault deposits can skip the runtime
         // allowance read. Allowance set to `type(uint256).max` is never decremented by
         // `vault.deposit`, so a single approval is durable for the (currency, vault) pair.
