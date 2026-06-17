@@ -145,7 +145,9 @@ contract SmartPoolHookDecimalsTest is Test, Deployers {
         t0.approve(address(hook), 1e13);
         t1.approve(address(hook), 1e13);
         // sqrt(1e13 * 1e13) = 1e13 < 1e14 floor (offset 12, unchanged).
-        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.BootstrapTooSmall.selector, uint256(1e13), uint256(1e14)));
+        vm.expectRevert(
+            abi.encodeWithSelector(MultiAssetVault.BootstrapTooSmall.selector, uint256(1e13), uint256(1e14))
+        );
         hook.bootstrap(k, 1e13, 1e13);
         vm.stopPrank();
     }
