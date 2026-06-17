@@ -14,6 +14,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -971,6 +972,192 @@ contract SmartPoolHookTest is Test, Deployers {
         // v4 wraps hook reverts; assert the inner selector is present in the bubbled payload.
         vm.expectRevert();
         swap(testPoolKey, true, -1e18, "");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EMERGENCY VAULT REVOCATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev The atomic emergency lever flips all three pieces of state: both vault allowances
+    ///      to zero, external deposits off, and the pool paused. After it runs, swaps revert.
+    function test_emergencyRevokeVault_zeroesAllowancesPausesAndDisablesDeposits() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        // Pre-state: standing max allowance to each vault, pool live, external deposits on.
+        assertEq(token0.allowance(address(hook), address(vault0)), type(uint256).max, "pre: allowance0 != max");
+        assertEq(token1.allowance(address(hook), address(vault1)), type(uint256).max, "pre: allowance1 != max");
+        assertTrue(hook.livePools(testPoolId), "pre: not live");
+        assertTrue(hook.externalDepositsEnabled(testPoolId), "pre: external deposits off");
+
+        vm.prank(owner);
+        hook.emergencyRevokeVault(testPoolKey);
+
+        assertEq(token0.allowance(address(hook), address(vault0)), 0, "post: allowance0 != 0");
+        assertEq(token1.allowance(address(hook), address(vault1)), 0, "post: allowance1 != 0");
+        assertFalse(hook.livePools(testPoolId), "post: still live");
+        assertFalse(hook.externalDepositsEnabled(testPoolId), "post: external deposits still on");
+
+        // Swaps now revert (pool paused).
+        vm.expectRevert();
+        swap(testPoolKey, true, -1e18, "");
+    }
+
+    /// @dev Demonstrates the actual protection: a (now-suspect) vault holding the hook's
+    ///      standing allowance can `transferFrom` the hook's raw token balance before
+    ///      revocation, and is blocked after. The raw balance stands in for funds attributed to
+    ///      a vault-less sibling pool sharing the currency.
+    function test_emergencyRevokeVault_blocksVaultTransferFrom() public {
+        _depositAsOperator(1_000e18);
+        address attacker = makeAddr("attacker");
+
+        // Hook holds raw token0 (e.g. a vault-less sibling pool's balance).
+        token0.mint(address(hook), 2e18);
+
+        // Before revocation: the vault's standing allowance lets it pull the hook's balance.
+        vm.prank(address(vault0));
+        token0.transferFrom(address(hook), attacker, 1e18);
+        assertEq(token0.balanceOf(attacker), 1e18, "pre: drain should succeed via standing allowance");
+
+        vm.prank(owner);
+        hook.emergencyRevokeVault(testPoolKey);
+
+        // After revocation: the same pull reverts (allowance is now zero).
+        vm.prank(address(vault0));
+        vm.expectRevert();
+        token0.transferFrom(address(hook), attacker, 1e18);
+    }
+
+    /// @dev The load-bearing correction: because `addLiquidity` is not liveness-gated, disabling
+    ///      external deposits is what actually prevents an external depositor from re-arming the
+    ///      allowance via the deposit path while the pool is paused.
+    function test_emergencyRevokeVault_externalDepositCannotReArm() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(owner);
+        hook.setExternalDeposits(testPoolKey, true);
+
+        vm.prank(owner);
+        hook.emergencyRevokeVault(testPoolKey);
+        assertEq(token0.allowance(address(hook), address(vault0)), 0, "allowance not zeroed");
+
+        // An external depositor can no longer call addLiquidity (deposits disabled), so the
+        // `_ensureVaultAllowance` re-approval path is unreachable.
+        (uint256 need0, uint256 need1) = hook.previewDeposit(testPoolKey, 100e18);
+        token0.mint(alice, need0);
+        token1.mint(alice, need1);
+        vm.startPrank(alice);
+        token0.approve(address(hook), need0);
+        token1.approve(address(hook), need1);
+        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
+        hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
+        vm.stopPrank();
+
+        // Allowance remains revoked.
+        assertEq(token0.allowance(address(hook), address(vault0)), 0, "allowance silently re-armed");
+    }
+
+    /// @dev LPs are not trapped: an existing shareholder can still exit after revocation. The
+    ///      vault-withdraw path needs no hook→vault allowance, so it neither re-arms nor reverts.
+    function test_emergencyRevokeVault_removeLiquidityStillWorks() public {
+        _depositAsOperator(1_000e18); // owner holds 1_000e18 shares
+
+        vm.prank(owner);
+        hook.emergencyRevokeVault(testPoolKey);
+
+        vm.prank(owner);
+        (uint256 out0, uint256 out1) = hook.removeLiquidity(testPoolKey, 500e18, 0, 0, block.timestamp);
+
+        assertGt(out0, 0, "LP exit returned zero token0");
+        assertGt(out1, 0, "LP exit returned zero token1");
+        assertEq(hook.userShares(testPoolId, owner), 500e18, "shares not burned on exit");
+    }
+
+    /// @dev Only the owner may trigger the emergency lever.
+    function test_emergencyRevokeVault_onlyOwner() public {
+        _depositAsOperator(1_000e18);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        hook.emergencyRevokeVault(testPoolKey);
+    }
+
+    /// @dev The rescue leg: a cooperative vault's assets are pulled back out into the hook's
+    ///      raw ledger, so they sit outside the suspect vault's reach. Economically neutral —
+    ///      `getReserves` is unchanged because vault assets simply become raw ERC-20.
+    function test_emergencyRevokeVault_drainsCooperativeVault() public {
+        _depositAsOperator(1_000e18);
+
+        (uint256 res0Before, uint256 res1Before) = hook.getReserves(testPoolKey);
+        assertEq(vault0.balanceOf(address(hook)), 1_000e18, "pre: vault0 holds pool shares");
+        assertEq(token0.balanceOf(address(hook)), 0, "pre: hook holds no raw token0");
+
+        vm.prank(owner);
+        hook.emergencyRevokeVault(testPoolKey);
+
+        // Assets pulled out of the vault into the hook's raw balance.
+        assertEq(vault0.balanceOf(address(hook)), 0, "post: vault0 shares not drained");
+        assertEq(vault1.balanceOf(address(hook)), 0, "post: vault1 shares not drained");
+        assertEq(token0.balanceOf(address(hook)), 1_000e18, "post: token0 not rescued to raw");
+        assertEq(token1.balanceOf(address(hook)), 1_000e18, "post: token1 not rescued to raw");
+
+        // Economically neutral: total reserves unchanged (vault assets -> raw ERC-20).
+        (uint256 res0After, uint256 res1After) = hook.getReserves(testPoolKey);
+        assertEq(res0After, res0Before, "reserves0 changed by drain");
+        assertEq(res1After, res1Before, "reserves1 changed by drain");
+    }
+
+    /// @dev Best-effort guarantee: if the vault is bricked and reverts on redeem, the rescue is
+    ///      skipped but the revocation + pause still land. The protections must never depend on
+    ///      a compromised vault cooperating.
+    function test_emergencyRevokeVault_drainBestEffortWhenVaultBricked() public {
+        MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
+        MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
+
+        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
+        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory mvKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+        PoolId mvId = mvKey.toId();
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: false,
+            vault0: IERC4626(address(mv0)),
+            vault1: IERC4626(address(mv1)),
+            minDepositBlocks: 0
+        });
+        vm.prank(owner);
+        hook.initializePool(mvKey, cfg);
+
+        token0.mint(owner, 1_000e18);
+        token1.mint(owner, 1_000e18);
+        vm.startPrank(owner);
+        token0.approve(address(hook), 1_000e18);
+        token1.approve(address(hook), 1_000e18);
+        hook.bootstrap(mvKey, 1_000e18, 1_000e18);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        uint256 sharesHeld = mv0.balanceOf(address(hook));
+        assertGt(sharesHeld, 0, "precondition: hook holds vault shares");
+
+        // Brick both vaults so the drain's `redeem` reverts.
+        mv0.setWithdrawShortfall(true);
+        mv1.setWithdrawShortfall(true);
+
+        // Must NOT revert despite the failed drain.
+        vm.prank(owner);
+        hook.emergencyRevokeVault(mvKey);
+
+        // Protections landed regardless of the vault being bricked.
+        assertEq(token0.allowance(address(hook), address(mv0)), 0, "allowance0 not zeroed");
+        assertEq(token1.allowance(address(hook), address(mv1)), 0, "allowance1 not zeroed");
+        assertFalse(hook.livePools(mvId), "pool not paused");
+        assertFalse(hook.externalDepositsEnabled(mvId), "external deposits not disabled");
+
+        // Drain was skipped: the assets remain in the (bricked) vault.
+        assertEq(mv0.balanceOf(address(hook)), sharesHeld, "shares should remain after skipped drain");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -169,6 +169,12 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param enabled Whether external deposits are enabled.
     event ExternalDepositsUpdated(PoolId indexed poolId, bool enabled);
 
+    /// @notice Emitted when the owner triggers `emergencyRevokeVault`: the pool is paused,
+    ///         external deposits are disabled, and both vault token allowances are zeroed in a
+    ///         single action. A monitoring signal that a vault incident response is in progress.
+    /// @param poolId The pool whose vault exposure was revoked.
+    event EmergencyVaultRevoked(PoolId indexed poolId);
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -267,9 +273,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @notice Initialize a new pool with vaults and liquidity distribution.
     /// @dev    Calls `poolManager.initialize` internally. The pool's LP fee is taken from
-    ///         `key.fee` and is static — it cannot be changed post-deployment. Vaults are
-    ///         permanent — set at creation and cannot be changed. The distribution can be
-    ///         updated later via `setDistribution`.
+    ///         `key.fee` and is static — it cannot be changed post-deployment. The vault
+    ///         BINDING is permanent — set at creation and cannot be changed — but the standing
+    ///         token allowance granted to each vault is revocable in an emergency via
+    ///         `emergencyRevokeVault`. The distribution can be updated later via
+    ///         `setDistribution`.
     ///         Native ETH (currency `address(0)`) is rejected — wrap as WETH instead.
     ///         The pool is created **not live**: swaps revert with `PoolNotLive` until the
     ///         owner calls `bootstrap`, which mints the first shares AND flips liveness on.
@@ -498,6 +506,55 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         IERC4626 vault = vaults[key.toId()][currency];
         if (address(vault) == address(0)) return;
         IERC20(Currency.unwrap(currency)).forceApprove(address(vault), type(uint256).max);
+    }
+
+    /// @notice Emergency incident-response lever for a suspect vault: in one atomic action,
+    ///         pause the pool, disable external deposits, zero BOTH currencies' vault allowances,
+    ///         and best-effort withdraw the pool's vault-held assets back into the hook. Use when
+    ///         a configured vault is suspected compromised, paused, or pending a risky upgrade.
+    /// @dev    The pool's vault binding is immutable, so this does NOT remove the vault. Four
+    ///         actions run in order; the first three always succeed, the fourth is best-effort:
+    ///
+    ///           1. Pause (`livePools = false`): blocks swaps so the JIT cycle stops touching
+    ///              the vault.
+    ///           2. Disable external deposits: load-bearing, because `addLiquidity` is NOT gated
+    ///              on liveness, so an external depositor could otherwise re-arm the allowance
+    ///              via `_ensureVaultAllowance` on the deposit path even while the pool is paused.
+    ///           3. Zero both vault allowances: removes the standing `type(uint256).max` grant
+    ///              that lets a vault `transferFrom` the hook's RAW balance of that currency
+    ///              (including ERC-20 attributed to OTHER pools sharing it; see {PoolVault}
+    ///              `Vault trust model`).
+    ///           4. Best-effort drain (`_drainVaultBestEffort`): redeems the pool's vault shares
+    ///              back to raw ERC-20, rescuing assets ALREADY inside the vault, which step 3
+    ///              alone does not protect. Wrapped in try/catch: if the vault is bricked/paused
+    ///              and reverts on redeem, the rescue is skipped (emits {PoolVault-VaultDrainSkipped})
+    ///              but the revocation + pause above still hold. `nonReentrant` because this is
+    ///              the only owner path that makes an external call to the (untrusted) vault.
+    ///
+    ///         `removeLiquidity` is intentionally left open so LPs can still exit; it needs no
+    ///         hook to vault allowance, so exits neither re-arm the exposure nor get trapped. To
+    ///         resume normal operation the owner re-approves via {refreshVaultApproval} and
+    ///         re-enables liveness / external deposits, which re-arms the exposure, so the
+    ///         underlying vault incident must be resolved first.
+    /// @param key The pool whose vault exposure to revoke.
+    function emergencyRevokeVault(PoolKey calldata key) external onlyOwner nonReentrant whenJITNotInProgress {
+        PoolId poolId = key.toId();
+
+        livePools[poolId] = false;
+        emit PoolLivenessUpdated(poolId, false);
+
+        externalDepositsEnabled[poolId] = false;
+        emit ExternalDepositsUpdated(poolId, false);
+
+        _revokeVaultApproval(key.currency0, address(vaults[poolId][key.currency0]));
+        _revokeVaultApproval(key.currency1, address(vaults[poolId][key.currency1]));
+
+        // Rescue assets already inside the vault. Best-effort: a bricked vault must not block
+        // the protections above.
+        _drainVaultBestEffort(poolId, key.currency0);
+        _drainVaultBestEffort(poolId, key.currency1);
+
+        emit EmergencyVaultRevoked(poolId);
     }
 
     /// @notice Enable or disable external (non-owner) deposits for a pool.

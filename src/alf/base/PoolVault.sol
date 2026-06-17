@@ -162,6 +162,23 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param reason   The raw revert data from `vault.deposit` (for operator diagnostics).
     event VaultDepositSkipped(PoolId indexed poolId, Currency indexed currency, uint256 amount, bytes reason);
 
+    /// @notice Emitted when `_drainVaultBestEffort` successfully pulls the pool's full vault
+    ///         position back into the raw ERC-20 ledger (e.g. during an emergency revocation).
+    /// @param poolId   The pool whose vault position was drained.
+    /// @param currency The currency that was withdrawn from the vault.
+    /// @param shares   The vault shares redeemed (the pool's full holding).
+    /// @param assets   The asset amount received and credited to `s.erc20`.
+    event VaultDrained(PoolId indexed poolId, Currency indexed currency, uint256 shares, uint256 assets);
+
+    /// @notice Emitted when a best-effort vault drain could not complete (vault paused, bricked,
+    ///         or otherwise reverting on redeem). The assets remain in the vault; the caller
+    ///         continues so the surrounding action (e.g. allowance revocation + pause) still lands.
+    /// @param poolId   The pool whose vault drain was skipped.
+    /// @param currency The currency whose vault rejected the redeem.
+    /// @param shares   The vault shares that could not be redeemed.
+    /// @param reason   The raw revert data from `vault.redeem` (for operator diagnostics).
+    event VaultDrainSkipped(PoolId indexed poolId, Currency indexed currency, uint256 shares, bytes reason);
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                              ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -465,6 +482,11 @@ abstract contract PoolVault is MultiAssetVault {
     ///      pools that share that currency. Operators MUST select vaults whose security
     ///      properties they understand (immutable / non-upgradeable preferred).
     ///
+    ///      The (pool, currency) → vault BINDING is immutable, but the standing ALLOWANCE is
+    ///      not: `_revokeVaultApproval` zeroes it, and a subclass MAY expose an owner-only
+    ///      emergency action that revokes the allowance, disables deposits, and pauses the
+    ///      pool atomically to cap the damage window when a vault incident is detected.
+    ///
     ///      Curated/gated vaults (e.g., Morpho VaultV2) add a third trust dimension on top
     ///      of share-price and allowance trust: the curator can enable a gate that denies
     ///      future deposits or withdrawals from the hook. Operators MUST trust the chosen
@@ -542,6 +564,34 @@ abstract contract PoolVault is MultiAssetVault {
         s.erc20 = (uint256(s.erc20) + amount).toUint128();
     }
 
+    /// @dev Best-effort full withdrawal of the pool's vault position for `currency` back into
+    ///      the per-pool raw ERC-20 ledger. Redeems exactly the pool's own `_vaultShares` (never
+    ///      a sibling pool's), so cross-pool isolation is preserved.
+    ///
+    ///      Wrapped in try/catch by design: this is the rescue leg of an emergency response
+    ///      against a suspect-but-still-cooperative vault. A bricked / paused vault that reverts
+    ///      on `redeem` MUST NOT block the surrounding revocation + pause, so on failure this is
+    ///      a no-op (assets stay in the vault, `_vaultShares` untouched) and emits
+    ///      {VaultDrainSkipped}. On success the position moves to `s.erc20`: vault assets become
+    ///      raw ERC-20, outside the suspect vault's reach.
+    /// @param poolId   The pool whose vault position to drain.
+    /// @param currency The currency to withdraw from the vault.
+    function _drainVaultBestEffort(PoolId poolId, Currency currency) internal {
+        IERC4626 vault = vaults[poolId][currency];
+        if (address(vault) == address(0)) return;
+        uint256 shares = _vaultShares[poolId][currency];
+        if (shares == 0) return;
+
+        try vault.redeem(shares, address(this), address(this)) returns (uint256 assets) {
+            _vaultShares[poolId][currency] = 0;
+            CurrencyState storage s = _state[poolId][currency];
+            s.erc20 = (uint256(s.erc20) + assets).toUint128();
+            emit VaultDrained(poolId, currency, shares, assets);
+        } catch (bytes memory reason) {
+            emit VaultDrainSkipped(poolId, currency, shares, reason);
+        }
+    }
+
     /// @dev Ensure the pool's tracked ERC-20 balance is at least `amount`, then debit it.
     ///      Withdraws any shortfall from the configured vault by calling `vault.withdraw`
     ///      directly; on vault failure (paused, curated shortfall, etc.) the revert bubbles
@@ -586,6 +636,19 @@ abstract contract PoolVault is MultiAssetVault {
         if (token.allowance(address(this), vault) == 0) {
             token.forceApprove(vault, type(uint256).max);
         }
+    }
+
+    /// @dev Zero the hook's standing approval to a vault -- the emergency counterpart to
+    ///      `_approveVault`. Uses `forceApprove(0)` (a non-zero→zero transition, safe for
+    ///      USDT-style tokens) so a vault suspected compromised can no longer `transferFrom`
+    ///      the hook's balance of `currency`. No-op for `address(0)` (non-vaulted currency).
+    ///
+    ///      NOTE: the LP deposit path re-arms the allowance via `_ensureVaultAllowance` on the
+    ///      next `vault.deposit`. Callers MUST stop deposits (pause the pool AND disable
+    ///      external deposits) in the same transaction, or the revocation will not hold.
+    function _revokeVaultApproval(Currency currency, address vault) internal {
+        if (vault == address(0)) return;
+        IERC20(Currency.unwrap(currency)).forceApprove(vault, 0);
     }
 
     /// @dev Reject ERC-4626 vaults that apply entry or exit fees. Called once per vault at
