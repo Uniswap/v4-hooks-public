@@ -700,18 +700,53 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Redeem this pool's ERC-6909 claims to ERC-20 via the PoolManager. Only callable
     ///      within a v4 unlock context. Increments `_state.erc20` by the redeemed amount and
     ///      returns the post-redeem balance so callers don't need a follow-up SLOAD.
+    ///
+    ///      A claim is an accounting credit, backed by real tokens in the PoolManager only once
+    ///      the corresponding swapper has settled. Claims minted by an EARLIER swap on this pool
+    ///      within the SAME, still-unsettled transaction (multiple swaps on one pool inside a
+    ///      single `unlock`) are therefore not yet physically backed: the swapper's input lands
+    ///      at end-of-unlock, not now. Taking the full claim balance would attempt to transfer
+    ///      tokens the PoolManager does not yet hold and revert the later swap.
+    ///
+    ///      Cap the physical `take` at the PoolManager's current balance of `currency` and burn
+    ///      only that much; leave any remainder as recorded claims. The deployment shortfall is
+    ///      sourced from the vault by the caller (`_deployJIT` withdraws `totalNeed - onHand`),
+    ///      and the residual claims redeem on a later cycle once their backing has settled. The
+    ///      common path (claims fully backed) is unchanged: `available >= claimBal`, so the full
+    ///      balance is redeemed exactly as before.
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal returns (uint256 erc20Bal) {
         // Single SLOAD reads both packed fields.
         CurrencyState memory snapshot = _state[poolId][currency];
         uint256 claimBal = snapshot.claims;
         erc20Bal = snapshot.erc20;
         if (claimBal > 0) {
-            _poolManager().burn(address(this), currency.toId(), claimBal);
-            _poolManager().take(currency, address(this), claimBal);
-            erc20Bal += claimBal;
-            // Single SSTORE clears claims while incrementing erc20.
-            _state[poolId][currency] = CurrencyState({erc20: erc20Bal.toUint128(), claims: 0});
+            uint256 available = currency.balanceOf(address(_poolManager()));
+            uint256 takeAmount = claimBal < available ? claimBal : available;
+            if (takeAmount > 0) {
+                _poolManager().burn(address(this), currency.toId(), takeAmount);
+                _poolManager().take(currency, address(this), takeAmount);
+                erc20Bal += takeAmount;
+            }
+            // Single SSTORE: increment erc20 by what was redeemed, retain any unbacked remainder
+            // as claims.
+            _state[poolId][currency] =
+                CurrencyState({erc20: erc20Bal.toUint128(), claims: (claimBal - takeAmount).toUint128()});
         }
+    }
+
+    /// @dev The portion of a pool's recorded claims that the PoolManager cannot physically
+    ///      honor right now: claims whose backing settle is still pending in this transaction
+    ///      (e.g. minted by an earlier same-pool swap inside one unlock). `_deployJIT` excludes
+    ///      this from the deployable balance so it never sizes liquidity against funds it cannot
+    ///      source this cycle — `_redeemPoolClaims` can only redeem the backed portion, and the
+    ///      vault does not hold the claim portion, so counting it would over-draw the vault.
+    ///      Returns 0 in the common case (claims fully backed), so steady-state sizing is
+    ///      unaffected.
+    function _unbackedClaims(PoolId poolId, Currency currency) internal view returns (uint256) {
+        uint256 claims = _state[poolId][currency].claims;
+        if (claims == 0) return 0;
+        uint256 available = currency.balanceOf(address(_poolManager()));
+        return claims > available ? claims - available : 0;
     }
 
     /// @dev Record newly minted ERC-6909 claims for a pool. Called after `poolManager.mint()`

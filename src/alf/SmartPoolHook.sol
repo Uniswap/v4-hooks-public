@@ -773,6 +773,13 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         // continues to use `_totalAssets` to ensure that LP pro-rata claims are over true economic
         // stake, not the momentarily-withdrawable subset of that stake.
         (uint256 bal0, uint256 bal1) = _effectiveAssets(poolId, key.currency0, key.currency1);
+        // Exclude claims the PoolManager cannot physically honor yet (their backing settle is
+        // still pending in this transaction, e.g. a prior same-pool swap within one unlock).
+        // `_redeemPoolClaims` can only redeem the backed portion, and the vault does not hold
+        // the claim portion, so sizing the deployment against unbacked claims would over-draw
+        // the vault and revert. In steady state these are zero, so sizing is unchanged.
+        bal0 -= _unbackedClaims(poolId, key.currency0);
+        bal1 -= _unbackedClaims(poolId, key.currency1);
         if (bal0 == 0 && bal1 == 0) return;
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
