@@ -82,7 +82,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @inheritdoc IFeeClassifiedHook
     function protocolFeeFlags() external view virtual override returns (uint256) {
-        return 1;
+        return 1 << 11;
     }
 
     /// @notice Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
