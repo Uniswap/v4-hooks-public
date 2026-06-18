@@ -567,6 +567,35 @@ contract ALFMultiplexerTest is Test, Deployers {
         assertGt(delta.amount1(), 0, "should receive output");
     }
 
+    /// @dev A target trading a different currency pair than the virtual pool is rejected up front
+    ///      with `TargetCurrencyMismatch` (attributing the bad index), rather than producing
+    ///      non-netting deltas that revert the unlock with the opaque `CurrencyNotSettled`. The
+    ///      check fails fast before any nested swap, so the mismatched target pool need not exist.
+    function test_targets_currencyMismatch_reverts() public {
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: 0}); // correct pair
+        // Second target keeps currency0 but swaps currency1 for an unrelated token.
+        PoolKey memory mismatched = PoolKey({
+            currency0: currency0,
+            currency1: Currency.wrap(address(0xBEEF)),
+            fee: 10_000,
+            tickSpacing: 60,
+            hooks: IHooks(address(quoterB))
+        });
+        targets[1] = TargetedQuoter({poolKey: mismatched, amountSpecified: 0});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(multiplexer),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ALFMultiplexer.TargetCurrencyMismatch.selector, uint256(1)),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(multiplexerPoolKey, true, -1e18, _buildTargetedHookData(targets));
+    }
+
     /// @dev Donations to the virtual multiplexer pool would be permanently locked since the pool
     ///      has no LP positions — `_beforeDonate` reverts unconditionally.
     function test_donate_revertsOnVirtualPool() public {

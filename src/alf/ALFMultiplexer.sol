@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -179,6 +180,13 @@ contract ALFMultiplexer is BaseHook {
     ///      `|swapAmount|`. Over-allocating across legs flips the `remaining` tracker's sign and
     ///      produces malformed downstream fills.
     error TargetsOverAllocated();
+
+    /// @dev A target's pool trades a different currency pair than the multiplexer's virtual pool.
+    ///      The virtual pool's `BeforeSwapDelta` can only offset deltas in its own
+    ///      `currency0`/`currency1`, so a mismatched-pair fill would leave non-netting deltas and
+    ///      revert the unlock with the opaque `CurrencyNotSettled`. Caught up front instead.
+    /// @param index The index of the offending target in the `targets` array.
+    error TargetCurrencyMismatch(uint256 index);
 
     // ──── Events ────
 
@@ -398,13 +406,29 @@ contract ALFMultiplexer is BaseHook {
     /// @return totalDelta     Accumulated BalanceDelta across all fills.
     /// @return primaryQuoter  The first quoter in fill order.
     /// @return bestQuote      The best individual indicative (tolerance baseline). 0 if skipped.
-    function _multiplexAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+    function _multiplexAndSwap(PoolKey calldata key, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
         returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
     {
         if (hookData.length == 0) revert TargetsRequired();
         MultiplexerHookData memory ahd = abi.decode(hookData, (MultiplexerHookData));
         if (ahd.targets.length == 0) revert TargetsRequired();
+
+        // Every target must trade the virtual pool's exact currency pair. A target on a different
+        // pair opens deltas in currencies the virtual pool can't represent — `_toBeforeSwapDelta`
+        // only offsets `key.currency0`/`key.currency1`, so the leftover deltas would revert the
+        // unlock with the opaque `CurrencyNotSettled`. Fail fast with an attributable error,
+        // before any wasted nested swaps. Only the currency pair is constrained; fee, tickSpacing,
+        // and hooks deliberately vary across candidates.
+        for (uint256 i = 0; i < ahd.targets.length; i++) {
+            PoolKey memory tk = ahd.targets[i].poolKey;
+            if (
+                Currency.unwrap(tk.currency0) != Currency.unwrap(key.currency0)
+                    || Currency.unwrap(tk.currency1) != Currency.unwrap(key.currency1)
+            ) {
+                revert TargetCurrencyMismatch(i);
+            }
+        }
 
         if (_isPrePlanned(ahd.targets)) {
             // Pre-planned: router-optimized execution order and amounts
