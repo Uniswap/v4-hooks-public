@@ -583,6 +583,18 @@ abstract contract PoolVault is MultiAssetVault {
     ///      of share-price and allowance trust: the curator can enable a gate that denies
     ///      future deposits or withdrawals from the hook. Operators MUST trust the chosen
     ///      vault's curator not to weaponize the gate against the pool.
+    ///
+    ///      Deposit-credit trust: LP shares are minted against `want` (the assets pulled),
+    ///      but the pool's vault-backed value derives from `convertToAssets(_vaultShares)`. A
+    ///      vault that credits a `deposit` with less value than the assets in (a deposit fee,
+    ///      or shares worth less than they cost) would over-mint LP shares relative to value
+    ///      backed, diluting existing LPs. `_requireFeelessVault` rejects this at init for any
+    ///      honestly-disclosed fee; a vault that passes the probe yet charges a real deposit
+    ///      fee is adversarial and already covered by the allowance trust above (it can drain
+    ///      outright, which dwarfs dilution). A runtime net-credit check is intentionally NOT
+    ///      added: ERC-4626 `deposit` rounds shares down, so `convertToAssets(sharesActual)`
+    ///      is legitimately a few wei below `want` on honest vaults, and that dust rounds in
+    ///      the pool's favour (a deposit→withdraw round-trip never profits the depositor).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = vaults[poolId][currency];
