@@ -828,7 +828,11 @@ contract ALFMultiplexer is BaseHook, Ownable {
             }
         }
 
-        if (!exactInput && remaining > 0) revert InsufficientLiquidity();
+        // Fill-completely-or-revert, for BOTH directions (see `_executeFills` for the full
+        // rationale): an unfilled `remaining` would leak a residual swap onto the multiplexer's
+        // own zero-liquidity pool, pinning its price. An under-allocated pre-planned target set
+        // (sized legs summing to less than the swap, with no catch-all) reverts here.
+        if (remaining != 0) revert InsufficientLiquidity();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -998,9 +1002,16 @@ contract ALFMultiplexer is BaseHook, Ownable {
             }
         }
 
-        // Exact output: if remaining > 0 after all candidates, the aggregate liquidity wasn't
-        // sufficient to fill the requested output. The swapper's transaction must revert.
-        if (!exactInput && remaining > 0) revert InsufficientLiquidity();
+        // Fill-completely-or-revert, for BOTH directions. Any unfilled amount after all
+        // candidates means the aggregate deployable liquidity was insufficient. Reverting is
+        // load-bearing for the dispatcher invariant, not just an exact-output nicety: a non-zero
+        // `remaining` only partially offsets the virtual pool's swap in `_toBeforeSwapDelta`, so
+        // PoolManager would execute the residual `remaining` against the multiplexer's own
+        // zero-liquidity pool. That pool can't consume input, so v4's "input exhausted" early
+        // stop never fires — the swap tick-walks to the caller's price limit (burning gas, up to
+        // a full block at an extreme limit) and pins the virtual pool's price at the boundary,
+        // griefing subsequent same-direction swaps. The swapper retries with a smaller amount.
+        if (remaining != 0) revert InsufficientLiquidity();
     }
 
     /// @dev Comparison function for insertion sort. Returns true if indicative `a` is worse

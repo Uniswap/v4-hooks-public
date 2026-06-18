@@ -543,6 +543,42 @@ contract ALFMultiplexerTest is Test, Deployers {
         swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
     }
 
+    /// @dev Regression: an under-allocated pre-planned EXACT-INPUT set (sized legs summing to
+    ///      less than the swap, no catch-all) must revert, not silently leave the unfilled
+    ///      residual to be swapped against the multiplexer's own zero-liquidity pool. Previously
+    ///      only exact-output reverted on under-fill; exact-input leaked the residual, which
+    ///      tick-walked to the price limit and pinned the virtual pool's price.
+    function test_prePlanned_exactInputUnderAllocated_reverts() public {
+        MultiplexerHookData memory ahd =
+            MultiplexerHookData({attestationData: "", targets: new TargetedQuoter[](1), strictTolerancePips: 0});
+        // One sized leg covering only 0.4 of a 1.0 exact-input swap, and NO catch-all leg.
+        ahd.targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(-0.4e18)});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(multiplexer),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ALFMultiplexer.InsufficientLiquidity.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
+    }
+
+    /// @dev Control: a pre-planned exact-input whose catch-all leg covers the remainder still
+    ///      fills completely — the under-fill guard does not reject well-allocated splits.
+    function test_prePlanned_exactInputFullyAllocated_succeeds() public {
+        MultiplexerHookData memory ahd =
+            MultiplexerHookData({attestationData: "", targets: new TargetedQuoter[](2), strictTolerancePips: 0});
+        ahd.targets[0] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: int256(-0.4e18)});
+        ahd.targets[1] = TargetedQuoter({poolKey: quoterAPoolKey, amountSpecified: int256(0)}); // catch-all fills 0.6
+
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, abi.encode(ahd));
+        assertEq(delta.amount0(), -1e18, "full exact-input should be consumed");
+        assertGt(delta.amount1(), 0, "should receive output");
+    }
+
     /// @dev Donations to the virtual multiplexer pool would be permanently locked since the pool
     ///      has no LP positions — `_beforeDonate` reverts unconditionally.
     function test_donate_revertsOnVirtualPool() public {
