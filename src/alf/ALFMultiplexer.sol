@@ -89,6 +89,21 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         tolerance. This is a downside-only check — split fill producing more output than
 ///         the best individual indicative (the expected case) does not trigger a revert.
 ///
+///         The baseline is the best PRE-execution indicative across the targets, and it is NOT
+///         re-derived after execution. A candidate that wins quoting but then contributes
+///         nothing — it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
+///         it quoted — drops aggregate execution below that baseline and can trip the tolerance
+///         revert even when the other candidates filled acceptably. This is intentional and
+///         FAIL-SAFE (the check is downside-only, so the worst outcome is a revert, never a
+///         bad fill), but it means a flaky or adversarial candidate in the target set can force
+///         a revert ("quote-baiting") for a caller who enabled strict tolerance. Enable strict
+///         tolerance only over trusted targets; otherwise bound slippage with a router-side
+///         minimum-output / maximum-input check, which measures the actual aggregate execution
+///         rather than a per-candidate pre-execution baseline. NOTE: hard-failing the
+///         baseline-setting candidate instead of soft-skipping it would not help — its revert
+///         would still abort the swap — and would break soft-fail resilience for the common
+///         (non-strict) path, so the soft-skip is kept.
+///
 ///         ## Slippage Control — the outer `sqrtPriceLimitX96` is NOT enforced
 ///
 ///         The `sqrtPriceLimitX96` a caller passes on the outer swap to the multiplexer pool has
@@ -388,6 +403,11 @@ contract ALFMultiplexer is BaseHook {
                 // No baseline ⇒ no protection. Refuse rather than silently accept.
                 if (bestQuote == 0) revert MissingQuoteBaseline();
 
+                // `bestQuote` is the best PRE-execution indicative and is not re-derived here.
+                // A candidate that won quoting but then reverted (soft-skipped) or under-filled
+                // leaves `executed` below it and trips the revert below — fail-safe, but callers
+                // must enable strict tolerance only over trusted targets. See contract NatSpec
+                // "Tolerance Enforcement".
                 uint256 executed = _extractOutput(totalDelta, params);
                 if (params.amountSpecified < 0) {
                     if (executed < bestQuote) {
