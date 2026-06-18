@@ -19,7 +19,6 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC20Minimal} from "@uniswap/v4-core/src/interfaces/external/IERC20Minimal.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
@@ -54,7 +53,7 @@ contract ALFMultiplexerTest is Test, Deployers {
         multiplexer = ALFMultiplexer(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | multiplexerFlags))
         );
-        deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(multiplexer));
+        deployCodeTo("ALFMultiplexer", abi.encode(manager), address(multiplexer));
 
         // ── Deploy quoters (native LP model with LP gating) ──
         uint160 quoterFlags = uint160(
@@ -505,17 +504,6 @@ contract ALFMultiplexerTest is Test, Deployers {
         // Default pool has no protocol fee set in slot0 — verify no fee taken
         swap(multiplexerPoolKey, true, -1e18, _buildBothTargets());
         assertEq(manager.balanceOf(address(multiplexer), currency0.toId()), 0);
-    }
-
-    function test_governance_transferOwnership() public {
-        address newOwner = makeAddr("newOwner");
-        vm.expectEmit(true, true, true, true);
-        emit Ownable.OwnershipTransferred(address(this), newOwner);
-        multiplexer.transferOwnership(newOwner);
-        assertEq(multiplexer.owner(), newOwner);
-
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
-        multiplexer.transferOwnership(address(this));
     }
 
     /// @dev A pre-planned target whose `amountSpecified` sign mismatches the outer swap is rejected.

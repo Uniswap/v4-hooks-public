@@ -14,7 +14,6 @@ import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/Pool
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {BaseHook} from "../base/BaseHook.sol";
 import {QuoterRevert} from "@uniswap/v4-periphery/src/libraries/QuoterRevert.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IALFHook, ALFHookData} from "./interfaces/IALFHook.sol";
 import {SwapSimulator} from "./libraries/SwapSimulator.sol";
@@ -115,7 +114,7 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         candidates receive empty hookData and any required hook input must be encoded into
 ///         the candidate's own pool design.
 /// @custom:security-contact security@uniswap.org
-contract ALFMultiplexer is BaseHook, Ownable {
+contract ALFMultiplexer is BaseHook {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
@@ -210,8 +209,7 @@ contract ALFMultiplexer is BaseHook, Ownable {
     // ──── Constructor ────
 
     /// @param _poolManager The Uniswap v4 PoolManager.
-    /// @param _owner       Initial owner.
-    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Ownable(_owner) {}
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          HOOK PERMISSIONS

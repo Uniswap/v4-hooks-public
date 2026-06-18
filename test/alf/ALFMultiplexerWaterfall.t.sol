@@ -65,7 +65,7 @@ contract ALFMultiplexerWaterfallTest is Test, Deployers {
         multiplexer = ALFMultiplexer(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | multiplexerFlags))
         );
-        deployCodeTo("ALFMultiplexer", abi.encode(manager, address(this)), address(multiplexer));
+        deployCodeTo("ALFMultiplexer", abi.encode(manager), address(multiplexer));
 
         // ── Two ALF quoters (used only for the gas-baseline test) ──
         uint160 quoterFlags = uint160(
