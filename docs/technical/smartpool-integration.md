@@ -162,7 +162,12 @@ This is the one accounting subtlety that affects fill sizing.
 - `getReserves` = **total economic assets**: `vault.convertToAssets(shares)` +
   PoolManager claims + tracked ERC-20. This is what LPs own.
 - `getEffectiveLiquidity` = **what the hook can withdraw and deploy this block**:
-  `min(convertToAssets, pro-rata maxWithdraw)` + claims + ERC-20
+  `vault.previewRedeem(poolShares)` + claims + ERC-20, where `poolShares` is the
+  pool's own tracked vault-share balance. `previewRedeem` (not `maxWithdraw`) is the
+  net realizable exit value per share — curated/gated vaults (e.g. Morpho VaultV2)
+  return `0` from `maxWithdraw` by design, so a `maxWithdraw`-based size would wrongly
+  read as zero. Because it is keyed on the pool's own shares, it is inherently per-pool
+  and unaffected by sibling pools or share donations to the hook
   ([SmartPoolHook.sol:542-549](../../src/alf/SmartPoolHook.sol#L542-L549)).
 
 When the operator's ERC-4626 vault is paused, capped, or utilization-constrained,
