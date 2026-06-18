@@ -474,14 +474,10 @@ abstract contract PoolVault is MultiAssetVault {
         received = token.balanceOf(address(this)) - balBefore;
         if (received < want) revert TransferReceiptShortfall();
 
-        // Route to vault if configured; otherwise track in `_state.erc20`.
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) {
-            CurrencyState storage s = _state[poolId][currency];
-            s.erc20 = (uint256(s.erc20) + received).toUint128();
-        } else {
-            _depositToVault(poolId, currency, received);
-        }
+        // Route the receipt: `_depositToVault` deposits into the configured vault, or credits
+        // the per-pool `_state.erc20` ledger when no vault is set. `received > 0` here (FoT
+        // check above + the `want == 0` early return), so its zero-amount guard never fires.
+        _depositToVault(poolId, currency, received);
     }
 
     /// @inheritdoc MultiAssetVault
