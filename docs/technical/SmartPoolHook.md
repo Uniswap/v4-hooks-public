@@ -393,7 +393,7 @@ The quote path uses:
 - Effective, not total, assets.
 - Current pool `slot0`.
 - Active distribution buckets **whose tick range contains the current tick** (summed liquidity).
-- A single `SwapMath.computeSwapStep` bounded by the caller's price limit.
+- A single `SwapMath.computeSwapStep`. `getIndicativeQuote` runs it across the full tick range (`MIN_SQRT_PRICE` / `MAX_SQRT_PRICE`) — it takes no price-limit argument and is **not** bounded by a caller price. Only `swapToPrice` is price-bounded, by its `sqrtPriceLimitX96` argument.
 
 This is a compact quote, not a full virtual tick-walking simulator over all bucket boundary crossings. Tests assert tight relative fidelity (on the order of a few bps) rather than exact equality for broad cases. Routers should treat persistent quote/execution divergence as a routing reputation signal.
 
@@ -435,7 +435,7 @@ The global counter closes cross-pool reentry. For example, if a malicious vault 
 - **Vault trust:** ERC4626 vaults receive standing max allowance. Use immutable or well-governed vaults whose risk profile is acceptable. Curated/gated vaults (Morpho VaultV2-style) require trusting the curator not to deny the hook withdrawal access.
 - **Feeless vaults:** Entry/exit fee vaults are rejected at init. Non-conformant vaults break JIT economics and LP share fairness.
 - **Vault liquidity:** Execution and quotes use `previewRedeem`-sized balances; LP shares still represent total economic assets via `convertToAssets`. A constrained vault can reduce immediately swappable liquidity without reducing LP economic claims.
-- **Token compatibility:** Inbound transfers use `SafeERC20`, and received amounts are measured to reject fee-on-transfer or rebasing shortfalls. Native ETH is unsupported.
+- **Token compatibility:** Fee-on-transfer and rebasing tokens are unsupported. Inbound LP transfers use `SafeERC20` and measure the actual receipt; a shortfall (`received < want`) reverts `TransferReceiptShortfall` on both `bootstrap` and `addLiquidity`, so a fee-charging token cannot seed a pool. This is a deposit-time check only — it cannot catch a token that begins charging a fee or rebases down *after* deposit, so operators must still restrict pools to non-FoT, non-rebasing tokens. Native ETH is unsupported.
 - **Owner trust:** The owner controls liveness, distributions, external deposit permissions, and vault approval refreshes. The LP fee is not owner-updatable after pool creation.
 - **Pool isolation:** Per-pool accounting prevents ordinary cross-pool balance leakage, but a malicious vault for a shared currency can still abuse its standing allowance across that currency's hook-wide token balance.
 

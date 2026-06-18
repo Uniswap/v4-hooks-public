@@ -443,10 +443,18 @@ abstract contract PoolVault is MultiAssetVault {
 
     /// @inheritdoc MultiAssetVault
     /// @dev Pulls underlying ERC-20 from `from` via `safeTransferFrom`, measures the actual
-    ///      receipt (FoT/rebasing token defense), then routes:
+    ///      receipt, then routes:
     ///        - If a vault is configured for this `(pool, currency)`, deposits to the vault
     ///          (updating `_vaultShares`).
     ///        - Otherwise, credits the per-pool `_state.erc20` counter.
+    ///
+    ///      Fee-on-transfer / rebasing tokens are UNSUPPORTED. The receipt is measured against
+    ///      the hook's balance delta, and any shortfall (`received < want`, i.e. the token took
+    ///      a transfer fee) reverts `TransferReceiptShortfall` — for BOTH the bootstrap and the
+    ///      `addLiquidity` deposit paths, so a fee-charging token can never seed an unswappable
+    ///      pool. This is a deposit-time check only: it cannot catch a token that begins
+    ///      charging a fee or rebases DOWN after the deposit, so operators must still restrict
+    ///      pools to non-FoT, non-rebasing tokens.
     function _pullAsset(VaultId vaultId, address asset, address from, uint256 want)
         internal
         override
@@ -456,13 +464,15 @@ abstract contract PoolVault is MultiAssetVault {
         PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
         Currency currency = Currency.wrap(asset);
 
-        // Measure inbound receipt against the hook's balance, NOT the vault's, so FoT and
-        // rebasing tokens are reconciled before any vault interaction.
+        // Measure inbound receipt against the hook's balance, NOT the vault's, so a FoT/rebasing
+        // shortfall is detected before any vault interaction. Reject under-receipt outright
+        // rather than crediting the reduced figure: a smaller bootstrap/deposit would seed a
+        // pool whose recorded balances exceed what the hook can ever settle, bricking its swaps.
         IERC20 token = IERC20(asset);
         uint256 balBefore = token.balanceOf(address(this));
         token.safeTransferFrom(from, address(this), want);
         received = token.balanceOf(address(this)) - balBefore;
-        if (received == 0) return 0;
+        if (received < want) revert TransferReceiptShortfall();
 
         // Route to vault if configured; otherwise track in `_state.erc20`.
         IERC4626 vault = vaults[poolId][currency];

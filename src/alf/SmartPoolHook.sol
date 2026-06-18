@@ -258,8 +258,10 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
 
     /// @param _pm                 The Uniswap v4 PoolManager.
     /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_              Immutable contract owner. Cannot be changed post-deployment;
-    ///                            key loss or compromise is unrecoverable. See {SmartPoolBase}.
+    /// @param owner_              Initial contract owner. Transferable post-deployment via OZ
+    ///                            `Ownable2Step` (`transferOwnership` + `acceptOwnership`);
+    ///                            `renounceOwnership` is disabled (see {SmartPoolBase}). Key
+    ///                            loss without a pending transfer is unrecoverable.
     /// @param _maxMinDepositBlocks Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
     constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepositBlocks)
         SmartPoolBase(_pm, maxGas_, owner_)

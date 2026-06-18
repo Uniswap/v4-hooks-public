@@ -1,5 +1,5 @@
 # WstETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/db91a2c77b66fec3dbf96f155f47b911e1de18e8/src/WstETHHook.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/0c68c6912ec9b3df692fd62740997db52f245b7d/src/WstETHHook.sol)
 
 **Inherits:**
 [BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)

@@ -26,7 +26,7 @@ contract SmartPoolHookDecimalsTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
 
     SmartPoolHook hook;
-    address constant poolOwner = makeAddr("poolOwner");
+    address poolOwner = makeAddr("poolOwner");
     uint24 constant FEE = 1_000;
     int24 constant TICK_SPACING = 10;
 
