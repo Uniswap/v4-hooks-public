@@ -101,6 +101,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///         so gas scales linearly with bucket count.
     uint8 private constant MAX_BUCKETS = 8;
 
+    /// @notice Basis-points denominator for distribution weights: every pool's bucket
+    ///         `weightBps` values must sum to exactly this, and it is the divisor when
+    ///         pro-budgeting each bucket's slice of the pool balance.
+    uint256 private constant TOTAL_WEIGHT_BPS = 10_000;
+
     /// @dev Transient namespace for active per-bucket JIT liquidity. The slot for bucket `i`
     ///      of pool `poolId` is `keccak256(_ACTIVE_LIQ_NAMESPACE, poolId) + i`. Lives only for
     ///      the duration of a swap callback pair (`_beforeSwap` deploys, `_afterSwap` removes),
@@ -116,7 +121,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param tickLower Lower tick boundary (must be aligned to pool's tickSpacing).
     /// @param tickUpper Upper tick boundary (must be aligned to pool's tickSpacing).
     /// @param weightBps Fraction of total capital allocated to this range, in basis points.
-    ///                  All weights across a pool's distribution must sum to 10_000.
+    ///                  All weights across a pool's distribution must sum to `TOTAL_WEIGHT_BPS`
+    ///                  (10_000).
     struct LiquidityBucket {
         int24 tickLower;
         int24 tickUpper;
@@ -840,8 +846,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             // deploy. Pre-budgeting eliminates the implicit reuse and makes the indicative
             // path deterministic w.r.t. the JIT cycle's actual allocation.
             uint256 weightBps = bucket.weightBps;
-            uint256 weightedBal0 = bal0 * weightBps / 10_000;
-            uint256 weightedBal1 = bal1 * weightBps / 10_000;
+            uint256 weightedBal0 = bal0 * weightBps / TOTAL_WEIGHT_BPS;
+            uint256 weightedBal1 = bal1 * weightBps / TOTAL_WEIGHT_BPS;
             uint128 liq =
                 LiquidityAmounts.getLiquidityForAmounts(sqrtPriceX96, sqrtLower, sqrtUpper, weightedBal0, weightedBal1);
             liqs[i] = liq;
@@ -988,7 +994,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      - All ticks aligned to tickSpacing
     ///      - All tick ranges valid (lower < upper)
     ///      - No zero-weight buckets
-    ///      - Weights sum to exactly 10_000
+    ///      - Weights sum to exactly `TOTAL_WEIGHT_BPS` (10_000)
     /// @param poolId      The pool to configure.
     /// @param buckets     The distribution buckets to validate and store.
     /// @param tickSpacing The pool's tick spacing (for alignment validation).
@@ -1011,7 +1017,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             if (buckets[i].weightBps == 0) revert InvalidDistribution();
             totalWeight += buckets[i].weightBps;
         }
-        if (totalWeight != 10_000) revert InvalidDistribution();
+        if (totalWeight != TOTAL_WEIGHT_BPS) revert InvalidDistribution();
 
         delete _distribution[poolId];
 
