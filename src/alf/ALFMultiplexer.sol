@@ -89,6 +89,18 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         tolerance. This is a downside-only check — split fill producing more output than
 ///         the best individual indicative (the expected case) does not trigger a revert.
 ///
+///         ## Slippage Control — the outer `sqrtPriceLimitX96` is NOT enforced
+///
+///         The `sqrtPriceLimitX96` a caller passes on the outer swap to the multiplexer pool has
+///         NO effect on execution. The real swaps run as nested `poolManager.swap` calls inside
+///         `_beforeSwap`, and those derive their own per-candidate price limits; the outer limit
+///         is never propagated to them. The multiplexer then returns a `BeforeSwapDelta` that
+///         offsets the outer swap, so the virtual pool itself performs no price-bounded
+///         execution either. Callers MUST bound slippage via `strictTolerancePips` and/or a
+///         minimum-output (or maximum-input) check in their own router — treating the outer
+///         `sqrtPriceLimitX96` as an on-chain price bound (as one would for an ordinary v4 pool)
+///         provides NO protection here.
+///
 ///         ## Call Flow
 ///
 ///         ```
@@ -119,6 +131,12 @@ contract ALFMultiplexer is BaseHook {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using QuoterRevert for uint256;
+
+    // ──── Constants ────
+
+    /// @dev Parts-per-million denominator that gives `strictTolerancePips` its unit. Aggregate
+    ///      execution fails the tolerance when `deviation * PIPS_DENOMINATOR > baseline * pips`.
+    uint256 private constant PIPS_DENOMINATOR = 1_000_000;
 
     /// @dev Tracks a candidate pool during the split fill process. Built during
     ///      `_prepareCandidates`, sorted by indicative quality, and consumed sequentially by
@@ -187,6 +205,12 @@ contract ALFMultiplexer is BaseHook {
     ///      revert the unlock with the opaque `CurrencyNotSettled`. Caught up front instead.
     /// @param index The index of the offending target in the `targets` array.
     error TargetCurrencyMismatch(uint256 index);
+
+    /// @dev An accumulated delta component equals `type(int128).min`, which `_toBeforeSwapDelta`
+    ///      cannot negate (overflow in 0.8.x). Unreachable through normal fills — v4's checked
+    ///      `toInt128` casts bound real deltas far below this — but surfaced as a clear error
+    ///      rather than an opaque arithmetic panic if a crafted candidate delta ever hits it.
+    error UnrepresentableDelta();
 
     // ──── Events ────
 
@@ -368,12 +392,12 @@ contract ALFMultiplexer is BaseHook {
                 if (params.amountSpecified < 0) {
                     if (executed < bestQuote) {
                         uint256 dev = bestQuote - executed;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                        if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                     }
                 } else {
                     if (executed > bestQuote) {
                         uint256 dev = executed - bestQuote;
-                        if (dev * 1_000_000 > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                        if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                     }
                 }
             }
@@ -682,8 +706,11 @@ contract ALFMultiplexer is BaseHook {
         // indicative is only used for sorting + tolerance baseline.
         if (q != 0) return (q, quoterHookData);
 
-        // Tier 4: universal reverting-swap fallback. Only fires for hooks that override the AMM
-        // AND don't expose IALFHook / IIndicativeQuote.
+        // Tier 4: universal reverting-swap fallback. Fires whenever tiers 1–3 yield no usable
+        // quote (`q == 0`) — including an IALFHook or IIndicativeQuote candidate whose view-tier
+        // quote reverted or returned zero, not only opaque curve-overriding hooks. The
+        // `quoterHookData` carried over from the earlier tier is reused here, so the tier-4 quote
+        // and the eventual execution stay consistent.
         try this.quoteTargetBySwap(target.poolKey, zeroForOne, amountSpecified, quoterHookData) returns (
             uint256
         ) {
@@ -1068,15 +1095,22 @@ contract ALFMultiplexer is BaseHook {
         pure
         returns (BeforeSwapDelta)
     {
+        int128 amount0 = delta.amount0();
+        int128 amount1 = delta.amount1();
+        // Negating `type(int128).min` overflows in 0.8.x. Surface a clear error instead of an
+        // opaque arithmetic panic that would abort the whole multiplexer swap (this runs outside
+        // the per-candidate try/catch). Unreachable via normal fills; see {UnrepresentableDelta}.
+        if (amount0 == type(int128).min || amount1 == type(int128).min) revert UnrepresentableDelta();
+
         int128 specified;
         int128 unspecified;
 
         if ((params.amountSpecified < 0) == params.zeroForOne) {
-            specified = -delta.amount0();
-            unspecified = -delta.amount1();
+            specified = -amount0;
+            unspecified = -amount1;
         } else {
-            specified = -delta.amount1();
-            unspecified = -delta.amount0();
+            specified = -amount1;
+            unspecified = -amount0;
         }
 
         return toBeforeSwapDelta(specified, unspecified);
