@@ -82,6 +82,10 @@ contract LitePSMAggregator is BaseAggregatorHook {
         }
     }
 
+    function protocolFeeFlags() external pure override returns (uint256) {
+        return 1 << 12;
+    }
+
     /// @inheritdoc BaseAggregatorHook
     /// @dev Quotes without fees; BaseAggregatorHook.quote() applies protocol fees on top.
     ///      Reads tin/tout fresh each call since governance can change them.
