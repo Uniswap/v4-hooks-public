@@ -594,7 +594,7 @@ contract FluidDexT1NativeFuzz is Test {
             setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(true, -int256(params.amountIn), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
         params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
@@ -610,7 +610,7 @@ contract FluidDexT1NativeFuzz is Test {
             setup.liquidityNative < setup.liquidityErc20 ? setup.liquidityNative : setup.liquidityErc20;
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(false, -int256(params.amountIn), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
         params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
@@ -629,7 +629,7 @@ contract FluidDexT1NativeFuzz is Test {
             bound(uint256(keccak256(abi.encode(swapSeed, "exactOut"))), params.amountOut / 10, params.amountOut);
         if (params.amountOut == 0) params.amountOut = 1 ether;
         params.expectedIn = deployment.hook.quote(false, int256(params.amountOut), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
         params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 

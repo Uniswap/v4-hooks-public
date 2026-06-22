@@ -18,6 +18,11 @@ abstract contract ProtocolFees {
     using StateLibrary for IPoolManager;
 
     address public tokenJar;
+    uint24 public immutable protocolFeeMultiplier;
+
+    constructor(uint24 _protocolFeeMultiplier) {
+        protocolFeeMultiplier = _protocolFeeMultiplier;
+    }
 
     event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
 
@@ -81,6 +86,7 @@ abstract contract ProtocolFees {
         }
     }
 
+    /// @dev The protocol fee is multiplied by the protocol fee multiplier
     function _getProtocolFee(IPoolManager poolManager, bool zeroToOne, PoolId poolId)
         internal
         view
@@ -90,6 +96,7 @@ abstract contract ProtocolFees {
         protocolFee = zeroToOne
             ? ProtocolFeeLibrary.getZeroForOneFee(protocolFeeRaw)
             : ProtocolFeeLibrary.getOneForZeroFee(protocolFeeRaw);
+        protocolFee *= protocolFeeMultiplier;
     }
 
     function _getTokenJar(IPoolManager poolManager) internal view returns (address currentJar) {
