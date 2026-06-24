@@ -1088,8 +1088,8 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
                 // Match `_computeAllocations`: pre-budget each bucket against its weighted share
                 // of the balance so the indicative quote tracks what JIT actually deploys.
                 uint256 weightBps = bucket.weightBps;
-                uint256 weightedBal0 = bal0 * weightBps / 10_000;
-                uint256 weightedBal1 = bal1 * weightBps / 10_000;
+                uint256 weightedBal0 = bal0 * weightBps / TOTAL_WEIGHT_BPS;
+                uint256 weightedBal1 = bal1 * weightBps / TOTAL_WEIGHT_BPS;
                 uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
                     sqrtPriceX96,
                     TickMath.getSqrtPriceAtTick(bucket.tickLower),
