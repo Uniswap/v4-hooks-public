@@ -1042,11 +1042,10 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         uint24 feePips = key.fee;
 
         // Use vault-cap-aware balances for indicative quotes. Execution caps vault
-        // withdrawals at `maxWithdraw`, so quoting against the uncapped `_totalAssets`
+        // withdrawals at `_effectiveAssets`, so quoting against the uncapped `_totalAssets`
         // produces an indicative the JIT cycle cannot honour when the vault is paused
         // or utilization-constrained. Share math (`_convertToAmounts`) deliberately uses
-        // `_totalAssets` (uncapped) so LP pro-rata claims are not capped — see
-        // INV-POOL-12 for the asymmetry rationale.
+        // `_totalAssets` (uncapped) so LP pro-rata claims are not capped.
         (uint256 bal0, uint256 bal1) = _effectiveAssets(poolId, key.currency0, key.currency1);
         if (bal0 == 0 && bal1 == 0) return (0, 0);
 
