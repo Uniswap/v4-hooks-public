@@ -357,19 +357,20 @@ contract LitePSMAggregatorUnitTest is Test {
         assertEq(quotedOverCap, 0, "Quote over sellGemCap == 0");
     }
 
-    function test_quote_exactOut_sellGem_exceedsSellGemCap_returnsMaxUint() public {
+    function test_quote_exactOut_sellGem_exceedsSellGemCap_reverts() public {
         uint256 capUsdc = 500_000 * 1e6;
         psm.setBuf(capUsdc * 1e12);
         bool usdcToUsds = _isUsdcCurrency0();
 
-        // Max USDS out from the cap (no fee): capUsdc * 1e12
+        // Max USDS out from the cap (no fee): capUsdc * 1e12. At exactly the cap the swap is
+        // fillable, so the quote must succeed (capacity check is strict `>`).
         uint256 maxUsdsOut = capUsdc * 1e12;
-        uint256 quotedAtMax = hook.quote(usdcToUsds, int256(maxUsdsOut), poolId);
-        assertLt(quotedAtMax, type(uint256).max, "Quote at max USDS out is not maxUint");
+        uint256 quotedAtCap = hook.quote(usdcToUsds, int256(maxUsdsOut), poolId);
+        assertGt(quotedAtCap, 0, "Quote at exactly sellGemCap succeeds");
 
-        // One wei over the max USDS capacity: must return type(uint256).max
-        uint256 quotedOver = hook.quote(usdcToUsds, int256(maxUsdsOut + 1), poolId);
-        assertEq(quotedOver, type(uint256).max, "Quote over sellGem USDS cap == maxUint");
+        // One wei over the max USDS capacity: must revert
+        vm.expectRevert(LitePSMAggregator.ExactOutExceedsCapacity.selector);
+        hook.quote(usdcToUsds, int256(maxUsdsOut + 1), poolId);
     }
 
     function test_quote_exactIn_buyGem_exceedsBuyGemCap_returnsZero() public {
@@ -383,17 +384,17 @@ contract LitePSMAggregatorUnitTest is Test {
         assertEq(quoted, 0, "Quote over buyGemCap == 0");
     }
 
-    function test_quote_exactOut_buyGem_exceedsBuyGemCap_returnsMaxUint() public {
+    function test_quote_exactOut_buyGem_exceedsBuyGemCap_reverts() public {
         uint256 psmUsdcBalance = usdc.balanceOf(address(psm));
         bool usdsToUsdc = !_isUsdcCurrency0();
 
-        // At cap: should return a finite USDS cost
+        // At exactly the cap the swap is fillable, so the quote must succeed (capacity check is strict `>`).
         uint256 quotedAtCap = hook.quote(usdsToUsdc, int256(psmUsdcBalance), poolId);
-        assertLt(quotedAtCap, type(uint256).max, "Quote at buyGemCap is finite");
+        assertGt(quotedAtCap, 0, "Quote at exactly buyGemCap succeeds");
 
-        // One unit over cap: must return maxUint
-        uint256 quotedOver = hook.quote(usdsToUsdc, int256(psmUsdcBalance + 1), poolId);
-        assertEq(quotedOver, type(uint256).max, "Quote over buyGemCap == maxUint");
+        // One unit over cap: must revert
+        vm.expectRevert(LitePSMAggregator.ExactOutExceedsCapacity.selector);
+        hook.quote(usdsToUsdc, int256(psmUsdcBalance + 1), poolId);
     }
 
     // ── Fuzz tests ────────────────────────────────────────────────────────────

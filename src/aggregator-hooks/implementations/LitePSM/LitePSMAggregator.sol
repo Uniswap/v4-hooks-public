@@ -52,6 +52,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
 
     error TokensNotSupported(address token0, address token1);
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
+    error ExactOutExceedsCapacity();
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _litePSM The LitePSM or LitePSMWrapper contract
@@ -99,7 +100,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
     ///
     ///      When an amount exceeds available capacity:
     ///      - Exact-in: returns 0 (the full input cannot be processed)
-    ///      - Exact-out: returns type(uint256).max (the desired output cannot be sourced)
+    ///      - Exact-out: reverts with ExactOutExceedsCapacity (the desired output cannot be sourced)
     function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
         view
@@ -139,11 +140,11 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 // Division-first avoids overflow when sellGemCap is large (e.g. buf = type(uint256).max).
                 uint256 denom = to18ConversionFactor * (WAD - tin);
                 uint256 gemRequired = (amountOut * WAD + denom - 1) / denom;
-                if (gemRequired > sellGemCap) return type(uint256).max;
+                if (gemRequired > sellGemCap) revert ExactOutExceedsCapacity();
                 amountUnspecified = gemRequired;
             } else {
                 // Exact-out gem: check directly against pocket balance
-                if (amountOut > buyGemCap) return type(uint256).max;
+                if (amountOut > buyGemCap) revert ExactOutExceedsCapacity();
                 amountUnspecified = (amountOut * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
             }
         }
@@ -215,8 +216,9 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 uint256 tout = litePSM.tout();
                 uint256 usdsNeeded = (amountSettle * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
                 poolManager.take(takeCurrency, address(this), usdsNeeded);
-                uint256 actualUsdsIn = litePSM.buyGem(address(this), amountSettle);
-                amountTake = actualUsdsIn;
+                litePSM.buyGem(address(this), amountSettle);
+                // Charge the user the full amount taken from the PM; any USDS excess (< 1 µUSDS) stays in hook as dust
+                amountTake = usdsNeeded;
             }
         }
 
