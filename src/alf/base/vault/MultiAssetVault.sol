@@ -222,6 +222,11 @@ abstract contract MultiAssetVault is BlockNumberish {
         uint256 minShares = 100 * 10 ** uint256(_decimalsOffset(vaultId));
         if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
 
+        // Pre-mutation accounting checkpoint. At bootstrap the vault holds no shares, so the
+        // pre-state is (0, 0) -- an incentive capability initializes the bootstrapper's paid
+        // index here and accrues from now.
+        _onShareCheckpoint(vaultId, to, 0, 0);
+
         _totalShares[vaultId] = sharesMinted;
         _userShares[vaultId][to] = sharesMinted;
         _lastDepositBlock[vaultId][to] = _getBlockNumberish();
@@ -245,6 +250,9 @@ abstract contract MultiAssetVault is BlockNumberish {
 
         Assets memory pair = _assets[vaultId];
         (uint256 want0, uint256 want1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, true);
+
+        // Settle reward/accounting accrual on the pre-deposit balances before the counters move.
+        _onShareCheckpoint(vaultId, to, _totalShares[vaultId], _userShares[vaultId][to]);
 
         // Effects-first: share counters update before any asset I/O so a reentrant view
         // path (e.g., a callback observing `previewDeposit`) sees a coherent snapshot.
@@ -276,6 +284,9 @@ abstract contract MultiAssetVault is BlockNumberish {
 
         Assets memory pair = _assets[vaultId];
         (amount0, amount1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, false);
+
+        // Settle reward/accounting accrual on the pre-withdraw balances before the counters move.
+        _onShareCheckpoint(vaultId, from, _totalShares[vaultId], _userShares[vaultId][from]);
 
         _totalShares[vaultId] -= shares;
         _userShares[vaultId][from] -= shares;
@@ -348,6 +359,22 @@ abstract contract MultiAssetVault is BlockNumberish {
         vaultId; // silence unused-parameter warning
         return 0;
     }
+
+    /// @notice Accounting checkpoint fired immediately BEFORE any share-balance mutation for
+    ///         `user`, carrying the pre-mutation total and user share counts. A composed
+    ///         capability (e.g. a liquidity-incentives `RewardsLib`) overrides this to settle
+    ///         per-share accrual on the balances in force until now, following the Synthetix
+    ///         `updateReward` pattern (settle the global index against the OLD supply, then the
+    ///         user against their OLD balance, before the counts change). Fires on bootstrap,
+    ///         deposit, and withdraw. Default no-op, so vaults without an incentive capability
+    ///         are unaffected.
+    /// @param vaultId           The vault whose shares are about to change.
+    /// @param user              The account whose share balance is about to change.
+    /// @param totalSharesBefore Total shares outstanding immediately before the mutation.
+    /// @param userSharesBefore  `user`'s share balance immediately before the mutation.
+    function _onShareCheckpoint(VaultId vaultId, address user, uint256 totalSharesBefore, uint256 userSharesBefore)
+        internal
+        virtual {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          ABSTRACT HOOKS
