@@ -1,5 +1,5 @@
 # LitePSMAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/307b1b2cf75bf77abe89e8a25717902b77f19142/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9c7cbaffe0f8d313cc3a336ac2fb5d0852684139/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -73,7 +73,7 @@ mapping(PoolId => PoolTokens) public poolIdToTokens
 
 
 ### _canonicalPoolByPair
-Canonical pool per token pair — enforces one pool per USDC/USDS pair
+Canonical pool per token pair — enforces one pool per gem/stable pair
 
 
 ```solidity
@@ -105,6 +105,13 @@ constructor(IPoolManager _manager, ILitePSM _litePSM, address _stableToken)
 function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
 ```
 
+### protocolFeeFlags
+
+
+```solidity
+function protocolFeeFlags() external pure override returns (uint256);
+```
+
 ### _rawQuote
 
 Returns the raw quote from the underlying liquidity source without protocol fees
@@ -112,14 +119,14 @@ Returns the raw quote from the underlying liquidity source without protocol fees
 Quotes without fees; BaseAggregatorHook.quote() applies protocol fees on top.
 Reads tin/tout fresh each call since governance can change them.
 Capacity limits are applied to prevent quoting liquidity that the PSM cannot fill:
-- sellGem (gem→USDS): capped at `buf / to18ConversionFactor` (gem units). This uses
+- sellGem (gem→stable): capped at `buf / to18ConversionFactor` (gem units). This uses
 `buf` as a proxy for the true cap of `min(buf, lineRoom) / to18`, since `lineRoom`
 is only accessible via the Vat and is not exposed by the LitePSMWrapper. In practice
 buf is kept below the debt ceiling, so this proxy is conservative and accurate.
-- buyGem (USDS→gem): capped at the gem balance held in `pocket()`. This is exact.
+- buyGem (stable→gem): capped at the gem balance held in `pocket()`. This is exact.
 When an amount exceeds available capacity:
 - Exact-in: returns 0 (the full input cannot be processed)
-- Exact-out: returns type(uint256).max (the desired output cannot be sourced)
+- Exact-out: reverts with ExactOutExceedsCapacity (the desired output cannot be sourced)
 
 
 ```solidity
@@ -179,6 +186,12 @@ error TokensNotSupported(address token0, address token1);
 
 ```solidity
 error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
+```
+
+### ExactOutExceedsCapacity
+
+```solidity
+error ExactOutExceedsCapacity();
 ```
 
 ## Structs

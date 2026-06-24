@@ -66,6 +66,11 @@ contract LitePSMAggregatorUnitTest is Test {
         usdc.mint(address(psm), INITIAL_BALANCE * 1e6);
         usds.mint(address(psm), INITIAL_BALANCE * 1e18);
 
+        // Set a realistic finite buf (pre-minted stable buffer, WAD). pseudoTotalValueLocked reports
+        // buf for the stable side, and the default uint256.max would be a nonsensical TVL. This gives a
+        // sellGemCap of INITIAL_BALANCE USDC, well above any amount used in non-capacity tests.
+        psm.setBuf(INITIAL_BALANCE * 1e18);
+
         manager = IPoolManager(deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(0))));
 
         // Seed PoolManager so it has reserves for swap settlements
@@ -293,6 +298,14 @@ contract LitePSMAggregatorUnitTest is Test {
         (uint256 amount0, uint256 amount1) = hook.pseudoTotalValueLocked(poolId);
         assertGt(amount0, 0, "amount0 > 0");
         assertGt(amount1, 0, "amount1 > 0");
+
+        // gem side = USDC in the pocket (6-dec); stable side = buf (pre-minted buffer, 18-dec WAD)
+        uint256 gemBalance = usdc.balanceOf(psm.pocket());
+        uint256 stableBuf = psm.buf();
+        (uint256 expectedGem, uint256 expectedStable) =
+            _isUsdcCurrency0() ? (gemBalance, stableBuf) : (stableBuf, gemBalance);
+        assertEq(amount0, expectedGem, "amount0 matches gem/stable depth");
+        assertEq(amount1, expectedStable, "amount1 matches gem/stable depth");
     }
 
     // ── Error cases ───────────────────────────────────────────────────────────

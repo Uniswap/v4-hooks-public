@@ -72,7 +72,12 @@ contract LitePSMAggregator is BaseAggregatorHook {
         require(tokens.token0 != address(0), PoolDoesNotExist());
 
         uint256 gemBalance = IERC20(gemToken).balanceOf(litePSM.pocket());
-        uint256 stableBalance = IERC20(stableToken).balanceOf(address(litePSM));
+        // Stable-side depth: use `buf` (pre-minted stable buffer, WAD/18-dec) rather than the PSM's
+        // own stable balance. For the LitePSMWrapper deployment the wrapper holds almost no stable
+        // (it mints on demand from the underlying LitePSM), so balanceOf(litePSM) understates depth by
+        // orders of magnitude. `buf` is deployment-agnostic and matches the sellGem capacity proxy used
+        // in _rawQuote, so reported depth stays consistent with what is actually quotable.
+        uint256 stableBalance = litePSM.buf();
 
         if (tokens.token0 == gemToken) {
             amount0 = gemBalance;
