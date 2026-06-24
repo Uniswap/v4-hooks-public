@@ -1,29 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {BaseHook} from "../../base/BaseHook.sol";
+import {BaseALFHook} from "./BaseALFHook.sol";
 import {IALFHook} from "../interfaces/IALFHook.sol";
 
 /// @title DualPoolBase
 /// @author Uniswap Labs
-/// @notice Minimal ALF/v4 base for DualPoolHook.
+/// @notice Minimal ALF/v4 base for SmartPoolHook. Layers owner administration (`Ownable2Step`
+///         with `renounceOwnership` disabled), per-pool liveness, and a direct-initialize guard
+///         on top of the shared `BaseALFHook` metadata surface — `maxGas`, `isLive`, reserves,
+///         indicative quoting, the `ALFHookData`/attestation envelope, and `DeltaResolver`
+///         settlement (`_pay`). The `IALFHook` view defaults (`getIndicativeQuote`,
+///         `getReserves`, `getEffectiveLiquidity`, `swapToPrice` → 0) are inherited from
+///         `BaseALFHook`; `SmartPoolHook` overrides the ones it supports.
 /// @dev Pool fees are static per `PoolKey.fee` and immutable post-initialize. The owner has
 ///      only a per-pool liveness flag for pause/resume; pricing itself cannot be reconfigured
 ///      after deployment.
 /// @custom:security-contact security@uniswap.org
-abstract contract DualPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHook {
-    using PoolIdLibrary for PoolKey;
-
-    /// @dev Gas budget declared for `getIndicativeQuote` staticcalls. Returned by `maxGas()`.
-    uint32 private immutable _maxGas;
-
+abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
     /// @notice Whether each pool is currently quoting and executing swaps. Set by the
     ///         subclass's guarded `initializePool` and toggled via {DualPoolHook.setPoolLive}.
     mapping(PoolId => bool) public livePools;
@@ -48,6 +46,12 @@ abstract contract DualPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHoo
     ///      principal in this contract's model; their continuing presence is load-bearing.
     error RenounceOwnershipDisabled();
 
+    /// @param manager The Uniswap v4 PoolManager.
+    /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
+    /// @param owner_  Initial contract owner. Transferable via OZ's two-step
+    ///                {Ownable2Step.transferOwnership} / {Ownable2Step.acceptOwnership} flow.
+    constructor(IPoolManager manager, uint32 maxGas_, address owner_) BaseALFHook(manager, maxGas_) Ownable(owner_) {}
+
     /// @dev Reject direct `poolManager.initialize`. Per v4 `Hooks.noSelfCall`, the hook's own
     ///      `poolManager.initialize` from `initializePool` skips this callback, so the only
     ///      caller path that reaches here is an external party's direct attempt.
@@ -65,74 +69,11 @@ abstract contract DualPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHoo
         revert RenounceOwnershipDisabled();
     }
 
-    /// @param manager The Uniswap v4 PoolManager.
-    /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_  Initial contract owner. Transferable via OZ's two-step
-    ///                {Ownable2Step.transferOwnership} / {Ownable2Step.acceptOwnership} flow.
-    constructor(IPoolManager manager, uint32 maxGas_, address owner_) BaseHook(manager) Ownable(owner_) {
-        _maxGas = maxGas_;
-    }
-
-    /// @inheritdoc IALFHook
-    function maxGas() external view override returns (uint32) {
-        return _maxGas;
-    }
-
-    /// @notice ERC-165 advertisement for the interfaces this contract implements.
-    /// @dev Stateless implementation; mirrors `BaseALFHook.supportsInterface`. Subclasses that
-    ///      implement additional interfaces should override and OR-in their own selectors.
-    function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IERC165).interfaceId;
-    }
-
     /// @inheritdoc IALFHook
     /// @dev Always reports live; hook-level liveness is per-pool via `livePools[poolId]`.
     ///      Routers call this to reject offline hooks; this hook is always reachable, but
     ///      individual pools may pause via {DualPoolHook.setPoolLive}.
     function isLive() external pure override returns (bool) {
         return true;
-    }
-
-    /// @inheritdoc IALFHook
-    /// @dev DualPool's deployable single-contract build does not include the heavy virtual
-    ///      multi-range tick-walking quoter. Returning 0 is the IALFHook unsupported-quote path.
-    function getIndicativeQuote(PoolKey calldata, bool, int256, bytes calldata)
-        external
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        return 0;
-    }
-
-    /// @inheritdoc IALFHook
-    function getReserves(PoolKey calldata) external view virtual override returns (uint256, uint256) {
-        return (0, 0);
-    }
-
-    /// @inheritdoc IALFHook
-    function getEffectiveLiquidity(PoolKey calldata) external view virtual override returns (uint256, uint256) {
-        return (0, 0);
-    }
-
-    /// @inheritdoc IALFHook
-    /// @dev Same unsupported-simulation policy as `getIndicativeQuote`.
-    function swapToPrice(PoolKey calldata, bool, int256, uint160, bytes calldata)
-        external
-        view
-        virtual
-        override
-        returns (uint256, uint256)
-    {
-        return (0, 0);
-    }
-
-    /// @inheritdoc DeltaResolver
-    /// @dev Settles a hook-owed delta by transferring `amount` of `token` directly to the
-    ///      PoolManager. The `payer` argument is unused because settlement is always from
-    ///      the hook's own balance.
-    function _pay(Currency token, address, uint256 amount) internal override {
-        token.transfer(address(poolManager), amount);
     }
 }

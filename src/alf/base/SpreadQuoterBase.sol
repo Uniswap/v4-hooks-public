@@ -112,19 +112,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         return true;
     }
 
-    /// @notice Indicative quote against the static pool fee.
-    /// @dev Resolves attestation from hookData; the pool's static `key.fee` drives pricing.
-    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
-        external
-        view
-        virtual
-        override
-        returns (uint256 outputAmount)
-    {
-        (bool isAttested, address attester) = _resolveHookData(hookData);
-        return _price(key, zeroForOne, amountSpecified, isAttested, attester);
-    }
-
     /// @notice Simulate a swap up to a target price, returning both amounts.
     /// @dev Delegates to `SwapSimulator.simulateSwapToPrice`. The `DYNAMIC_FEE_FLAG` and
     ///      `OVERRIDE_FEE_FLAG` bits are stripped from `key.fee` before forwarding -- both
