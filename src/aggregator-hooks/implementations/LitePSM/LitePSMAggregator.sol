@@ -69,7 +69,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
     /// @inheritdoc BaseAggregatorHook
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         PoolTokens storage tokens = poolIdToTokens[poolId];
-        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
+        require(tokens.token0 != address(0), PoolDoesNotExist());
 
         uint256 gemBalance = IERC20(gemToken).balanceOf(litePSM.pocket());
         uint256 stableBalance = IERC20(stableToken).balanceOf(address(litePSM));
@@ -108,7 +108,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
         returns (uint256 amountUnspecified)
     {
         PoolTokens storage tokens = poolIdToTokens[poolId];
-        if (tokens.token0 == address(0)) revert PoolDoesNotExist();
+        require(tokens.token0 != address(0), PoolDoesNotExist());
 
         address tokenIn = zeroToOne ? tokens.token0 : tokens.token1;
         bool isSellingGem = tokenIn == gemToken;
@@ -155,13 +155,11 @@ contract LitePSMAggregator is BaseAggregatorHook {
         address token1 = Currency.unwrap(key.currency1);
 
         bool validPair = (token0 == gemToken && token1 == stableToken) || (token0 == stableToken && token1 == gemToken);
-        if (!validPair) revert TokensNotSupported(token0, token1);
+        require(validPair, TokensNotSupported(token0, token1));
 
         bytes32 pairKey = _canonicalPairKey(token0, token1);
         PoolId existing = _canonicalPoolByPair[pairKey];
-        if (PoolId.unwrap(existing) != bytes32(0)) {
-            revert PairAlreadyHasCanonicalPool(existing, token0, token1);
-        }
+        require(PoolId.unwrap(existing) == bytes32(0), PairAlreadyHasCanonicalPool(existing, token0, token1));
         _canonicalPoolByPair[pairKey] = key.toId();
 
         poolIdToTokens[key.toId()] = PoolTokens({token0: token0, token1: token1});
