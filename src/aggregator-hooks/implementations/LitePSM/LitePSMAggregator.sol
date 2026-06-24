@@ -47,7 +47,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
     /// @notice Maps Uniswap V4 pool IDs to their token addresses
     mapping(PoolId => PoolTokens) public poolIdToTokens;
 
-    /// @notice Canonical pool per token pair — enforces one pool per USDC/USDS pair
+    /// @notice Canonical pool per token pair — enforces one pool per gem/stable pair
     mapping(bytes32 => PoolId) private _canonicalPoolByPair;
 
     error TokensNotSupported(address token0, address token1);
@@ -92,11 +92,11 @@ contract LitePSMAggregator is BaseAggregatorHook {
     ///      Reads tin/tout fresh each call since governance can change them.
     ///
     ///      Capacity limits are applied to prevent quoting liquidity that the PSM cannot fill:
-    ///      - sellGem (gem→USDS): capped at `buf / to18ConversionFactor` (gem units). This uses
+    ///      - sellGem (gem→stable): capped at `buf / to18ConversionFactor` (gem units). This uses
     ///        `buf` as a proxy for the true cap of `min(buf, lineRoom) / to18`, since `lineRoom`
     ///        is only accessible via the Vat and is not exposed by the LitePSMWrapper. In practice
     ///        buf is kept below the debt ceiling, so this proxy is conservative and accurate.
-    ///      - buyGem (USDS→gem): capped at the gem balance held in `pocket()`. This is exact.
+    ///      - buyGem (stable→gem): capped at the gem balance held in `pocket()`. This is exact.
     ///
     ///      When an amount exceeds available capacity:
     ///      - Exact-in: returns 0 (the full input cannot be processed)
@@ -124,11 +124,11 @@ contract LitePSMAggregator is BaseAggregatorHook {
         if (amountSpecified < 0) {
             uint256 amountIn = uint256(-amountSpecified);
             if (isSellingGem) {
-                // Exact-in gem → USDS
+                // Exact-in gem → stable
                 if (amountIn > sellGemCap) return 0;
                 amountUnspecified = amountIn * to18ConversionFactor * (WAD - tin) / WAD;
             } else {
-                // Exact-in USDS → gem: compute gem output then check cap
+                // Exact-in stable → gem: compute gem output then check cap
                 uint256 gemOut = amountIn * WAD / (to18ConversionFactor * (WAD + tout));
                 if (gemOut > buyGemCap) return 0;
                 amountUnspecified = gemOut;
@@ -136,7 +136,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
         } else {
             uint256 amountOut = uint256(amountSpecified);
             if (isSellingGem) {
-                // Exact-out USDS: convert to required gem input and compare against sellGemCap.
+                // Exact-out stable: convert to required gem input and compare against sellGemCap.
                 // Division-first avoids overflow when sellGemCap is large (e.g. buf = type(uint256).max).
                 uint256 denom = to18ConversionFactor * (WAD - tin);
                 uint256 gemRequired = (amountOut * WAD + denom - 1) / denom;
@@ -188,10 +188,10 @@ contract LitePSMAggregator is BaseAggregatorHook {
             poolManager.take(takeCurrency, address(this), amountTake);
 
             if (isSellingGem) {
-                // USDC → USDS: sellGem returns exact usdsOut
+                // gem → stable: sellGem returns exact stableOut
                 amountSettle = litePSM.sellGem(address(this), amountTake);
             } else {
-                // USDS → USDC: compute max gemAmt from usdsGiven, tiny dust (<1 µUSDS) stays in hook
+                // stable → gem: compute max gemAmt from stableGiven, tiny dust (< 1 µ-stable) stays in hook
                 uint256 tout = litePSM.tout();
                 uint256 gemAmt = amountTake * WAD / (to18ConversionFactor * (WAD + tout));
                 litePSM.buyGem(address(this), gemAmt);
@@ -202,21 +202,21 @@ contract LitePSMAggregator is BaseAggregatorHook {
             amountSettle = uint256(params.amountSpecified);
 
             if (isSellingGem) {
-                // USDC → USDS: compute USDC needed (ceil) to guarantee >= usdsWanted
+                // gem → stable: compute gem (USDC) needed (ceil) to guarantee >= stableWanted
                 uint256 tin = litePSM.tin();
                 uint256 denom = to18ConversionFactor * (WAD - tin);
                 amountTake = (amountSettle * WAD + denom - 1) / denom;
                 poolManager.take(takeCurrency, address(this), amountTake);
                 litePSM.sellGem(address(this), amountTake);
-                // Any USDS excess (< 1 µUSDS) over amountSettle stays in hook as dust
+                // Any stable excess (< 1 µ-stable) over amountSettle stays in hook as dust
             } else {
-                // USDS → USDC: take ceiling USDS from PM
+                // stable → gem: take ceiling stable from PM
                 uint256 tout = litePSM.tout();
-                uint256 usdsNeeded = (amountSettle * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
-                poolManager.take(takeCurrency, address(this), usdsNeeded);
+                uint256 stableNeeded = (amountSettle * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
+                poolManager.take(takeCurrency, address(this), stableNeeded);
                 litePSM.buyGem(address(this), amountSettle);
-                // Charge the user the full amount taken from the PM; any USDS excess (< 1 µUSDS) stays in hook as dust
-                amountTake = usdsNeeded;
+                // Charge the user the full amount taken from the PM; any stable excess (< 1 µ-stable) stays in hook as dust
+                amountTake = stableNeeded;
             }
         }
 
