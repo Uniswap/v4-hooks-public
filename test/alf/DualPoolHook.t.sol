@@ -25,6 +25,7 @@ import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
+import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
@@ -422,7 +423,7 @@ contract DualPoolHookTest is Test, Deployers {
             minDepositBlocks: 0
         });
         vm.prank(owner);
-        vm.expectRevert(PoolVault.VaultChargesEntryFee.selector);
+        vm.expectRevert(InventoryLib.VaultChargesEntryFee.selector);
         hook.initializePool(feeKey, cfg);
     }
 
@@ -446,7 +447,7 @@ contract DualPoolHookTest is Test, Deployers {
             minDepositBlocks: 0
         });
         vm.prank(owner);
-        vm.expectRevert(PoolVault.VaultChargesExitFee.selector);
+        vm.expectRevert(InventoryLib.VaultChargesExitFee.selector);
         hook.initializePool(feeKey, cfg);
     }
 

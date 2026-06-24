@@ -69,7 +69,7 @@ contract MockPoolVault is PoolVault {
     }
 
     function setVault(PoolId poolId, Currency currency, IERC4626 vault) external {
-        vaults[poolId][currency] = vault;
+        _setVault(poolId, currency, vault);
         // Mirror production's init-time approval so hot-path deposits don't need a
         // runtime allowance read.
         _approveVault(currency, address(vault));
@@ -84,15 +84,15 @@ contract MockPoolVault is PoolVault {
     }
 
     function getVaultShares(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _vaultShares[poolId][currency];
+        return _vaultSharesOf(poolId, currency);
     }
 
     function getClaims(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _state[poolId][currency].claims;
+        return _claimsOf(poolId, currency);
     }
 
     function getERC20(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _state[poolId][currency].erc20;
+        return _erc20Of(poolId, currency);
     }
 
     function effectiveBalance(PoolId poolId, Currency currency) external view returns (uint256) {

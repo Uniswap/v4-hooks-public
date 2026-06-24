@@ -335,8 +335,8 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
         PoolId poolId = key.toId();
         externalDepositsEnabled[poolId] = config.allowExternalDeposits;
-        vaults[poolId][key.currency0] = config.vault0;
-        vaults[poolId][key.currency1] = config.vault1;
+        _setVault(poolId, key.currency0, config.vault0);
+        _setVault(poolId, key.currency1, config.vault1);
         minDepositBlocks[poolId] = config.minDepositBlocks;
 
         // Derive the virtual-shares offset from the pair's decimals so the bootstrap floor stays
@@ -519,7 +519,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param key      The pool whose vault allowance should be refreshed.
     /// @param currency Which side (currency0 or currency1) to refresh.
     function refreshVaultApproval(PoolKey calldata key, Currency currency) external onlyOwner whenJITNotInProgress {
-        IERC4626 vault = vaults[key.toId()][currency];
+        IERC4626 vault = _vaultOf(key.toId(), currency);
         if (address(vault) == address(0)) return;
         IERC20(Currency.unwrap(currency)).forceApprove(address(vault), type(uint256).max);
     }
@@ -562,8 +562,8 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         externalDepositsEnabled[poolId] = false;
         emit ExternalDepositsUpdated(poolId, false);
 
-        _revokeVaultApproval(key.currency0, address(vaults[poolId][key.currency0]));
-        _revokeVaultApproval(key.currency1, address(vaults[poolId][key.currency1]));
+        _revokeVaultApproval(key.currency0, address(_vaultOf(poolId, key.currency0)));
+        _revokeVaultApproval(key.currency1, address(_vaultOf(poolId, key.currency1)));
 
         // Rescue assets already inside the vault. Best-effort: a bricked vault must not block
         // the protections above.

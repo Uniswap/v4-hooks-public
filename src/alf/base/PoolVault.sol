@@ -9,9 +9,9 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
 import {VaultId} from "../types/VaultId.sol";
+import {InventoryLib} from "../libraries/InventoryLib.sol";
 
 /// @title PoolVault
 /// @author Uniswap Labs
@@ -98,7 +98,7 @@ abstract contract PoolVault is MultiAssetVault {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeERC20 for IERC20;
-    using SafeCast for uint256;
+    using InventoryLib for InventoryLib.Inventory;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTANTS
@@ -119,43 +119,16 @@ abstract contract PoolVault is MultiAssetVault {
     uint8 private constant FALLBACK_DECIMALS = 18;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                              TYPES
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Per-(pool, currency) packed balance state. Co-locates ERC-20 holdings and
-    ///      ERC-6909 claim balance in a single 32-byte slot so the pair-aware code paths
-    ///      (`_assetBalance`, `_redeemPoolClaims`) read both with one SLOAD instead of two.
-    ///      `uint128` per field admits balances up to ~3.4e38, which dwarfs any plausible
-    ///      per-pool token amount; deposits/credits SafeCast on write.
-    struct CurrencyState {
-        uint128 erc20;
-        uint128 claims;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     //                              STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice ERC4626 vault for each (pool, currency) pair.
-    /// @dev    `address(0)` means no vault is configured -- tokens are held as ERC-20 in the
-    ///         hook and tracked via `_state.erc20`. Vaults are typically set at pool
-    ///         initialization and are immutable for the pool's lifetime.
-    mapping(PoolId => mapping(Currency => IERC4626)) public vaults;
-
-    /// @dev Number of ERC4626 vault shares this pool owns. Isolated from other pools that
-    ///      may use the same vault contract, preventing one pool from consuming another's
-    ///      shares.
-    mapping(PoolId => mapping(Currency => uint256)) internal _vaultShares;
-
-    /// @dev Packed per-(pool, currency) ERC-20 + ERC-6909 claim state.
-    ///
-    ///      `state.erc20`  -- ERC-20 tokens held by the hook attributed to this pool.
-    ///                       ALWAYS reflects the per-pool share of the hook's global token
-    ///                       balance -- never substitutes a global `balanceOf` read.
-    ///      `state.claims` -- ERC-6909 claims on the PoolManager attributed to this pool.
-    ///                       Minted when afterSwap produces a positive hook delta; redeemed
-    ///                       to ERC-20 in the next beforeSwap via `_redeemPoolClaims`.
-    mapping(PoolId => mapping(Currency => CurrencyState)) internal _state;
+    /// @dev Rehypothecation + claim state -- vault bindings, vault shares, raw ERC-20, and
+    ///      ERC-6909 claims -- lives in the `InventoryLib` capability at its ERC-7201
+    ///      namespaced slot, keyed by `_bucket(poolId, currency)`. PoolVault is the V4 binding:
+    ///      it owns the bucket derivation, re-exposes the `vaults` getter, and delegates every
+    ///      asset/claim operation through thin wrappers (`_vaultOf`, `_setVault`,
+    ///      `_assetBalanceV4`, `_depositToVault`, `_redeemPoolClaims`, ...) so subclasses and
+    ///      the test harness keep their existing `(PoolId, Currency)` call surface.
 
     /// @notice Per-pool minimum deposit-lock duration, measured in `BlockNumberish`-clock blocks.
     /// @dev    Returned by `_minDepositBlocks(VaultId)` and consumed by the base
@@ -204,32 +177,9 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param reason   The raw revert data from `vault.redeem` (for operator diagnostics).
     event VaultDrainSkipped(PoolId indexed poolId, Currency indexed currency, uint256 shares, bytes reason);
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                              ERRORS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev A vault redemption returned more shares than the pool owns. Defensive check --
-    ///      should never trigger if `_vaultShares` accounting is consistent.
-    error CrossPoolShareLeak();
-
-    /// @dev `_debitPoolERC20` was asked to pay more than the pool's tracked ERC-20 balance.
-    error InsufficientPoolBalance();
-
-    /// @dev `vault.deposit` returned zero shares for a non-zero asset deposit. Either the
-    ///      vault enforces a minimum deposit threshold the pool's amount didn't meet, or the
-    ///      vault is misconfigured. Reverting fail-fast prevents asset loss into a vault
-    ///      that gives no claim back.
-    error ZeroSharesMinted();
-
-    /// @dev The configured ERC-4626 vault applies an entry fee (`previewDeposit < convertToShares`).
-    ///      PoolVault deliberately does not support fee-on-entry vaults: see the contract-level
-    ///      `Vault Compatibility` NatSpec for the structural reasons (JIT-cycle bleed + share-math
-    ///      socialization). Detected at pool init via the probe in `_requireFeelessVault`.
-    error VaultChargesEntryFee();
-
-    /// @dev The configured ERC-4626 vault applies an exit fee (`previewRedeem < convertToAssets`).
-    ///      Same rationale as `VaultChargesEntryFee`; see contract-level `Vault Compatibility`.
-    error VaultChargesExitFee();
+    // Vault/claim errors (CrossPoolShareLeak, InsufficientPoolBalance, ZeroSharesMinted,
+    // VaultChargesEntryFee, VaultChargesExitFee) are declared and reverted by `InventoryLib`.
+    // Selectors are unchanged; callers that match on them reference `InventoryLib.<Error>`.
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                  TYPED VIEWS (PoolKey / PoolId wrappers)
@@ -303,6 +253,58 @@ abstract contract PoolVault is MultiAssetVault {
     ///      through bytes32; both types are `type X is bytes32`.
     function _vaultIdFor(PoolId poolId) internal pure returns (VaultId) {
         return VaultId.wrap(PoolId.unwrap(poolId));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                  INVENTORY BUCKET / VAULT ACCESSORS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The ERC-4626 vault configured for `(poolId, currency)`, or `address(0)` if the
+    ///         currency is held as raw ERC-20. Preserves the pre-extraction `vaults` getter ABI.
+    /// @param poolId   The pool to read.
+    /// @param currency The currency side (currency0 or currency1).
+    /// @return The bound ERC-4626 vault, or the zero vault if none.
+    function vaults(PoolId poolId, Currency currency) external view returns (IERC4626) {
+        return _vaultOf(poolId, currency);
+    }
+
+    /// @dev Accounting partition for `(poolId, currency)` in the `InventoryLib` capability.
+    ///      Distinct per pool so a hook serving multiple pools that share a currency keeps each
+    ///      pool's reserves isolated. Hashes in scratch memory (0x00–0x40) — equivalent to
+    ///      `keccak256(abi.encode(poolId, currency))` but without the free-memory allocation,
+    ///      so the hot path's repeated bucket derivations cost no more than the prior nested
+    ///      `mapping[poolId][currency]` lookups.
+    function _bucket(PoolId poolId, Currency currency) private pure returns (bytes32 bucket) {
+        assembly ("memory-safe") {
+            mstore(0x00, poolId)
+            mstore(0x20, currency)
+            bucket := keccak256(0x00, 0x40)
+        }
+    }
+
+    /// @dev Vault bound to `(poolId, currency)`.
+    function _vaultOf(PoolId poolId, Currency currency) internal view returns (IERC4626) {
+        return InventoryLib.load().vaultOf(_bucket(poolId, currency));
+    }
+
+    /// @dev Bind `vault` to `(poolId, currency)`. Caller validates the asset match.
+    function _setVault(PoolId poolId, Currency currency, IERC4626 vault) internal {
+        InventoryLib.load().setVault(_bucket(poolId, currency), vault);
+    }
+
+    /// @dev ERC-4626 shares owned by `(poolId, currency)`.
+    function _vaultSharesOf(PoolId poolId, Currency currency) internal view returns (uint256) {
+        return InventoryLib.load().sharesOf(_bucket(poolId, currency));
+    }
+
+    /// @dev ERC-6909 claims attributed to `(poolId, currency)`.
+    function _claimsOf(PoolId poolId, Currency currency) internal view returns (uint256) {
+        return InventoryLib.load().claimsOf(_bucket(poolId, currency));
+    }
+
+    /// @dev Raw ERC-20 attributed to `(poolId, currency)`.
+    function _erc20Of(PoolId poolId, Currency currency) internal view returns (uint256) {
+        return InventoryLib.load().erc20Of(_bucket(poolId, currency));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -386,15 +388,8 @@ abstract contract PoolVault is MultiAssetVault {
     ///      cause `_ensureERC20` to revert mid-swap when the vault cannot satisfy the
     ///      requested withdrawal. This is bounded by the documented vault-trust assumption:
     ///      operators must use trusted ERC-4626 vaults.
-    function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
-        // Single SLOAD reads both packed fields.
-        CurrencyState storage s = _state[poolId][currency];
-        bal = uint256(s.erc20) + uint256(s.claims);
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) != address(0)) {
-            uint256 shares = _vaultShares[poolId][currency];
-            if (shares > 0) bal += vault.convertToAssets(shares);
-        }
+    function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256) {
+        return InventoryLib.load().assetBalance(_bucket(poolId, currency));
     }
 
     /// @dev Net realizable balance for a single (pool, currency) pair. Same composition as
@@ -412,14 +407,8 @@ abstract contract PoolVault is MultiAssetVault {
     ///      Cross-pool isolation is automatic: `previewRedeem` is per-share, so pool A's
     ///      reported balance is its own share-count × per-share value, independent of
     ///      what other pools sharing the same vault hold.
-    function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256 bal) {
-        CurrencyState storage s = _state[poolId][currency];
-        bal = uint256(s.erc20) + uint256(s.claims);
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) != address(0)) {
-            uint256 shares = _vaultShares[poolId][currency];
-            if (shares > 0) bal += vault.previewRedeem(shares);
-        }
+    function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256) {
+        return InventoryLib.load().effectiveBalance(_bucket(poolId, currency));
     }
 
     /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
@@ -592,20 +581,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      is legitimately a few wei below `want` on honest vaults, and that dust rounds in
     ///      the pool's favour (a deposit→withdraw round-trip never profits the depositor).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        if (amount == 0) return;
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) {
-            CurrencyState storage s = _state[poolId][currency];
-            s.erc20 = (uint256(s.erc20) + amount).toUint128();
-            return;
-        }
-
-        _ensureVaultAllowance(currency, address(vault), amount);
-        uint256 sharesActual = vault.deposit(amount, address(this));
-
-        // Fail-fast on a vault that swallows assets without minting shares.
-        if (sharesActual == 0) revert ZeroSharesMinted();
-        _vaultShares[poolId][currency] += sharesActual;
+        InventoryLib.load().depositToVault(_bucket(poolId, currency), currency, amount);
     }
 
     /// @dev Deposit all of the pool's tracked ERC-20 balance for both currencies into vaults.
@@ -630,19 +606,8 @@ abstract contract PoolVault is MultiAssetVault {
     ///      and continue. LPs forgo vault yield on the un-deposited amount until the next
     ///      cycle retries, but trading remains live.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) return;
-        CurrencyState storage s = _state[poolId][currency];
-        uint256 amount = s.erc20;
-        if (amount == 0) return;
-
-        try vault.deposit(amount, address(this)) returns (uint256 sharesActual) {
-            if (sharesActual == 0) revert ZeroSharesMinted();
-            s.erc20 = 0;
-            _vaultShares[poolId][currency] += sharesActual;
-        } catch (bytes memory reason) {
-            emit VaultDepositSkipped(poolId, currency, amount, reason);
-        }
+        (uint256 amount, bool ok, bytes memory reason) = InventoryLib.load().tryDepositAll(_bucket(poolId, currency));
+        if (!ok) emit VaultDepositSkipped(poolId, currency, amount, reason);
     }
 
     /// @dev Withdraw `amount` of `currency` from the pool's vault, crediting per-pool ERC-20.
@@ -652,16 +617,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      `CrossPoolShareLeak` defensive check stays to catch a vault that consumes more
     ///      shares than the pool owns.
     function _withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        if (amount == 0) return;
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) return; // already in _state.erc20
-
-        uint256 sharesUsed = vault.withdraw(amount, address(this), address(this));
-        uint256 poolShares = _vaultShares[poolId][currency];
-        if (sharesUsed > poolShares) revert CrossPoolShareLeak();
-        _vaultShares[poolId][currency] -= sharesUsed;
-        CurrencyState storage s = _state[poolId][currency];
-        s.erc20 = (uint256(s.erc20) + amount).toUint128();
+        InventoryLib.load().withdrawFromVault(_bucket(poolId, currency), amount);
     }
 
     /// @dev Best-effort full withdrawal of the pool's vault position for `currency` back into
@@ -677,19 +633,11 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param poolId   The pool whose vault position to drain.
     /// @param currency The currency to withdraw from the vault.
     function _drainVaultBestEffort(PoolId poolId, Currency currency) internal {
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) return;
-        uint256 shares = _vaultShares[poolId][currency];
+        (uint256 shares, uint256 assets, bool ok, bytes memory reason) =
+            InventoryLib.load().tryDrain(_bucket(poolId, currency));
         if (shares == 0) return;
-
-        try vault.redeem(shares, address(this), address(this)) returns (uint256 assets) {
-            _vaultShares[poolId][currency] = 0;
-            CurrencyState storage s = _state[poolId][currency];
-            s.erc20 = (uint256(s.erc20) + assets).toUint128();
-            emit VaultDrained(poolId, currency, shares, assets);
-        } catch (bytes memory reason) {
-            emit VaultDrainSkipped(poolId, currency, shares, reason);
-        }
+        if (ok) emit VaultDrained(poolId, currency, shares, assets);
+        else emit VaultDrainSkipped(poolId, currency, shares, reason);
     }
 
     /// @dev Ensure the pool's tracked ERC-20 balance is at least `amount`, then debit it.
@@ -703,39 +651,14 @@ abstract contract PoolVault is MultiAssetVault {
     ///      when the pool has no configured vault and insufficient ERC-20 -- there is no
     ///      separate sentinel revert.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        if (amount == 0) return;
-        CurrencyState storage s = _state[poolId][currency];
-        uint256 bal = s.erc20;
-        if (bal >= amount) {
-            s.erc20 = uint128(bal - amount);
-            return;
-        }
-
-        IERC4626 vault = vaults[poolId][currency];
-        if (address(vault) == address(0)) {
-            // Non-vaulted pool with insufficient erc20 -- the `bal - amount` subtraction
-            // panics on underflow.
-            s.erc20 = uint128(bal - amount);
-            return;
-        }
-
-        uint256 shortfall = amount - bal;
-        uint256 sharesUsed = vault.withdraw(shortfall, address(this), address(this));
-        uint256 poolShares = _vaultShares[poolId][currency];
-        if (sharesUsed > poolShares) revert CrossPoolShareLeak();
-        _vaultShares[poolId][currency] -= sharesUsed;
-        s.erc20 = 0; // bal + shortfall = amount, fully consumed
+        InventoryLib.load().ensureERC20(_bucket(poolId, currency), amount);
     }
 
     /// @dev Set max approval for a vault using OZ `forceApprove` (zeros out first for
     ///      USDT-style tokens). Subclasses MUST call this once per (currency, vault) pair
     ///      at pool initialization, before any vault deposit can occur.
     function _approveVault(Currency currency, address vault) internal {
-        if (vault == address(0)) return;
-        IERC20 token = IERC20(Currency.unwrap(currency));
-        if (token.allowance(address(this), vault) == 0) {
-            token.forceApprove(vault, type(uint256).max);
-        }
+        InventoryLib.approveVault(currency, vault);
     }
 
     /// @dev Zero the hook's standing approval to a vault -- the emergency counterpart to
@@ -747,8 +670,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      next `vault.deposit`. Callers MUST stop deposits (pause the pool AND disable
     ///      external deposits) in the same transaction, or the revocation will not hold.
     function _revokeVaultApproval(Currency currency, address vault) internal {
-        if (vault == address(0)) return;
-        IERC20(Currency.unwrap(currency)).forceApprove(vault, 0);
+        InventoryLib.revokeVaultApproval(currency, vault);
     }
 
     /// @dev Reject ERC-4626 vaults that apply entry or exit fees. Called once per vault at
@@ -768,29 +690,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      NatSpec would still apply in that case. Operators are trusted to pick curated
     ///      vaults whose preview functions reflect ground truth.
     function _requireFeelessVault(IERC4626 vault) internal view {
-        if (address(vault) == address(0)) return;
-        uint256 probe = 10 ** uint256(vault.decimals());
-        // Entry side maps assets → shares: `previewDeposit` and `convertToShares` must agree.
-        if (vault.previewDeposit(probe) != vault.convertToShares(probe)) revert VaultChargesEntryFee();
-        // Exit side maps shares → assets: `previewRedeem` and `convertToAssets` must agree.
-        if (vault.previewRedeem(probe) != vault.convertToAssets(probe)) revert VaultChargesExitFee();
-    }
-
-    /// @dev Ensure the hook's allowance to `vault` for `currency` is at least `amount` for the
-    ///      current operation. Refreshes to `type(uint256).max` only when below the required
-    ///      threshold — a no-op for tokens that don't decrement allowance on transfer (the
-    ///      common case), and a recovery path for USDT-style tokens whose post-init
-    ///      max-allowance is gradually consumed by ordinary deposits.
-    ///
-    ///      Without this guard, the JIT cycle would brick on the first deposit after the
-    ///      cumulative deposit volume crossed `type(uint256).max` — no real-world threshold,
-    ///      but unbounded for tokens that decrement on every transfer (USDT) and bricks the
-    ///      pool until owner manually calls `refreshVaultApproval`.
-    function _ensureVaultAllowance(Currency currency, address vault, uint256 amount) internal {
-        IERC20 token = IERC20(Currency.unwrap(currency));
-        if (token.allowance(address(this), vault) < amount) {
-            token.forceApprove(vault, type(uint256).max);
-        }
+        InventoryLib.requireFeelessVault(vault);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -815,23 +715,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      common path (claims fully backed) is unchanged: `available >= claimBal`, so the full
     ///      balance is redeemed exactly as before.
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal returns (uint256 erc20Bal) {
-        // Single SLOAD reads both packed fields.
-        CurrencyState memory snapshot = _state[poolId][currency];
-        uint256 claimBal = snapshot.claims;
-        erc20Bal = snapshot.erc20;
-        if (claimBal > 0) {
-            uint256 available = currency.balanceOf(address(_poolManager()));
-            uint256 takeAmount = claimBal < available ? claimBal : available;
-            if (takeAmount > 0) {
-                _poolManager().burn(address(this), currency.toId(), takeAmount);
-                _poolManager().take(currency, address(this), takeAmount);
-                erc20Bal += takeAmount;
-            }
-            // Single SSTORE: increment erc20 by what was redeemed, retain any unbacked remainder
-            // as claims.
-            _state[poolId][currency] =
-                CurrencyState({erc20: erc20Bal.toUint128(), claims: (claimBal - takeAmount).toUint128()});
-        }
+        return InventoryLib.load().redeemClaims(_bucket(poolId, currency), currency, _poolManager());
     }
 
     /// @dev The portion of a pool's recorded claims that the PoolManager cannot physically
@@ -843,28 +727,20 @@ abstract contract PoolVault is MultiAssetVault {
     ///      Returns 0 in the common case (claims fully backed), so steady-state sizing is
     ///      unaffected.
     function _unbackedClaims(PoolId poolId, Currency currency) internal view returns (uint256) {
-        uint256 claims = _state[poolId][currency].claims;
-        if (claims == 0) return 0;
-        uint256 available = currency.balanceOf(address(_poolManager()));
-        return claims > available ? claims - available : 0;
+        return InventoryLib.load().unbackedClaims(_bucket(poolId, currency), currency, _poolManager());
     }
 
     /// @dev Record newly minted ERC-6909 claims for a pool. Called after `poolManager.mint()`
     ///      in the JIT delta resolution.
     function _recordClaims(PoolId poolId, Currency currency, uint256 amount) internal {
-        CurrencyState storage s = _state[poolId][currency];
-        s.claims = (uint256(s.claims) + amount).toUint128();
+        InventoryLib.load().recordClaims(_bucket(poolId, currency), amount);
     }
 
     /// @dev Debit `amount` from the pool's tracked ERC-20 balance after a PM settlement.
     ///      The actual `_settle` call is the subclass's responsibility -- this function only
     ///      updates the per-pool counter.
     function _debitPoolERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        if (amount == 0) return;
-        CurrencyState storage s = _state[poolId][currency];
-        uint256 bal = s.erc20;
-        if (bal < amount) revert InsufficientPoolBalance();
-        s.erc20 = uint128(bal - amount);
+        InventoryLib.load().debitERC20(_bucket(poolId, currency), amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
