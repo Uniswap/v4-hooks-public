@@ -16,7 +16,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {SmartPoolIncentivizedHook} from "../../src/alf/SmartPoolIncentivizedHook.sol";
-import {RewardsLib} from "../../src/alf/libraries/RewardsLib.sol";
+import {RewardTokenAlreadySet} from "../../src/alf/types/Rewards.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @title SmartPoolIncentivizedHookTest
@@ -138,7 +138,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
     function test_setRewardToken_isPermanent() public {
         vm.startPrank(owner);
         hook.setRewardToken(testKey, IERC20(address(reward)));
-        vm.expectRevert(RewardsLib.RewardTokenAlreadySet.selector);
+        vm.expectRevert(RewardTokenAlreadySet.selector);
         hook.setRewardToken(testKey, IERC20(address(reward)));
         vm.stopPrank();
     }
