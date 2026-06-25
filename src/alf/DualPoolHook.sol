@@ -227,13 +227,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///      `OwnableUnauthorizedAccount`.
     error Unauthorized();
 
-    /// @dev `_beforeSwap` was invoked on a pool whose `live` flag is false. Owner pauses
-    ///      the pool via {setPoolLive}; while paused, swaps revert here so routers and
-    ///      aggregators see an explicit failure instead of executing against zero JIT
-    ///      liquidity.
-    /// @param poolId The pool whose live flag is currently false.
-    error PoolNotLive(PoolId poolId);
-
     /// @dev Operator-supplied `PoolConfig.minDepositBlocks` exceeds the per-deployment upper
     ///      bound (`maxMinDepositBlocks`).
     /// @param supplied The value the operator provided in `PoolConfig`.
@@ -397,8 +390,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         // re-bootstrap attempt, so this branch fires exactly once per pool. The owner
         // can subsequently toggle liveness via `setPoolLive` (emergency pause).
         PoolId poolId = key.toId();
-        livePools[poolId] = true;
-        emit PoolLivenessUpdated(poolId, true);
+        _liveness.setLive(poolId, true);
     }
 
     /// @notice Deposit token0 and token1 proportional to the pool's current asset ratio.
@@ -557,8 +549,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     function emergencyRevokeVault(PoolKey calldata key) external onlyOwner nonReentrant whenJITNotInProgress {
         PoolId poolId = key.toId();
 
-        livePools[poolId] = false;
-        emit PoolLivenessUpdated(poolId, false);
+        _liveness.setLive(poolId, false);
 
         externalDepositsEnabled[poolId] = false;
         emit ExternalDepositsUpdated(poolId, false);
@@ -597,8 +588,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param key  The pool to toggle.
     /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
     function setPoolLive(PoolKey calldata key, bool live) external onlyOwner whenJITNotInProgress {
-        livePools[key.toId()] = live;
-        emit PoolLivenessUpdated(key.toId(), live);
+        _liveness.setLive(key.toId(), live);
     }
 
     /// @notice Total reserves managed by this hook for the given pool.
@@ -759,7 +749,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
-        if (!livePools[poolId]) revert PoolNotLive(poolId);
+        _liveness.requireLive(poolId);
 
         _enterJITLock(poolId);
         _deployJIT(poolId, key);
@@ -1048,7 +1038,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ) internal view returns (uint256 amountIn, uint256 amountOut) {
         PoolId poolId = key.toId();
 
-        if (!livePools[poolId]) return (0, 0);
+        if (!_liveness.isLive(poolId)) return (0, 0);
         uint24 feePips = key.fee;
 
         // Use vault-cap-aware balances for indicative quotes. Execution caps vault

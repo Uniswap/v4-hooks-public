@@ -13,6 +13,7 @@ import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/Pool
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
 import {SwapSimulator} from "../libraries/SwapSimulator.sol";
+import {Liveness} from "../types/Liveness.sol";
 
 /// @title SpreadQuoterBase
 /// @author Uniswap Labs
@@ -28,19 +29,13 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     using LPFeeLibrary for uint24;
     using StateLibrary for IPoolManager;
 
-    /// @notice Whether each pool is currently quoting and executing swaps. Pools default to
-    ///         paused (`false`) after `manager.initialize`; the owner enables them via
-    ///         {setPoolLive}.
-    mapping(PoolId => bool) public livePools;
+    /// @notice Per-pool pause/resume flag. Pools default to paused after `manager.initialize`;
+    ///         the owner enables them via {setPoolLive}. Read externally through {livePools}.
+    Liveness internal _liveness;
 
     /// @notice Lower tick of the single permitted LP range per pool. LP add liquidity calls
     ///         must use exactly `[activeLowerTick, activeLowerTick + tickSpacing]`.
     mapping(PoolId => int24) public activeLowerTick;
-
-    /// @notice Emitted when a pool's liveness flag is toggled via `setPoolLive`.
-    /// @param poolId The pool whose liveness changed.
-    /// @param isLive The new liveness state.
-    event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
 
     /// @notice Emitted when the active lower tick is changed via `setActiveTick`. The initial
     ///         tick set by `initializePool` does not emit: the tick is observable via the
@@ -71,11 +66,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     ///      model; their continuing presence is load-bearing.
     error RenounceOwnershipDisabled();
 
-    /// @dev `_beforeSwap` was invoked on a pool whose `livePools` flag is false. Pools default
-    ///      to paused after `manager.initialize`; the owner enables a pool via {setPoolLive}.
-    /// @param poolId The pool whose live flag is currently false.
-    error PoolNotLive(PoolId poolId);
-
     /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SpreadQuoter is
     ///      designed around a static fee fixed at pool creation; dynamic-fee pools require the
     ///      hook to maintain its own fee state and route every swap through a fee-update
@@ -105,11 +95,18 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     // ──── IALFHook ────
 
-    /// @notice Always reports live; per-pool liveness is gated by `livePools[poolId]`.
+    /// @notice Always reports live; per-pool liveness is gated by {livePools}.
     /// @dev    See {IALFHook.isLive}. Routers SHOULD also consult per-pool liveness for swap
     ///         eligibility.
     function isLive() external pure override returns (bool) {
         return true;
+    }
+
+    /// @notice Whether `poolId` is currently quoting and executing swaps.
+    /// @param poolId The pool to read.
+    /// @return Whether the pool is live.
+    function livePools(PoolId poolId) external view returns (bool) {
+        return _liveness.isLive(poolId);
     }
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
@@ -125,7 +122,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         uint160 sqrtPriceLimitX96,
         bytes calldata
     ) external view virtual override returns (uint256 amountIn, uint256 amountOut) {
-        if (!livePools[key.toId()]) return (0, 0);
+        if (!_liveness.isLive(key.toId())) return (0, 0);
 
         return SwapSimulator.simulateSwapToPrice(
             poolManager,
@@ -195,7 +192,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
-        if (!livePools[poolId]) revert PoolNotLive(poolId);
+        _liveness.requireLive(poolId);
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
@@ -208,7 +205,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
         override
         returns (uint256 outputAmount)
     {
-        if (!livePools[key.toId()]) return 0;
+        if (!_liveness.isLive(key.toId())) return 0;
         outputAmount = SwapSimulator.simulateSwap(
             poolManager, key.toId(), zeroForOne, amountSpecified, _staticFee(key.fee), key.tickSpacing
         );
@@ -248,8 +245,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     ///      owner enables a pool by calling `setPoolLive(key, true)`. Disabling pauses swaps
     ///      via `_beforeSwap`'s liveness check; pricing (the static `key.fee`) is unaffected.
     function setPoolLive(PoolKey calldata key, bool live) external virtual onlyOwner {
-        livePools[key.toId()] = live;
-        emit PoolLivenessUpdated(key.toId(), live);
+        _liveness.setLive(key.toId(), live);
     }
 
     /// @notice Set the active lower tick for LP concentration.

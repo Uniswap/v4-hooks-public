@@ -27,6 +27,7 @@ import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
+import {PoolNotLive} from "../../src/alf/types/Liveness.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
@@ -955,7 +956,7 @@ contract DualPoolHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(hook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(DualPoolHook.PoolNotLive.selector, testPoolId),
+                abi.encodeWithSelector(PoolNotLive.selector, testPoolId),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );

@@ -7,6 +7,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {BaseALFHook} from "./BaseALFHook.sol";
 import {IALFHook} from "../interfaces/IALFHook.sol";
+import {Liveness} from "../types/Liveness.sol";
 
 /// @title DualPoolBase
 /// @author Uniswap Labs
@@ -22,14 +23,10 @@ import {IALFHook} from "../interfaces/IALFHook.sol";
 ///      after deployment.
 /// @custom:security-contact security@uniswap.org
 abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
-    /// @notice Whether each pool is currently quoting and executing swaps. Set by the
-    ///         subclass's guarded `initializePool` and toggled via {DualPoolHook.setPoolLive}.
-    mapping(PoolId => bool) public livePools;
-
-    /// @notice Emitted whenever a pool's liveness flag changes.
-    /// @param poolId The pool whose liveness changed.
-    /// @param isLive The new liveness state.
-    event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
+    /// @notice Per-pool pause/resume flag. Pools default to paused; the subclass's guarded
+    ///         `initializePool`/`bootstrap` and {SmartPoolHook.setPoolLive} toggle it via the
+    ///         `Liveness` capability. Read externally through {livePools}.
+    Liveness internal _liveness;
 
     /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
     ///      not aligned to the pool's tickSpacing).
@@ -70,10 +67,17 @@ abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
     }
 
     /// @inheritdoc IALFHook
-    /// @dev Always reports live; hook-level liveness is per-pool via `livePools[poolId]`.
-    ///      Routers call this to reject offline hooks; this hook is always reachable, but
-    ///      individual pools may pause via {DualPoolHook.setPoolLive}.
+    /// @dev Always reports live; hook-level liveness is per-pool via {livePools}. Routers call
+    ///      this to reject offline hooks; this hook is always reachable, but individual pools may
+    ///      pause via {SmartPoolHook.setPoolLive}.
     function isLive() external pure override returns (bool) {
         return true;
+    }
+
+    /// @notice Whether `poolId` is currently quoting and executing swaps.
+    /// @param poolId The pool to read.
+    /// @return Whether the pool is live.
+    function livePools(PoolId poolId) external view returns (bool) {
+        return _liveness.isLive(poolId);
     }
 }
