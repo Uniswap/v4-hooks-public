@@ -829,7 +829,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ) private {
         bytes32 base = _activeLiqBase(poolId);
         uint256 n = buckets.length;
-        for (uint256 i; i < n;) {
+        for (uint256 i; i < n; ++i) {
             uint128 liq = liqs[i];
             if (liq > 0) {
                 LiquidityBucket memory bucket = buckets[i];
@@ -850,9 +850,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
                 assembly ("memory-safe") {
                     tstore(slot, liq)
                 }
-            }
-            unchecked {
-                ++i;
             }
         }
     }
@@ -877,7 +874,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         uint256 n = buckets.length;
         bytes32 base = _activeLiqBase(poolId);
 
-        for (uint256 i; i < n;) {
+        for (uint256 i; i < n; ++i) {
             bytes32 slot;
             unchecked {
                 slot = bytes32(uint256(base) + i);
@@ -899,9 +896,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
                     }),
                     ""
                 );
-            }
-            unchecked {
-                ++i;
             }
         }
     }

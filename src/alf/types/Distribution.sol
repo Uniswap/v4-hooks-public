@@ -109,7 +109,7 @@ function computeAllocations(LiquidityBucket[] memory buckets, uint160 sqrtPriceX
     returns (uint128[MAX_BUCKETS] memory liqs, uint256 totalNeed0, uint256 totalNeed1)
 {
     uint256 n = buckets.length;
-    for (uint256 i; i < n;) {
+    for (uint256 i; i < n; ++i) {
         LiquidityBucket memory bucket = buckets[i];
         uint160 sqrtLower = TickMath.getSqrtPriceAtTick(bucket.tickLower);
         uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(bucket.tickUpper);
@@ -131,9 +131,6 @@ function computeAllocations(LiquidityBucket[] memory buckets, uint160 sqrtPriceX
                 totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, lower, liq, true);
             }
         }
-        unchecked {
-            ++i;
-        }
     }
 }
 
@@ -154,7 +151,7 @@ function activeLiquidity(
     uint256 bal1
 ) pure returns (uint128 liquidity) {
     uint256 n = buckets.length;
-    for (uint256 i; i < n;) {
+    for (uint256 i; i < n; ++i) {
         LiquidityBucket memory bucket = buckets[i];
         if (currentTick >= bucket.tickLower && currentTick < bucket.tickUpper) {
             uint256 weightBps = bucket.weightBps;
@@ -167,9 +164,6 @@ function activeLiquidity(
                 weightedBal0,
                 weightedBal1
             );
-        }
-        unchecked {
-            ++i;
         }
     }
 }
