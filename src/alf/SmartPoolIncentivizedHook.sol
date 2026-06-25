@@ -14,8 +14,9 @@ import {Rewards} from "./types/Rewards.sol";
 /// @title SmartPoolIncentivizedHook
 /// @author Uniswap Labs
 /// @notice `SmartPoolHook` composed with the `Rewards` liquidity-incentives capability. LP shares
-///         earn a third reward token via Synthetix-style per-second accrual, on top of the JIT
-///         spread quoting and ERC-4626 rehypothecation inherited unchanged from `SmartPoolHook`.
+///         earn a third reward token via Synthetix-style per-block accrual on the `BlockNumberish`
+///         clock, on top of the JIT spread quoting and ERC-4626 rehypothecation inherited unchanged
+///         from `SmartPoolHook`.
 ///
 ///         The composition adds no new v4 hook callback, so the permission flags (and the
 ///         address-mining requirement) are identical to `SmartPoolHook`; it does not touch the
@@ -70,7 +71,7 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
         internal
         override
     {
-        _rewards.checkpoint(vaultId, user, totalSharesBefore, userSharesBefore);
+        _rewards.checkpoint(vaultId, user, totalSharesBefore, userSharesBefore, _getBlockNumberish());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -90,13 +91,13 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
 
     /// @notice Set the reward period length for a pool. Only permitted between periods.
     /// @param key      The pool to configure.
-    /// @param duration Period length in seconds.
+    /// @param duration Period length in blocks (on the `BlockNumberish` clock).
     function setRewardsDuration(PoolKey calldata key, uint256 duration) external onlyOwner whenJITNotInProgress {
-        _rewards.setRewardsDuration(_vaultIdFor(key.toId()), duration);
+        _rewards.setRewardsDuration(_vaultIdFor(key.toId()), duration, _getBlockNumberish());
     }
 
     /// @notice Fund a reward period for a pool (or top up the active one). Pulls `reward` of the
-    ///         configured reward token from the caller, then recomputes the per-second rate.
+    ///         configured reward token from the caller, then recomputes the per-block rate.
     /// @param key    The pool to fund.
     /// @param reward Reward tokens to add to the period.
     function notifyRewardAmount(PoolKey calldata key, uint256 reward)
@@ -109,7 +110,9 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
         IERC20 token = _rewards.rewardTokenOf(id);
         if (address(token) == address(0)) revert RewardTokenNotConfigured();
         token.safeTransferFrom(msg.sender, address(this), reward);
-        _rewards.notifyRewardAmount(id, reward, _shares.totalSupply(id), token.balanceOf(address(this)));
+        _rewards.notifyRewardAmount(
+            id, reward, _shares.totalSupply(id), token.balanceOf(address(this)), _getBlockNumberish()
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -121,7 +124,9 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     /// @return amount Reward tokens transferred to the caller.
     function claimRewards(PoolKey calldata key) external nonReentrant whenJITNotInProgress returns (uint256 amount) {
         VaultId id = _vaultIdFor(key.toId());
-        amount = _rewards.claim(id, msg.sender, _shares.totalSupply(id), _shares.balanceOf(id, msg.sender));
+        amount = _rewards.claim(
+            id, msg.sender, _shares.totalSupply(id), _shares.balanceOf(id, msg.sender), _getBlockNumberish()
+        );
     }
 
     /// @notice Reward tokens `user` could claim right now on a pool.
@@ -130,6 +135,6 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     /// @return The claimable reward amount.
     function earned(PoolKey calldata key, address user) external view returns (uint256) {
         VaultId id = _vaultIdFor(key.toId());
-        return _rewards.earned(id, user, _shares.balanceOf(id, user), _shares.totalSupply(id));
+        return _rewards.earned(id, user, _shares.balanceOf(id, user), _shares.totalSupply(id), _getBlockNumberish());
     }
 }

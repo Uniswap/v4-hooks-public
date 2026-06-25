@@ -30,13 +30,13 @@ error RewardRateTooHigh();
 event RewardTokenSet(VaultId indexed vaultId, address token);
 /// @notice Emitted when a vault's reward period duration is set.
 /// @param vaultId  The vault whose duration was set.
-/// @param duration The new period length, in seconds.
+/// @param duration The new period length, in blocks.
 event RewardsDurationSet(VaultId indexed vaultId, uint256 duration);
 /// @notice Emitted when a reward period is funded (or topped up).
-/// @param vaultId      The vault that was funded.
-/// @param reward       The reward tokens added to the period (token's native decimals).
-/// @param periodFinish The timestamp the (re)started period now ends.
-event RewardAdded(VaultId indexed vaultId, uint256 reward, uint256 periodFinish);
+/// @param vaultId           The vault that was funded.
+/// @param reward            The reward tokens added to the period (token's native decimals).
+/// @param periodFinishBlock The block the (re)started period now ends.
+event RewardAdded(VaultId indexed vaultId, uint256 reward, uint256 periodFinishBlock);
 /// @notice Emitted when a user claims accrued rewards.
 /// @param vaultId The vault claimed from.
 /// @param user    The account that claimed.
@@ -46,21 +46,25 @@ event RewardPaid(VaultId indexed vaultId, address indexed user, uint256 reward);
 /// @dev Fixed-point scale for the per-share index, matching Synthetix.
 uint256 constant REWARDS_PRECISION = 1e18;
 
-/// @notice Per-vault Synthetix reward-program state.
+/// @notice Per-vault Synthetix reward-program state. The period and accrual run on the consumer's
+///         `BlockNumberish` clock, not `block.timestamp`: the same clock the share ledger's deposit
+///         lock uses, chosen because `block.number` (or the chain's native block count, e.g.
+///         Arbitrum's `arbBlockNumber`) is monotonic and reliable where sequencer-set timestamps
+///         are not. The consumer supplies the current block to every accruing function.
 /// @param token                 Reward ERC-20 (`address(0)` = unconfigured).
-/// @param rewardsDuration        Length of a reward period, in seconds.
-/// @param periodFinish           Timestamp the current period ends.
-/// @param rewardRate             Reward tokens distributed per second during the period.
-/// @param lastUpdateTime         Timestamp of the last global index checkpoint.
+/// @param rewardsDuration        Length of a reward period, in blocks.
+/// @param periodFinishBlock      Block the current period ends.
+/// @param rewardRate             Reward tokens distributed per block during the period.
+/// @param lastUpdateBlock        Block of the last global index checkpoint.
 /// @param rewardPerTokenStored   Accumulated reward per share, scaled by `REWARDS_PRECISION`.
 /// @param userRewardPerTokenPaid Per-user index snapshot at their last checkpoint.
 /// @param rewards                Per-user settled, claimable reward balance.
 struct Reward {
     IERC20 token;
     uint256 rewardsDuration;
-    uint256 periodFinish;
+    uint256 periodFinishBlock;
     uint256 rewardRate;
-    uint256 lastUpdateTime;
+    uint256 lastUpdateBlock;
     uint256 rewardPerTokenStored;
     mapping(address user => uint256) userRewardPerTokenPaid;
     mapping(address user => uint256) rewards;
@@ -78,11 +82,12 @@ struct Reward {
 ///              balances, and
 ///           2. exposes owner funding ({notifyRewardAmount}) plus a user {claim} entry point.
 ///
-///         Accrual follows the canonical Synthetix `StakingRewards` math: a global
-///         `rewardPerTokenStored` index accumulates `rewardRate` per second spread across the
-///         total share supply, and each account is credited `balance * (index - paidIndex)` at
-///         every checkpoint. The caller supplies the share balances at checkpoint time (the type
-///         never owns them), so the same type works over any share ledger.
+///         Accrual follows the canonical Synthetix `StakingRewards` math, with the clock changed
+///         from wall-time to block height: a global `rewardPerTokenStored` index accumulates
+///         `rewardRate` per block spread across the total share supply, and each account is
+///         credited `balance * (index - paidIndex)` at every checkpoint. The caller supplies both
+///         the share balances and the current block at checkpoint time (the type owns neither), so
+///         the same type works over any share ledger and any `BlockNumberish` consumer.
 ///
 ///         The checkpoint fires only on share mutations (bootstrap, deposit, withdraw), not on
 ///         swaps, so accrual adds no swap-path gas.
@@ -139,12 +144,15 @@ function setRewardToken(Rewards storage self, VaultId id, IERC20 token) returns 
 ///      period is live.
 /// @param self     Capability storage.
 /// @param id       The vault to configure.
-/// @param duration The period length, in seconds.
+/// @param duration The period length, in blocks.
+/// @param nowBlock The consumer's current block (from `_getBlockNumberish()`).
 /// @return self_ The capability storage, for chaining.
-function setRewardsDuration(Rewards storage self, VaultId id, uint256 duration) returns (Rewards storage self_) {
+function setRewardsDuration(Rewards storage self, VaultId id, uint256 duration, uint256 nowBlock)
+    returns (Rewards storage self_)
+{
     if (duration == 0) revert RewardsDurationNotSet();
     Reward storage r = self._inner[id];
-    if (block.timestamp < r.periodFinish) revert RewardPeriodActive();
+    if (nowBlock < r.periodFinishBlock) revert RewardPeriodActive();
     r.rewardsDuration = duration;
     emit RewardsDurationSet(id, duration);
     return self;
@@ -152,21 +160,23 @@ function setRewardsDuration(Rewards storage self, VaultId id, uint256 duration) 
 
 // ─────────────────────────────────────── Accrual core ──────────────────────────────────────
 
-/// @dev `min(block.timestamp, periodFinish)`; accrual stops at period end.
-/// @param r The reward program to read.
-/// @return The latest timestamp rewards still accrue for.
-function _lastTimeApplicable(Reward storage r) view returns (uint256) {
-    uint256 finish = r.periodFinish;
-    return block.timestamp < finish ? block.timestamp : finish;
+/// @dev `min(nowBlock, periodFinishBlock)`; accrual stops at period end.
+/// @param r        The reward program to read.
+/// @param nowBlock The consumer's current block.
+/// @return The latest block rewards still accrue for.
+function _lastBlockApplicable(Reward storage r, uint256 nowBlock) view returns (uint256) {
+    uint256 finish = r.periodFinishBlock;
+    return nowBlock < finish ? nowBlock : finish;
 }
 
-/// @dev Current global reward-per-share index given the supply over the elapsed window.
+/// @dev Current global reward-per-share index given the supply over the elapsed block window.
 /// @param r           The reward program to read.
 /// @param totalSupply The total shares the period accrues across.
+/// @param nowBlock    The consumer's current block.
 /// @return The reward-per-share index, scaled by `REWARDS_PRECISION`.
-function _rewardPerToken(Reward storage r, uint256 totalSupply) view returns (uint256) {
+function _rewardPerToken(Reward storage r, uint256 totalSupply, uint256 nowBlock) view returns (uint256) {
     if (totalSupply == 0) return r.rewardPerTokenStored;
-    uint256 elapsed = _lastTimeApplicable(r) - r.lastUpdateTime;
+    uint256 elapsed = _lastBlockApplicable(r, nowBlock) - r.lastUpdateBlock;
     return r.rewardPerTokenStored + (elapsed * r.rewardRate * REWARDS_PRECISION) / totalSupply;
 }
 
@@ -178,14 +188,20 @@ function _rewardPerToken(Reward storage r, uint256 totalSupply) view returns (ui
 /// @param user        The account to credit, or `address(0)` for index-only.
 /// @param totalSupply Total shares outstanding BEFORE the imminent mutation.
 /// @param userShares  `user`'s share balance BEFORE the imminent mutation.
+/// @param nowBlock    The consumer's current block (from `_getBlockNumberish()`).
 /// @return self_ The capability storage, for chaining.
-function checkpoint(Rewards storage self, VaultId id, address user, uint256 totalSupply, uint256 userShares)
-    returns (Rewards storage self_)
-{
+function checkpoint(
+    Rewards storage self,
+    VaultId id,
+    address user,
+    uint256 totalSupply,
+    uint256 userShares,
+    uint256 nowBlock
+) returns (Rewards storage self_) {
     Reward storage r = self._inner[id];
-    uint256 rpt = _rewardPerToken(r, totalSupply);
+    uint256 rpt = _rewardPerToken(r, totalSupply, nowBlock);
     r.rewardPerTokenStored = rpt;
-    r.lastUpdateTime = _lastTimeApplicable(r);
+    r.lastUpdateBlock = _lastBlockApplicable(r, nowBlock);
     if (user != address(0)) {
         r.rewards[user] += (userShares * (rpt - r.userRewardPerTokenPaid[user])) / REWARDS_PRECISION;
         r.userRewardPerTokenPaid[user] = rpt;
@@ -201,13 +217,18 @@ function checkpoint(Rewards storage self, VaultId id, address user, uint256 tota
 /// @param user        The account to value.
 /// @param userShares  `user`'s current share balance.
 /// @param totalSupply The current total share supply.
+/// @param nowBlock    The consumer's current block (from `_getBlockNumberish()`).
 /// @return The claimable reward amount (reward token's native decimals).
-function earned(Rewards storage self, VaultId id, address user, uint256 userShares, uint256 totalSupply)
-    view
-    returns (uint256)
-{
+function earned(
+    Rewards storage self,
+    VaultId id,
+    address user,
+    uint256 userShares,
+    uint256 totalSupply,
+    uint256 nowBlock
+) view returns (uint256) {
     Reward storage r = self._inner[id];
-    uint256 rpt = _rewardPerToken(r, totalSupply);
+    uint256 rpt = _rewardPerToken(r, totalSupply, nowBlock);
     return r.rewards[user] + (userShares * (rpt - r.userRewardPerTokenPaid[user])) / REWARDS_PRECISION;
 }
 
@@ -225,13 +246,15 @@ function earned(Rewards storage self, VaultId id, address user, uint256 userShar
 /// @param reward        Reward tokens added to the period (token's native decimals).
 /// @param totalSupply   Current total shares outstanding (for the index settle).
 /// @param onHandBalance The consumer's current reward-token balance (post-transfer), bounding the rate.
+/// @param nowBlock      The consumer's current block (from `_getBlockNumberish()`).
 /// @return self_ The capability storage, for chaining.
 function notifyRewardAmount(
     Rewards storage self,
     VaultId id,
     uint256 reward,
     uint256 totalSupply,
-    uint256 onHandBalance
+    uint256 onHandBalance,
+    uint256 nowBlock
 ) returns (Rewards storage self_) {
     Reward storage r = self._inner[id];
     if (address(r.token) == address(0)) revert RewardTokenNotSet();
@@ -239,21 +262,21 @@ function notifyRewardAmount(
     if (duration == 0) revert RewardsDurationNotSet();
 
     // Settle the global index up to now before changing the rate.
-    r.rewardPerTokenStored = _rewardPerToken(r, totalSupply);
+    r.rewardPerTokenStored = _rewardPerToken(r, totalSupply, nowBlock);
 
-    if (block.timestamp >= r.periodFinish) {
+    if (nowBlock >= r.periodFinishBlock) {
         r.rewardRate = reward / duration;
     } else {
-        uint256 leftover = (r.periodFinish - block.timestamp) * r.rewardRate;
+        uint256 leftover = (r.periodFinishBlock - nowBlock) * r.rewardRate;
         r.rewardRate = (reward + leftover) / duration;
     }
 
     // The rate must be coverable by the reward tokens actually held by the consumer.
     if (r.rewardRate > onHandBalance / duration) revert RewardRateTooHigh();
 
-    r.lastUpdateTime = block.timestamp;
-    r.periodFinish = block.timestamp + duration;
-    emit RewardAdded(id, reward, r.periodFinish);
+    r.lastUpdateBlock = nowBlock;
+    r.periodFinishBlock = nowBlock + duration;
+    emit RewardAdded(id, reward, r.periodFinishBlock);
     return self;
 }
 
@@ -265,11 +288,17 @@ function notifyRewardAmount(
 /// @param user        The account to settle and pay.
 /// @param totalSupply The current total share supply.
 /// @param userShares  `user`'s current share balance.
+/// @param nowBlock    The consumer's current block (from `_getBlockNumberish()`).
 /// @return amount The reward tokens transferred to `user` (token's native decimals).
-function claim(Rewards storage self, VaultId id, address user, uint256 totalSupply, uint256 userShares)
-    returns (uint256 amount)
-{
-    self.checkpoint(id, user, totalSupply, userShares);
+function claim(
+    Rewards storage self,
+    VaultId id,
+    address user,
+    uint256 totalSupply,
+    uint256 userShares,
+    uint256 nowBlock
+) returns (uint256 amount) {
+    self.checkpoint(id, user, totalSupply, userShares, nowBlock);
     Reward storage r = self._inner[id];
     amount = r.rewards[user];
     if (amount > 0) {

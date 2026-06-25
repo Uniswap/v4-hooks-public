@@ -42,7 +42,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
     MockERC20 token1;
 
     uint24 constant FEE_PIPS = 1_000; // 0.1%
-    uint256 constant DURATION = 1_000; // seconds → with REWARD below, rate = 1 ether/s
+    uint256 constant DURATION = 1_000; // blocks → with REWARD below, rate = 1 ether/block
     uint256 constant REWARD = 1_000 ether; // total reward over a full period
     uint256 constant SEED = 1 ether; // bootstrap/deposit share amount
 
@@ -163,7 +163,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
         _configureRewards();
         _fund(REWARD);
 
-        vm.warp(block.timestamp + DURATION / 2);
+        vm.roll(block.number + DURATION / 2);
 
         uint256 earned = hook.earned(testKey, owner);
         assertApproxEqAbs(earned, REWARD / 2, 1e6, "half-period accrual ~ half reward");
@@ -181,7 +181,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
         _configureRewards();
         _fund(REWARD);
 
-        vm.warp(block.timestamp + DURATION); // full period
+        vm.roll(block.number + DURATION); // full period
 
         uint256 eOwner = hook.earned(testKey, owner);
         uint256 eAlice = hook.earned(testKey, alice);
@@ -194,7 +194,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
         _configureRewards();
         _fund(REWARD);
 
-        vm.warp(block.timestamp + DURATION / 4);
+        vm.roll(block.number + DURATION / 4);
 
         uint256 shares = hook.sharesOf(testKey, owner);
         vm.prank(owner);
@@ -204,7 +204,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
         assertGt(earnedAtExit, 0, "accrued while staked");
 
         // No shares held → no further accrual even as the period continues.
-        vm.warp(block.timestamp + DURATION);
+        vm.roll(block.number + DURATION);
         assertEq(hook.earned(testKey, owner), earnedAtExit, "accrual frozen after full withdraw");
     }
 
