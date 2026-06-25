@@ -15,7 +15,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
+import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice ERC-20 that burns a configurable fee on `transferFrom`, delivering less than the
@@ -112,7 +112,7 @@ contract DualPoolHookFeeOnTransferTest is Test, Deployers {
         _fundOwner(1_000e18);
 
         vm.prank(owner);
-        vm.expectRevert(MultiAssetVault.TransferReceiptShortfall.selector);
+        vm.expectRevert(PoolVault.TransferReceiptShortfall.selector);
         hook.bootstrap(poolKey, 1_000e18, 1_000e18);
     }
 
@@ -138,7 +138,7 @@ contract DualPoolHookFeeOnTransferTest is Test, Deployers {
         _fundOwner(1_000e18);
 
         vm.prank(owner);
-        vm.expectRevert(MultiAssetVault.TransferReceiptShortfall.selector);
+        vm.expectRevert(PoolVault.TransferReceiptShortfall.selector);
         hook.addLiquidity(poolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
     }
 }

@@ -22,9 +22,9 @@ import {Rewards} from "./types/Rewards.sol";
 ///         swap path; and it reuses the base's share ledger. The `Rewards` capability is held as a
 ///         plain storage field (`_rewards`), and its behavior is invoked on it directly via
 ///         type-driven free functions, as `_rewards.checkpoint(...)`. It wires
-///         `MultiAssetVault._onShareCheckpoint` (which fires on bootstrap, deposit, and
-///         withdraw, before the share counts move) to `Rewards.checkpoint`, so accrual settles
-///         when LP positions change.
+///         `PoolVault._onShareCheckpoint` (which fires on bootstrap, deposit, and withdraw, before
+///         the share counts move) to `Rewards.checkpoint`, so accrual settles when LP positions
+///         change.
 ///
 ///         ## Trust model
 ///
@@ -60,7 +60,7 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     //                        CAPABILITY WIRING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Settle reward accrual on the pre-mutation balances. Overrides the `MultiAssetVault`
+    /// @notice Settle reward accrual on the pre-mutation balances. Overrides the `PoolVault`
     ///         checkpoint seam; fires on bootstrap, deposit, and withdraw, never on swaps.
     /// @param vaultId           The vault whose shares are about to change.
     /// @param user              The account whose share balance is about to change.
@@ -109,7 +109,7 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
         IERC20 token = _rewards.rewardTokenOf(id);
         if (address(token) == address(0)) revert RewardTokenNotConfigured();
         token.safeTransferFrom(msg.sender, address(this), reward);
-        _rewards.notifyRewardAmount(id, reward, _totalShares[id], token.balanceOf(address(this)));
+        _rewards.notifyRewardAmount(id, reward, _shares.totalSupply(id), token.balanceOf(address(this)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -121,7 +121,7 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     /// @return amount Reward tokens transferred to the caller.
     function claimRewards(PoolKey calldata key) external nonReentrant whenJITNotInProgress returns (uint256 amount) {
         VaultId id = _vaultIdFor(key.toId());
-        amount = _rewards.claim(id, msg.sender, _totalShares[id], _userShares[id][msg.sender]);
+        amount = _rewards.claim(id, msg.sender, _shares.totalSupply(id), _shares.balanceOf(id, msg.sender));
     }
 
     /// @notice Reward tokens `user` could claim right now on a pool.
@@ -130,6 +130,6 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     /// @return The claimable reward amount.
     function earned(PoolKey calldata key, address user) external view returns (uint256) {
         VaultId id = _vaultIdFor(key.toId());
-        return _rewards.earned(id, user, _userShares[id][user], _totalShares[id]);
+        return _rewards.earned(id, user, _shares.balanceOf(id, user), _shares.totalSupply(id));
     }
 }

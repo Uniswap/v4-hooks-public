@@ -647,7 +647,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param user The address whose shares to look up.
     /// @return The number of pool shares held by `user`.
     function sharesOf(PoolKey calldata key, address user) external view returns (uint256) {
-        return _userShares[_vaultIdFor(key.toId())][user];
+        return _shares.balanceOf(_vaultIdFor(key.toId()), user);
     }
 
     /// @notice Returns the current liquidity distribution for a pool.

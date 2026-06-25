@@ -9,23 +9,30 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
+import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
+import {MultiAssetShareMath} from "./vault/MultiAssetShareMath.sol";
 import {VaultId} from "../types/VaultId.sol";
+import {Shares, Assets, InsufficientBootstrap, BootstrapTooSmall} from "../types/Shares.sol";
 import {Inventory} from "../types/Inventory.sol";
 import {InventoryLib} from "../libraries/InventoryLib.sol";
 
 /// @title PoolVault
 /// @author Uniswap Labs
 ///
-/// @notice Uniswap v4 hook adapter over `MultiAssetVault`. Adds the V4-specific concerns:
-///         ERC-4626 vault rehypothecation, ERC-6909 PoolManager claim handling, and per-pool
-///         tracking of raw ERC-20 attributed to the hook contract.
+/// @notice Uniswap v4 hook base for two-asset proportional share accounting. Owns the
+///         bootstrap/deposit/withdraw lifecycle and the V4-specific concerns: ERC-4626 vault
+///         rehypothecation, ERC-6909 PoolManager claim handling, and per-pool tracking of raw
+///         ERC-20 attributed to the hook contract.
 ///
-///         `MultiAssetVault` provides the share accounting, virtual-shares inflation defense,
-///         and bootstrap/deposit/withdraw lifecycle. PoolVault overrides the three asset-I/O
-///         hooks (`_pullAsset`, `_pushAsset`, `_assetBalance`) to plumb V4 currency types and
-///         vault rehypothecation, and exposes `PoolKey`-flavored entry points so subclasses
-///         (e.g., DualPoolHook) integrate naturally.
+///         The share ledger and conversion math live in the `Shares` type (the `_shares` field):
+///         non-transferable shares, the EIP-4626 virtual-shares inflation defense, and the
+///         deposit-lock invariant. PoolVault drives that ledger through the lifecycle below,
+///         supplying the pieces the type cannot: asset I/O (`_pullAsset` / `_pushAsset` over V4
+///         currencies and rehypothecation), the managed balances fed to the conversion, the
+///         per-pool decimals offset and lock duration, the `BlockNumberish` clock, and the
+///         `_onShareCheckpoint` accrual seam a composed capability overrides. It exposes
+///         `PoolKey`-flavored entry points so subclasses (e.g., SmartPoolHook) integrate
+///         naturally.
 ///
 ///         For every `(PoolId, Currency)`, PoolVault tracks three asset sources:
 ///
@@ -89,13 +96,16 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///              valuation (remaining LPs pay the exit fee). Manifests as a
 ///              first-out-wins / last-out-loses redemption race.
 ///
-/// @dev    See `MultiAssetVault` for the share-math + lifecycle. This contract is the V4
-///         binding: it translates `PoolKey` / `PoolId` / `Currency` into the base's
-///         `VaultId` / `address asset` plumbing, and adds the V4-specific helpers
-///         (`_redeemPoolClaims`, `_recordClaims`, `_debitPoolERC20`) that the JIT lifecycle
-///         in subclasses calls during swap callbacks.
+/// @dev    See `Shares` for the ledger + conversion math and `MultiAssetShareMath` for the pure
+///         formulas. This contract binds them to V4: it translates `PoolKey` / `PoolId` /
+///         `Currency` into the `Shares` ledger's `VaultId` / `address asset` plumbing, runs the
+///         lifecycle effects-first (share counters move before asset I/O so reentrant view paths
+///         see a coherent snapshot), and adds the V4-specific helpers (`_redeemPoolClaims`,
+///         `_recordClaims`, `_debitPoolERC20`) that the JIT lifecycle in subclasses calls during
+///         swap callbacks. This base is reentrancy-agnostic; subclasses guard their own entry
+///         points (typically `nonReentrant` plus a JIT-cycle lock).
 /// @custom:security-contact security@uniswap.org
-abstract contract PoolVault is MultiAssetVault {
+abstract contract PoolVault is BlockNumberish {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeERC20 for IERC20;
@@ -105,7 +115,7 @@ abstract contract PoolVault is MultiAssetVault {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Default virtual-shares offset (also the upper clamp for the per-pool derivation).
-    ///      Correct for 18-decimal pairs; matches the base `MultiAssetVault` default.
+    ///      Correct for 18-decimal pairs; the default offset when a pool derives none.
     uint8 private constant DEFAULT_DECIMALS_OFFSET = 12;
 
     /// @dev Lower clamp on the per-pool offset, keeping the inflation defense at >= `1e6`
@@ -134,9 +144,17 @@ abstract contract PoolVault is MultiAssetVault {
     ///      ...) so subclasses and the test harness keep their existing call surface.
     Inventory internal _inventory;
 
+    /// @dev Two-asset proportional share ledger composed as a type-driven `Shares` storage field,
+    ///      keyed per pool by `_vaultIdFor`. Holds the share supply, per-holder balances, the
+    ///      bootstrap-bound asset pair, and last-deposit blocks; the EIP-4626 conversion math and
+    ///      ledger invariants are attached via the file-level free functions on `Shares`. The
+    ///      lifecycle (`_bootstrap` / `_deposit` / `_withdraw`) and the typed getters (`totalShares`,
+    ///      `userShares`) drive it through `_shares.method(...)`.
+    Shares internal _shares;
+
     /// @notice Per-pool minimum deposit-lock duration, measured in `BlockNumberish`-clock blocks.
-    /// @dev    Returned by `_minDepositBlocks(VaultId)` and consumed by the base
-    ///         `MultiAssetVault._withdraw` guard. `0` means no lock (same-block withdraw allowed);
+    /// @dev    Returned by `_minDepositBlocks(VaultId)` and consumed by the `_withdraw` lock
+    ///         guard (`Shares.checkUnlocked`). `0` means no lock (same-block withdraw allowed);
     ///         `1` reproduces the legacy same-block ban; `N > 1` requires `N` blocks to elapse
     ///         between the depositor's last `_deposit` and any `_withdraw`. Set at pool
     ///         initialization and immutable thereafter.
@@ -181,9 +199,43 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param reason   The raw revert data from `vault.redeem` (for operator diagnostics).
     event VaultDrainSkipped(PoolId indexed poolId, Currency indexed currency, uint256 shares, bytes reason);
 
+    /// @notice Emitted on first deposit (bootstrap); sets the initial share/asset ratio.
+    /// @param vaultId  The vault being bootstrapped.
+    /// @param provider The address that received the bootstrap shares.
+    /// @param shares   Total shares minted (`sqrt(received0 * received1)`).
+    /// @param amount0  Asset0 transferred from the bootstrapper (post-FoT receipt).
+    /// @param amount1  Asset1 transferred from the bootstrapper (post-FoT receipt).
+    event Bootstrap(
+        VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1
+    );
+
+    /// @notice Emitted when a depositor mints shares by providing proportional token amounts.
+    /// @param vaultId  The vault receiving the deposit.
+    /// @param provider The address that received the minted shares.
+    /// @param shares   Shares minted to `provider`.
+    /// @param amount0  Asset0 transferred from the depositor (post-FoT receipt).
+    /// @param amount1  Asset1 transferred from the depositor (post-FoT receipt).
+    event Deposit(VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
+
+    /// @notice Emitted when a depositor burns shares and receives proportional token amounts.
+    /// @param vaultId  The vault being withdrawn from.
+    /// @param provider The address whose shares were burned.
+    /// @param shares   Shares burned from `provider`.
+    /// @param amount0  Asset0 transferred to the withdrawer.
+    /// @param amount1  Asset1 transferred to the withdrawer.
+    event Withdraw(VaultId indexed vaultId, address indexed provider, uint256 shares, uint256 amount0, uint256 amount1);
+
+    /// @dev A deposit/bootstrap pull delivered fewer tokens than requested (typically a
+    ///      fee-on-transfer or rebasing token). Shares are minted against the requested amount, so
+    ///      accepting under-receipt would dilute existing holders; the pull paths reject it outright.
+    error TransferReceiptShortfall();
+
     // Vault/claim errors (CrossPoolShareLeak, InsufficientPoolBalance, ZeroSharesMinted,
     // VaultChargesEntryFee, VaultChargesExitFee) are declared and reverted by `InventoryLib`.
     // Selectors are unchanged; callers that match on them reference `InventoryLib.<Error>`.
+    // Share-ledger errors (InsufficientShares, VaultNotBootstrapped, VaultAlreadyBootstrapped,
+    // DepositLocked, plus the bootstrap-floor InsufficientBootstrap / BootstrapTooSmall reverted
+    // here) are declared at file level in `Shares`; callers match on the bare error names.
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                  TYPED VIEWS (PoolKey / PoolId wrappers)
@@ -193,7 +245,7 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param poolId The pool whose share supply should be read.
     /// @return shares Total non-transferable pool shares outstanding.
     function totalShares(PoolId poolId) external view returns (uint256) {
-        return _totalShares[_vaultIdFor(poolId)];
+        return _shares.totalSupply(_vaultIdFor(poolId));
     }
 
     /// @notice Share balance for `(poolId, user)`.
@@ -201,7 +253,7 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param user The account whose share balance should be read.
     /// @return shares Non-transferable pool shares held by `user`.
     function userShares(PoolId poolId, address user) external view returns (uint256) {
-        return _userShares[_vaultIdFor(poolId)][user];
+        return _shares.balanceOf(_vaultIdFor(poolId), user);
     }
 
     /// @notice The virtual-shares offset used by a pool's bootstrap floor and share-price
@@ -316,10 +368,10 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //              PoolKey-FLAVORED LIFECYCLE (adapters into base)
+    //              SHARE LIFECYCLE (PoolKey adapters)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev See {MultiAssetVault._bootstrap}. Adapter over PoolKey/Currency.
+    /// @dev See {_bootstrap}. Adapter over PoolKey/Currency.
     function _bootstrap(PoolKey calldata key, address from, address to, uint256 amount0, uint256 amount1)
         internal
         returns (uint256 sharesMinted)
@@ -335,8 +387,8 @@ abstract contract PoolVault is MultiAssetVault {
         );
     }
 
-    /// @dev See {MultiAssetVault._deposit}. Asset pair is read from the base's `_assets`
-    ///      storage (set at bootstrap), not threaded through here.
+    /// @dev See {_deposit}. Asset pair is read from the `Shares` ledger (bound at bootstrap),
+    ///      not threaded through here.
     function _deposit(PoolKey calldata key, address from, address to, uint256 shares)
         internal
         returns (uint256 amount0, uint256 amount1)
@@ -344,13 +396,158 @@ abstract contract PoolVault is MultiAssetVault {
         return _deposit(_vaultIdFor(key.toId()), from, to, shares);
     }
 
-    /// @dev See {MultiAssetVault._withdraw}.
+    /// @dev See {_withdraw}.
     function _withdraw(PoolKey calldata key, address from, address to, uint256 shares)
         internal
         returns (uint256 amount0, uint256 amount1)
     {
         return _withdraw(_vaultIdFor(key.toId()), from, to, shares);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //              SHARE LIFECYCLE (core)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Seed a vault with its first deposit. Binds the asset pair, pulls both legs, mints
+    ///      `sqrt(received0 * received1)` shares to `to`, and stamps the initial share/asset ratio.
+    ///      Caller is responsible for authorization (owner-only on the consuming subclass).
+    ///
+    ///      Ordering is load-bearing: the pair is bound before the pulls, but it is only ever read
+    ///      by `_deposit`/`_withdraw`, which require a non-zero supply that this function sets
+    ///      atomically with the credit at the end, so an intra-bootstrap reentrant deposit would
+    ///      still revert {VaultNotBootstrapped}. The pre-mutation accrual checkpoint fires against
+    ///      the empty `(0, 0)` pre-state so a composed incentive capability initializes the
+    ///      bootstrapper's paid index here.
+    /// @param vaultId The vault to bootstrap.
+    /// @param asset0  First asset address (used by `_pullAsset`).
+    /// @param asset1  Second asset address.
+    /// @param from    The address to pull tokens from.
+    /// @param to      The address to credit shares to.
+    /// @param amount0 Asset0 to deposit.
+    /// @param amount1 Asset1 to deposit.
+    /// @return sharesMinted Total shares minted, all credited to `to`.
+    function _bootstrap(
+        VaultId vaultId,
+        address asset0,
+        address asset1,
+        address from,
+        address to,
+        uint256 amount0,
+        uint256 amount1
+    ) internal returns (uint256 sharesMinted) {
+        _shares.requireNotBootstrapped(vaultId);
+        if (amount0 == 0 || amount1 == 0) revert InsufficientBootstrap();
+
+        _shares.bindAssets(vaultId, asset0, asset1);
+
+        // FoT/rebasing reconciliation is `_pullAsset`'s responsibility; the share math uses the
+        // returned `received`, so any under-receipt shrinks bootstrap shares rather than silently
+        // diluting future holders.
+        uint256 received0 = _pullAsset(vaultId, asset0, from, amount0);
+        uint256 received1 = _pullAsset(vaultId, asset1, from, amount1);
+        if (received0 == 0 || received1 == 0) revert InsufficientBootstrap();
+
+        sharesMinted = MultiAssetShareMath.bootstrapShares(received0, received1);
+        if (sharesMinted == 0) revert InsufficientBootstrap();
+
+        // Inflation-defense floor: bootstrap shares must dwarf the virtual position so the
+        // bootstrapper's economic claim is close to 100%. `100 * 10**offset` corresponds to ~1%
+        // drift; below it the bootstrapper permanently loses non-trivial seed capital to the
+        // virtual position, and a later attacker can cheaply capture the remainder via small
+        // deposits (the EIP-4626 defense protects future depositors from each other, not the
+        // bootstrapper themselves).
+        uint256 minShares = 100 * 10 ** uint256(_decimalsOffset(vaultId));
+        if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
+
+        _onShareCheckpoint(vaultId, to, 0, 0);
+
+        _shares.creditBootstrap(vaultId, to, sharesMinted, _getBlockNumberish());
+
+        emit Bootstrap(vaultId, to, sharesMinted, received0, received1);
+    }
+
+    /// @dev Mint `shares` to `to` by pulling proportional token amounts from `from`. The
+    ///      conversion rounds up (depositor pays slightly more to prevent share-value dilution).
+    ///      Effects-first: the share counters update before any asset I/O so a reentrant view path
+    ///      sees a coherent snapshot. Shares are minted against the requested `want`, so a
+    ///      FoT/rebasing under-receipt reverts {TransferReceiptShortfall} rather than leaving the
+    ///      vault short on assets.
+    function _deposit(VaultId vaultId, address from, address to, uint256 shares)
+        internal
+        returns (uint256 amount0, uint256 amount1)
+    {
+        _shares.requireBootstrapped(vaultId);
+
+        Assets memory pair = _shares.assetPair(vaultId);
+        (uint256 want0, uint256 want1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, true);
+
+        // Settle reward/accounting accrual on the pre-deposit balances before the counters move.
+        _onShareCheckpoint(vaultId, to, _shares.totalSupply(vaultId), _shares.balanceOf(vaultId, to));
+
+        _shares.mint(vaultId, to, shares, _getBlockNumberish());
+
+        amount0 = want0 > 0 ? _pullAsset(vaultId, pair.asset0, from, want0) : 0;
+        amount1 = want1 > 0 ? _pullAsset(vaultId, pair.asset1, from, want1) : 0;
+        if (amount0 < want0 || amount1 < want1) revert TransferReceiptShortfall();
+
+        emit Deposit(vaultId, to, shares, amount0, amount1);
+    }
+
+    /// @dev Burn `shares` from `from` and send proportional token amounts to `to`. The conversion
+    ///      rounds down (withdrawer receives slightly less to prevent over-withdrawal at remaining
+    ///      holders' expense). The deposit lock and the balance check run before the accrual
+    ///      checkpoint and the counter mutation, matching the pre-extraction ordering.
+    function _withdraw(VaultId vaultId, address from, address to, uint256 shares)
+        internal
+        returns (uint256 amount0, uint256 amount1)
+    {
+        _shares.checkUnlocked(vaultId, from, _minDepositBlocks(vaultId), _getBlockNumberish());
+        _shares.requireBalance(vaultId, from, shares);
+
+        Assets memory pair = _shares.assetPair(vaultId);
+        (amount0, amount1) = _convertToAmounts(vaultId, pair.asset0, pair.asset1, shares, false);
+
+        // Settle reward/accounting accrual on the pre-withdraw balances before the counters move.
+        _onShareCheckpoint(vaultId, from, _shares.totalSupply(vaultId), _shares.balanceOf(vaultId, from));
+
+        _shares.burn(vaultId, from, shares);
+
+        if (amount0 > 0) _pushAsset(vaultId, pair.asset0, to, amount0);
+        if (amount1 > 0) _pushAsset(vaultId, pair.asset1, to, amount1);
+
+        emit Withdraw(vaultId, from, shares, amount0, amount1);
+    }
+
+    /// @dev Convert a share count to the equivalent token amounts for both assets, proportional to
+    ///      the pool's current managed balances. Reads `_assetBalanceV4` for each leg and the
+    ///      per-pool offset, then defers to the `Shares` ledger's virtual-offset formula
+    ///      (`amount = shares * (total + 1) / (supply + 10**offset)`). Reverts
+    ///      {VaultNotBootstrapped} when the supply is zero.
+    function _convertToAmounts(VaultId vaultId, address asset0, address asset1, uint256 shares, bool roundUp)
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
+        uint256 bal0 = _assetBalanceV4(poolId, Currency.wrap(asset0));
+        uint256 bal1 = _assetBalanceV4(poolId, Currency.wrap(asset1));
+        return _shares.convertToAmounts(vaultId, bal0, bal1, _decimalsOffset(vaultId), shares, roundUp);
+    }
+
+    /// @notice Accounting checkpoint fired immediately before any share-balance mutation for
+    ///         `user`, carrying the pre-mutation total and user share counts. A composed capability
+    ///         (e.g. a liquidity-incentives `Rewards`) overrides this to settle per-share accrual on
+    ///         the balances in force until now, following the Synthetix `updateReward` pattern
+    ///         (settle the global index against the old supply, then the user against their old
+    ///         balance, before the counts change). Fires on bootstrap, deposit, and withdraw.
+    ///         Default no-op, so pools without an incentive capability are unaffected.
+    /// @param vaultId           The vault whose shares are about to change.
+    /// @param user              The account whose share balance is about to change.
+    /// @param totalSharesBefore Total shares outstanding immediately before the mutation.
+    /// @param userSharesBefore  `user`'s share balance immediately before the mutation.
+    function _onShareCheckpoint(VaultId vaultId, address user, uint256 totalSharesBefore, uint256 userSharesBefore)
+        internal
+        virtual {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                          ASSET ACCOUNTING (V4)
@@ -435,10 +632,11 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //              ABSTRACT-HOOK OVERRIDES (MultiAssetVault → V4)
+    //                          ASSET I/O (V4)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @inheritdoc MultiAssetVault
+    /// @notice Pull `want` of `asset` from `from` into the hook's custody for the share lifecycle,
+    ///         returning the actual amount received.
     /// @dev Pulls underlying ERC-20 from `from` via `safeTransferFrom`, measures the actual
     ///      receipt, then routes:
     ///        - If a vault is configured for this `(pool, currency)`, deposits to the vault
@@ -454,7 +652,6 @@ abstract contract PoolVault is MultiAssetVault {
     ///      pools to non-FoT, non-rebasing tokens.
     function _pullAsset(VaultId vaultId, address asset, address from, uint256 want)
         internal
-        override
         returns (uint256 received)
     {
         if (want == 0) return 0;
@@ -477,11 +674,11 @@ abstract contract PoolVault is MultiAssetVault {
         _depositToVault(poolId, currency, received);
     }
 
-    /// @inheritdoc MultiAssetVault
+    /// @notice Push `amount` of `asset` from the hook's custody to `to` for the share lifecycle.
     /// @dev Ensures the per-pool `_state.erc20` holds at least `amount` (redeems claims
     ///      and/or withdraws from the configured vault as needed), then transfers via
     ///      `Currency.transfer` (USDT-safe).
-    function _pushAsset(VaultId vaultId, address asset, address to, uint256 amount) internal override {
+    function _pushAsset(VaultId vaultId, address asset, address to, uint256 amount) internal {
         if (amount == 0) return;
         PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
         Currency currency = Currency.wrap(asset);
@@ -490,27 +687,20 @@ abstract contract PoolVault is MultiAssetVault {
         currency.transfer(to, amount);
     }
 
-    /// @inheritdoc MultiAssetVault
-    /// @dev Sums the per-(pool, currency) ERC-4626 vault assets (via `convertToAssets`),
-    ///      ERC-6909 claims, and tracked ERC-20.
-    function _assetBalance(VaultId vaultId, address asset) internal view override returns (uint256) {
-        return _assetBalanceV4(PoolId.wrap(VaultId.unwrap(vaultId)), Currency.wrap(asset));
-    }
-
-    /// @inheritdoc MultiAssetVault
+    /// @notice Per-pool minimum deposit-lock duration, as consumed by the `_withdraw` lock guard.
     /// @dev Looks up the per-pool lock duration set at pool initialization.
-    function _minDepositBlocks(VaultId vaultId) internal view override returns (uint64) {
+    function _minDepositBlocks(VaultId vaultId) internal view returns (uint64) {
         return minDepositBlocks[PoolId.wrap(VaultId.unwrap(vaultId))];
     }
 
-    /// @inheritdoc MultiAssetVault
+    /// @notice The virtual-shares offset for a pool's inflation defense and bootstrap floor.
     /// @dev Returns the per-pool offset derived from the pair's token decimals at init (see
-    ///      {_initDecimalsOffset}). The base default `12` is correct for 18-decimal pairs but
-    ///      makes the bootstrap floor (`100 * 10**12` base units) very large for low-decimal
-    ///      pairs (e.g. ~100M tokens/side for a 6/6 stablecoin pair), so without this override
-    ///      common stablecoin pools could not be bootstrapped at a realistic size. A pool that
-    ///      was never initialized maps to `12`.
-    function _decimalsOffset(VaultId vaultId) internal view override returns (uint8) {
+    ///      {_initDecimalsOffset}). The default `12` is correct for 18-decimal pairs but makes the
+    ///      bootstrap floor (`100 * 10**12` base units) very large for low-decimal pairs (e.g.
+    ///      ~100M tokens/side for a 6/6 stablecoin pair), so the per-pool derivation lowers it so
+    ///      common stablecoin pools can be bootstrapped at a realistic size. A pool that was never
+    ///      initialized maps to `12`.
+    function _decimalsOffset(VaultId vaultId) internal view returns (uint8) {
         uint8 offset = _poolDecimalsOffset[PoolId.wrap(VaultId.unwrap(vaultId))];
         return offset == 0 ? DEFAULT_DECIMALS_OFFSET : offset;
     }

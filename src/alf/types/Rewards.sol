@@ -70,10 +70,10 @@ struct Reward {
 /// @author Uniswap Labs
 /// @notice Liquidity-incentives capability: Synthetix-style per-share reward accrual keyed by an
 ///         opaque `VaultId`, decoupled from where the share balances live. A hook that already
-///         tracks LP shares (e.g. via `MultiAssetVault`) composes this as a plain storage field
+///         tracks LP shares (e.g. via a `Shares` ledger) composes this as a plain storage field
 ///         and:
 ///
-///           1. calls {checkpoint} from `MultiAssetVault._onShareCheckpoint`, which fires
+///           1. calls {checkpoint} from `PoolVault._onShareCheckpoint`, which fires
 ///              immediately before every share mutation with the pre-mutation total and user
 ///              balances, and
 ///           2. exposes owner funding ({notifyRewardAmount}) plus a user {claim} entry point.

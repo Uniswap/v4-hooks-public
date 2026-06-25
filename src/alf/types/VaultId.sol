@@ -3,8 +3,8 @@ pragma solidity 0.8.26;
 
 /// @title VaultId
 /// @author Uniswap Labs
-/// @notice User-defined value type identifying a vault within a `MultiAssetVault` deployment.
-///         32-byte opaque key; equality is identity. Subclass conventions determine how
+/// @notice User-defined value type identifying a vault within a `Shares` ledger.
+///         32-byte opaque key; equality is identity. Consumer conventions determine how
 ///         the key is derived (e.g., PoolVault uses `PoolId.unwrap(key.toId())`; a generic
 ///         deployer might use `keccak256(abi.encode(asset0, asset1, salt))`).
 /// @dev    Type-safe wrapper around `bytes32` so callers can't accidentally pass a random

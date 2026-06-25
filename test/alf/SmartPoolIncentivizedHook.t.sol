@@ -22,7 +22,7 @@ import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @title SmartPoolIncentivizedHookTest
 /// @notice Exercises the liquidity-incentives capability composed onto SmartPoolHook: Synthetix
-///         per-share accrual settled at the MultiAssetVault share-checkpoint seam, owner funding,
+///         per-share accrual settled at the PoolVault share-checkpoint seam, owner funding,
 ///         user claims, and proof that the inherited JIT swap path is untouched by rewards.
 contract SmartPoolIncentivizedHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;

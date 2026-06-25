@@ -5,10 +5,10 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
 /// @title MultiAssetShareMath
 /// @author Uniswap Labs
-/// @notice Pure share-math helpers for `MultiAssetVault`. Extracted so peripheral
+/// @notice Pure share-math helpers for the `Shares` ledger. Extracted so peripheral
 ///         contracts (aggregator routers, off-chain quote helpers, alternative vault
-///         implementations) can compute the same conversions without inheriting the
-///         vault's state machine.
+///         implementations) can compute the same conversions without touching the
+///         ledger's storage.
 ///
 ///         Implements the EIP-4626 virtual-shares pattern in two-asset form. The vault
 ///         conversion has a bounded share/asset ratio: every read adds `1` virtual asset
@@ -31,7 +31,7 @@ library MultiAssetShareMath {
     /// @param shares          The number of shares to convert.
     /// @param total0          Real asset0 balance (output of `_assetBalance` for asset 0).
     /// @param total1          Real asset1 balance.
-    /// @param supply          Real share supply (`_totalShares[vaultId]`).
+    /// @param supply          Real share supply (`Shares.totalSupply(vaultId)`).
     /// @param decimalsOffset  Virtual-shares decimal offset (typically 12).
     /// @param roundUp         True for deposits (round up to prevent dilution), false for
     ///                        withdrawals (round down to prevent over-withdrawal).

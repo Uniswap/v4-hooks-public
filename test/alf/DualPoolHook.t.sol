@@ -20,7 +20,12 @@ import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/Bala
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
+import {
+    InsufficientBootstrap,
+    VaultNotBootstrapped,
+    InsufficientShares,
+    DepositLocked
+} from "../../src/alf/types/Shares.sol";
 
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
@@ -529,7 +534,7 @@ contract DualPoolHookTest is Test, Deployers {
         vm.startPrank(owner);
         token0.approve(address(hook), 1);
         token1.approve(address(hook), 1);
-        vm.expectRevert(MultiAssetVault.InsufficientBootstrap.selector);
+        vm.expectRevert(InsufficientBootstrap.selector);
         hook.bootstrap(testPoolKey, 0, 1);
         vm.stopPrank();
     }
@@ -543,7 +548,7 @@ contract DualPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
+        vm.expectRevert(VaultNotBootstrapped.selector);
         hook.addLiquidity(key, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
     }
@@ -647,7 +652,7 @@ contract DualPoolHookTest is Test, Deployers {
         _depositAsOperator(1_000e18);
 
         vm.prank(owner);
-        vm.expectRevert(MultiAssetVault.InsufficientShares.selector);
+        vm.expectRevert(InsufficientShares.selector);
         hook.removeLiquidity(testPoolKey, 2_000e18, 0, 0, block.timestamp);
     }
 
@@ -669,7 +674,7 @@ contract DualPoolHookTest is Test, Deployers {
 
         // Roll just below the unlock block.
         vm.roll(unlockBlock - 1);
-        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.DepositLocked.selector, unlockBlock));
+        vm.expectRevert(abi.encodeWithSelector(DepositLocked.selector, unlockBlock));
         hook.removeLiquidity(lockedKey, 100e18, 0, 0, block.timestamp);
         vm.stopPrank();
     }
@@ -1775,8 +1780,8 @@ contract DualPoolHookTest is Test, Deployers {
         PoolKey memory mvKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
-        PoolId mvId = mvKey.toId();
-        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
+
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1974,7 +1979,7 @@ contract DualPoolHookTest is Test, Deployers {
     function test_previewAddLiquidity_revertsBeforeBootstrap() public {
         // Fresh pool that hasn't been bootstrapped.
         (PoolKey memory key,) = _initSecondaryPool({vaulted: false, bootstrapAmount: 0});
-        vm.expectRevert(MultiAssetVault.VaultNotBootstrapped.selector);
+        vm.expectRevert(VaultNotBootstrapped.selector);
         hook.previewDeposit(key, 500e18);
     }
 

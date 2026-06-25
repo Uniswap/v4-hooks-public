@@ -15,7 +15,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
+import {BootstrapTooSmall} from "../../src/alf/types/Shares.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @title DualPoolHookDecimalsTest
@@ -125,7 +125,7 @@ contract DualPoolHookDecimalsTest is Test, Deployers {
         t0.approve(address(hook), 50 * 1e6);
         t1.approve(address(hook), 50 * 1e6);
         // sqrt(5e7 * 5e7) = 5e7 < 1e8 floor.
-        vm.expectRevert(abi.encodeWithSelector(MultiAssetVault.BootstrapTooSmall.selector, uint256(5e7), uint256(1e8)));
+        vm.expectRevert(abi.encodeWithSelector(BootstrapTooSmall.selector, uint256(5e7), uint256(1e8)));
         hook.bootstrap(k, 50 * 1e6, 50 * 1e6);
         vm.stopPrank();
     }
@@ -146,9 +146,7 @@ contract DualPoolHookDecimalsTest is Test, Deployers {
         t0.approve(address(hook), 1e13);
         t1.approve(address(hook), 1e13);
         // sqrt(1e13 * 1e13) = 1e13 < 1e14 floor (offset 12, unchanged).
-        vm.expectRevert(
-            abi.encodeWithSelector(MultiAssetVault.BootstrapTooSmall.selector, uint256(1e13), uint256(1e14))
-        );
+        vm.expectRevert(abi.encodeWithSelector(BootstrapTooSmall.selector, uint256(1e13), uint256(1e14)));
         hook.bootstrap(k, 1e13, 1e13);
         vm.stopPrank();
     }
