@@ -991,8 +991,8 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param poolId The pool to resolve deltas for (used for inventory-bucket derivation).
     /// @param key    The pool key (for currency references).
     function _resolveNetDelta(PoolId poolId, PoolKey calldata key) internal {
-        SettlementLib.resolveCurrency(poolManager, _bucket(poolId, key.currency0), key.currency0);
-        SettlementLib.resolveCurrency(poolManager, _bucket(poolId, key.currency1), key.currency1);
+        SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency0), key.currency0);
+        SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency1), key.currency1);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

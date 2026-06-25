@@ -11,6 +11,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {MultiAssetVault} from "./vault/MultiAssetVault.sol";
 import {VaultId} from "../types/VaultId.sol";
+import {Inventory} from "../types/Inventory.sol";
 import {InventoryLib} from "../libraries/InventoryLib.sol";
 
 /// @title PoolVault
@@ -98,7 +99,6 @@ abstract contract PoolVault is MultiAssetVault {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeERC20 for IERC20;
-    using InventoryLib for InventoryLib.Inventory;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              CONSTANTS
@@ -123,12 +123,16 @@ abstract contract PoolVault is MultiAssetVault {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Rehypothecation + claim state -- vault bindings, vault shares, raw ERC-20, and
-    ///      ERC-6909 claims -- lives in the `InventoryLib` capability at its ERC-7201
-    ///      namespaced slot, keyed by `_bucket(poolId, currency)`. PoolVault is the V4 binding:
-    ///      it owns the bucket derivation, re-exposes the `vaults` getter, and delegates every
-    ///      asset/claim operation through thin wrappers (`_vaultOf`, `_setVault`,
-    ///      `_assetBalanceV4`, `_depositToVault`, `_redeemPoolClaims`, ...) so subclasses and
-    ///      the test harness keep their existing `(PoolId, Currency)` call surface.
+    ///      ERC-6909 claims -- composed as a type-driven `Inventory` storage field, keyed per
+    ///      `(pool, currency)` by `_bucket`. Behavior is attached via the file-level free
+    ///      functions on `Inventory` (accessors, balances, claim accounting) plus the
+    ///      `InventoryLib` library (token-custody ops), so the wrappers below call
+    ///      `_inventory.method(...)` directly -- no singleton/`load()` indirection. PoolVault is
+    ///      the V4 binding: it owns the bucket derivation, re-exposes the `vaults` getter, and
+    ///      delegates every asset/claim operation through thin `(PoolId, Currency)` wrappers
+    ///      (`_vaultOf`, `_setVault`, `_assetBalanceV4`, `_depositToVault`, `_redeemPoolClaims`,
+    ///      ...) so subclasses and the test harness keep their existing call surface.
+    Inventory internal _inventory;
 
     /// @notice Per-pool minimum deposit-lock duration, measured in `BlockNumberish`-clock blocks.
     /// @dev    Returned by `_minDepositBlocks(VaultId)` and consumed by the base
@@ -288,27 +292,27 @@ abstract contract PoolVault is MultiAssetVault {
 
     /// @dev Vault bound to `(poolId, currency)`.
     function _vaultOf(PoolId poolId, Currency currency) internal view returns (IERC4626) {
-        return InventoryLib.load().vaultOf(_bucket(poolId, currency));
+        return _inventory.vaultOf(_bucket(poolId, currency));
     }
 
     /// @dev Bind `vault` to `(poolId, currency)`. Caller validates the asset match.
     function _setVault(PoolId poolId, Currency currency, IERC4626 vault) internal {
-        InventoryLib.load().setVault(_bucket(poolId, currency), vault);
+        _inventory.setVault(_bucket(poolId, currency), vault);
     }
 
     /// @dev ERC-4626 shares owned by `(poolId, currency)`.
     function _vaultSharesOf(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().sharesOf(_bucket(poolId, currency));
+        return _inventory.sharesOf(_bucket(poolId, currency));
     }
 
     /// @dev ERC-6909 claims attributed to `(poolId, currency)`.
     function _claimsOf(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().claimsOf(_bucket(poolId, currency));
+        return _inventory.claimsOf(_bucket(poolId, currency));
     }
 
     /// @dev Raw ERC-20 attributed to `(poolId, currency)`.
     function _erc20Of(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().erc20Of(_bucket(poolId, currency));
+        return _inventory.erc20Of(_bucket(poolId, currency));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -393,7 +397,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      requested withdrawal. This is bounded by the documented vault-trust assumption:
     ///      operators must use trusted ERC-4626 vaults.
     function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().assetBalance(_bucket(poolId, currency));
+        return _inventory.assetBalance(_bucket(poolId, currency));
     }
 
     /// @dev Net realizable balance for a single (pool, currency) pair. Same composition as
@@ -412,7 +416,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      reported balance is its own share-count × per-share value, independent of
     ///      what other pools sharing the same vault hold.
     function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().effectiveBalance(_bucket(poolId, currency));
+        return _inventory.effectiveBalance(_bucket(poolId, currency));
     }
 
     /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
@@ -585,7 +589,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      is legitimately a few wei below `want` on honest vaults, and that dust rounds in
     ///      the pool's favour (a deposit→withdraw round-trip never profits the depositor).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        InventoryLib.load().depositToVault(_bucket(poolId, currency), currency, amount);
+        _inventory.depositToVault(_bucket(poolId, currency), currency, amount);
     }
 
     /// @dev Deposit all of the pool's tracked ERC-20 balance for both currencies into vaults.
@@ -610,7 +614,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      and continue. LPs forgo vault yield on the un-deposited amount until the next
     ///      cycle retries, but trading remains live.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
-        (uint256 amount, bool ok, bytes memory reason) = InventoryLib.load().tryDepositAll(_bucket(poolId, currency));
+        (uint256 amount, bool ok, bytes memory reason) = _inventory.tryDepositAll(_bucket(poolId, currency));
         if (!ok) emit VaultDepositSkipped(poolId, currency, amount, reason);
     }
 
@@ -621,7 +625,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      `CrossPoolShareLeak` defensive check stays to catch a vault that consumes more
     ///      shares than the pool owns.
     function _withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        InventoryLib.load().withdrawFromVault(_bucket(poolId, currency), amount);
+        _inventory.withdrawFromVault(_bucket(poolId, currency), amount);
     }
 
     /// @dev Best-effort full withdrawal of the pool's vault position for `currency` back into
@@ -637,8 +641,7 @@ abstract contract PoolVault is MultiAssetVault {
     /// @param poolId   The pool whose vault position to drain.
     /// @param currency The currency to withdraw from the vault.
     function _drainVaultBestEffort(PoolId poolId, Currency currency) internal {
-        (uint256 shares, uint256 assets, bool ok, bytes memory reason) =
-            InventoryLib.load().tryDrain(_bucket(poolId, currency));
+        (uint256 shares, uint256 assets, bool ok, bytes memory reason) = _inventory.tryDrain(_bucket(poolId, currency));
         if (shares == 0) return;
         if (ok) emit VaultDrained(poolId, currency, shares, assets);
         else emit VaultDrainSkipped(poolId, currency, shares, reason);
@@ -655,7 +658,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      when the pool has no configured vault and insufficient ERC-20 -- there is no
     ///      separate sentinel revert.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        InventoryLib.load().ensureERC20(_bucket(poolId, currency), amount);
+        _inventory.ensureERC20(_bucket(poolId, currency), amount);
     }
 
     /// @dev Set max approval for a vault using OZ `forceApprove` (zeros out first for
@@ -719,7 +722,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      common path (claims fully backed) is unchanged: `available >= claimBal`, so the full
     ///      balance is redeemed exactly as before.
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal returns (uint256 erc20Bal) {
-        return InventoryLib.load().redeemClaims(_bucket(poolId, currency), currency, _poolManager());
+        return _inventory.redeemClaims(_bucket(poolId, currency), currency, _poolManager());
     }
 
     /// @dev The portion of a pool's recorded claims that the PoolManager cannot physically
@@ -731,20 +734,20 @@ abstract contract PoolVault is MultiAssetVault {
     ///      Returns 0 in the common case (claims fully backed), so steady-state sizing is
     ///      unaffected.
     function _unbackedClaims(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return InventoryLib.load().unbackedClaims(_bucket(poolId, currency), currency, _poolManager());
+        return _inventory.unbackedClaims(_bucket(poolId, currency), currency, _poolManager());
     }
 
     /// @dev Record newly minted ERC-6909 claims for a pool. Called after `poolManager.mint()`
     ///      in the JIT delta resolution.
     function _recordClaims(PoolId poolId, Currency currency, uint256 amount) internal {
-        InventoryLib.load().recordClaims(_bucket(poolId, currency), amount);
+        _inventory.recordClaims(_bucket(poolId, currency), amount);
     }
 
     /// @dev Debit `amount` from the pool's tracked ERC-20 balance after a PM settlement.
     ///      The actual `_settle` call is the subclass's responsibility -- this function only
     ///      updates the per-pool counter.
     function _debitPoolERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        InventoryLib.load().debitERC20(_bucket(poolId, currency), amount);
+        _inventory.debitERC20(_bucket(poolId, currency), amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
