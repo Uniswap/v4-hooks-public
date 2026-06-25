@@ -34,6 +34,7 @@ import {
     activeLiquidity
 } from "./types/Distribution.sol";
 import {ActiveLiquidity, activeLiquidityFor} from "./types/ActiveLiquidity.sol";
+import {DepositGate} from "./types/DepositGate.sol";
 
 /// @title DualPoolHook
 /// @author Uniswap Labs
@@ -132,8 +133,11 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     //                              STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Whether non-owner addresses may deposit into a pool.
-    mapping(PoolId => bool) public externalDepositsEnabled;
+    /// @dev Per-pool gate for non-owner deposits, as a type-driven `DepositGate`. Set at
+    ///      initialization via `initializePool`, toggled via `setExternalDeposits` /
+    ///      `emergencyRevokeVault`, and read by `_requireDepositAuth`. Re-exposed through the
+    ///      `externalDepositsEnabled` getter.
+    DepositGate internal _depositGate;
 
     /// @dev Per-pool liquidity distribution (tick ranges and weights), as a type-driven
     ///      `Distribution`. Set at initialization via `initializePool`, updatable via
@@ -151,11 +155,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @notice Emitted when the liquidity distribution is replaced via `setDistribution`.
     /// @param poolId The pool whose distribution was updated.
     event DistributionUpdated(PoolId indexed poolId);
-
-    /// @notice Emitted when external deposits are enabled or disabled via `setExternalDeposits`.
-    /// @param poolId The pool whose external deposits were enabled or disabled.
-    /// @param enabled Whether external deposits are enabled.
-    event ExternalDepositsUpdated(PoolId indexed poolId, bool enabled);
 
     /// @notice Emitted when the owner triggers `emergencyRevokeVault`: the pool is paused,
     ///         external deposits are disabled, and both vault token allowances are zeroed in a
@@ -303,7 +302,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         }
 
         PoolId poolId = key.toId();
-        externalDepositsEnabled[poolId] = config.allowExternalDeposits;
+        _depositGate.setOpen(poolId, config.allowExternalDeposits);
         _setVault(poolId, key.currency0, config.vault0);
         _setVault(poolId, key.currency1, config.vault1);
         minDepositBlocks[poolId] = config.minDepositBlocks;
@@ -526,8 +525,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
         _liveness.setLive(poolId, false);
 
-        externalDepositsEnabled[poolId] = false;
-        emit ExternalDepositsUpdated(poolId, false);
+        _depositGate.setOpen(poolId, false);
 
         _revokeVaultApproval(key.currency0, address(_vaultOf(poolId, key.currency0)));
         _revokeVaultApproval(key.currency1, address(_vaultOf(poolId, key.currency1)));
@@ -544,8 +542,14 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param key     The pool to configure.
     /// @param enabled True to permit non-owner `addLiquidity`, false for owner-only.
     function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOwner whenJITNotInProgress {
-        externalDepositsEnabled[key.toId()] = enabled;
-        emit ExternalDepositsUpdated(key.toId(), enabled);
+        _depositGate.setOpen(key.toId(), enabled);
+    }
+
+    /// @notice Whether non-owner addresses may currently deposit into a pool.
+    /// @param poolId The pool to read.
+    /// @return Whether non-owner deposits are permitted.
+    function externalDepositsEnabled(PoolId poolId) external view returns (bool) {
+        return _depositGate.isOpen(poolId);
     }
 
     /// @notice Disabled: DualPool uses distribution buckets instead of one active LP tick.
@@ -958,7 +962,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param poolId The pool to check authorization for.
     function _requireDepositAuth(PoolId poolId) internal view {
         if (msg.sender == owner()) return;
-        if (externalDepositsEnabled[poolId]) return;
+        if (_depositGate.isOpen(poolId)) return;
         revert Unauthorized();
     }
 
