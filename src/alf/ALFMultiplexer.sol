@@ -39,17 +39,17 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         Tier selection is purely a property of the candidate's PoolKey (hook flags +
 ///         ERC-165 advertisement); the router doesn't need to know which tier will fire.
 ///
-///           1. **IALFHook** (ERC-165 detected) — the rich path: liveness check, gas budget,
+///           1. **IALFHook** (ERC-165 detected): the rich path: liveness check, gas budget,
 ///              attestation, and per-candidate ALFHookData.
-///           2. **SwapSimulator** — for vanilla CFMM pools and hooks that don't override the
+///           2. **SwapSimulator**: for vanilla CFMM pools and hooks that don't override the
 ///              swap curve (no `beforeSwap` / `afterSwap` returns-delta flags, no dynamic-fee
 ///              hook with `BEFORE_SWAP_FLAG`). Walks the pool's real state via extsload;
 ///              exact in-frame.
-///           3. **IIndicativeQuote** (ERC-165 detected) — minimal view-style quote surface for
+///           3. **IIndicativeQuote** (ERC-165 detected): minimal view-style quote surface for
 ///              hooks that override the curve (PropAMM hooks, aggregator hooks). Invoked via
 ///              low-level `staticcall` so non-`view` implementations can satisfy the interface,
 ///              but state writes revert.
-///           4. **Reverting self-swap** — universal fallback for opaque hooks; only reached
+///           4. **Reverting self-swap**: universal fallback for opaque hooks; only reached
 ///              from the execution path (view-side `quote()` returns no quote for these).
 ///
 ///         ## Execution Model: Greedy Split Fill
@@ -68,7 +68,7 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///
 ///         ## Delta Forwarding
 ///
-///         The multiplexer's virtual pool has zero liquidity — all execution happens via nested
+///         The multiplexer's virtual pool has zero liquidity; all execution happens via nested
 ///         `poolManager.swap()` calls on the candidates' real pools. The accumulated BalanceDelta
 ///         from all fills is negated into a `BeforeSwapDelta` that offsets the virtual pool's
 ///         swap, ensuring the multiplexer's net position is zero. The outer caller receives
@@ -77,7 +77,7 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         ## Protocol Fees
 ///
 ///         The multiplexer does not charge a protocol fee on its own virtual pool. v4 charges
-///         the protocol fee natively on each NESTED candidate swap (against the candidate's
+///         the protocol fee natively on each nested candidate swap (against the candidate's
 ///         own pool), so layering an additional multiplexer-level fee would double-charge
 ///         users. Operators who want to collect fees through this routing path SHOULD
 ///         configure them on the underlying candidate pools.
@@ -86,47 +86,35 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///
 ///         Callers may set `strictTolerancePips` in MultiplexerHookData to revert if aggregate
 ///         execution falls below the best individual indicative by more than the specified
-///         tolerance. This is a downside-only check — split fill producing more output than
+///         tolerance. This is a downside-only check: split fill producing more output than
 ///         the best individual indicative (the expected case) does not trigger a revert.
 ///
-///         The baseline is the best PRE-execution indicative across the targets, and it is NOT
-///         re-derived after execution. A tier-1 indicative can be a constant-liquidity UPPER
-///         BOUND that overstates output for swaps large enough to exhaust a quoter's depth
-///         (e.g. a DualPool extrapolating its in-range buckets to the price extreme), so each
-///         candidate's contribution to the baseline is first bounded by its declared effective
-///         output liquidity (`getEffectiveLiquidity`); see `_baselineContribution`. Without
-///         that bound a large swap against a deep-looking but shallow quoter would set an
-///         unreachable threshold and trip the check on a fair fill. The bound applies only to
-///         quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact
-///         against real pool state, and tier-3/4 opaque quoters cannot be bounded (the
-///         trusted-targets note below covers them). It is computed only when strict tolerance
-///         is enabled.
-///
-///         A candidate that wins quoting but then contributes
-///         nothing — it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
-///         it quoted — drops aggregate execution below that baseline and can trip the tolerance
+///         The baseline is the best pre-execution indicative across the targets, and it is not
+///         re-derived after execution. A candidate that wins quoting but then contributes
+///         nothing (it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
+///         it quoted) drops aggregate execution below that baseline and can trip the tolerance
 ///         revert even when the other candidates filled acceptably. This is intentional and
-///         FAIL-SAFE (the check is downside-only, so the worst outcome is a revert, never a
+///         fail-safe (the check is downside-only, so the worst outcome is a revert, never a
 ///         bad fill), but it means a flaky or adversarial candidate in the target set can force
 ///         a revert ("quote-baiting") for a caller who enabled strict tolerance. Enable strict
 ///         tolerance only over trusted targets; otherwise bound slippage with a router-side
 ///         minimum-output / maximum-input check, which measures the actual aggregate execution
-///         rather than a per-candidate pre-execution baseline. NOTE: hard-failing the
-///         baseline-setting candidate instead of soft-skipping it would not help — its revert
-///         would still abort the swap — and would break soft-fail resilience for the common
+///         rather than a per-candidate pre-execution baseline. Hard-failing the
+///         baseline-setting candidate instead of soft-skipping it would not help: its revert
+///         would still abort the swap, and would break soft-fail resilience for the common
 ///         (non-strict) path, so the soft-skip is kept.
 ///
-///         ## Slippage Control — the outer `sqrtPriceLimitX96` is NOT enforced
+///         ## Slippage Control: the outer `sqrtPriceLimitX96` is not enforced
 ///
 ///         The `sqrtPriceLimitX96` a caller passes on the outer swap to the multiplexer pool has
-///         NO effect on execution. The real swaps run as nested `poolManager.swap` calls inside
+///         no effect on execution. The real swaps run as nested `poolManager.swap` calls inside
 ///         `_beforeSwap`, and those derive their own per-candidate price limits; the outer limit
 ///         is never propagated to them. The multiplexer then returns a `BeforeSwapDelta` that
 ///         offsets the outer swap, so the virtual pool itself performs no price-bounded
 ///         execution either. Callers MUST bound slippage via `strictTolerancePips` and/or a
-///         minimum-output (or maximum-input) check in their own router — treating the outer
-///         `sqrtPriceLimitX96` as an on-chain price bound (as one would for an ordinary v4 pool)
-///         provides NO protection here.
+///         minimum-output (or maximum-input) check in their own router. Treating the outer
+///         `sqrtPriceLimitX96` as an onchain price bound (as one would for an ordinary v4 pool)
+///         provides no protection here.
 ///
 ///         ## Call Flow
 ///
@@ -212,7 +200,7 @@ contract ALFMultiplexer is BaseHook {
 
     /// @dev `strictTolerancePips > 0` but no indicative baseline could be established (every
     ///      candidate's quote query failed). Strict tolerance has nothing to compare against,
-    ///      so the swap is refused — the caller asked for a guarantee the multiplexer cannot make.
+    ///      so the swap is refused: the caller asked for a guarantee the multiplexer cannot make.
     error MissingQuoteBaseline();
 
     /// @dev Pre-planned mode received a target whose `amountSpecified` sign does not match the
@@ -234,8 +222,8 @@ contract ALFMultiplexer is BaseHook {
     error TargetCurrencyMismatch(uint256 index);
 
     /// @dev An accumulated delta component equals `type(int128).min`, which `_toBeforeSwapDelta`
-    ///      cannot negate (overflow in 0.8.x). Unreachable through normal fills — v4's checked
-    ///      `toInt128` casts bound real deltas far below this — but surfaced as a clear error
+    ///      cannot negate (overflow in 0.8.x). Unreachable through normal fills (v4's checked
+    ///      `toInt128` casts bound real deltas far below this) but surfaced as a clear error
     ///      rather than an opaque arithmetic panic if a crafted candidate delta ever hits it.
     error UnrepresentableDelta();
 
@@ -370,7 +358,7 @@ contract ALFMultiplexer is BaseHook {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Blocks all liquidity additions. The multiplexer pool is a virtual dispatch mechanism
-    ///      with zero liquidity — all real execution happens on candidates' pools.
+    ///      with zero liquidity; all real execution happens on candidates' pools.
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
         pure
@@ -408,7 +396,7 @@ contract ALFMultiplexer is BaseHook {
         // 2. Tolerance enforcement (downside-only). The "downside" direction depends on swap
         //    type: exact-input swappers want MORE output (so executed < bestQuote is bad);
         //    exact-output swappers want LESS input (so executed > bestQuote is bad). Both
-        //    `executed` and `bestQuote` are in the candidate frame — v4 charges each
+        //    `executed` and `bestQuote` are in the candidate frame: v4 charges each
         //    candidate's protocol fee natively on the nested swap and the multiplexer
         //    itself does not charge a fee on top, so no frame conversion is needed.
         if (hookData.length > 0) {
@@ -417,9 +405,9 @@ contract ALFMultiplexer is BaseHook {
                 // No baseline ⇒ no protection. Refuse rather than silently accept.
                 if (bestQuote == 0) revert MissingQuoteBaseline();
 
-                // `bestQuote` is the best PRE-execution indicative and is not re-derived here.
+                // `bestQuote` is the best pre-execution indicative and is not re-derived here.
                 // A candidate that won quoting but then reverted (soft-skipped) or under-filled
-                // leaves `executed` below it and trips the revert below — fail-safe, but callers
+                // leaves `executed` below it and trips the revert below; fail-safe, but callers
                 // must enable strict tolerance only over trusted targets. See contract NatSpec
                 // "Tolerance Enforcement".
                 uint256 executed = _extractOutput(totalDelta, params);
@@ -451,7 +439,7 @@ contract ALFMultiplexer is BaseHook {
     ///
     ///      **Autonomous mode** (all targets have amountSpecified = 0):
     ///        Queries indicatives, sorts candidates by quote quality, and executes a greedy
-    ///        split fill with price limits. Fully self-contained.
+    ///        split fill with price limits. Self-contained.
     ///
     ///      **Pre-planned mode** (any target has amountSpecified != 0):
     ///        Executes targets in the given order with their specified amounts. A target
@@ -474,7 +462,7 @@ contract ALFMultiplexer is BaseHook {
         if (ahd.targets.length == 0) revert TargetsRequired();
 
         // Every target must trade the virtual pool's exact currency pair. A target on a different
-        // pair opens deltas in currencies the virtual pool can't represent — `_toBeforeSwapDelta`
+        // pair opens deltas in currencies the virtual pool can't represent; `_toBeforeSwapDelta`
         // only offsets `key.currency0`/`key.currency1`, so the leftover deltas would revert the
         // unlock with the opaque `CurrencyNotSettled`. Fail fast with an attributable error,
         // before any wasted nested swaps. Only the currency pair is constrained; fee, tickSpacing,
@@ -503,7 +491,7 @@ contract ALFMultiplexer is BaseHook {
     }
 
     /// @dev Single-winner selection used by the `quote()` view function. Iterates all targets
-    ///      and returns the quoter with the best indicative quote. Does NOT execute any swaps.
+    ///      and returns the quoter with the best indicative quote. Does not execute any swaps.
     /// @param zeroForOne      The swap direction.
     /// @param amountSpecified The swap amount (negative = exact input).
     /// @param hookData        ABI-encoded MultiplexerHookData.
@@ -566,11 +554,11 @@ contract ALFMultiplexer is BaseHook {
     }
 
     /// @dev Query a single targeted quoter for its indicative quote. Performs three checks:
-    ///      1. `isLive()` — skip quoters that report themselves as offline
-    ///      2. `maxGas()` — read the declared gas budget for the indicative call
-    ///      3. `getIndicativeQuote()` — call with the gas budget, catch failures
+    ///      1. `isLive()`: skip quoters that report themselves as offline
+    ///      2. `maxGas()`: read the declared gas budget for the indicative call
+    ///      3. `getIndicativeQuote()`: call with the gas budget, catch failures
     ///
-    ///      Returns (0, "") if any step fails. Failures are soft — the quoter is skipped
+    ///      Returns (0, "") if any step fails. Failures are soft: the quoter is skipped
     ///      without reverting the entire multiplexer.
     ///
     ///      Constructs the per-quoter ALFHookData by pairing the shared attestation data
@@ -584,16 +572,16 @@ contract ALFMultiplexer is BaseHook {
     /// @dev Resolve an indicative quote for a single target via the cheapest accurate path
     ///      available. Waterfall, in order of preference:
     ///
-    ///        1. **IALFHook** (ERC-165 detected) — full liveness/gas-budget/attestation path.
-    ///        2. **SwapSimulator** (vanilla CFMM or light hook) — tick-walks the pool's real
+    ///        1. **IALFHook** (ERC-165 detected): full liveness/gas-budget/attestation path.
+    ///        2. **SwapSimulator** (vanilla CFMM or light hook): tick-walks the pool's real
     ///           state via `extsload`. Exact when nothing outside the AMM curve modifies the
     ///           swap result. See `_isSimulatorSafe` for the gate.
-    ///        3. **IIndicativeQuote** (ERC-165 detected) — cheap view-style quote exposed by
+    ///        3. **IIndicativeQuote** (ERC-165 detected): cheap view-style quote exposed by
     ///           hooks that override the AMM curve (e.g. PropAMM aggregators).
-    ///        4. **Reverting self-swap** — signaled by returning `q == 0` here; the actual swap
+    ///        4. **Reverting self-swap**: signaled by returning `q == 0` here; the actual swap
     ///           attempt happens in `_queryTargetBySwap`.
     ///
-    ///      The caller (`_queryTargetBySwap`) uses tiers 1–3's result directly when non-zero
+    ///      The caller (`_queryTargetBySwap`) uses tiers 1-3's result directly when non-zero
     ///      and only falls back to tier 4 when this returns `(0, "")`.
     function _queryTargetView(
         TargetedQuoter memory target,
@@ -631,7 +619,7 @@ contract ALFMultiplexer is BaseHook {
         // Tier 3: IIndicativeQuote (aggregator hooks, PropAMMs, etc.).
         // `indicativeQuote` is declared non-view in the interface so that hooks whose underlying
         // resolvers happen to lack the `view` keyword can satisfy it. We invoke through
-        // `staticcall` so the EVM rejects any actual state write at runtime — read-only
+        // `staticcall` so the EVM rejects any actual state write at runtime; read-only
         // implementations succeed; any implementation that tries to mutate state reverts and we
         // treat that as "no quote available".
         if (_supportsInterface(hook, type(IIndicativeQuote).interfaceId)) {
@@ -655,14 +643,14 @@ contract ALFMultiplexer is BaseHook {
         bool zeroForOne,
         int256 amountSpecified
     ) internal view returns (uint256 q, bytes memory quoterHookData) {
-        // 1. Liveness check — skip offline quoters
+        // 1. Liveness check: skip offline quoters
         try IALFHook(hook).isLive() returns (bool live) {
             if (!live) return (0, "");
         } catch {
             return (0, "");
         }
 
-        // 2. Gas budget — used to cap the indicative call
+        // 2. Gas budget: used to cap the indicative call
         uint32 gasLimit;
         try IALFHook(hook).maxGas() returns (uint32 mg) {
             gasLimit = mg;
@@ -740,7 +728,7 @@ contract ALFMultiplexer is BaseHook {
     }
 
     /// @dev True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
-    ///      pool. The hook (if any) must NOT:
+    ///      pool. The hook (if any) must not:
     ///        - return a `beforeSwap` delta (could override curve output)
     ///        - return an `afterSwap` delta (could adjust post-swap delta)
     ///        - have `BEFORE_SWAP_FLAG` set AND be a dynamic-fee pool (would let the hook push an
@@ -763,7 +751,7 @@ contract ALFMultiplexer is BaseHook {
     }
 
     /// @dev Resolve a per-target quote. First tries the cheap waterfall in `_queryTargetView`
-    ///      (tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
+    ///      (tiers 1-3); if every tier declines (`q == 0` after the view path), falls through to
     ///      the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
     ///      hooks that override the AMM and do not advertise any indicative interface (e.g.
     ///      DualPoolHook predecessors, custom one-off integrations).
@@ -773,20 +761,20 @@ contract ALFMultiplexer is BaseHook {
         bool zeroForOne,
         int256 amountSpecified
     ) internal returns (uint256 q, bytes memory quoterHookData) {
-        // Skip targets whose hook is this contract — preventing the multiplexer from recursing into
+        // Skip targets whose hook is this contract, preventing the multiplexer from recursing into
         // itself (gas-DoS via nested MultiplexerHookData). Only the caller pays for the wasted gas,
         // but no useful execution is possible against the multiplexer's virtual pool.
         if (address(target.poolKey.hooks) == address(this)) return (0, "");
 
         (q, quoterHookData) = _queryTargetView(target, attestationData, zeroForOne, amountSpecified);
 
-        // Tiers 1–3 produced a usable quote: trust it and skip the expensive reverting-swap.
+        // Tiers 1-3 produced a usable quote: trust it and skip the expensive reverting-swap.
         // The split-fill execution path runs the real swap anyway and reconciles deltas, so the
         // indicative is only used for sorting + tolerance baseline.
         if (q != 0) return (q, quoterHookData);
 
-        // Tier 4: universal reverting-swap fallback. Fires whenever tiers 1–3 yield no usable
-        // quote (`q == 0`) — including an IALFHook or IIndicativeQuote candidate whose view-tier
+        // Tier 4: universal reverting-swap fallback. Fires whenever tiers 1-3 yield no usable
+        // quote (`q == 0`), including an IALFHook or IIndicativeQuote candidate whose view-tier
         // quote reverted or returned zero, not only opaque curve-overriding hooks. The
         // `quoterHookData` carried over from the earlier tier is reused here, so the tier-4 quote
         // and the eventual execution stay consistent.
@@ -928,7 +916,7 @@ contract ALFMultiplexer is BaseHook {
             // load-bearing protection against catch-all-not-last over-fills: if a catch-all
             // leg only partially filled, `remaining` already reflects the residual, and a
             // subsequent sized leg with `amountSpecified > remaining` (or with the wrong
-            // sign relative to the residual after a partial fill) must be capped — otherwise
+            // sign relative to the residual after a partial fill) must be capped; otherwise
             // the aggregate `totalDelta` exceeds the swapper's stated swap amount.
             int256 thisAmount = ahd.targets[i].amountSpecified != 0 ? ahd.targets[i].amountSpecified : remaining;
             if (exactInput) {
@@ -941,7 +929,7 @@ contract ALFMultiplexer is BaseHook {
             if (thisAmount == 0) continue;
 
             // Wrapped in try/catch so a single failing target does not abort the entire
-            // pre-planned multiplexer — soft-fail per target, mirroring the autonomous-mode contract.
+            // pre-planned multiplexer; soft-fail per target, mirroring the autonomous-mode contract.
             try poolManager.swap(
                 ahd.targets[i].poolKey,
                 SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
@@ -961,7 +949,7 @@ contract ALFMultiplexer is BaseHook {
             }
         }
 
-        // Fill-completely-or-revert, for BOTH directions (see `_executeFills` for the full
+        // Fill-completely-or-revert, for both directions (see `_executeFills` for the full
         // rationale): an unfilled `remaining` would leak a residual swap onto the multiplexer's
         // own zero-liquidity pool, pinning its price. An under-allocated pre-planned target set
         // (sized legs summing to less than the swap, with no catch-all) reverts here.
@@ -1013,7 +1001,7 @@ contract ALFMultiplexer is BaseHook {
             if (q == 0) continue;
 
             // Read the quoter's current pool price for price limit computation during fills.
-            // This is a snapshot — the price won't change before we fill this candidate because
+            // This is a snapshot: the price won't change before we fill this candidate because
             // each pool is filled at most once during the split fill.
             (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(ahd.targets[i].poolKey.toId());
 
@@ -1077,7 +1065,7 @@ contract ALFMultiplexer is BaseHook {
     ///      requires `limit < currentPrice` (zeroForOne) or `limit > currentPrice` (oneForZero).
     ///      In this case, the limit falls through to the extreme (MIN/MAX), which means the
     ///      current candidate is fully drained before moving to the next. This is correct but
-    ///      not optimal for the degenerate equal-price case — acceptable since the sort by
+    ///      not optimal for the degenerate equal-price case, but acceptable since the sort by
     ///      indicative ensures the better quoter (by fee/liquidity) fills first regardless.
     ///
     ///      ## Remaining Tracking
@@ -1105,7 +1093,7 @@ contract ALFMultiplexer is BaseHook {
 
         for (uint256 i = 0; i < count && remaining != 0; i++) {
             // Compute the price limit for this fill. The next candidate's sqrtPrice acts as
-            // the crossover threshold — stop filling the current candidate when its marginal
+            // the crossover threshold: stop filling the current candidate when its marginal
             // price drops to this level, and let remaining flow cascade to the next candidate.
             uint160 limit;
             if (i + 1 < count) {
@@ -1124,7 +1112,7 @@ contract ALFMultiplexer is BaseHook {
 
             // Execute the nested swap on this candidate's pool. Wrapped in try/catch so a single
             // failing target (vault DoS, malicious hook, etc.) is soft-skipped and the multiplexer
-            // continues with the next candidate — matches the indicative-phase soft-fail
+            // continues with the next candidate; matches the indicative-phase soft-fail
             // semantics in INV-MUX-3 instead of leaving fill-phase as a hard-fail asymmetry.
             try poolManager.swap(
                 candidates[i].poolKey,
@@ -1152,13 +1140,13 @@ contract ALFMultiplexer is BaseHook {
             }
         }
 
-        // Fill-completely-or-revert, for BOTH directions. Any unfilled amount after all
+        // Fill-completely-or-revert, for both directions. Any unfilled amount after all
         // candidates means the aggregate deployable liquidity was insufficient. Reverting is
         // load-bearing for the dispatcher invariant, not just an exact-output nicety: a non-zero
         // `remaining` only partially offsets the virtual pool's swap in `_toBeforeSwapDelta`, so
         // PoolManager would execute the residual `remaining` against the multiplexer's own
         // zero-liquidity pool. That pool can't consume input, so v4's "input exhausted" early
-        // stop never fires — the swap tick-walks to the caller's price limit (burning gas, up to
+        // stop never fires: the swap tick-walks to the caller's price limit (burning gas, up to
         // a full block at an extreme limit) and pins the virtual pool's price at the boundary,
         // griefing subsequent same-direction swaps. The swapper retries with a smaller amount.
         if (remaining != 0) revert InsufficientLiquidity();
@@ -1190,7 +1178,7 @@ contract ALFMultiplexer is BaseHook {
 
     /// @dev Convert the accumulated BalanceDelta from nested fills into a BeforeSwapDelta
     ///      that offsets the virtual pool's swap. The multiplexer charges no fee of its
-    ///      own — protocol fees flow through the candidates' nested v4 swaps natively.
+    ///      own; protocol fees flow through the candidates' nested v4 swaps natively.
     function _toBeforeSwapDelta(BalanceDelta delta, SwapParams calldata params)
         internal
         pure

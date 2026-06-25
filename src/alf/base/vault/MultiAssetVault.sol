@@ -10,13 +10,13 @@ import {VaultId} from "../../types/VaultId.sol";
 /// @notice Generic two-asset share-accounting primitive. Tracks proportional shares of an
 ///         abstract `(asset0, asset1)` pair indexed by an opaque `VaultId`.
 ///
-///         Shares are non-transferable internal accounting -- there is no ERC-20 share
+///         Shares are non-transferable internal accounting; there is no ERC-20 share
 ///         token. Each vault id has its own supply (`totalShares`) and per-user balance
 ///         (`userShares`). Conversion math uses the EIP-4626 virtual-shares pattern:
 ///
 ///             amount = shares * (total + 1) / (supply + 10**_decimalsOffset(vaultId))
 ///
-///         The `+1` virtual asset and `+10**offset` virtual shares exist only in math --
+///         The `+1` virtual asset and `+10**offset` virtual shares exist only in math;
 ///         they don't correspond to real entries and can never withdraw. They mitigate
 ///         post-bootstrap donation attacks: any direct donation to an underlying yield
 ///         source that the subclass reads through `_assetBalance` is captured
@@ -24,7 +24,7 @@ import {VaultId} from "../../types/VaultId.sol";
 ///
 ///         **Bootstrap drift.** The bootstrapper's economic claim on the pool's value is
 ///         `S / (S + 10**offset)` where `S = sqrt(received0 * received1)`. When `S` is
-///         comparable to or smaller than `10**offset`, the bootstrapper PERMANENTLY loses
+///         comparable to or smaller than `10**offset`, the bootstrapper permanently loses
 ///         a meaningful fraction of their seed capital to the virtual position. With the
 ///         default `_decimalsOffset = 12`, drift breakpoints look like:
 ///
@@ -55,7 +55,7 @@ import {VaultId} from "../../types/VaultId.sol";
 ///             lock rejects withdrawals that arrive earlier than
 ///             `lastDepositBlock + _minDepositBlocks(vaultId)` (measured on the
 ///             `BlockNumberish` clock) to defend against atomic fee/yield sniping. The
-///             default implementation returns `0`, which means NO lock -- same-block
+///             default implementation returns `0`, which means no lock: same-block
 ///             deposit-then-withdraw is allowed. Subclasses that need the legacy same-block
 ///             ban override `_minDepositBlocks` to return `1`; values `> 1` enforce a
 ///             longer lock.
@@ -70,14 +70,14 @@ import {VaultId} from "../../types/VaultId.sol";
 ///           - `_assetBalance(vaultId, asset) -> uint256`: read total managed assets for
 ///             the (vault, asset) pair. The conversion math reads this for both legs.
 ///
-/// @dev    This primitive is reentrancy-AGNOSTIC. Subclasses are responsible for guarding
+/// @dev    This primitive is reentrancy-agnostic. Subclasses are responsible for guarding
 ///         their own external entry points (typically with `nonReentrant` plus a JIT-cycle
 ///         lock if applicable). The internal lifecycle is effects-first where possible:
 ///         share counters are updated before asset I/O so reentrant view paths see a
 ///         coherent snapshot.
 /// @custom:security-contact security@uniswap.org
 abstract contract MultiAssetVault is BlockNumberish {
-    /// @dev Asset pair backing each vault, set at first bootstrap. Immutable thereafter --
+    /// @dev Asset pair backing each vault, set at first bootstrap. Immutable thereafter:
     ///      `_bootstrap` reverts on a re-bootstrap, so the pair never changes once set.
     struct Assets {
         address asset0;
@@ -112,7 +112,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     //                              EVENTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Emitted on first deposit (bootstrap) -- sets the initial share/asset ratio.
+    /// @notice Emitted on first deposit (bootstrap); sets the initial share/asset ratio.
     /// @param vaultId  The vault being bootstrapped.
     /// @param provider The address that received the bootstrap shares.
     /// @param shares   Total shares minted (`sqrt(received0 * received1)`).
@@ -164,7 +164,7 @@ abstract contract MultiAssetVault is BlockNumberish {
 
     /// @dev Bootstrap shares (`sqrt(received0 * received1)`) are below the inflation-defense
     ///      floor of `100 * 10**_decimalsOffset(vaultId)`. Below this floor, the bootstrapper
-    ///      PERMANENTLY loses more than ~1% of their seed capital to the virtual position.
+    ///      permanently loses more than ~1% of their seed capital to the virtual position.
     ///      Operators MUST seed with larger bootstrap amounts; the floor guarantees drift
     ///      stays below ~1%.
     /// @param sharesMinted The bootstrap shares the operator's amounts would have produced.
@@ -216,14 +216,14 @@ abstract contract MultiAssetVault is BlockNumberish {
         // Inflation-defense floor: bootstrap shares must dwarf the virtual position so the
         // bootstrapper's economic claim is close to 100%. `100 * 10**offset` corresponds to
         // ~1% drift; below that, the bootstrapper permanently loses non-trivial seed capital
-        // to the virtual position, AND a subsequent attacker can cheaply capture remaining
+        // to the virtual position, and a subsequent attacker can cheaply capture remaining
         // value via small `_deposit` calls (the EIP-4626 inflation defense protects future
-        // depositors from EACH OTHER, not the bootstrapper themselves).
+        // depositors from each other, not the bootstrapper themselves).
         uint256 minShares = 100 * 10 ** uint256(_decimalsOffset(vaultId));
         if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
 
         // Pre-mutation accounting checkpoint. At bootstrap the vault holds no shares, so the
-        // pre-state is (0, 0) -- an incentive capability initializes the bootstrapper's paid
+        // pre-state is (0, 0): an incentive capability initializes the bootstrapper's paid
         // index here and accrues from now.
         _onShareCheckpoint(vaultId, to, 0, 0);
 
@@ -239,7 +239,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Mint `shares` to `to` by pulling proportional token amounts from `from`. The
-    ///      conversion rounds UP per the virtual-offset formula -- depositor pays slightly
+    ///      conversion rounds up per the virtual-offset formula: depositor pays slightly
     ///      more to prevent share-value dilution. The asset pair is read from `_assets`
     ///      (set at bootstrap) so the caller can't accidentally pass a different pair.
     function _deposit(VaultId vaultId, address from, address to, uint256 shares)
@@ -262,7 +262,7 @@ abstract contract MultiAssetVault is BlockNumberish {
 
         // Shares are minted against `want{0,1}`, so any FoT/rebasing under-receipt would
         // dilute existing shareholders by leaving the vault short on assets. Fail-fast on
-        // under-receipt -- subclasses that want to support FoT must compensate inside
+        // under-receipt: subclasses that want to support FoT must compensate inside
         // `_pullAsset` (e.g., by pre-funding the difference).
         amount0 = want0 > 0 ? _pullAsset(vaultId, pair.asset0, from, want0) : 0;
         amount1 = want1 > 0 ? _pullAsset(vaultId, pair.asset1, from, want1) : 0;
@@ -272,7 +272,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     }
 
     /// @dev Burn `shares` from `from` and send proportional token amounts to `to`. The
-    ///      conversion rounds DOWN -- withdrawer receives slightly less to prevent
+    ///      conversion rounds down: withdrawer receives slightly less to prevent
     ///      over-withdrawal at remaining shareholders' expense.
     function _withdraw(VaultId vaultId, address from, address to, uint256 shares)
         internal
@@ -307,7 +307,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///
     ///          amount = shares * (total + 1) / (supply + 10**_decimalsOffset())
     ///
-    ///      Reverts if `supply == 0` -- pre-bootstrap vaults have no defined ratio.
+    ///      Reverts if `supply == 0`: pre-bootstrap vaults have no defined ratio.
     function _convertToAmounts(VaultId vaultId, address asset0, address asset1, uint256 shares, bool roundUp)
         internal
         view
@@ -334,7 +334,7 @@ abstract contract MultiAssetVault is BlockNumberish {
     ///         `drift = 10**offset / (S + 10**offset)` where `S = sqrt(received0 * received1)`.
     ///         For ~ppm drift the offset SHOULD be 6-12 dB below `log10(S)`.
     ///
-    ///         Subclasses MAY override per-vault — for example, a stablecoin-pair vault
+    ///         Subclasses MAY override per-vault. For example, a stablecoin-pair vault
     ///         (6-decimal tokens) might return `6` to keep drift below 1ppm at typical
     ///         operator bootstrap sizes, while keeping the default `12` for 18-decimal
     ///         pairs. The override SHOULD return a value bound to the bootstrap-time
@@ -348,8 +348,8 @@ abstract contract MultiAssetVault is BlockNumberish {
 
     /// @notice Minimum number of `BlockNumberish`-clock blocks that must elapse between a
     ///         depositor's last `_deposit` and any subsequent `_withdraw` on the same vault.
-    /// @dev    Default: `0`, meaning NO lock -- the depositor may withdraw in the same block
-    ///         as their deposit. This is a deliberate semantic: subclasses opt INTO a lock
+    /// @dev    Default: `0`, meaning no lock: the depositor may withdraw in the same block
+    ///         as their deposit. This is a deliberate semantic: subclasses opt into a lock
     ///         (typically `1` to reproduce the legacy "same-block ban", or `N > 1` for a
     ///         longer hold) rather than the base imposing one. PoolVault overrides this to
     ///         read a per-pool storage value set at pool initialization.
@@ -360,12 +360,12 @@ abstract contract MultiAssetVault is BlockNumberish {
         return 0;
     }
 
-    /// @notice Accounting checkpoint fired immediately BEFORE any share-balance mutation for
+    /// @notice Accounting checkpoint fired immediately before any share-balance mutation for
     ///         `user`, carrying the pre-mutation total and user share counts. A composed
     ///         capability (e.g. a liquidity-incentives `RewardsLib`) overrides this to settle
     ///         per-share accrual on the balances in force until now, following the Synthetix
-    ///         `updateReward` pattern (settle the global index against the OLD supply, then the
-    ///         user against their OLD balance, before the counts change). Fires on bootstrap,
+    ///         `updateReward` pattern (settle the global index against the old supply, then the
+    ///         user against their old balance, before the counts change). Fires on bootstrap,
     ///         deposit, and withdraw. Default no-op, so vaults without an incentive capability
     ///         are unaffected.
     /// @param vaultId           The vault whose shares are about to change.

@@ -29,16 +29,16 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///
 ///         For every `(PoolId, Currency)`, PoolVault tracks three asset sources:
 ///
-///           1. **ERC4626 vault shares** -- assets rehypothecated into yield-bearing vaults
+///           1. **ERC4626 vault shares**: assets rehypothecated into yield-bearing vaults
 ///              between swaps. Tracked per-pool via `_vaultShares` to isolate multi-pool
 ///              deployments that share the same vault contract.
 ///
-///           2. **ERC-6909 claims** -- deferred settlement tokens minted on the PoolManager
+///           2. **ERC-6909 claims**: deferred settlement tokens minted on the PoolManager
 ///              when afterSwap produces a positive delta but the PM lacks ERC-20 (because the
 ///              swapper hasn't settled yet). Tracked per-pool via `_state.claims` and redeemed
 ///              in the next `_redeemPoolClaims`.
 ///
-///           3. **Raw ERC-20** -- tokens held directly by the hook, attributed per-pool via
+///           3. **Raw ERC-20**: tokens held directly by the hook, attributed per-pool via
 ///              `_state.erc20`. Source of truth for pool ownership; the hook's global
 ///              `balanceOf` is never read for accounting decisions.
 ///
@@ -48,7 +48,7 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///         (hook → user) uses v4-core's `Currency.transfer`. Vault approvals use
 ///         `forceApprove` for tokens that require zero-out-first.
 ///
-///         **Native ETH is NOT supported** -- subclasses must reject `address(0)` currencies
+///         **Native ETH is not supported**: subclasses must reject `address(0)` currencies
 ///         at pool initialization. PoolVault calls `IERC20.safeTransferFrom(address(0), ...)`
 ///         which would revert; the subclass-level rejection makes the failure mode explicit
 ///         at init.
@@ -58,12 +58,12 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///         PoolVault interacts with the configured per-currency vault solely through the
 ///         ERC-4626 interface (`deposit`, `withdraw`, `convertToAssets`, `convertToShares`,
 ///         `previewRedeem`). It deliberately does NOT read `maxWithdraw` on the hot paths
-///         (`_effectiveBalance`, `_withdrawFromVault`, `_ensureERC20`) — curated/gated vaults
+///         (`_effectiveBalance`, `_withdrawFromVault`, `_ensureERC20`): curated/gated vaults
 ///         such as Morpho VaultV2 return `0` from `maxWithdraw` by construction because they
 ///         cannot honestly bound a single-block withdrawal cap across their internal
 ///         allocations. Effective-liquidity sizing instead uses `previewRedeem(shares)`,
 ///         which on every conformant vault reflects the realizable exit value per share
-///         (net of any exit fee), and `withdraw` is called optimistically — if the vault
+///         (net of any exit fee), and `withdraw` is called optimistically: if the vault
 ///         cannot satisfy the request from its current allocation, the revert bubbles up
 ///         through `_pushAsset` → swap callback → `beforeSwap`. Routers and aggregators
 ///         see an explicit failure and route elsewhere.
@@ -73,12 +73,12 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///         trust not to enable a denial gate against the hook. See `_depositToVault` for
 ///         the broader vault-trust model.
 ///
-///         **Fee-on-entry / fee-on-exit vaults are NOT supported** and are rejected at
+///         **Fee-on-entry / fee-on-exit vaults are not supported** and are rejected at
 ///         pool initialization by `_requireFeelessVault`. Two reasons compound:
 ///
 ///           1. JIT-cycle bleed. Every swap does `_ensureERC20` (vault withdraw) → swap →
 ///              `_depositAllToVaults` (vault deposit). A vault with `f_in + f_out = 20bps`
-///              of round-trip fee bleeds 20bps of the JIT-deployed notional PER SWAP,
+///              of round-trip fee bleeds 20bps of the JIT-deployed notional per swap,
 ///              charged entirely to LPs. At typical hook utilization this dwarfs the LP
 ///              fee revenue.
 ///
@@ -122,12 +122,12 @@ abstract contract PoolVault is MultiAssetVault {
     //                              STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Rehypothecation + claim state -- vault bindings, vault shares, raw ERC-20, and
-    ///      ERC-6909 claims -- composed as a type-driven `Inventory` storage field, keyed per
+    /// @dev Rehypothecation + claim state (vault bindings, vault shares, raw ERC-20, and
+    ///      ERC-6909 claims) composed as a type-driven `Inventory` storage field, keyed per
     ///      `(pool, currency)` by `_bucket`. Behavior is attached via the file-level free
     ///      functions on `Inventory` (accessors, balances, claim accounting) plus the
     ///      `InventoryLib` library (token-custody ops), so the wrappers below call
-    ///      `_inventory.method(...)` directly -- no singleton/`load()` indirection. PoolVault is
+    ///      `_inventory.method(...)` directly. PoolVault is
     ///      the V4 binding: it owns the bucket derivation, re-exposes the `vaults` getter, and
     ///      delegates every asset/claim operation through thin `(PoolId, Currency)` wrappers
     ///      (`_vaultOf`, `_setVault`, `_assetBalanceV4`, `_depositToVault`, `_redeemPoolClaims`,
@@ -156,7 +156,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///         vault's `maxDeposit` cap is reached, or a curated allocator declined). The
     ///         underlying ERC-20 stays in `_state.erc20` and is retried on the next swap.
     ///         LP share math remains correct because `_assetBalanceV4` reads
-    ///         `s.erc20 + s.claims + vault` -- LPs simply forgo vault yield on the
+    ///         `s.erc20 + s.claims + vault`; LPs forgo vault yield on the
     ///         non-deposited portion until the cap loosens or operator intervention.
     /// @param poolId   The pool whose afterSwap re-deposit was skipped.
     /// @param currency The currency whose vault rejected the deposit.
@@ -367,16 +367,16 @@ abstract contract PoolVault is MultiAssetVault {
     ///      ERC4626 vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool
     ///      ERC-20 holdings.
     ///
-    ///      DELIBERATE VIEW-ASYMMETRY WITH `_effectiveBalance`:
-    ///        - `_assetBalanceV4` uses `vault.convertToAssets(shares)` -- the gross per-share
+    ///      Deliberate view-asymmetry with `_effectiveBalance`:
+    ///        - `_assetBalanceV4` uses `vault.convertToAssets(shares)`: the gross per-share
     ///          economic value of the pool's vault stake, ignoring any vault-side exit fee
     ///          or temporary throttle.
-    ///        - `_effectiveBalance` uses `vault.previewRedeem(shares)` -- the net amount the
+    ///        - `_effectiveBalance` uses `vault.previewRedeem(shares)`: the net amount the
     ///          vault would deliver right now if the hook called `withdraw`/`redeem` for
     ///          those shares (i.e., after exit fees, but still subject to single-block
     ///          liquidity races on curated/gated vaults).
     ///
-    ///      Why the asymmetry: LP shares represent the pool's TRUE economic claim, including
+    ///      Why the asymmetry: LP shares represent the pool's true economic claim, including
     ///      capital that is temporarily locked behind a vault pause, a not-yet-realized exit
     ///      fee, or a curated allocation. Sizing LP share math by `previewRedeem` would let
     ///      a vault unilaterally tax LP exits (a vault that raises its exit-fee parameter
@@ -402,7 +402,7 @@ abstract contract PoolVault is MultiAssetVault {
 
     /// @dev Net realizable balance for a single (pool, currency) pair. Same composition as
     ///      `_assetBalanceV4`, but the vault contribution is the per-share `previewRedeem`
-    ///      output -- the amount the vault would deliver if the hook redeemed exactly the
+    ///      output: the amount the vault would deliver if the hook redeemed exactly the
     ///      pool's share count right now. Used by callers that need "what can actually be
     ///      delivered to a swapper this block": JIT deployment sizing and indicative quotes.
     ///
@@ -445,12 +445,12 @@ abstract contract PoolVault is MultiAssetVault {
     ///          (updating `_vaultShares`).
     ///        - Otherwise, credits the per-pool `_state.erc20` counter.
     ///
-    ///      Fee-on-transfer / rebasing tokens are UNSUPPORTED. The receipt is measured against
+    ///      Fee-on-transfer / rebasing tokens are unsupported. The receipt is measured against
     ///      the hook's balance delta, and any shortfall (`received < want`, i.e. the token took
-    ///      a transfer fee) reverts `TransferReceiptShortfall` — for BOTH the bootstrap and the
+    ///      a transfer fee) reverts `TransferReceiptShortfall` for both the bootstrap and the
     ///      `addLiquidity` deposit paths, so a fee-charging token can never seed an unswappable
     ///      pool. This is a deposit-time check only: it cannot catch a token that begins
-    ///      charging a fee or rebases DOWN after the deposit, so operators must still restrict
+    ///      charging a fee or rebases down after the deposit, so operators must still restrict
     ///      pools to non-FoT, non-rebasing tokens.
     function _pullAsset(VaultId vaultId, address asset, address from, uint256 want)
         internal
@@ -461,7 +461,7 @@ abstract contract PoolVault is MultiAssetVault {
         PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
         Currency currency = Currency.wrap(asset);
 
-        // Measure inbound receipt against the hook's balance, NOT the vault's, so a FoT/rebasing
+        // Measure inbound receipt against the hook's balance, not the vault's, so a FoT/rebasing
         // shortfall is detected before any vault interaction. Reject under-receipt outright
         // rather than crediting the reduced figure: a smaller bootstrap/deposit would seed a
         // pool whose recorded balances exceed what the hook can ever settle, bricking its swaps.
@@ -478,8 +478,8 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @inheritdoc MultiAssetVault
-    /// @dev Ensures the per-pool `_state.erc20` holds at least `amount` -- redeems claims
-    ///      and/or withdraws from the configured vault as needed -- then transfers via
+    /// @dev Ensures the per-pool `_state.erc20` holds at least `amount` (redeems claims
+    ///      and/or withdraws from the configured vault as needed), then transfers via
     ///      `Currency.transfer` (USDT-safe).
     function _pushAsset(VaultId vaultId, address asset, address to, uint256 amount) internal override {
         if (amount == 0) return;
@@ -506,8 +506,8 @@ abstract contract PoolVault is MultiAssetVault {
     /// @inheritdoc MultiAssetVault
     /// @dev Returns the per-pool offset derived from the pair's token decimals at init (see
     ///      {_initDecimalsOffset}). The base default `12` is correct for 18-decimal pairs but
-    ///      makes the bootstrap floor (`100 * 10**12` base units) absurdly large for low-decimal
-    ///      pairs — e.g. ~100M tokens/side for a 6/6 stablecoin pair — so without this override
+    ///      makes the bootstrap floor (`100 * 10**12` base units) very large for low-decimal
+    ///      pairs (e.g. ~100M tokens/side for a 6/6 stablecoin pair), so without this override
     ///      common stablecoin pools could not be bootstrapped at a realistic size. A pool that
     ///      was never initialized maps to `12`.
     function _decimalsOffset(VaultId vaultId) internal view override returns (uint8) {
@@ -563,11 +563,11 @@ abstract contract PoolVault is MultiAssetVault {
     ///
     ///      The hook holds standing max allowance to each (pool, currency) vault. A
     ///      compromised or upgradeable vault for currency X can in principle `transferFrom`
-    ///      the hook's full balance of X -- including raw ERC-20 attributed to unrelated
+    ///      the hook's full balance of X, including raw ERC-20 attributed to unrelated
     ///      pools that share that currency. Operators MUST select vaults whose security
     ///      properties they understand (immutable / non-upgradeable preferred).
     ///
-    ///      The (pool, currency) → vault BINDING is immutable, but the standing ALLOWANCE is
+    ///      The (pool, currency) → vault binding is immutable, but the standing allowance is
     ///      not: `_revokeVaultApproval` zeroes it, and a subclass MAY expose an owner-only
     ///      emergency action that revokes the allowance, disables deposits, and pauses the
     ///      pool atomically to cap the damage window when a vault incident is detected.
@@ -606,12 +606,12 @@ abstract contract PoolVault is MultiAssetVault {
     ///
     ///      Unlike `_depositToVault` (LP deposit path, surfaces vault rejection directly to
     ///      the caller), this function wraps `vault.deposit` in `try/catch`. The caller here
-    ///      is the JIT cycle's afterSwap settlement -- the swap itself has already executed
-    ///      and a deposit-side revert would gratuitously brick swaps for an operator-vault
+    ///      is the JIT cycle's afterSwap settlement: the swap itself has already executed
+    ///      and a deposit-side revert would brick swaps for an operator-vault
     ///      misconfiguration (e.g., `maxDeposit` cap reached, curated allocator rejection,
     ///      paused vault). On failure the `try` block's state changes atomically revert, so
-    ///      `s.erc20` and `_vaultShares` are untouched; we just emit `VaultDepositSkipped`
-    ///      and continue. LPs forgo vault yield on the un-deposited amount until the next
+    ///      `s.erc20` and `_vaultShares` are untouched; the function emits `VaultDepositSkipped`
+    ///      and continues. LPs forgo vault yield on the un-deposited amount until the next
     ///      cycle retries, but trading remains live.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
         (uint256 amount, bool ok, bytes memory reason) = _inventory.tryDepositAll(_bucket(poolId, currency));
@@ -619,7 +619,7 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @dev Withdraw `amount` of `currency` from the pool's vault, crediting per-pool ERC-20.
-    ///      Calls `vault.withdraw` optimistically -- if the vault cannot satisfy the request
+    ///      Calls `vault.withdraw` optimistically: if the vault cannot satisfy the request
     ///      (paused, utilization-constrained, curated-allocation shortfall), the vault's own
     ///      revert bubbles up through `_pushAsset` → swap callback → `beforeSwap`. The
     ///      `CrossPoolShareLeak` defensive check stays to catch a vault that consumes more
@@ -655,7 +655,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      uniform PoolVault sentinel.
     ///
     ///      For non-vaulted pools the `bal - amount` subtraction below panics on underflow
-    ///      when the pool has no configured vault and insufficient ERC-20 -- there is no
+    ///      when the pool has no configured vault and insufficient ERC-20; there is no
     ///      separate sentinel revert.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
         _inventory.ensureERC20(_bucket(poolId, currency), amount);
@@ -668,13 +668,13 @@ abstract contract PoolVault is MultiAssetVault {
         InventoryLib.approveVault(currency, vault);
     }
 
-    /// @dev Zero the hook's standing approval to a vault -- the emergency counterpart to
+    /// @dev Zero the hook's standing approval to a vault: the emergency counterpart to
     ///      `_approveVault`. Uses `forceApprove(0)` (a non-zero→zero transition, safe for
     ///      USDT-style tokens) so a vault suspected compromised can no longer `transferFrom`
     ///      the hook's balance of `currency`. No-op for `address(0)` (non-vaulted currency).
     ///
-    ///      NOTE: the LP deposit path re-arms the allowance via `_ensureVaultAllowance` on the
-    ///      next `vault.deposit`. Callers MUST stop deposits (pause the pool AND disable
+    ///      Note: the LP deposit path re-arms the allowance via `_ensureVaultAllowance` on the
+    ///      next `vault.deposit`. Callers MUST stop deposits (pause the pool and disable
     ///      external deposits) in the same transaction, or the revocation will not hold.
     function _revokeVaultApproval(Currency currency, address vault) internal {
         InventoryLib.revokeVaultApproval(currency, vault);
@@ -686,8 +686,8 @@ abstract contract PoolVault is MultiAssetVault {
     ///      Detection leverages the EIP-4626 contract that `convertToShares`/`convertToAssets`
     ///      MUST NOT factor in fees, while `previewDeposit`/`previewRedeem` MUST. For a feeless
     ///      vault:
-    ///        - `previewDeposit(probe) == convertToShares(probe)` (both round DOWN)
-    ///        - `previewRedeem(probe)  == convertToAssets(probe)` (both round DOWN)
+    ///        - `previewDeposit(probe) == convertToShares(probe)` (both round down)
+    ///        - `previewRedeem(probe)  == convertToAssets(probe)` (both round down)
     ///      Any divergence is an honest report of a fee. The probe is `10**vault.decimals()`
     ///      so any per-mille-or-larger fee shows up well above rounding noise.
     ///
@@ -709,8 +709,8 @@ abstract contract PoolVault is MultiAssetVault {
     ///      returns the post-redeem balance so callers don't need a follow-up SLOAD.
     ///
     ///      A claim is an accounting credit, backed by real tokens in the PoolManager only once
-    ///      the corresponding swapper has settled. Claims minted by an EARLIER swap on this pool
-    ///      within the SAME, still-unsettled transaction (multiple swaps on one pool inside a
+    ///      the corresponding swapper has settled. Claims minted by an earlier swap on this pool
+    ///      within the same, still-unsettled transaction (multiple swaps on one pool inside a
     ///      single `unlock`) are therefore not yet physically backed: the swapper's input lands
     ///      at end-of-unlock, not now. Taking the full claim balance would attempt to transfer
     ///      tokens the PoolManager does not yet hold and revert the later swap.
@@ -729,7 +729,7 @@ abstract contract PoolVault is MultiAssetVault {
     ///      honor right now: claims whose backing settle is still pending in this transaction
     ///      (e.g. minted by an earlier same-pool swap inside one unlock). `_deployJIT` excludes
     ///      this from the deployable balance so it never sizes liquidity against funds it cannot
-    ///      source this cycle — `_redeemPoolClaims` can only redeem the backed portion, and the
+    ///      source this cycle: `_redeemPoolClaims` can only redeem the backed portion, and the
     ///      vault does not hold the claim portion, so counting it would over-draw the vault.
     ///      Returns 0 in the common case (claims fully backed), so steady-state sizing is
     ///      unaffected.
@@ -744,7 +744,7 @@ abstract contract PoolVault is MultiAssetVault {
     }
 
     /// @dev Debit `amount` from the pool's tracked ERC-20 balance after a PM settlement.
-    ///      The actual `_settle` call is the subclass's responsibility -- this function only
+    ///      The actual `_settle` call is the subclass's responsibility; this function only
     ///      updates the per-pool counter.
     function _debitPoolERC20(PoolId poolId, Currency currency, uint256 amount) internal {
         _inventory.debitERC20(_bucket(poolId, currency), amount);

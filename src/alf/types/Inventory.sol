@@ -39,10 +39,10 @@ struct CurrencyState {
 ///
 ///         ## Type-driven composition
 ///
-///         The consumer holds an `Inventory` as a plain storage field and calls behavior directly
-///         (`_inventory.assetBalance(bucket)`); there is no singleton or `load()` indirection. The
-///         pure, context-free operations (accessors, balance views, claim accounting) live here as
-///         file-level free functions bound `using { ... } for Inventory global`. The operations
+///         The consumer holds an `Inventory` as a plain storage field and calls behavior on it
+///         directly, as `_inventory.assetBalance(bucket)`. The pure, context-free operations
+///         (accessors, balance views, claim accounting) live here as file-level free functions
+///         bound `using { ... } for Inventory global`. The operations
 ///         that move tokens, and so need the consumer's execution context (`address(this)` for
 ///         vault `deposit`/`withdraw`/`redeem`, PoolManager `take`/`burn`, allowance checks), live
 ///         in `InventoryLib`, a library whose internal functions inline into the consumer so

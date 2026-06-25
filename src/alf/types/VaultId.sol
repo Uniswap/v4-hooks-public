@@ -8,7 +8,7 @@ pragma solidity 0.8.26;
 ///         the key is derived (e.g., PoolVault uses `PoolId.unwrap(key.toId())`; a generic
 ///         deployer might use `keccak256(abi.encode(asset0, asset1, salt))`).
 /// @dev    Type-safe wrapper around `bytes32` so callers can't accidentally pass a random
-///         hash where a vault key is expected. Pure value type -- no storage, no methods
+///         hash where a vault key is expected. Pure value type: no storage, no methods
 ///         beyond equality and conversion via `wrap`/`unwrap`.
 type VaultId is bytes32;
 

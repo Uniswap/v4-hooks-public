@@ -87,10 +87,9 @@ struct Reward {
 ///         The checkpoint fires only on share mutations (bootstrap, deposit, withdraw), not on
 ///         swaps, so accrual adds no swap-path gas.
 ///
-///         Type-driven: the consumer holds a `Rewards` storage field and calls these free
-///         functions directly (`rewards.checkpoint(...)`); there is no singleton/`load()`
-///         indirection. The reward token, period, and per-user accounting are isolated per
-///         `VaultId`.
+///         The consumer holds a `Rewards` storage field and calls these free functions on it
+///         directly, as `rewards.checkpoint(...)`. The reward token, period, and per-user
+///         accounting are isolated per `VaultId`.
 /// @param _inner The per-`VaultId` reward program state.
 /// @custom:security-contact security@uniswap.org
 struct Rewards {

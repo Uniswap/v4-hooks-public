@@ -15,7 +15,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 ///         to each side and `10**decimalsOffset` virtual shares to supply. The virtual
 ///         position can never withdraw, so any post-bootstrap inflation attempt
 ///         (e.g., a donation that surfaces through `_assetBalance`) is captured
-///         proportionally by it -- making such attacks uneconomic regardless of bootstrap
+///         proportionally by it, making such attacks uneconomic regardless of bootstrap
 ///         size.
 ///
 ///         All functions are `internal pure`. Stateless. Overflow-safe via Solady's

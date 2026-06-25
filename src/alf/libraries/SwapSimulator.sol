@@ -81,7 +81,7 @@ library SwapSimulator {
     /// @dev Walks ticks until the price limit is reached or the specified amount is exhausted.
     ///      Mirrors Pool.sol's swap loop with protocol fee handling.
     ///
-    ///      Soft-fail contract: returns `(0, 0)` -- never reverts -- for every input shape
+    ///      Soft-fail contract: returns `(0, 0)` (never reverts) for every input shape
     ///      `Pool.swap` would reject with `PriceLimitAlreadyExceeded` or `PriceLimitOutOfBounds`.
     ///      Routers and aggregators that take the output at face value can rely on the
     ///      invariant `(amountIn, amountOut) == (0, 0)` ⇔ "untradable at these parameters".
@@ -95,7 +95,7 @@ library SwapSimulator {
     ///      Post-loop rejection case:
     ///        - cumulative `amountCalc` or `(amountSpecified - amountRemaining)` exceeds
     ///          `int128` range. Mirrors `Pool.swap`'s final `toInt128()` cast which would
-    ///          `SafeCastOverflow()` -- triggerable with fees near `MAX_LP_FEE`, an aggressive
+    ///          `SafeCastOverflow()`: triggerable with fees near `MAX_LP_FEE`, an aggressive
     ///          correct-side limit, and the price already adjacent to the limit.
     /// @param manager The PoolManager contract.
     /// @param poolId The pool to simulate against.
@@ -150,8 +150,8 @@ library SwapSimulator {
         //   - Limit at MIN/MAX_SQRT_PRICE: simulator walks the entire bitmap to the
         //     boundary; Pool.swap reverts strictly at equality.
         //   - Limit past boundary: walk's exit conditions (`amountRemaining == 0` or
-        //     `sqrtPriceX96 == sqrtPriceLimitX96`) can never fire -- previously infinite,
-        //     now bounded by `MAX_WALK_STEPS` but still yields a non-zero tuple.
+        //     `sqrtPriceX96 == sqrtPriceLimitX96`) can never fire (previously infinite,
+        //     now bounded by `MAX_WALK_STEPS`) but still yields a non-zero tuple.
         if (zeroForOne) {
             if (sqrtPriceLimitX96 >= s.sqrtPriceX96) return (0, 0);
             if (sqrtPriceLimitX96 <= TickMath.MIN_SQRT_PRICE) return (0, 0);
@@ -184,7 +184,7 @@ library SwapSimulator {
         }
     }
 
-    /// @dev Core tick-walking loop — mirrors Pool.sol. Modifies `s` in place.
+    /// @dev Core tick-walking loop; mirrors Pool.sol. Modifies `s` in place.
     ///      Extracted from the main function to stay within stack depth limits.
     ///
     ///      Gas hotspots by impact:
@@ -204,7 +204,7 @@ library SwapSimulator {
         while (s.amountRemaining != 0 && s.sqrtPriceX96 != s.sqrtPriceLimitX96) {
             // Defense against pathological bitmap walks (empty pools, oversized swaps past
             // LP, sparse bitmaps); see `MAX_WALK_STEPS` for rationale. Hitting the cap is a
-            // graceful exit -- the caller receives the partial output accumulated so far.
+            // graceful exit: the caller receives the partial output accumulated so far.
             if (steps == MAX_WALK_STEPS) break;
             unchecked {
                 ++steps;
@@ -233,14 +233,14 @@ library SwapSimulator {
                     exactInput
                 );
 
-                // Price moved mid-tick (didn't reach boundary) — recompute tick
+                // Price moved mid-tick (didn't reach boundary): recompute tick
                 if (s.sqrtPriceX96 != sqrtPriceNextX96 && s.sqrtPriceX96 != sqrtPriceStartX96) {
                     s.tick = TickMath.getTickAtSqrtPrice(s.sqrtPriceX96);
                 }
             }
-            // sqrtPriceStartX96 is now dead — stack freed for tick crossing
+            // sqrtPriceStartX96 is now dead; stack freed for tick crossing
 
-            // Cross tick boundary — uses cached sqrtPriceNextX96
+            // Cross tick boundary; uses cached sqrtPriceNextX96
             if (s.sqrtPriceX96 == sqrtPriceNextX96) {
                 if (initialized) {
                     (, int128 liquidityNet) = manager.getTickLiquidity(poolId, tickNext);

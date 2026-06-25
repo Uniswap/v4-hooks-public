@@ -6,7 +6,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 /// @notice Standard hookData encoding for ALF hooks.
 /// @dev Callers MUST encode hookData as `abi.encode(ALFHookData(...))`.
-///      `attestationData` is optional — pass empty bytes when not applicable.
+///      `attestationData` is optional; pass empty bytes when not applicable.
 struct ALFHookData {
     bytes attestationData; // ABI-encoded attestation payload, or empty
 }
@@ -49,7 +49,7 @@ interface IALFHook is IERC165 {
     function maxGas() external view returns (uint32);
 
     /// @notice Total reserves managed by the hook (true TVL).
-    /// @dev Should include ALL assets under management: ERC-20 balances, ERC-6909 claims,
+    /// @dev Should include all assets under management: ERC-20 balances, ERC-6909 claims,
     ///      vault deposits, rehypothecated assets, etc. Returns (0, 0) for hooks that do
     ///      not manage off-pool reserves.
     /// @param key The pool key for the specific pool.

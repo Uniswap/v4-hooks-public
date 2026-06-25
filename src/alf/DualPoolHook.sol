@@ -32,13 +32,13 @@ import {SettlementLib} from "./libraries/SettlementLib.sol";
 /// @title DualPoolHook
 /// @author Uniswap Labs
 /// @notice JIT quoter with ERC4626 vault rehypothecation and multi-range liquidity
-///         distribution. Pricing is fully static — pool fees are set at deploy time via
+///         distribution. Pricing is fully static: pool fees are set at deploy time via
 ///         `PoolKey.fee` and never change.
 ///
 ///         Assets are deployed across multiple tick ranges ("buckets") during each JIT cycle,
 ///         with owner-configured weights that control capital concentration. Token allocation
 ///         across buckets uses `getLiquidityForAmounts` at the current price so that no capital
-///         sits idle — even when the price has drifted and ranges are asymmetric.
+///         sits idle, even when the price has drifted and ranges are asymmetric.
 ///
 ///         Example: 75% at [-10,10], 15% at [-30,30], 10% at [-60,60] concentrates most
 ///         liquidity around the peg while maintaining depth for larger price moves.
@@ -66,7 +66,7 @@ import {SettlementLib} from "./libraries/SettlementLib.sol";
 ///         The pool's LP fee is read from `PoolKey.fee` and charged natively by v4 on every
 ///         swap. The fee is fixed at pool-creation time and cannot be changed afterwards. The
 ///         owner has only a per-pool liveness flag (`setPoolLive`) for emergency pause; the
-///         hook intentionally **ignores hookData on swaps**.
+///         hook intentionally ignores hookData on swaps.
 ///
 ///         ## Share Accounting
 ///
@@ -112,7 +112,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @dev Transient namespace for active per-bucket JIT liquidity. The slot for bucket `i`
     ///      of pool `poolId` is `keccak256(_ACTIVE_LIQ_NAMESPACE, poolId) + i`. Lives only for
     ///      the duration of a swap callback pair (`_beforeSwap` deploys, `_afterSwap` removes),
-    ///      so transient storage is the natural fit — avoids the cold/warm SSTORE penalty
+    ///      so transient storage avoids the cold/warm SSTORE penalty
     ///      (~22K cold, ~5K warm) per bucket that storage-backed tracking incurs.
     bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("dualpoolhook.activeliq.v1");
 
@@ -138,7 +138,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param allowExternalDeposits Whether non-owner addresses may call `addLiquidity`.
     /// @param vault0               ERC4626 vault for currency0 (address(0) to hold as ERC-20).
     /// @param vault1               ERC4626 vault for currency1 (address(0) to hold as ERC-20).
-    /// @param minDepositBlocks     Per-pool deposit lock duration. `0` (default) means NO lock
+    /// @param minDepositBlocks     Per-pool deposit lock duration. `0` (default) means no lock
     ///                             and same-block deposit-then-withdraw is allowed. Must be
     ///                             `<= maxMinDepositBlocks`. Immutable after `initializePool`.
     struct PoolConfig {
@@ -284,14 +284,14 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
     /// @notice Initialize a new pool with vaults and liquidity distribution.
     /// @dev    Calls `poolManager.initialize` internally. The pool's LP fee is taken from
-    ///         `key.fee` and is static — it cannot be changed post-deployment. The vault
-    ///         BINDING is permanent — set at creation and cannot be changed — but the standing
+    ///         `key.fee` and is static: it cannot be changed post-deployment. The vault
+    ///         binding is permanent (set at creation and cannot be changed), but the standing
     ///         token allowance granted to each vault is revocable in an emergency via
     ///         `emergencyRevokeVault`. The distribution can be updated later via
     ///         `setDistribution`.
-    ///         Native ETH (currency `address(0)`) is rejected — wrap as WETH instead.
-    ///         The pool is created **not live**: swaps revert with `PoolNotLive` until the
-    ///         owner calls `bootstrap`, which mints the first shares AND flips liveness on.
+    ///         Native ETH (currency `address(0)`) is rejected; wrap as WETH instead.
+    ///         The pool is created not live: swaps revert with `PoolNotLive` until the
+    ///         owner calls `bootstrap`, which mints the first shares and flips liveness on.
     ///         This closes the post-init, pre-bootstrap window in which a swapper could
     ///         shift `slot0.sqrtPriceX96` against a zero-liquidity pool. After bootstrap,
     ///         the owner can pause/unpause via `setPoolLive`.
@@ -299,7 +299,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///         `config.minDepositBlocks` is recorded once and immutable thereafter. Its unit
     ///         is defined as blocks; this works consistently across chains by way of the
     ///         `BlockNumberish` library which returns the L2 sequencer's local block number
-    ///         on Arbitrum and `block.number` elsewhere. A value of `0` means NO lock applies
+    ///         on Arbitrum and `block.number` elsewhere. A value of `0` means no lock applies
     ///         and same-block deposit-then-withdraw is allowed; for a same-block ban set `1`.
     ///         Values above `maxMinDepositBlocks` are disallowed.
     /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee;
@@ -317,7 +317,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         if (key.fee.isDynamicFee()) revert DynamicFeeNotSupported();
 
         // Vaults are immutable per (pool, currency) post-init. Verify the configured ERC-4626
-        // vault wraps the same underlying as the currency before storing — a mismatch would
+        // vault wraps the same underlying as the currency before storing; a mismatch would
         // otherwise brick bootstrap/deposit/swap silently or, worse, account shares against an
         // unexpected underlying.
         _requireVaultMatchesCurrency(config.vault0, key.currency0);
@@ -356,11 +356,11 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         _setDistribution(poolId, config.distribution, key.tickSpacing);
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
-        // Pool starts NOT live: liveness is gated on `bootstrap` so the post-init,
+        // Pool starts not live: liveness is gated on `bootstrap` so the post-init,
         // pre-bootstrap window cannot be swapped through. Without this, a swap in that
         // window would deploy zero JIT liquidity yet may still shift slot0's
         // `sqrtPriceX96`, letting an attacker push the price away from the intended
-        // bootstrap value before the owner's bootstrap TX lands. `bootstrap` flips
+        // bootstrap value before the owner's bootstrap transaction lands. `bootstrap` flips
         // liveness to true after the first deposit succeeds.
         emit PoolCreated(poolId);
     }
@@ -370,7 +370,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Seed a pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares
-    ///         to the owner AND flips the pool to live, enabling swaps for the first time.
+    ///         to the owner and flips the pool to live, enabling swaps for the first time.
     /// @dev    Only the owner may bootstrap. The owner-supplied amounts set the initial
     ///         share/asset ratio, which is critical for asymmetric-decimal pairs (e.g.,
     ///         USDC/WETH) where a naïve 1-wei-of-each bootstrap would either be unaffordable
@@ -457,11 +457,11 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         if (block.timestamp > deadline) revert DeadlineExpired();
 
         // Route through `poolManager.unlock` so the callback can redeem any pending ERC-6909
-        // claims into `s.erc20` BEFORE the withdraw math runs. Between swaps,
+        // claims into `s.erc20` before the withdraw math runs. Between swaps,
         // `_depositAllToVaults` has swept `s.erc20` to 0 and `afterSwap` has minted positive
         // hook deltas as claims, so the LP's pro-rata `amount` (priced against
         // `s.erc20 + s.claims + vault`) cannot be sourced from `s.erc20` alone, and the vault
-        // does not hold the claim portion — without pre-redeem, exits would brick or force an
+        // does not hold the claim portion; without pre-redeem, exits would brick or force an
         // unnecessary vault withdrawal that can itself revert on paused / illiquid vaults.
         bytes memory result = poolManager.unlock(abi.encode(key, msg.sender, sharesToBurn));
         (amount0, amount1) = abi.decode(result, (uint256, uint256));
@@ -526,23 +526,23 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     }
 
     /// @notice Emergency incident-response lever for a suspect vault: in one atomic action,
-    ///         pause the pool, disable external deposits, zero BOTH currencies' vault allowances,
+    ///         pause the pool, disable external deposits, zero both currencies' vault allowances,
     ///         and best-effort withdraw the pool's vault-held assets back into the hook. Use when
     ///         a configured vault is suspected compromised, paused, or pending a risky upgrade.
-    /// @dev    The pool's vault binding is immutable, so this does NOT remove the vault. Four
+    /// @dev    The pool's vault binding is immutable, so this does not remove the vault. Four
     ///         actions run in order; the first three always succeed, the fourth is best-effort:
     ///
     ///           1. Pause (`livePools = false`): blocks swaps so the JIT cycle stops touching
     ///              the vault.
-    ///           2. Disable external deposits: load-bearing, because `addLiquidity` is NOT gated
+    ///           2. Disable external deposits: load-bearing, because `addLiquidity` is not gated
     ///              on liveness, so an external depositor could otherwise re-arm the allowance
     ///              via `_ensureVaultAllowance` on the deposit path even while the pool is paused.
     ///           3. Zero both vault allowances: removes the standing `type(uint256).max` grant
-    ///              that lets a vault `transferFrom` the hook's RAW balance of that currency
-    ///              (including ERC-20 attributed to OTHER pools sharing it; see {PoolVault}
+    ///              that lets a vault `transferFrom` the hook's raw balance of that currency
+    ///              (including ERC-20 attributed to other pools sharing it; see {PoolVault}
     ///              `Vault trust model`).
     ///           4. Best-effort drain (`_drainVaultBestEffort`): redeems the pool's vault shares
-    ///              back to raw ERC-20, rescuing assets ALREADY inside the vault, which step 3
+    ///              back to raw ERC-20, rescuing assets already inside the vault, which step 3
     ///              alone does not protect. Wrapped in try/catch: if the vault is bricked/paused
     ///              and reverts on redeem, the rescue is skipped (emits {PoolVault-VaultDrainSkipped})
     ///              but the revocation + pause above still hold. `nonReentrant` because this is
@@ -592,7 +592,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
     /// @notice Enable or disable pool liveness for emergency pause/resume.
     /// @dev    When toggled to false, `_beforeSwap` reverts with {PoolNotLive}, pausing the
-    ///         pool for swaps. The static fee (`key.fee`) is unaffected — re-enabling
+    ///         pool for swaps. The static fee (`key.fee`) is unaffected; re-enabling
     ///         immediately restores trading at the original rate.
     /// @param key  The pool to toggle.
     /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
@@ -720,7 +720,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
     /// @dev External LP additions are blocked. v4-core's `Hooks.noSelfCall` skips the hook
     ///      callback entirely when the hook itself is the caller, so the only path that
-    ///      reaches this body is an external `modifyLiquidity` call -- always reject.
+    ///      reaches this body is an external `modifyLiquidity` call, which is always rejected.
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
         pure
@@ -741,7 +741,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     }
 
     /// @dev JIT entry point. Deploys multi-range JIT liquidity under the JIT lock. v4 charges
-    ///      the static `key.fee` on the in-flight swap natively — no override is returned.
+    ///      the static `key.fee` on the in-flight swap natively; no override is returned.
     ///
     ///      Reverts when the pool is paused (`!live`). Routers and aggregators see an explicit
     ///      failure instead of the swap running against zero deployed liquidity; the
@@ -798,7 +798,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///           than vault interaction), then withdraw only the shortfall from vaults.
     ///           Unneeded capital stays in the vault earning yield during the swap window.
     ///           Phase 2 reads the pool's `_erc20[poolId][currency]` tracker rather than the
-    ///           hook's global `IERC20.balanceOf` — preserving cross-pool isolation when the
+    ///           hook's global `IERC20.balanceOf`, preserving cross-pool isolation when the
     ///           hook serves multiple pools sharing a currency.
     ///        3. **Deploy**: add each bucket as a concentrated LP position.
     ///
@@ -837,7 +837,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
         // Phase 2: liquidate claims (cheap), then pull only the shortfall from vault.
         // `_redeemPoolClaims` returns the post-redeem per-pool ERC-20 balance so we avoid a
-        // follow-up SLOAD. Per-pool tracking — NOT the hook's global balance — preserves
+        // follow-up SLOAD. Per-pool tracking, not the hook's global balance, preserves
         // cross-pool isolation.
         uint256 onHand0 = _redeemPoolClaims(poolId, key.currency0);
         uint256 onHand1 = _redeemPoolClaims(poolId, key.currency1);
@@ -866,9 +866,9 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
             uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(tickUpper);
 
             // Pre-budget the bucket against its weighted share of the balance. The earlier
-            // implementation passed the FULL `(bal0, bal1)` to `getLiquidityForAmounts` and
+            // implementation passed the full `(bal0, bal1)` to `getLiquidityForAmounts` and
             // post-scaled by `weightBps / 10_000`. That over-counted capital across in-range
-            // buckets — each bucket's `maxLiq` was sized for the entire balance, so the
+            // buckets: each bucket's `maxLiq` was sized for the entire balance, so the
             // summed liquidity (and indicative quote) overstated what the pool could actually
             // deploy. Pre-budgeting eliminates the implicit reuse and makes the indicative
             // path deterministic w.r.t. the JIT cycle's actual allocation.
@@ -939,8 +939,8 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///      storage). After removal, the hook's cumulative delta reflects the net position from
     ///      the deploy-swap-remove cycle.
     ///
-    ///      Slots are cleared after read (`tstore(slot, 0)`), NOT relied on to auto-clear at
-    ///      end of transaction. Transient storage scopes to the transaction, not the unlock —
+    ///      Slots are cleared after read (`tstore(slot, 0)`), not relied on to auto-clear at
+    ///      end of transaction. Transient storage scopes to the transaction, not the unlock,
     ///      so for multiple swaps on the same pool within one transaction, slot values would
     ///      otherwise persist across cycles. If bucket `i` deployed `liq = 100` in swap 1 and
     ///      the price moved such that bucket `i` deploys `liq = 0` in swap 2,
@@ -986,7 +986,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @dev Resolve the hook's net delta for both currencies after the JIT cycle via the single
     ///      `SettlementLib` authority. Negative delta (hook owes PM): settle from the pool's raw
     ///      ERC-20 and debit its inventory bucket. Positive delta (PM owes hook): mint ERC-6909
-    ///      claims — cannot `take` because the swapper hasn't settled yet — recorded on the
+    ///      claims (cannot `take` because the swapper hasn't settled yet), recorded on the
     ///      bucket and redeemed in the next `_deployJIT`.
     /// @param poolId The pool to resolve deltas for (used for inventory-bucket derivation).
     /// @param key    The pool key (for currency references).
@@ -1015,7 +1015,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         uint256 totalWeight;
         for (uint256 i; i < n; i++) {
             if (buckets[i].tickLower >= buckets[i].tickUpper) revert InvalidTickRange();
-            // Reject ticks outside the v4 representable range — `TickMath.getSqrtPriceAtTick`
+            // Reject ticks outside the v4 representable range; `TickMath.getSqrtPriceAtTick`
             // would otherwise revert later from inside allocation or quote paths,
             // bricking quotes and swaps for any pool with a misconfigured distribution.
             if (buckets[i].tickLower < TickMath.MIN_TICK || buckets[i].tickUpper > TickMath.MAX_TICK) {
@@ -1148,7 +1148,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     }
 
     /// @dev Verify that the ERC-4626 vault's `asset()` matches the pool's currency. Skipped
-    ///      for `address(0)` (no vault — currency held as raw ERC-20). Called only at
+    ///      for `address(0)` (no vault; currency held as raw ERC-20). Called only at
     ///      `initializePool` since the vault address is immutable thereafter.
     function _requireVaultMatchesCurrency(IERC4626 vault, Currency currency) internal view {
         if (address(vault) == address(0)) return;

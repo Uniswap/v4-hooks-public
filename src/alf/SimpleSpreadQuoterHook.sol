@@ -14,15 +14,15 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///         remove liquidity, and all LP must be concentrated in a single tick spacing at
 ///         the active tick. Owner controls pricing via a single symmetric fee override.
 ///
-///         ## Trust model — `authorizedLPs` is operator-only, not a public LP allowlist
+///         ## Trust model: `authorizedLPs` is operator-only, not a public LP allowlist
 ///
 ///         `authorizedLPs` is designed as an allowlist of addresses controlled by a single
-///         trust principal (the operator), NOT as a registry of independent third-party LPs.
+///         trust principal (the operator), not as a registry of independent third-party LPs.
 ///         Typical configurations: a treasury contract + an algorithmic-execution hot wallet;
 ///         a multisig + a routine-operations EOA; a primary and a backup. All entries are
 ///         expected to be in coordination with one another.
 ///
-///         The hook does NOT track per-LP positions. Two consequences follow:
+///         The hook does not track per-LP positions. Two consequences follow:
 ///
 ///           1. **Revocation locks the revoked LP's outstanding funds.** If LP A holds a v4
 ///              position in this pool and the owner calls `setAuthorizedLP(A, false)`, A's
@@ -37,9 +37,9 @@ import {SpreadQuoterBase} from "./base/SpreadQuoterBase.sol";
 ///              different value. Setting the same tick remains an idempotent no-op.
 ///
 ///         Use cases that need genuine multi-tenant LP (independent users supplying
-///         liquidity, hook manages spread) are OUT OF SCOPE for this contract and would
+///         liquidity, hook manages spread) are out of scope for this contract and would
 ///         require a separate hook with per-LP position tracking.
-/// @dev    This is NOT intended as a production-ready hook. It is a reference implementation
+/// @dev    This is not intended as a production-ready hook. It is a reference implementation
 ///         designed to demonstrate the core mechanics of a spread-based quoter where LP is
 ///         controlled by a single owner. Although it may work for simple use cases, it is not
 ///         expected to be used in production as-is.
@@ -69,7 +69,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @dev    `beforeInitialize` blocks direct PM init (forces operator to use
     ///         `initializePool`); `beforeAddLiquidity` / `beforeRemoveLiquidity` enforce the LP
     ///         allowlist; `beforeSwap` enforces the liveness flag. Pricing is fully static
-    ///         (`key.fee`) -- no LP fee override is returned from `_beforeSwap`.
+    ///         (`key.fee`); no LP fee override is returned from `_beforeSwap`.
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true, // block direct init (force initializePool)
@@ -117,11 +117,11 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     /// @notice Authorize or revoke an address for LP operations.
     /// @dev    Only the owner may toggle authorization. Emits {AuthorizedLPUpdated}.
     ///
-    ///         **WARNING — revocation locks outstanding liquidity.** This contract has no
+    ///         **Warning: revocation locks outstanding liquidity.** This contract has no
     ///         per-LP position tracking, so revoking `lp` while `lp` holds a v4 position in
     ///         any pool gated by this hook makes that position un-removable until
     ///         `lp` is re-authorized. Owners MUST sequence revocations as
-    ///         "drain (have `lp` remove its positions) THEN revoke" -- never the reverse.
+    ///         "drain (have `lp` remove its positions) then revoke", never the reverse.
     ///         See the contract-level `Trust model` NatSpec for more context onthe operator-only
     ///         design intent and the trade-offs involved.
     /// @param lp         The address to authorize or revoke.

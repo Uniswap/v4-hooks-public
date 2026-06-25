@@ -10,10 +10,10 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 ///
 ///         Two slots cover two distinct reentrancy paths:
 ///
-///         1. **Per-pool lock** -- read by `_afterSwap` to decide whether to run teardown.
+///         1. **Per-pool lock**: read by `_afterSwap` to decide whether to run teardown.
 ///            Set on entry to a JIT cycle, cleared on exit. Boolean (0/1).
 ///
-///         2. **Global in-flight counter** -- incremented when any pool's cycle starts,
+///         2. **Global in-flight counter**: incremented when any pool's cycle starts,
 ///            decremented on exit. Read by {whenJITNotInProgress} to reject cross-pool
 ///            reentry from a vault callback during pool A's cycle into pool B's user/admin
 ///            entry points (e.g., `addLiquidity`, `setDistribution`).
@@ -38,8 +38,8 @@ abstract contract JITLockable {
 
     /// @dev Transient slot for the global "any JIT in flight" counter. Incremented on
     ///      `_enterJITLock`, decremented on `_clearJITLock`. Read by `whenJITNotInProgress`
-    ///      to reject ANY reentrant user/admin call that originates inside an in-flight
-    ///      JIT cycle anywhere in this hook -- closing the cross-pool path that a per-pool
+    ///      to reject any reentrant user/admin call that originates inside an in-flight
+    ///      JIT cycle anywhere in this hook, closing the cross-pool path that a per-pool
     ///      lock alone would leave open.
     bytes32 private constant _JIT_GLOBAL_COUNTER_SLOT = keccak256("alf.jitlockable.global.v1");
 
@@ -83,7 +83,7 @@ abstract contract JITLockable {
         }
     }
 
-    /// @dev Returns whether ANY pool served by this hook has a JIT cycle in flight. Used by
+    /// @dev Returns whether any pool served by this hook has a JIT cycle in flight. Used by
     ///      `whenJITNotInProgress` to reject cross-pool reentry from a vault callback.
     function _isAnyJITInProgress() internal view returns (bool inProgress) {
         bytes32 slot = _JIT_GLOBAL_COUNTER_SLOT;

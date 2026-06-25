@@ -13,7 +13,7 @@ import {IALFHook, ALFHookData} from "../interfaces/IALFHook.sol";
 /// @author Uniswap Labs
 /// @notice Abstract base contract for ALF hooks. Provides hookData resolution, settlement
 ///         helpers, and the IALFHook interface. Quoters extend this and implement _price()
-///         with their proprietary pricing logic.
+///         with their pricing logic.
 /// @dev Follows the same BaseHook + DeltaResolver dual-inheritance pattern as BaseTokenWrapperHook.
 /// @custom:security-contact security@uniswap.org
 abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
@@ -83,7 +83,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     // ──── Internal: HookData Resolution ────
 
     /// @dev Decode ALFHookData and resolve attestation. The base implementation does not
-    ///      verify attestations — subclasses that want attestation support override
+    ///      verify attestations; subclasses that want attestation support override
     ///      `_resolveAttestation` with their own verification logic.
     function _resolveHookData(bytes calldata hookData) internal view returns (bool isAttested, address attester) {
         if (hookData.length == 0) return (false, address(0));

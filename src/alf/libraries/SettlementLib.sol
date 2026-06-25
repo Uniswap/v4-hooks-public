@@ -31,7 +31,7 @@ import {Inventory} from "../types/Inventory.sol";
 ///
 ///         Internal library functions inline into the consumer, so `address(this)` and token
 ///         custody resolve to the consuming hook. The `Inventory` is passed by storage reference
-///         (the consumer holds it as a field), so there is no singleton or `load()` indirection.
+///         from the field the consumer holds.
 /// @custom:security-contact security@uniswap.org
 library SettlementLib {
     using CurrencyLibrary for Currency;

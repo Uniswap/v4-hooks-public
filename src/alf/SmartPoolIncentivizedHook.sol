@@ -20,9 +20,9 @@ import {Rewards} from "./types/Rewards.sol";
 ///         The composition adds no new v4 hook callback, so the permission flags (and the
 ///         address-mining requirement) are identical to `SmartPoolHook`; it does not touch the
 ///         swap path; and it reuses the base's share ledger. The `Rewards` capability is held as a
-///         plain storage field (`_rewards`), and its behavior is invoked directly via type-driven
-///         free functions (`_rewards.checkpoint(...)`), with no singleton or `load()` indirection.
-///         It wires `MultiAssetVault._onShareCheckpoint` (which fires on bootstrap, deposit, and
+///         plain storage field (`_rewards`), and its behavior is invoked on it directly via
+///         type-driven free functions, as `_rewards.checkpoint(...)`. It wires
+///         `MultiAssetVault._onShareCheckpoint` (which fires on bootstrap, deposit, and
 ///         withdraw, before the share counts move) to `Rewards.checkpoint`, so accrual settles
 ///         when LP positions change.
 ///

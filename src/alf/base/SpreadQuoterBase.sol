@@ -43,7 +43,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     event PoolLivenessUpdated(PoolId indexed poolId, bool isLive);
 
     /// @notice Emitted when the active lower tick is changed via `setActiveTick`. The initial
-    ///         tick set by `initializePool` does NOT emit -- the tick is observable via the
+    ///         tick set by `initializePool` does not emit: the tick is observable via the
     ///         `activeLowerTick` getter and `setActiveTick` is the canonical mutation event.
     /// @param poolId           The pool whose active range changed.
     /// @param activeLowerTick  The new lower tick (always aligned to `tickSpacing`).
@@ -79,7 +79,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SpreadQuoter is
     ///      designed around a static fee fixed at pool creation; dynamic-fee pools require the
     ///      hook to maintain its own fee state and route every swap through a fee-update
-    ///      callback, which this contract is explicitly NOT built for. If a dynamic-fee pool
+    ///      callback, which this contract is not built for. If a dynamic-fee pool
     ///      slipped through, `slot0.lpFee` would stay at its `0` default for the pool's
     ///      lifetime and every swap would charge zero LP fee. Use a concrete `uint24` fee
     ///      value below `MAX_LP_FEE` instead.
@@ -91,7 +91,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     ///      party at a price the operator did not choose.
     error DirectInitializeBlocked();
 
-    /// @dev The PoolKey's hooks address does not match this contract — `initializePool` was
+    /// @dev The PoolKey's hooks address does not match this contract: `initializePool` was
     ///      called with a key intended for a different hook.
     error InvalidHookAddress();
 
@@ -114,7 +114,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
     /// @dev Delegates to `SwapSimulator.simulateSwapToPrice`. The `DYNAMIC_FEE_FLAG` and
-    ///      `OVERRIDE_FEE_FLAG` bits are stripped from `key.fee` before forwarding -- both
+    ///      `OVERRIDE_FEE_FLAG` bits are stripped from `key.fee` before forwarding; both
     ///      sit above `MAX_LP_FEE`, so the strip is a no-op for any valid static fee and a
     ///      belt-and-suspenders guard against a misconfigured pool slipping a flag bit past
     ///      `initializePool`'s rejection.
@@ -170,7 +170,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
 
     /// @dev Floor-align `tick` to `key.tickSpacing` and clamp into the v4 usable tick range so
     ///      the resulting LP range `[activeLowerTick, activeLowerTick + tickSpacing]` is always
-    ///      a valid v4 LP position -- even at the extremes near MIN/MAX_TICK. Emits no event;
+    ///      a valid v4 LP position, even at the extremes near MIN/MAX_TICK. Emits no event;
     ///      `setActiveTick` is the canonical source for `ActiveTickUpdated` post-init.
     function _setActiveTickFromInitialTick(PoolKey calldata key, int24 tick) private {
         int24 compressed = tick / key.tickSpacing;
@@ -253,9 +253,9 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     /// @notice Set the active lower tick for LP concentration.
-    /// @dev    Relocates the band that NEW LP adds will be enforced to (via
+    /// @dev    Relocates the band that new LP adds will be enforced to (via
     ///         `_enforceActiveTick` in subclasses). Refuses to relocate while the prior
-    ///         active band still references liquidity in v4 -- operators must drain the old
+    ///         active band still references liquidity in v4: operators must drain the old
     ///         band first (have authorized LPs remove all positions at the old tick) before
     ///         calling this with a different `newActiveLowerTick`. Setting the same tick is
     ///         always permitted (idempotent no-op). For the multi-LP trust trade-offs (e.g.
@@ -271,7 +271,7 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
             // band would leave them outside the enforced range, silently diverging on-chain
             // liquidity from the hook's single-band policy. `liquidityGross` at
             // `oldActiveLowerTick` is non-zero iff at least one position has either its
-            // lower or upper tick on that boundary -- and the hook enforces every position
+            // lower or upper tick on that boundary, and the hook enforces every position
             // as exactly `[activeLowerTick, activeLowerTick + tickSpacing]`, so this catches
             // every position opened under the old policy.
             (uint128 liquidityGross,) = poolManager.getTickLiquidity(poolId, oldActiveLowerTick);
