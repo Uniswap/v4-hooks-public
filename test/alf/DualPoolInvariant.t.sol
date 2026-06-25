@@ -14,7 +14,8 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {DualPoolHandler} from "./handlers/DualPoolHandler.sol";
 
@@ -80,10 +81,10 @@ contract DualPoolInvariantTest is Test, Deployers {
         testPoolId = testPoolKey.toId();
 
         // Use a 3-bucket "conservative" distribution to exercise multi-bucket allocation paths.
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](3);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
 
         DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
@@ -153,7 +154,7 @@ contract DualPoolInvariantTest is Test, Deployers {
 
     /// @notice INV-DIST-1: distribution weights always sum to exactly 10_000 bps.
     function invariant_distributionWeightsSumTo10000() public view {
-        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         uint256 totalWeight;
         for (uint256 i; i < dist.length; i++) {
             totalWeight += dist[i].weightBps;
@@ -163,7 +164,7 @@ contract DualPoolInvariantTest is Test, Deployers {
 
     /// @notice INV-DIST-2: bucket count is bounded `[1, MAX_BUCKETS=8]`.
     function invariant_distributionBucketCountBounded() public view {
-        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         assertGe(dist.length, 1, "INV-DIST-2: zero buckets");
         assertLe(dist.length, 8, "INV-DIST-2: too many buckets");
     }
@@ -196,7 +197,7 @@ contract DualPoolInvariantTest is Test, Deployers {
     /// @dev    The validator rejects zero-weight buckets at write time; this is a
     ///         post-condition cross-check.
     function invariant_distributionAllWeightsNonZero() public view {
-        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         for (uint256 i; i < dist.length; i++) {
             assertGt(dist[i].weightBps, 0, "INV-DIST: zero-weight bucket present");
         }

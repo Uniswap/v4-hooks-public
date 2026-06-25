@@ -17,7 +17,8 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @title DualPoolHookFuzzTest
@@ -75,10 +76,10 @@ contract DualPoolHookFuzzTest is Test, Deployers {
         poolId = testKey.toId();
 
         // Three-bucket conservative distribution centered on tick 0 so swaps/quotes have depth.
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](3);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
 
         DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
@@ -265,12 +266,12 @@ contract DualPoolHookFuzzTest is Test, Deployers {
     /// forge-config: default.fuzz.runs = 256
     function testFuzz_setDistribution_validShapesRoundtrip(uint256 nSeed, uint256 widthSeed) public {
         uint256 n = bound(nSeed, 1, 8);
-        DualPoolHook.LiquidityBucket[] memory dist = _validDistribution(n, widthSeed);
+        LiquidityBucket[] memory dist = _validDistribution(n, widthSeed);
 
         vm.prank(poolOwner);
         hook.setDistribution(testKey, dist);
 
-        DualPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
+        LiquidityBucket[] memory stored = hook.getDistribution(poolId);
         assertEq(stored.length, n, "bucket count not stored");
 
         uint256 sum;
@@ -298,14 +299,14 @@ contract DualPoolHookFuzzTest is Test, Deployers {
         int24 lo1,
         int24 up1
     ) public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](2);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: lo0, tickUpper: up0, weightBps: w0});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: lo1, tickUpper: up1, weightBps: w1});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](2);
+        dist[0] = LiquidityBucket({tickLower: lo0, tickUpper: up0, weightBps: w0});
+        dist[1] = LiquidityBucket({tickLower: lo1, tickUpper: up1, weightBps: w1});
 
         vm.prank(poolOwner);
         try hook.setDistribution(testKey, dist) {
             // Accepted → post-state must be fully valid.
-            DualPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
+            LiquidityBucket[] memory stored = hook.getDistribution(poolId);
             uint256 sum;
             for (uint256 i; i < stored.length; i++) {
                 assertGt(stored[i].weightBps, 0, "stored zero weight");
@@ -323,12 +324,8 @@ contract DualPoolHookFuzzTest is Test, Deployers {
     /// @dev Build a guaranteed-valid distribution of `n` buckets: weights split evenly with the
     ///      remainder folded into the last bucket (all > 0 since 10_000/8 = 1_250 >= 1), and a
     ///      symmetric tick band per bucket aligned to `TICK_SPACING` and within tick bounds.
-    function _validDistribution(uint256 n, uint256 widthSeed)
-        internal
-        pure
-        returns (DualPoolHook.LiquidityBucket[] memory dist)
-    {
-        dist = new DualPoolHook.LiquidityBucket[](n);
+    function _validDistribution(uint256 n, uint256 widthSeed) internal pure returns (LiquidityBucket[] memory dist) {
+        dist = new LiquidityBucket[](n);
         uint256 base = 10_000 / n;
         uint256 assigned;
         for (uint256 i; i < n; i++) {
@@ -338,7 +335,7 @@ contract DualPoolHookFuzzTest is Test, Deployers {
             // and well inside MAX_TICK (max half-width here is (1_000 + 7) * 10 = 10_070 ticks).
             uint256 mult = bound(widthSeed, 1, 1_000) + i;
             int24 hw = int24(uint24(mult)) * TICK_SPACING;
-            dist[i] = DualPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
+            dist[i] = LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
         }
     }
 }

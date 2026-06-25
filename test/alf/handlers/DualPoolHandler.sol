@@ -11,7 +11,8 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {DualPoolHook} from "../../../src/alf/DualPoolHook.sol";
+import {SmartPoolHook} from "../../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "../mocks/MockERC4626.sol";
 
 /// @title DualPoolHandler
@@ -241,7 +242,7 @@ contract DualPoolHandler is Test {
         ghost_setDistributionCalls++;
 
         uint256 n = bound(nSeed, 1, 8);
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](n);
+        LiquidityBucket[] memory dist = new LiquidityBucket[](n);
         uint256 base = 10_000 / n;
         uint256 assigned;
         for (uint256 i; i < n; i++) {
@@ -249,7 +250,7 @@ contract DualPoolHandler is Test {
             if (i != n - 1) assigned += base;
             uint256 mult = bound(widthSeed, 1, 1_000) + i;
             int24 hw = int24(uint24(mult)) * key.tickSpacing;
-            dist[i] = DualPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
+            dist[i] = LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
         }
 
         vm.prank(hook.owner());

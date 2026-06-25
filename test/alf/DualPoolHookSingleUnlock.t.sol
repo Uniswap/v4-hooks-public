@@ -17,7 +17,8 @@ import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/Bala
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Minimal router that performs TWO swaps on the same pool inside a SINGLE
@@ -118,9 +119,9 @@ contract DualPoolHookSingleUnlockTest is Test, Deployers {
         });
         poolId = testKey.toId();
 
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
-        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
+        LiquidityBucket[] memory dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,

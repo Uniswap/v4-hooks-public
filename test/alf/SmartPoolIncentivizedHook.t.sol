@@ -15,6 +15,7 @@ import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/Bala
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {SmartPoolIncentivizedHook} from "../../src/alf/SmartPoolIncentivizedHook.sol";
 import {RewardTokenAlreadySet} from "../../src/alf/types/Rewards.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
@@ -77,8 +78,8 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
     // ─────────────────────────────────────────── Helpers ───────────────────────────────────────────
 
     function _config() internal view returns (SmartPoolHook.PoolConfig memory) {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
         return SmartPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,

@@ -17,8 +17,9 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
-import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
+import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
 
 /// @notice Demonstration tests showing JIT swap behavior under each of the
 ///         liquidity-distribution shapes documented in
@@ -65,10 +66,10 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     /// @notice Conservative shape from the doc: most depth at the peg, tapering tails.
     ///         75% [-10, 10] / 15% [-30, 30] / 10% [-60, 60].
     function test_demo_conservative() public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](3);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
         PoolKey memory key =
             _initWithDistribution("Conservative (75/15/10 across [-10,10] [-30,30] [-60,60])", dist, 10);
         _runSwapSeries(key);
@@ -77,11 +78,11 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     /// @notice Ultra-tight stable-pair shape: 45% [-1, 1] / 35% [-5, 5] / 15% [-20, 20] /
     ///         5% [-100, 100]. Capital-efficient on tiny swaps, fragile on bigger ones.
     function test_demo_ultraTight() public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](4);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -1, tickUpper: 1, weightBps: 4_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
-        dist[3] = DualPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](4);
+        dist[0] = LiquidityBucket({tickLower: -1, tickUpper: 1, weightBps: 4_500});
+        dist[1] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
+        dist[2] = LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
+        dist[3] = LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
         PoolKey memory key =
             _initWithDistribution("Ultra-tight (45/35/15/5 across [-1,1] [-5,5] [-20,20] [-100,100])", dist, 1);
         _runSwapSeries(key);
@@ -90,11 +91,11 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     /// @notice Barbell shape: tight center plus far one-sided tails for shock absorption.
     ///         50% [-5, 5] / 20% [-25, 25] / 15% [-250, -50] / 15% [50, 250].
     function test_demo_barbell() public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](4);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 5_000});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
-        dist[3] = DualPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](4);
+        dist[0] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 5_000});
+        dist[1] = LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
+        dist[2] = LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
+        dist[3] = LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
         PoolKey memory key = _initWithDistribution("Barbell (50/20/15/15 with [-250,-50] and [50,250] tails)", dist, 5);
         _runSwapSeries(key);
     }
@@ -103,11 +104,11 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     ///         to convert token0 into token1 as price rises.
     ///         35% [-10, 10] / 40% [10, 80] / 20% [-80, 80] / 5% [-200, -80].
     function test_demo_inventorySkewed() public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](4);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: 10, tickUpper: 80, weightBps: 4_000});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 2_000});
-        dist[3] = DualPoolHook.LiquidityBucket({tickLower: -200, tickUpper: -80, weightBps: 500});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](4);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_500});
+        dist[1] = LiquidityBucket({tickLower: 10, tickUpper: 80, weightBps: 4_000});
+        dist[2] = LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 2_000});
+        dist[3] = LiquidityBucket({tickLower: -200, tickUpper: -80, weightBps: 500});
         PoolKey memory key = _initWithDistribution("Inventory-skewed (token0-heavy, upper sell wall [10,80])", dist, 10);
         _runSwapSeries(key);
     }
@@ -116,11 +117,11 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     ///         recovery band above. 30% [-8, 8] / 25% [-40, -8] / 25% [-120, -40] /
     ///         20% [8, 80].
     function test_demo_pegDefense() public {
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](4);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -8, tickUpper: 8, weightBps: 3_000});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -40, tickUpper: -8, weightBps: 2_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -120, tickUpper: -40, weightBps: 2_500});
-        dist[3] = DualPoolHook.LiquidityBucket({tickLower: 8, tickUpper: 80, weightBps: 2_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](4);
+        dist[0] = LiquidityBucket({tickLower: -8, tickUpper: 8, weightBps: 3_000});
+        dist[1] = LiquidityBucket({tickLower: -40, tickUpper: -8, weightBps: 2_500});
+        dist[2] = LiquidityBucket({tickLower: -120, tickUpper: -40, weightBps: 2_500});
+        dist[3] = LiquidityBucket({tickLower: 8, tickUpper: 80, weightBps: 2_000});
         PoolKey memory key = _initWithDistribution("Peg-defense ladder (asymmetric, deeper below peg)", dist, 8);
         _runSwapSeries(key);
     }
@@ -129,9 +130,9 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     ///         rotate to a stressed distribution via setDistribution, swap the same size
     ///         again. Demonstrates how shape changes alone (constant reserves) move slippage.
     function test_demo_volatilityRotation() public {
-        DualPoolHook.LiquidityBucket[] memory calm = new DualPoolHook.LiquidityBucket[](2);
-        calm[0] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 8_000});
-        calm[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 2_000});
+        LiquidityBucket[] memory calm = new LiquidityBucket[](2);
+        calm[0] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 8_000});
+        calm[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 2_000});
         PoolKey memory key =
             _initWithDistribution("Volatility-adaptive: CALM phase (80/20 across [-5,5] [-30,30])", calm, 5);
 
@@ -142,10 +143,10 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
         _logSwap(key, true, -9_500 ether, "ZF1 size 9_500 t0   [calm boundary]");
 
         // Rotate to stressed shape mid-life. Same reserves, much wider spread of liquidity.
-        DualPoolHook.LiquidityBucket[] memory stressed = new DualPoolHook.LiquidityBucket[](3);
-        stressed[0] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 2_500});
-        stressed[1] = DualPoolHook.LiquidityBucket({tickLower: -250, tickUpper: 250, weightBps: 5_000});
-        stressed[2] = DualPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 500, weightBps: 2_500});
+        LiquidityBucket[] memory stressed = new LiquidityBucket[](3);
+        stressed[0] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 2_500});
+        stressed[1] = LiquidityBucket({tickLower: -250, tickUpper: 250, weightBps: 5_000});
+        stressed[2] = LiquidityBucket({tickLower: 50, tickUpper: 500, weightBps: 2_500});
         vm.prank(owner);
         hook.setDistribution(key, stressed);
         console2.log("--- rotated distribution to STRESSED (25/50/25) ---");
@@ -169,10 +170,10 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
         CappedMockERC4626 v0 = new CappedMockERC4626(ERC20(address(token0)));
         CappedMockERC4626 v1 = new CappedMockERC4626(ERC20(address(token1)));
 
-        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        LiquidityBucket[] memory dist = new LiquidityBucket[](3);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
         PoolKey memory key = _initWithDistributionEx(
             "Vault rehypothecation: vault1 maxWithdraw capped at 2k of 10k",
             dist,
@@ -232,26 +233,26 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     ///         simulator", so drift on swaps that cross multiple bucket boundaries is expected.
     function test_demo_quoteVsExec_drift() public {
         // (a) Conservative — most-likely-realistic baseline.
-        DualPoolHook.LiquidityBucket[] memory conservative = new DualPoolHook.LiquidityBucket[](3);
-        conservative[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        conservative[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        conservative[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        LiquidityBucket[] memory conservative = new LiquidityBucket[](3);
+        conservative[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        conservative[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        conservative[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
         _runQuoteSeries(_initWithDistribution("Conservative -- single dense bucket, simple drift", conservative, 10));
 
         // (b) Barbell — far one-sided tails should make multi-bucket-crossing drift obvious.
-        DualPoolHook.LiquidityBucket[] memory barbell = new DualPoolHook.LiquidityBucket[](4);
-        barbell[0] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 5_000});
-        barbell[1] = DualPoolHook.LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
-        barbell[2] = DualPoolHook.LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
-        barbell[3] = DualPoolHook.LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
+        LiquidityBucket[] memory barbell = new LiquidityBucket[](4);
+        barbell[0] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 5_000});
+        barbell[1] = LiquidityBucket({tickLower: -25, tickUpper: 25, weightBps: 2_000});
+        barbell[2] = LiquidityBucket({tickLower: -250, tickUpper: -50, weightBps: 1_500});
+        barbell[3] = LiquidityBucket({tickLower: 50, tickUpper: 250, weightBps: 1_500});
         _runQuoteSeries(_initWithDistribution("Barbell -- multi-bucket crossings expected on big swaps", barbell, 5));
 
         // (c) Ultra-tight — narrow active band, drift should grow as swap exits the [-1,1] core.
-        DualPoolHook.LiquidityBucket[] memory tight = new DualPoolHook.LiquidityBucket[](4);
-        tight[0] = DualPoolHook.LiquidityBucket({tickLower: -1, tickUpper: 1, weightBps: 4_500});
-        tight[1] = DualPoolHook.LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
-        tight[2] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
-        tight[3] = DualPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
+        LiquidityBucket[] memory tight = new LiquidityBucket[](4);
+        tight[0] = LiquidityBucket({tickLower: -1, tickUpper: 1, weightBps: 4_500});
+        tight[1] = LiquidityBucket({tickLower: -5, tickUpper: 5, weightBps: 3_500});
+        tight[2] = LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
+        tight[3] = LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
         _runQuoteSeries(_initWithDistribution("Ultra-tight -- drift grows once size pushes past micro band", tight, 1));
     }
 
@@ -267,7 +268,7 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     //                              HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _initWithDistribution(string memory name, DualPoolHook.LiquidityBucket[] memory dist, int24 tickSpacing)
+    function _initWithDistribution(string memory name, LiquidityBucket[] memory dist, int24 tickSpacing)
         internal
         returns (PoolKey memory key)
     {
@@ -278,7 +279,7 @@ contract DualPoolHookDistributionDemoTest is Test, Deployers {
     ///      vault-rehypothecation demo.
     function _initWithDistributionEx(
         string memory name,
-        DualPoolHook.LiquidityBucket[] memory dist,
+        LiquidityBucket[] memory dist,
         int24 tickSpacing,
         uint24 feePips,
         IERC4626 vault0,

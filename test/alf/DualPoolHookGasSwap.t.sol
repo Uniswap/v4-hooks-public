@@ -14,7 +14,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Focused gas guard for DualPool's real JIT swap path.
@@ -57,10 +58,7 @@ contract DualPoolHookGasSwapTest is Test, Deployers {
         assertLt(gasUsed, SINGLE_BUCKET_VAULTED_SWAP_GAS_TARGET, "single-bucket vaulted swap gas");
     }
 
-    function _initPool(DualPoolHook.LiquidityBucket[] memory dist, bool withVault)
-        internal
-        returns (PoolKey memory key)
-    {
+    function _initPool(LiquidityBucket[] memory dist, bool withVault) internal returns (PoolKey memory key) {
         key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
         });
@@ -85,8 +83,8 @@ contract DualPoolHookGasSwapTest is Test, Deployers {
         vm.roll(block.number + 1);
     }
 
-    function _singleBucket() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
-        dist = new DualPoolHook.LiquidityBucket[](1);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+    function _singleBucket() internal pure returns (LiquidityBucket[] memory dist) {
+        dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
     }
 }

@@ -13,8 +13,9 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
-import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
+import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
+import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Isolated gas measurements for `getIndicativeQuote`. Each test sets up a fresh pool
@@ -103,7 +104,7 @@ contract DualPoolHookGasIndicativeTest is Test, Deployers {
         console2.log("  1F0 100 t1  :", g - gasleft(), "gas");
     }
 
-    function _initPool(DualPoolHook.LiquidityBucket[] memory dist, int24 tickSpacing, bool withVault)
+    function _initPool(LiquidityBucket[] memory dist, int24 tickSpacing, bool withVault)
         internal
         returns (PoolKey memory key)
     {
@@ -135,27 +136,27 @@ contract DualPoolHookGasIndicativeTest is Test, Deployers {
         vm.roll(block.number + 1);
     }
 
-    function _singleBucket() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
-        dist = new DualPoolHook.LiquidityBucket[](1);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+    function _singleBucket() internal pure returns (LiquidityBucket[] memory dist) {
+        dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
     }
 
-    function _conservative() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
-        dist = new DualPoolHook.LiquidityBucket[](3);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+    function _conservative() internal pure returns (LiquidityBucket[] memory dist) {
+        dist = new LiquidityBucket[](3);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
     }
 
-    function _eightBuckets() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
-        dist = new DualPoolHook.LiquidityBucket[](8);
-        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_000});
-        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
-        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_000});
-        dist[3] = DualPoolHook.LiquidityBucket({tickLower: -40, tickUpper: 40, weightBps: 1_000});
-        dist[4] = DualPoolHook.LiquidityBucket({tickLower: -50, tickUpper: 50, weightBps: 1_000});
-        dist[5] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
-        dist[6] = DualPoolHook.LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 1_000});
-        dist[7] = DualPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
+    function _eightBuckets() internal pure returns (LiquidityBucket[] memory dist) {
+        dist = new LiquidityBucket[](8);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_000});
+        dist[1] = LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
+        dist[2] = LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_000});
+        dist[3] = LiquidityBucket({tickLower: -40, tickUpper: 40, weightBps: 1_000});
+        dist[4] = LiquidityBucket({tickLower: -50, tickUpper: 50, weightBps: 1_000});
+        dist[5] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        dist[6] = LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 1_000});
+        dist[7] = LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
     }
 }

@@ -14,12 +14,10 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -28,6 +26,13 @@ import {DualPoolBase} from "./base/DualPoolBase.sol";
 import {JITLockable} from "./base/JITLockable.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
+import {
+    Distribution,
+    LiquidityBucket,
+    MAX_BUCKETS,
+    computeAllocations,
+    activeLiquidity
+} from "./types/Distribution.sol";
 
 /// @title DualPoolHook
 /// @author Uniswap Labs
@@ -95,19 +100,10 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     using LPFeeLibrary for uint24;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
+
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
     bytes32 private constant LP_SALT = bytes32(uint256(0x4455414C)); // "DUAL"
-
-    /// @notice Maximum number of buckets per pool. Bounds gas cost of the JIT cycle:
-    ///         each bucket requires one modifyLiquidity call to deploy and one to remove,
-    ///         so gas scales linearly with bucket count.
-    uint8 private constant MAX_BUCKETS = 8;
-
-    /// @notice Basis-points denominator for distribution weights: every pool's bucket
-    ///         `weightBps` values must sum to exactly this, and it is the divisor when
-    ///         pro-budgeting each bucket's slice of the pool balance.
-    uint256 private constant TOTAL_WEIGHT_BPS = 10_000;
 
     /// @dev Transient namespace for active per-bucket JIT liquidity. The slot for bucket `i`
     ///      of pool `poolId` is `keccak256(_ACTIVE_LIQ_NAMESPACE, poolId) + i`. Lives only for
@@ -119,18 +115,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     // ═══════════════════════════════════════════════════════════════════════════
     //                              TYPES
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice A tick range with a weight for liquidity distribution.
-    /// @param tickLower Lower tick boundary (must be aligned to pool's tickSpacing).
-    /// @param tickUpper Upper tick boundary (must be aligned to pool's tickSpacing).
-    /// @param weightBps Fraction of total capital allocated to this range, in basis points.
-    ///                  All weights across a pool's distribution must sum to `TOTAL_WEIGHT_BPS`
-    ///                  (10_000).
-    struct LiquidityBucket {
-        int24 tickLower;
-        int24 tickUpper;
-        uint16 weightBps;
-    }
 
     /// @notice Configuration for initializing a new pool. Passed to `initializePool`.
     /// @param sqrtPriceX96         Initial sqrt price (Q64.96) for the v4 pool.
@@ -157,9 +141,10 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @notice Whether non-owner addresses may deposit into a pool.
     mapping(PoolId => bool) public externalDepositsEnabled;
 
-    /// @dev Liquidity distribution per pool. Each entry defines a tick range and its weight.
-    ///      Set at initialization via `initializePool`, updatable via `setDistribution`.
-    mapping(PoolId => LiquidityBucket[]) internal _distribution;
+    /// @dev Per-pool liquidity distribution (tick ranges and weights), as a type-driven
+    ///      `Distribution`. Set at initialization via `initializePool`, updatable via
+    ///      `setDistribution`, and read by the JIT cycle through `_distribution.get(poolId)`.
+    Distribution internal _distribution;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              EVENTS
@@ -194,10 +179,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
     /// @dev The PoolKey's hooks address does not match this contract.
     error InvalidHookAddress();
-
-    /// @dev Distribution is invalid: empty, exceeds MAX_BUCKETS, weights don't sum to 10_000,
-    ///      or a bucket has zero weight.
-    error InvalidDistribution();
 
     /// @dev Pool initialization rejected because one of the currencies is native ETH
     ///      (`address(0)`). PoolVault uses `IERC20.safeTransferFrom` which cannot operate on
@@ -346,7 +327,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         _approveVault(key.currency0, address(config.vault0));
         _approveVault(key.currency1, address(config.vault1));
 
-        _setDistribution(poolId, config.distribution, key.tickSpacing);
+        _distribution.set(poolId, config.distribution, key.tickSpacing);
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
         // Pool starts not live: liveness is gated on `bootstrap` so the post-init,
@@ -499,7 +480,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         onlyOwner
         whenJITNotInProgress
     {
-        _setDistribution(key.toId(), buckets, key.tickSpacing);
+        _distribution.set(key.toId(), buckets, key.tickSpacing);
         emit DistributionUpdated(key.toId());
     }
 
@@ -673,7 +654,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param poolId The pool to query.
     /// @return The active list of liquidity buckets (tick ranges + weights).
     function getDistribution(PoolId poolId) external view returns (LiquidityBucket[] memory) {
-        return _distribution[poolId];
+        return _distribution.get(poolId);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -815,13 +796,12 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
 
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
 
-        LiquidityBucket[] storage distStorage = _distribution[poolId];
-        uint256 n = distStorage.length;
-        if (n == 0) return;
+        LiquidityBucket[] memory buckets = _distribution.get(poolId);
+        if (buckets.length == 0) return;
 
-        // Phase 1: compute allocations. Loads distribution into memory and caches sqrtPrices.
+        // Phase 1: compute per-bucket liquidity and the total token amounts the deployment needs.
         (uint128[MAX_BUCKETS] memory liqs, uint256 totalNeed0, uint256 totalNeed1) =
-            _computeAllocations(distStorage, n, sqrtPriceX96, bal0, bal1);
+            computeAllocations(buckets, sqrtPriceX96, bal0, bal1);
 
         if (totalNeed0 == 0 && totalNeed1 == 0) return;
 
@@ -835,54 +815,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         if (totalNeed1 > onHand1) _withdrawFromVault(poolId, key.currency1, totalNeed1 - onHand1);
 
         // Phase 3: deploy each bucket.
-        _deployBuckets(poolId, key, distStorage, n, liqs);
-    }
-
-    /// @dev Compute weighted liquidity per bucket and total token needs.
-    ///      Loads distribution from storage once, caches sqrtPrices to avoid
-    ///      redundant getSqrtPriceAtTick calls (~500 gas each).
-    function _computeAllocations(
-        LiquidityBucket[] storage dist,
-        uint256 n,
-        uint160 sqrtPriceX96,
-        uint256 bal0,
-        uint256 bal1
-    ) private view returns (uint128[MAX_BUCKETS] memory liqs, uint256 totalNeed0, uint256 totalNeed1) {
-        for (uint256 i; i < n;) {
-            LiquidityBucket storage bucket = dist[i];
-            int24 tickLower = bucket.tickLower;
-            int24 tickUpper = bucket.tickUpper;
-            uint160 sqrtLower = TickMath.getSqrtPriceAtTick(tickLower);
-            uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(tickUpper);
-
-            // Pre-budget the bucket against its weighted share of the balance. The earlier
-            // implementation passed the full `(bal0, bal1)` to `getLiquidityForAmounts` and
-            // post-scaled by `weightBps / 10_000`. That over-counted capital across in-range
-            // buckets: each bucket's `maxLiq` was sized for the entire balance, so the
-            // summed liquidity (and indicative quote) overstated what the pool could actually
-            // deploy. Pre-budgeting eliminates the implicit reuse and makes the indicative
-            // path deterministic w.r.t. the JIT cycle's actual allocation.
-            uint256 weightBps = bucket.weightBps;
-            uint256 weightedBal0 = bal0 * weightBps / TOTAL_WEIGHT_BPS;
-            uint256 weightedBal1 = bal1 * weightBps / TOTAL_WEIGHT_BPS;
-            uint128 liq =
-                LiquidityAmounts.getLiquidityForAmounts(sqrtPriceX96, sqrtLower, sqrtUpper, weightedBal0, weightedBal1);
-            liqs[i] = liq;
-
-            if (liq > 0) {
-                if (sqrtPriceX96 < sqrtUpper) {
-                    uint160 upper = sqrtPriceX96 < sqrtLower ? sqrtLower : sqrtPriceX96;
-                    totalNeed0 += SqrtPriceMath.getAmount0Delta(upper, sqrtUpper, liq, true);
-                }
-                if (sqrtPriceX96 > sqrtLower) {
-                    uint160 lower = sqrtPriceX96 > sqrtUpper ? sqrtUpper : sqrtPriceX96;
-                    totalNeed1 += SqrtPriceMath.getAmount1Delta(sqrtLower, lower, liq, true);
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
+        _deployBuckets(poolId, key, buckets, liqs);
     }
 
     /// @dev Deploy each bucket's LP position. Separated from _deployJIT for stack depth.
@@ -891,15 +824,15 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     function _deployBuckets(
         PoolId poolId,
         PoolKey calldata key,
-        LiquidityBucket[] storage dist,
-        uint256 n,
+        LiquidityBucket[] memory buckets,
         uint128[MAX_BUCKETS] memory liqs
     ) private {
         bytes32 base = _activeLiqBase(poolId);
+        uint256 n = buckets.length;
         for (uint256 i; i < n;) {
             uint128 liq = liqs[i];
             if (liq > 0) {
-                LiquidityBucket storage bucket = dist[i];
+                LiquidityBucket memory bucket = buckets[i];
                 poolManager.modifyLiquidity(
                     key,
                     ModifyLiquidityParams({
@@ -940,8 +873,8 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @param poolId The pool to remove JIT positions from.
     /// @param key    The pool key (for modifyLiquidity calls).
     function _removeJIT(PoolId poolId, PoolKey calldata key) internal {
-        LiquidityBucket[] storage dist = _distribution[poolId];
-        uint256 n = dist.length;
+        LiquidityBucket[] memory buckets = _distribution.get(poolId);
+        uint256 n = buckets.length;
         bytes32 base = _activeLiqBase(poolId);
 
         for (uint256 i; i < n;) {
@@ -955,7 +888,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
                 tstore(slot, 0)
             }
             if (liq > 0) {
-                LiquidityBucket storage bucket = dist[i];
+                LiquidityBucket memory bucket = buckets[i];
                 poolManager.modifyLiquidity(
                     key,
                     ModifyLiquidityParams({
@@ -983,47 +916,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     function _resolveNetDelta(PoolId poolId, PoolKey calldata key) internal {
         SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency0), key.currency0);
         SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency1), key.currency1);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        INTERNAL: DISTRIBUTION MANAGEMENT
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Validate and store a liquidity distribution. Enforces:
-    ///      - 1 to MAX_BUCKETS entries
-    ///      - All ticks aligned to tickSpacing
-    ///      - All tick ranges valid (lower < upper)
-    ///      - No zero-weight buckets
-    ///      - Weights sum to exactly `TOTAL_WEIGHT_BPS` (10_000)
-    /// @param poolId      The pool to configure.
-    /// @param buckets     The distribution buckets to validate and store.
-    /// @param tickSpacing The pool's tick spacing (for alignment validation).
-    function _setDistribution(PoolId poolId, LiquidityBucket[] calldata buckets, int24 tickSpacing) internal {
-        uint256 n = buckets.length;
-        if (n == 0 || n > MAX_BUCKETS) revert InvalidDistribution();
-
-        uint256 totalWeight;
-        for (uint256 i; i < n; i++) {
-            if (buckets[i].tickLower >= buckets[i].tickUpper) revert InvalidTickRange();
-            // Reject ticks outside the v4 representable range; `TickMath.getSqrtPriceAtTick`
-            // would otherwise revert later from inside allocation or quote paths,
-            // bricking quotes and swaps for any pool with a misconfigured distribution.
-            if (buckets[i].tickLower < TickMath.MIN_TICK || buckets[i].tickUpper > TickMath.MAX_TICK) {
-                revert InvalidTickRange();
-            }
-            if (buckets[i].tickLower % tickSpacing != 0 || buckets[i].tickUpper % tickSpacing != 0) {
-                revert InvalidTickRange();
-            }
-            if (buckets[i].weightBps == 0) revert InvalidDistribution();
-            totalWeight += buckets[i].weightBps;
-        }
-        if (totalWeight != TOTAL_WEIGHT_BPS) revert InvalidDistribution();
-
-        delete _distribution[poolId];
-
-        for (uint256 i; i < n; i++) {
-            _distribution[poolId].push(buckets[i]);
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1058,7 +950,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
             feePips = _composeEffectiveFee(feePips, protocolFee, zeroForOne);
         }
 
-        uint128 liquidity = _activeIndicativeLiquidity(poolId, sqrtPriceX96, currentTick, bal0, bal1);
+        uint128 liquidity = activeLiquidity(_distribution.get(poolId), sqrtPriceX96, currentTick, bal0, bal1);
         if (liquidity == 0 || amountSpecified == 0) return (0, 0);
 
         (, uint256 stepIn, uint256 stepOut, uint256 feeAmount) =
@@ -1090,39 +982,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne) private pure returns (uint24) {
         uint16 directional = zeroForOne ? protocolFee.getZeroForOneFee() : protocolFee.getOneForZeroFee();
         return directional == 0 ? lpFee : directional.calculateSwapFee(lpFee);
-    }
-
-    function _activeIndicativeLiquidity(
-        PoolId poolId,
-        uint160 sqrtPriceX96,
-        int24 currentTick,
-        uint256 bal0,
-        uint256 bal1
-    ) internal view returns (uint128 liquidity) {
-        LiquidityBucket[] storage dist = _distribution[poolId];
-        uint256 n = dist.length;
-
-        for (uint256 i; i < n;) {
-            LiquidityBucket storage bucket = dist[i];
-            if (currentTick >= bucket.tickLower && currentTick < bucket.tickUpper) {
-                // Match `_computeAllocations`: pre-budget each bucket against its weighted share
-                // of the balance so the indicative quote tracks what JIT actually deploys.
-                uint256 weightBps = bucket.weightBps;
-                uint256 weightedBal0 = bal0 * weightBps / TOTAL_WEIGHT_BPS;
-                uint256 weightedBal1 = bal1 * weightBps / TOTAL_WEIGHT_BPS;
-                uint128 liq = LiquidityAmounts.getLiquidityForAmounts(
-                    sqrtPriceX96,
-                    TickMath.getSqrtPriceAtTick(bucket.tickLower),
-                    TickMath.getSqrtPriceAtTick(bucket.tickUpper),
-                    weightedBal0,
-                    weightedBal1
-                );
-                liquidity += liq;
-            }
-            unchecked {
-                ++i;
-            }
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

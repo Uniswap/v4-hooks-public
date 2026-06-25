@@ -28,10 +28,7 @@ abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
     ///         `Liveness` capability. Read externally through {livePools}.
     Liveness internal _liveness;
 
-    /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
-    ///      not aligned to the pool's tickSpacing).
-    error InvalidTickRange();
-    /// @dev Direct `poolManager.initialize` for any DualPool-hooked pool is rejected;
+    /// @dev Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
     ///      callers MUST go through the subclass's guarded `initializePool` entry point so
     ///      pricing, distribution, and vault config are validated before PM init runs.
     error DirectInitializeBlocked();
