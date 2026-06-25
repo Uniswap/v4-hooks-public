@@ -33,6 +33,7 @@ import {
     computeAllocations,
     activeLiquidity
 } from "./types/Distribution.sol";
+import {ActiveLiquidity, activeLiquidityFor} from "./types/ActiveLiquidity.sol";
 
 /// @title DualPoolHook
 /// @author Uniswap Labs
@@ -104,13 +105,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
     bytes32 private constant LP_SALT = bytes32(uint256(0x4455414C)); // "DUAL"
-
-    /// @dev Transient namespace for active per-bucket JIT liquidity. The slot for bucket `i`
-    ///      of pool `poolId` is `keccak256(_ACTIVE_LIQ_NAMESPACE, poolId) + i`. Lives only for
-    ///      the duration of a swap callback pair (`_beforeSwap` deploys, `_afterSwap` removes),
-    ///      so transient storage avoids the cold/warm SSTORE penalty
-    ///      (~22K cold, ~5K warm) per bucket that storage-backed tracking incurs.
-    bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("dualpoolhook.activeliq.v1");
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              TYPES
@@ -819,7 +813,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     }
 
     /// @dev Deploy each bucket's LP position. Separated from _deployJIT for stack depth.
-    ///      Records each deployed liquidity value in transient storage (slot = base + i)
+    ///      Records each deployed liquidity value in the pool's `ActiveLiquidity` transient slots
     ///      so `_removeJIT` can size its inverse `modifyLiquidity` call without a storage SLOAD.
     function _deployBuckets(
         PoolId poolId,
@@ -827,7 +821,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         LiquidityBucket[] memory buckets,
         uint128[MAX_BUCKETS] memory liqs
     ) private {
-        bytes32 base = _activeLiqBase(poolId);
+        ActiveLiquidity slots = activeLiquidityFor(poolId);
         uint256 n = buckets.length;
         for (uint256 i; i < n; ++i) {
             uint128 liq = liqs[i];
@@ -843,47 +837,25 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
                     }),
                     ""
                 );
-                bytes32 slot;
-                unchecked {
-                    slot = bytes32(uint256(base) + i);
-                }
-                assembly ("memory-safe") {
-                    tstore(slot, liq)
-                }
+                slots.store(i, liq);
             }
         }
     }
 
     /// @dev Remove all active JIT positions deployed in `_deployJIT`. Iterates the distribution
-    ///      and removes each bucket that has non-zero active liquidity (read from transient
-    ///      storage). After removal, the hook's cumulative delta reflects the net position from
-    ///      the deploy-swap-remove cycle.
-    ///
-    ///      Slots are cleared after read (`tstore(slot, 0)`), not relied on to auto-clear at
-    ///      end of transaction. Transient storage scopes to the transaction, not the unlock,
-    ///      so for multiple swaps on the same pool within one transaction, slot values would
-    ///      otherwise persist across cycles. If bucket `i` deployed `liq = 100` in swap 1 and
-    ///      the price moved such that bucket `i` deploys `liq = 0` in swap 2,
-    ///      `_deployBuckets` skips the write (guarded by `liq > 0`), leaving `slot[i] = 100`
-    ///      from swap 1. Without the clear here, swap 2's `_removeJIT` would tload `100` and
-    ///      try to remove a position that doesn't exist, reverting the swap.
+    ///      and removes each bucket that has non-zero active liquidity, reading it via
+    ///      `ActiveLiquidity.takeAndClear` (which zeroes the slot on read so a later same-tx swap
+    ///      on this pool does not see a stale value; see {ActiveLiquidity}). After removal, the
+    ///      hook's cumulative delta reflects the net position from the deploy-swap-remove cycle.
     /// @param poolId The pool to remove JIT positions from.
     /// @param key    The pool key (for modifyLiquidity calls).
     function _removeJIT(PoolId poolId, PoolKey calldata key) internal {
         LiquidityBucket[] memory buckets = _distribution.get(poolId);
         uint256 n = buckets.length;
-        bytes32 base = _activeLiqBase(poolId);
+        ActiveLiquidity slots = activeLiquidityFor(poolId);
 
         for (uint256 i; i < n; ++i) {
-            bytes32 slot;
-            unchecked {
-                slot = bytes32(uint256(base) + i);
-            }
-            uint128 liq;
-            assembly ("memory-safe") {
-                liq := tload(slot)
-                tstore(slot, 0)
-            }
+            uint128 liq = slots.takeAndClear(i);
             if (liq > 0) {
                 LiquidityBucket memory bucket = buckets[i];
                 poolManager.modifyLiquidity(
@@ -1001,16 +973,5 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     /// @dev Provides PoolVault access to the PoolManager for claim operations (burn/take).
     function _poolManager() internal view override returns (IPoolManager) {
         return poolManager;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //                        INTERNAL: ACTIVE LIQUIDITY SLOTS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev Base transient slot for the active-liquidity array of `poolId`. Per-bucket
-    ///      slots are derived as `base + bucketIndex`. Single keccak per JIT cycle, then
-    ///      pure addition for each bucket access.
-    function _activeLiqBase(PoolId poolId) private pure returns (bytes32) {
-        return keccak256(abi.encode(_ACTIVE_LIQ_NAMESPACE, poolId));
     }
 }
