@@ -275,7 +275,7 @@ abstract contract PoolVault is MultiAssetVault {
     /// @dev Accounting partition for `(poolId, currency)` in the `InventoryLib` capability, and
     ///      the canonical bucket derivation subclasses pass to `SettlementLib`. Distinct per pool
     ///      so a hook serving multiple pools that share a currency keeps each pool's reserves
-    ///      isolated. Hashes in scratch memory (0x00–0x40) — equivalent to
+    ///      isolated. Hashes in the 0x00-0x40 scratch region, equivalent to
     ///      `keccak256(abi.encode(poolId, currency))` but without the free-memory allocation,
     ///      so the hot path's repeated bucket derivations cost no more than the prior nested
     ///      `mapping[poolId][currency]` lookups.

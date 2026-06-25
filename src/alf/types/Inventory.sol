@@ -28,26 +28,25 @@ struct CurrencyState {
 /// @notice Rehypothecation + claim-accounting capability for ALF hooks, as a type-driven value.
 ///         Tracks three asset sources per opaque `bytes32 bucket`:
 ///
-///           1. **ERC-4626 vault shares** — assets rehypothecated into yield-bearing vaults
-///              between swaps, isolated per bucket so deployments that share a vault contract
-///              cannot consume each other's shares.
-///           2. **ERC-6909 claims** — deferred-settlement credits minted on the PoolManager when
-///              a positive hook delta cannot yet be `take`n; redeemed via `InventoryLib.redeemClaims`.
-///           3. **Raw ERC-20** — tokens held directly by the consuming contract, attributed per
-///              bucket. Source of truth for ownership; the contract's global `balanceOf` is never
-///              read for accounting decisions.
+///           1. ERC-4626 vault shares: assets rehypothecated into yield-bearing vaults between
+///              swaps, isolated per bucket so deployments sharing a vault contract cannot consume
+///              each other's shares.
+///           2. ERC-6909 claims: deferred-settlement credits minted on the PoolManager when a
+///              positive hook delta cannot yet be `take`n; redeemed via `InventoryLib.redeemClaims`.
+///           3. Raw ERC-20: tokens held directly by the consuming contract, attributed per bucket.
+///              The source of truth for ownership; the contract's global `balanceOf` is never read
+///              for accounting decisions.
 ///
 ///         ## Type-driven composition
 ///
 ///         The consumer holds an `Inventory` as a plain storage field and calls behavior directly
-///         (`_inventory.assetBalance(bucket)`) — there is no singleton/`load()` indirection. The
+///         (`_inventory.assetBalance(bucket)`); there is no singleton or `load()` indirection. The
 ///         pure, context-free operations (accessors, balance views, claim accounting) live here as
 ///         file-level free functions bound `using { ... } for Inventory global`. The operations
-///         that move tokens and therefore need the consumer's execution context (`address(this)`
-///         for vault `deposit`/`withdraw`/`redeem`, PoolManager `take`/`burn`, allowance checks)
-///         live in `InventoryLib` — a thin library whose internal functions inline into the
-///         consumer so `this` resolves correctly. Both are invoked uniformly as
-///         `_inventory.method(...)`.
+///         that move tokens, and so need the consumer's execution context (`address(this)` for
+///         vault `deposit`/`withdraw`/`redeem`, PoolManager `take`/`burn`, allowance checks), live
+///         in `InventoryLib`, a library whose internal functions inline into the consumer so
+///         `this` resolves correctly. Both are invoked uniformly as `_inventory.method(...)`.
 ///
 ///         ## Bucket key
 ///
@@ -59,9 +58,10 @@ struct CurrencyState {
 ///         ## Compatibility
 ///
 ///         Vault interaction is via the ERC-4626 interface only and deliberately avoids
-///         `maxWithdraw` on hot paths (curated/gated vaults such as Morpho VaultV2 return `0`);
+///         `maxWithdraw` on hot paths (curated/gated vaults like Morpho VaultV2 can return `0`);
 ///         {effectiveBalance} sizes via `previewRedeem`. Fee-on-entry/exit vaults are rejected by
-///         `InventoryLib.requireFeelessVault`; fee-on-transfer / rebasing underlyings are unsupported.
+///         `InventoryLib.requireFeelessVault`; fee-on-transfer / rebasing underlyings are not
+///         supported.
 /// @param vault       The ERC-4626 vault bound to a bucket (`address(0)` = hold as raw ERC-20).
 /// @param vaultShares The number of vault shares the bucket owns.
 /// @param state       The bucket's packed raw ERC-20 + ERC-6909 claim balances.
@@ -132,7 +132,7 @@ function claimsOf(Inventory storage self, bytes32 bucket) view returns (uint256)
 
 /// @notice Gross managed balance: raw + claims + `convertToAssets(shares)`.
 /// @dev The vault leg is the true per-share economic value, ignoring exit fees or temporary
-///      throttles — used by LP share math so claims are over true economic stake. Contrast
+///      throttles. Used by LP share math so claims are over true economic stake. Contrast
 ///      {effectiveBalance}, which sizes the vault leg via `previewRedeem`.
 /// @param self   Capability storage.
 /// @param bucket The accounting partition to value.

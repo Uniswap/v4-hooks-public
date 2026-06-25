@@ -27,7 +27,7 @@ library InventoryLib {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @dev A vault redemption returned more shares than the bucket owns. Defensive — should
+    /// @dev A vault redemption returned more shares than the bucket owns. Defensive; should
     ///      never trigger if `vaultShares` accounting is consistent.
     error CrossPoolShareLeak();
     /// @dev `vault.deposit` returned zero shares for a non-zero asset deposit. Reverting fail-fast
@@ -174,9 +174,9 @@ library InventoryLib {
     }
 
     /// @notice Redeem the bucket's ERC-6909 claims to raw ERC-20 via `pm` (only inside an unlock).
-    /// @dev Caps the physical `take` at the PoolManager's current balance — claims minted by an
-    ///      earlier same-bucket swap in the same unsettled tx are not yet backed — and retains any
-    ///      unbacked remainder as claims.
+    /// @dev Caps the physical `take` at the PoolManager's current balance, since claims minted by
+    ///      an earlier same-bucket swap in the same unsettled tx are not yet backed, and retains
+    ///      any unbacked remainder as claims.
     /// @param self     Capability storage.
     /// @param bucket   The accounting partition whose claims to redeem.
     /// @param currency The underlying asset of the claims.
@@ -217,7 +217,7 @@ library InventoryLib {
         }
     }
 
-    /// @notice Zero the consumer's standing approval to `vault` — the emergency counterpart to
+    /// @notice Zero the consumer's standing approval to `vault`. The emergency counterpart to
     ///         {approveVault}.
     /// @dev Caller MUST also stop deposits, or the LP path re-arms it via {ensureVaultAllowance}.
     ///      No-op for `address(0)` vault.

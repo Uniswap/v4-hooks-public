@@ -17,15 +17,14 @@ import {Rewards} from "./types/Rewards.sol";
 ///         earn a third reward token via Synthetix-style per-second accrual, on top of the JIT
 ///         spread quoting and ERC-4626 rehypothecation inherited unchanged from `SmartPoolHook`.
 ///
-///         The composition is the whole point of this contract: it adds NO new v4 hook callback
-///         (so the permission flags — and the address-mining requirement — are identical to
-///         `SmartPoolHook`), touches the swap hot path NOT AT ALL, and reuses the base's share
-///         ledger verbatim. The `Rewards` capability is held as a plain storage field (`_rewards`)
-///         and its behavior is invoked directly via type-driven free functions
-///         (`_rewards.checkpoint(...)`) — no singleton/`load()` indirection. It wires
-///         `MultiAssetVault._onShareCheckpoint` (which fires on bootstrap / deposit / withdraw,
-///         before the share counts move) to `Rewards.checkpoint`, so accrual settles exactly when
-///         LP positions change.
+///         The composition adds no new v4 hook callback, so the permission flags (and the
+///         address-mining requirement) are identical to `SmartPoolHook`; it does not touch the
+///         swap path; and it reuses the base's share ledger. The `Rewards` capability is held as a
+///         plain storage field (`_rewards`), and its behavior is invoked directly via type-driven
+///         free functions (`_rewards.checkpoint(...)`), with no singleton or `load()` indirection.
+///         It wires `MultiAssetVault._onShareCheckpoint` (which fires on bootstrap, deposit, and
+///         withdraw, before the share counts move) to `Rewards.checkpoint`, so accrual settles
+///         when LP positions change.
 ///
 ///         ## Trust model
 ///

@@ -8,30 +8,30 @@ import {Inventory} from "../types/Inventory.sol";
 
 /// @title SettlementLib
 /// @author Uniswap Labs
-/// @notice The single net-delta settlement authority for ALF hooks that custody an `Inventory`.
+/// @notice Single net-delta settlement authority for ALF hooks that custody an `Inventory`.
 ///         Under v4 flash accounting every currency delta must net to zero before an `unlock`
-///         finalizes, so exactly one actor may call `settle` / `take` / `mint` / `burn` for delta
-///         resolution — that actor is this library. Composed capabilities never settle on their
-///         own; they mutate the `Inventory` bucket (deposit, withdraw, fee skim, ...) and let the
-///         net delta flow through {resolveCurrency}, which settles or parks it ONCE per currency.
+///         finalizes, so only one actor may call `settle`, `take`, `mint`, or `burn` for delta
+///         resolution. That actor is this library. Composed capabilities do not settle
+///         themselves: they mutate their `Inventory` bucket (deposit, withdraw, fee skim), and
+///         {resolveCurrency} settles or parks the resulting net delta once per currency.
 ///
-///         This is the keystone that lets multiple fund-touching capabilities coexist in one hook:
-///         each expresses its effect as a bucket adjustment, and a single resolve nets the combined
-///         position so the capabilities cannot fight over the shared `currencyDelta`.
+///         Routing all resolution through one function lets several fund-touching capabilities
+///         share a hook. Each records its effect as a bucket adjustment, and a single resolve
+///         nets the combined position, so no two capabilities write the same `currencyDelta`.
 ///
 ///         ## Resolution
 ///
-///         For each currency, after all in-cycle operations have run:
-///           - **negative delta** (hook owes the PoolManager): settle from the hook's raw balance
-///             (sync → transfer → settle, or `settle{value}` for native ETH) and debit the
-///             bucket's raw ledger.
-///           - **positive delta** (PoolManager owes the hook): the swapper has not settled yet, so
-///             mint ERC-6909 claims instead of `take`-ing, and record them on the bucket. The
-///             claims redeem to raw on the next cycle via `InventoryLib.redeemClaims`.
+///         For each currency, after the cycle's operations complete:
+///           - negative delta (hook owes the PoolManager): settle from the hook's raw balance
+///             (sync, transfer, settle; or `settle{value}` for native ETH) and debit the bucket's
+///             raw ledger.
+///           - positive delta (PoolManager owes the hook): the swapper has not settled yet, so
+///             mint ERC-6909 claims rather than calling `take`, and record them on the bucket.
+///             The claims redeem to raw on the next cycle via `InventoryLib.redeemClaims`.
 ///
 ///         Internal library functions inline into the consumer, so `address(this)` and token
-///         custody refer to the consuming hook. The `Inventory` is passed by storage reference
-///         (the consumer holds it as a field), so there is no singleton/`load()` indirection.
+///         custody resolve to the consuming hook. The `Inventory` is passed by storage reference
+///         (the consumer holds it as a field), so there is no singleton or `load()` indirection.
 /// @custom:security-contact security@uniswap.org
 library SettlementLib {
     using CurrencyLibrary for Currency;

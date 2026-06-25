@@ -21,7 +21,7 @@ error RewardsDurationNotSet();
 ///      cadence mid-period would retroactively rescale the outstanding rate.
 error RewardPeriodActive();
 /// @dev The recomputed `rewardRate` would distribute more than the reward token balance on hand
-///      over the period — the Synthetix "provided reward too high" guard.
+///      over the period. Mirrors the Synthetix "provided reward too high" guard.
 error RewardRateTooHigh();
 
 /// @notice Emitted when a vault's reward token is bound.
@@ -73,19 +73,19 @@ struct Reward {
 ///         tracks LP shares (e.g. via `MultiAssetVault`) composes this as a plain storage field
 ///         and:
 ///
-///           1. calls {checkpoint} from `MultiAssetVault._onShareCheckpoint` — which fires
+///           1. calls {checkpoint} from `MultiAssetVault._onShareCheckpoint`, which fires
 ///              immediately before every share mutation with the pre-mutation total and user
-///              balances — and
+///              balances, and
 ///           2. exposes owner funding ({notifyRewardAmount}) plus a user {claim} entry point.
 ///
 ///         Accrual follows the canonical Synthetix `StakingRewards` math: a global
 ///         `rewardPerTokenStored` index accumulates `rewardRate` per second spread across the
 ///         total share supply, and each account is credited `balance * (index - paidIndex)` at
-///         every checkpoint. Because the share balances are SUPPLIED BY THE CALLER at checkpoint
-///         time (the type never owns them), the same type works over any share ledger.
+///         every checkpoint. The caller supplies the share balances at checkpoint time (the type
+///         never owns them), so the same type works over any share ledger.
 ///
-///         Crucially, the checkpoint only fires on share mutations (bootstrap / deposit /
-///         withdraw), never on the swap hot path — incentives add no per-swap gas.
+///         The checkpoint fires only on share mutations (bootstrap, deposit, withdraw), not on
+///         swaps, so accrual adds no swap-path gas.
 ///
 ///         Type-driven: the consumer holds a `Rewards` storage field and calls these free
 ///         functions directly (`rewards.checkpoint(...)`); there is no singleton/`load()`
@@ -118,7 +118,7 @@ function rewardTokenOf(Rewards storage self, VaultId id) view returns (IERC20) {
 }
 
 /// @notice Bind the reward token for `id`.
-/// @dev Permanent — accrued balances must always resolve against a single token. Caller validates
+/// @dev Permanent: accrued balances must always resolve against a single token. Caller validates
 ///      the token is not a pool currency. Reverts {ZeroRewardToken} on the zero address and
 ///      {RewardTokenAlreadySet} if a token is already bound.
 /// @param self  Capability storage.
@@ -153,7 +153,7 @@ function setRewardsDuration(Rewards storage self, VaultId id, uint256 duration) 
 
 // ─────────────────────────────────────── Accrual core ──────────────────────────────────────
 
-/// @dev `min(block.timestamp, periodFinish)` — accrual stops at period end.
+/// @dev `min(block.timestamp, periodFinish)`; accrual stops at period end.
 /// @param r The reward program to read.
 /// @return The latest timestamp rewards still accrue for.
 function _lastTimeApplicable(Reward storage r) view returns (uint256) {

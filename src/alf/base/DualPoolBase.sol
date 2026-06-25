@@ -12,7 +12,7 @@ import {IALFHook} from "../interfaces/IALFHook.sol";
 /// @author Uniswap Labs
 /// @notice Minimal ALF/v4 base for SmartPoolHook. Layers owner administration (`Ownable2Step`
 ///         with `renounceOwnership` disabled), per-pool liveness, and a direct-initialize guard
-///         on top of the shared `BaseALFHook` metadata surface — `maxGas`, `isLive`, reserves,
+///         on top of the shared `BaseALFHook` metadata surface: `maxGas`, `isLive`, reserves,
 ///         indicative quoting, the `ALFHookData`/attestation envelope, and `DeltaResolver`
 ///         settlement (`_pay`). The `IALFHook` view defaults (`getIndicativeQuote`,
 ///         `getReserves`, `getEffectiveLiquidity`, `swapToPrice` → 0) are inherited from
