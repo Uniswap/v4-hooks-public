@@ -61,6 +61,10 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
     /// @notice Settle reward accrual on the pre-mutation balances. Overrides the
     ///         `MultiAssetVault` checkpoint seam; fires on bootstrap, deposit, and withdraw,
     ///         never on swaps.
+    /// @param vaultId           The vault whose shares are about to change.
+    /// @param user              The account whose share balance is about to change.
+    /// @param totalSharesBefore Total shares outstanding immediately before the mutation.
+    /// @param userSharesBefore  `user`'s share balance immediately before the mutation.
     function _onShareCheckpoint(VaultId vaultId, address user, uint256 totalSharesBefore, uint256 userSharesBefore)
         internal
         override

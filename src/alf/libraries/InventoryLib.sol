@@ -55,16 +55,21 @@ library InventoryLib {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @dev Packed per-bucket ERC-20 + ERC-6909 claim balance. Co-located in one 32-byte slot
-    ///      so the pair-aware paths read both with a single SLOAD. `uint128` per field dwarfs
-    ///      any plausible per-bucket amount; writes SafeCast.
+    /// @notice Packed per-bucket ERC-20 + ERC-6909 claim balance.
+    /// @dev Co-located in one 32-byte slot so the pair-aware paths read both with a single
+    ///      SLOAD. `uint128` per field dwarfs any plausible per-bucket amount; writes SafeCast.
+    /// @param erc20  Raw ERC-20 tokens (in the token's native decimals) attributed to the bucket.
+    /// @param claims ERC-6909 claims on the PoolManager (token's native decimals) for the bucket.
     struct CurrencyState {
         uint128 erc20;
         uint128 claims;
     }
 
-    /// @dev Capability storage. `vault`: ERC-4626 vault bound to a bucket (`address(0)` = hold
-    ///      as raw ERC-20). `vaultShares`: shares this bucket owns. `state`: packed raw + claims.
+    /// @notice Capability storage: per-bucket vault binding, rehypothecated shares, and the
+    ///         packed raw + claim balances.
+    /// @param vault       The ERC-4626 vault bound to a bucket (`address(0)` = hold as raw ERC-20).
+    /// @param vaultShares The number of vault shares the bucket owns.
+    /// @param state       The bucket's packed raw ERC-20 + ERC-6909 claim balances.
     struct Inventory {
         mapping(bytes32 bucket => IERC4626 vault) vault;
         mapping(bytes32 bucket => uint256 shares) vaultShares;
@@ -74,15 +79,6 @@ library InventoryLib {
     /// @dev ERC-7201 namespaced storage slot.
     ///      `keccak256(abi.encode(uint256(keccak256("alf.capability.inventory")) - 1)) & ~0xff`.
     bytes32 private constant INVENTORY_SLOT = 0x400777bcd4b0a67bcb6f1adeecaa0d50e896490c46a04ee107a0b5dd67093900;
-
-    /// @notice Access the capability's namespaced storage.
-    function load() internal pure returns (Inventory storage s) {
-        assembly ("memory-safe") {
-            s.slot := INVENTORY_SLOT
-        }
-    }
-
-    // ─────────────────────────────────────────── Errors ───────────────────────────────────────────
 
     /// @dev A vault redemption returned more shares than the bucket owns. Defensive — should
     ///      never trigger if `vaultShares` accounting is consistent.
@@ -97,38 +93,65 @@ library InventoryLib {
     /// @dev The configured ERC-4626 vault applies an exit fee (`previewRedeem < convertToAssets`).
     error VaultChargesExitFee();
 
+    /// @notice Access the capability's namespaced storage.
+    /// @return s The `Inventory` storage struct at the capability's ERC-7201 slot.
+    function load() internal pure returns (Inventory storage s) {
+        assembly ("memory-safe") {
+            s.slot := INVENTORY_SLOT
+        }
+    }
+
     // ─────────────────────────────────────── Bucket accessors ──────────────────────────────────────
 
     /// @notice The ERC-4626 vault bound to `bucket`, or `address(0)` if held as raw ERC-20.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to read.
+    /// @return The vault bound to the bucket, or the zero vault if none.
     function vaultOf(Inventory storage self, bytes32 bucket) internal view returns (IERC4626) {
         return self.vault[bucket];
     }
 
     /// @notice Bind `vault` to `bucket`. Caller validates the vault matches the currency.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to configure.
+    /// @param vault  The ERC-4626 vault to bind (`address(0)` to hold the currency as raw ERC-20).
     function setVault(Inventory storage self, bytes32 bucket, IERC4626 vault) internal {
         self.vault[bucket] = vault;
     }
 
     /// @notice ERC-4626 shares this bucket owns.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to read.
+    /// @return The vault share count held for the bucket.
     function sharesOf(Inventory storage self, bytes32 bucket) internal view returns (uint256) {
         return self.vaultShares[bucket];
     }
 
     /// @notice Raw ERC-20 attributed to this bucket.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to read.
+    /// @return The raw ERC-20 balance (token's native decimals) attributed to the bucket.
     function erc20Of(Inventory storage self, bytes32 bucket) internal view returns (uint256) {
         return self.state[bucket].erc20;
     }
 
     /// @notice ERC-6909 claims attributed to this bucket.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to read.
+    /// @return The ERC-6909 claim balance (token's native decimals) attributed to the bucket.
     function claimsOf(Inventory storage self, bytes32 bucket) internal view returns (uint256) {
         return self.state[bucket].claims;
     }
 
     // ────────────────────────────────────────── Balances ───────────────────────────────────────────
 
-    /// @notice Gross managed balance: raw + claims + `convertToAssets(shares)`. The vault leg is
-    ///         the true per-share economic value, ignoring exit fees or temporary throttles —
-    ///         used by LP share math so claims are over true economic stake.
+    /// @notice Gross managed balance: raw + claims + `convertToAssets(shares)`.
+    /// @dev The vault leg is the true per-share economic value, ignoring exit fees or temporary
+    ///      throttles — used by LP share math so claims are over true economic stake. Contrast
+    ///      {effectiveBalance}, which sizes the vault leg via `previewRedeem`.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to value.
+    /// @return bal The gross managed balance (token's native decimals).
     function assetBalance(Inventory storage self, bytes32 bucket) internal view returns (uint256 bal) {
         CurrencyState storage s = self.state[bucket];
         bal = uint256(s.erc20) + uint256(s.claims);
@@ -139,9 +162,13 @@ library InventoryLib {
         }
     }
 
-    /// @notice Net realizable balance: raw + claims + `previewRedeem(shares)` — what the vault
-    ///         would deliver right now (post exit fee). Used for JIT-deployment sizing and
-    ///         indicative quotes so the cycle never sizes against funds it cannot source.
+    /// @notice Net realizable balance: raw + claims + `previewRedeem(shares)`.
+    /// @dev The vault leg is what the vault would deliver right now (post exit fee). Used for
+    ///      JIT-deployment sizing and indicative quotes so the cycle never sizes against funds
+    ///      it cannot source. Contrast {assetBalance}, which uses `convertToAssets`.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to value.
+    /// @return bal The immediately-realizable balance (token's native decimals).
     function effectiveBalance(Inventory storage self, bytes32 bucket) internal view returns (uint256 bal) {
         CurrencyState storage s = self.state[bucket];
         bal = uint256(s.erc20) + uint256(s.claims);
@@ -155,8 +182,13 @@ library InventoryLib {
     // ─────────────────────────────────────── Vault operations ──────────────────────────────────────
 
     /// @notice Deposit `amount` of `currency` (already held by the consumer) into `bucket`'s
-    ///         vault, or credit raw ERC-20 if no vault is bound. Reverts {ZeroSharesMinted} if a
-    ///         non-zero deposit mints no shares. LP-path semantics: vault rejection bubbles up.
+    ///         vault, or credit raw ERC-20 if no vault is bound.
+    /// @dev LP-path semantics: a vault rejection bubbles up to the caller (no try/catch). Reverts
+    ///      {ZeroSharesMinted} if a non-zero deposit mints no shares.
+    /// @param self     Capability storage.
+    /// @param bucket   The accounting partition to credit.
+    /// @param currency The underlying asset being deposited.
+    /// @param amount   The asset amount to deposit (token's native decimals).
     function depositToVault(Inventory storage self, bytes32 bucket, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = self.vault[bucket];
@@ -173,11 +205,16 @@ library InventoryLib {
         self.vaultShares[bucket] += sharesActual;
     }
 
-    /// @notice Best-effort deposit of the bucket's tracked raw ERC-20 into its vault. Returns
-    ///         `(amount, ok, reason)`: when `ok` is false and `amount > 0` the consumer SHOULD
-    ///         emit its own deposit-skipped event with `reason`. No-ops (no vault / zero raw)
-    ///         return `ok = true`. The vault-deposit failure is caught; `ZeroSharesMinted` from a
-    ///         successful-but-zero-share deposit still reverts (matching {depositToVault}).
+    /// @notice Best-effort deposit of the bucket's tracked raw ERC-20 into its vault.
+    /// @dev No-ops (no vault / zero raw) return `ok = true`. The vault-deposit failure is caught;
+    ///      a successful-but-zero-share deposit still reverts {ZeroSharesMinted} (matching
+    ///      {depositToVault}). When `ok` is false and `amount > 0` the consumer SHOULD emit its
+    ///      own deposit-skipped event with `reason`.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition whose raw balance to sweep.
+    /// @return amount The raw amount the deposit attempted (token's native decimals).
+    /// @return ok     True if the deposit succeeded or was a no-op; false if the vault reverted.
+    /// @return reason The raw revert data from `vault.deposit` when `ok` is false; empty otherwise.
     function tryDepositAll(Inventory storage self, bytes32 bucket)
         internal
         returns (uint256 amount, bool ok, bytes memory reason)
@@ -198,9 +235,12 @@ library InventoryLib {
         }
     }
 
-    /// @notice Withdraw `amount` of the bucket's vaulted assets back to raw ERC-20, optimistically
-    ///         (vault revert bubbles up). No-op if no vault is bound. {CrossPoolShareLeak} guards
-    ///         against a vault consuming more shares than the bucket owns.
+    /// @notice Withdraw `amount` of the bucket's vaulted assets back to raw ERC-20, optimistically.
+    /// @dev No-op if no vault is bound. A vault revert bubbles up to the caller.
+    ///      {CrossPoolShareLeak} guards against a vault consuming more shares than the bucket owns.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to withdraw for.
+    /// @param amount The asset amount to pull from the vault (token's native decimals).
     function withdrawFromVault(Inventory storage self, bytes32 bucket, uint256 amount) internal {
         if (amount == 0) return;
         IERC4626 vault = self.vault[bucket];
@@ -215,10 +255,16 @@ library InventoryLib {
     }
 
     /// @notice Best-effort full redemption of the bucket's vault position back to raw ERC-20.
-    ///         Returns `(shares, assets, ok, reason)`: `shares == 0` means nothing to drain (no
-    ///         event); otherwise `ok` true ⇒ consumer emits drained(shares, assets), false ⇒
-    ///         consumer emits drain-skipped(shares, reason). Redeems exactly the bucket's own
-    ///         shares, preserving cross-bucket isolation.
+    /// @dev `shares == 0` means nothing to drain (the consumer emits no event); otherwise `ok`
+    ///      true ⇒ consumer emits drained(shares, assets), false ⇒ consumer emits
+    ///      drain-skipped(shares, reason). Redeems exactly the bucket's own shares, preserving
+    ///      cross-bucket isolation.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to drain.
+    /// @return shares The vault shares the drain operated on (`0` if nothing to drain).
+    /// @return assets The asset amount received and credited to raw ERC-20 on success.
+    /// @return ok     True if the redeem succeeded; false if the vault reverted.
+    /// @return reason The raw revert data from `vault.redeem` when `ok` is false; empty otherwise.
     function tryDrain(Inventory storage self, bytes32 bucket)
         internal
         returns (uint256 shares, uint256 assets, bool ok, bytes memory reason)
@@ -240,8 +286,12 @@ library InventoryLib {
     }
 
     /// @notice Ensure the bucket's raw ERC-20 holds at least `amount`, withdrawing the shortfall
-    ///         from the vault, then debit it. For a non-vaulted bucket with insufficient raw, the
-    ///         `bal - amount` subtraction panics on underflow (no sentinel).
+    ///         from the vault, then debit it.
+    /// @dev For a non-vaulted bucket with insufficient raw, the `bal - amount` subtraction panics
+    ///      on underflow (no sentinel). {CrossPoolShareLeak} guards the vaulted path.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to debit.
+    /// @param amount The asset amount to make available and debit (token's native decimals).
     function ensureERC20(Inventory storage self, bytes32 bucket, uint256 amount) internal {
         if (amount == 0) return;
         CurrencyState storage s = self.state[bucket];
@@ -268,10 +318,14 @@ library InventoryLib {
     // ─────────────────────────────────────────── Claims ────────────────────────────────────────────
 
     /// @notice Redeem the bucket's ERC-6909 claims to raw ERC-20 via `pm` (only inside an unlock).
-    ///         Caps the physical `take` at the PoolManager's current balance — claims minted by an
-    ///         earlier same-bucket swap in the same unsettled tx are not yet backed — and retains
-    ///         any unbacked remainder as claims. Returns the post-redeem raw balance so the caller
-    ///         avoids a follow-up SLOAD.
+    /// @dev Caps the physical `take` at the PoolManager's current balance — claims minted by an
+    ///      earlier same-bucket swap in the same unsettled tx are not yet backed — and retains any
+    ///      unbacked remainder as claims.
+    /// @param self     Capability storage.
+    /// @param bucket   The accounting partition whose claims to redeem.
+    /// @param currency The underlying asset of the claims.
+    /// @param pm       The v4 PoolManager to burn the ERC-6909 claims on and `take` from.
+    /// @return erc20Bal The bucket's raw ERC-20 balance after redemption (token's native decimals).
     function redeemClaims(Inventory storage self, bytes32 bucket, Currency currency, IPoolManager pm)
         internal
         returns (uint256 erc20Bal)
@@ -292,8 +346,14 @@ library InventoryLib {
         }
     }
 
-    /// @notice The portion of the bucket's claims the PoolManager cannot physically honor yet
-    ///         (backing settle still pending this tx). Returns 0 in the common, fully-backed case.
+    /// @notice The portion of the bucket's claims the PoolManager cannot physically honor yet.
+    /// @dev Claims whose backing settle is still pending this tx. Returns 0 in the common,
+    ///      fully-backed case.
+    /// @param self     Capability storage.
+    /// @param bucket   The accounting partition to inspect.
+    /// @param currency The underlying asset of the claims.
+    /// @param pm       The v4 PoolManager whose balance bounds the backed portion.
+    /// @return The unbacked claim amount (token's native decimals).
     function unbackedClaims(Inventory storage self, bytes32 bucket, Currency currency, IPoolManager pm)
         internal
         view
@@ -306,13 +366,20 @@ library InventoryLib {
     }
 
     /// @notice Record newly-minted ERC-6909 claims for a bucket (after `pm.mint`).
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to credit.
+    /// @param amount The claim amount minted (token's native decimals).
     function recordClaims(Inventory storage self, bytes32 bucket, uint256 amount) internal {
         CurrencyState storage s = self.state[bucket];
         s.claims = (uint256(s.claims) + amount).toUint128();
     }
 
-    /// @notice Debit `amount` from the bucket's raw ERC-20 after a PM settlement. The `_settle`
-    ///         itself is the consumer's responsibility; this only updates the per-bucket counter.
+    /// @notice Debit `amount` from the bucket's raw ERC-20 after a PM settlement.
+    /// @dev The `_settle` itself is the consumer's responsibility; this only updates the
+    ///      per-bucket counter. Reverts {InsufficientPoolBalance} if the bucket is short.
+    /// @param self   Capability storage.
+    /// @param bucket The accounting partition to debit.
+    /// @param amount The raw amount settled away (token's native decimals).
     function debitERC20(Inventory storage self, bytes32 bucket, uint256 amount) internal {
         if (amount == 0) return;
         CurrencyState storage s = self.state[bucket];
@@ -323,8 +390,11 @@ library InventoryLib {
 
     // ───────────────────────────────────────── Allowances ──────────────────────────────────────────
 
-    /// @notice Grant max allowance to `vault` for `currency` (idempotent; `forceApprove` zeros
-    ///         first for USDT-style tokens). Consumers call once per (currency, vault) at bind.
+    /// @notice Grant max allowance to `vault` for `currency` (idempotent).
+    /// @dev `forceApprove` zeros first for USDT-style tokens. Consumers call once per
+    ///      (currency, vault) at bind. No-op for `address(0)` vault.
+    /// @param currency The underlying asset to approve.
+    /// @param vault    The ERC-4626 vault to grant allowance to.
     function approveVault(Currency currency, address vault) internal {
         if (vault == address(0)) return;
         IERC20 token = IERC20(Currency.unwrap(currency));
@@ -334,14 +404,22 @@ library InventoryLib {
     }
 
     /// @notice Zero the consumer's standing approval to `vault` — the emergency counterpart to
-    ///         {approveVault}. Caller MUST also stop deposits, or the LP path re-arms it.
+    ///         {approveVault}.
+    /// @dev Caller MUST also stop deposits, or the LP path re-arms it via {ensureVaultAllowance}.
+    ///      No-op for `address(0)` vault.
+    /// @param currency The underlying asset whose approval to revoke.
+    /// @param vault    The ERC-4626 vault to revoke allowance from.
     function revokeVaultApproval(Currency currency, address vault) internal {
         if (vault == address(0)) return;
         IERC20(Currency.unwrap(currency)).forceApprove(vault, 0);
     }
 
     /// @notice Refresh allowance to `>= amount` (recovery for USDT-style tokens whose max
-    ///         allowance is decremented on transfer). No-op for the common non-decrementing case.
+    ///         allowance is decremented on transfer).
+    /// @dev No-op for the common non-decrementing case.
+    /// @param currency The underlying asset to approve.
+    /// @param vault    The ERC-4626 vault to grant allowance to.
+    /// @param amount   The minimum allowance required for the current operation (native decimals).
     function ensureVaultAllowance(Currency currency, address vault, uint256 amount) internal {
         IERC20 token = IERC20(Currency.unwrap(currency));
         if (token.allowance(address(this), vault) < amount) {
@@ -349,10 +427,12 @@ library InventoryLib {
         }
     }
 
-    /// @notice Reject ERC-4626 vaults that apply entry or exit fees, leveraging the EIP-4626
-    ///         rule that `convertTo*` MUST NOT factor fees while `preview*` MUST. No-op for an
-    ///         unset vault. Catches honest fee disclosures only (see PoolVault `Vault
-    ///         Compatibility` for the adversarial-vault socialization that remains).
+    /// @notice Reject ERC-4626 vaults that apply entry or exit fees.
+    /// @dev Leverages the EIP-4626 rule that `convertTo*` MUST NOT factor fees while `preview*`
+    ///      MUST. No-op for an unset vault. Catches honest fee disclosures only (see PoolVault
+    ///      `Vault Compatibility` for the adversarial-vault socialization that remains). Reverts
+    ///      {VaultChargesEntryFee} / {VaultChargesExitFee} on divergence.
+    /// @param vault The ERC-4626 vault to probe.
     function requireFeelessVault(IERC4626 vault) internal view {
         if (address(vault) == address(0)) return;
         uint256 probe = 10 ** uint256(vault.decimals());
