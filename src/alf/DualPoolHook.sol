@@ -27,6 +27,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {DualPoolBase} from "./base/DualPoolBase.sol";
 import {JITLockable} from "./base/JITLockable.sol";
 import {PoolVault} from "./base/PoolVault.sol";
+import {SettlementLib} from "./libraries/SettlementLib.sol";
 
 /// @title DualPoolHook
 /// @author Uniswap Labs
@@ -982,33 +983,16 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         }
     }
 
-    /// @dev Resolve the hook's net delta for both currencies after the JIT cycle.
-    ///      Negative delta (hook owes PM): settle from per-pool ERC-20.
-    ///      Positive delta (PM owes hook): mint as ERC-6909 claims — cannot `take` because
-    ///      the swapper hasn't settled yet. Claims are redeemed in the next `_deployJIT`.
-    /// @param poolId The pool to resolve deltas for (used for claim tracking).
+    /// @dev Resolve the hook's net delta for both currencies after the JIT cycle via the single
+    ///      `SettlementLib` authority. Negative delta (hook owes PM): settle from the pool's raw
+    ///      ERC-20 and debit its inventory bucket. Positive delta (PM owes hook): mint ERC-6909
+    ///      claims — cannot `take` because the swapper hasn't settled yet — recorded on the
+    ///      bucket and redeemed in the next `_deployJIT`.
+    /// @param poolId The pool to resolve deltas for (used for inventory-bucket derivation).
     /// @param key    The pool key (for currency references).
     function _resolveNetDelta(PoolId poolId, PoolKey calldata key) internal {
-        _resolveNetDeltaCurrency(poolId, key.currency0);
-        _resolveNetDeltaCurrency(poolId, key.currency1);
-    }
-
-    /// @dev Resolve the hook's net delta for a single currency. Updates per-pool ERC-20
-    ///      tracking on settle so that `_erc20[poolId][currency]` continues to reflect the
-    ///      pool's share of the hook's actual token balance.
-    /// @param poolId   The pool (for per-pool claim recording).
-    /// @param currency The currency to resolve.
-    function _resolveNetDeltaCurrency(PoolId poolId, Currency currency) internal {
-        int256 delta = poolManager.currencyDelta(address(this), currency);
-        if (delta < 0) {
-            uint256 owed = uint256(-delta);
-            _settle(currency, address(this), owed);
-            _debitPoolERC20(poolId, currency, owed);
-        } else if (delta > 0) {
-            uint256 amount = uint256(delta);
-            poolManager.mint(address(this), currency.toId(), amount);
-            _recordClaims(poolId, currency, amount);
-        }
+        SettlementLib.resolveCurrency(poolManager, _bucket(poolId, key.currency0), key.currency0);
+        SettlementLib.resolveCurrency(poolManager, _bucket(poolId, key.currency1), key.currency1);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
