@@ -102,7 +102,7 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     /// @dev Indicative pricing backing the default {getIndicativeQuote}. Defaults to 0: the
     ///      IALFHook "cannot price this swap" path. Quoter subclasses override with their curve
     ///      (e.g. `SpreadQuoterBase` simulates against the pool's static fee). Hooks that price
-    ///      against bespoke liquidity (e.g. `SmartPoolHook`) override `getIndicativeQuote`
+    ///      against bespoke liquidity (e.g. `DualPoolHook`) override `getIndicativeQuote`
     ///      directly instead, leaving this dormant.
     function _price(PoolKey calldata, bool, int256, bool, address) internal view virtual returns (uint256) {
         return 0;

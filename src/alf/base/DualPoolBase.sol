@@ -11,24 +11,24 @@ import {Liveness} from "../types/Liveness.sol";
 
 /// @title DualPoolBase
 /// @author Uniswap Labs
-/// @notice Minimal ALF/v4 base for SmartPoolHook. Layers owner administration (`Ownable2Step`
+/// @notice Minimal ALF/v4 base for DualPoolHook. Layers owner administration (`Ownable2Step`
 ///         with `renounceOwnership` disabled), per-pool liveness, and a direct-initialize guard
 ///         on top of the shared `BaseALFHook` metadata surface: `maxGas`, `isLive`, reserves,
 ///         indicative quoting, the `ALFHookData`/attestation envelope, and `DeltaResolver`
 ///         settlement (`_pay`). The `IALFHook` view defaults (`getIndicativeQuote`,
 ///         `getReserves`, `getEffectiveLiquidity`, `swapToPrice` → 0) are inherited from
-///         `BaseALFHook`; `SmartPoolHook` overrides the ones it supports.
+///         `BaseALFHook`; `DualPoolHook` overrides the ones it supports.
 /// @dev Pool fees are static per `PoolKey.fee` and immutable post-initialize. The owner has
 ///      only a per-pool liveness flag for pause/resume; pricing itself cannot be reconfigured
 ///      after deployment.
 /// @custom:security-contact security@uniswap.org
-abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
+abstract contract DualPoolBase is BaseALFHook, Ownable2Step {
     /// @notice Per-pool pause/resume flag. Pools default to paused; the subclass's guarded
-    ///         `initializePool`/`bootstrap` and {SmartPoolHook.setPoolLive} toggle it via the
+    ///         `initializePool`/`bootstrap` and {DualPoolHook.setPoolLive} toggle it via the
     ///         `Liveness` capability. Read externally through {livePools}.
     Liveness internal _liveness;
 
-    /// @dev Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
+    /// @dev Direct `poolManager.initialize` for any DualPool-hooked pool is rejected;
     ///      callers MUST go through the subclass's guarded `initializePool` entry point so
     ///      pricing, distribution, and vault config are validated before PM init runs.
     error DirectInitializeBlocked();
@@ -66,7 +66,7 @@ abstract contract SmartPoolBase is BaseALFHook, Ownable2Step {
     /// @inheritdoc IALFHook
     /// @dev Always reports live; hook-level liveness is per-pool via {livePools}. Routers call
     ///      this to reject offline hooks; this hook is always reachable, but individual pools may
-    ///      pause via {SmartPoolHook.setPoolLive}.
+    ///      pause via {DualPoolHook.setPoolLive}.
     function isLive() external pure override returns (bool) {
         return true;
     }

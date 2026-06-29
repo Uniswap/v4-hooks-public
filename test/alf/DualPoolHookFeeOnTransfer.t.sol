@@ -13,7 +13,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
@@ -83,7 +83,7 @@ contract DualPoolHookFeeOnTransferTest is Test, Deployers {
 
         LiquidityBucket[] memory dist = new LiquidityBucket[](1);
         dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,

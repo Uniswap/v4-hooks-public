@@ -11,7 +11,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {SmartPoolHook} from "../../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "../mocks/MockERC4626.sol";
 

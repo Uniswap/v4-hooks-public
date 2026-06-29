@@ -14,21 +14,21 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {SmartPoolIncentivizedHook} from "../../src/alf/SmartPoolIncentivizedHook.sol";
+import {DualPoolIncentivizedHook} from "../../src/alf/DualPoolIncentivizedHook.sol";
 import {RewardTokenAlreadySet} from "../../src/alf/types/Rewards.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
-/// @title SmartPoolIncentivizedHookTest
-/// @notice Exercises the liquidity-incentives capability composed onto SmartPoolHook: Synthetix
+/// @title DualPoolIncentivizedHookTest
+/// @notice Exercises the liquidity-incentives capability composed onto DualPoolHook: Synthetix
 ///         per-share accrual settled at the PoolVault share-checkpoint seam, owner funding,
 ///         user claims, and proof that the inherited JIT swap path is untouched by rewards.
-contract SmartPoolIncentivizedHookTest is Test, Deployers {
+contract DualPoolIncentivizedHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
 
-    SmartPoolIncentivizedHook public hook;
+    DualPoolIncentivizedHook public hook;
     MockERC4626 public vault0;
     MockERC4626 public vault1;
     MockERC20 public reward;
@@ -60,11 +60,11 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolIncentivizedHook(
+        hook = DualPoolIncentivizedHook(
             address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
         );
         deployCodeTo(
-            "SmartPoolIncentivizedHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook)
+            "DualPoolIncentivizedHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook)
         );
 
         testKey = PoolKey({
@@ -77,10 +77,10 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
 
     // ─────────────────────────────────────────── Helpers ───────────────────────────────────────────
 
-    function _config() internal view returns (SmartPoolHook.PoolConfig memory) {
+    function _config() internal view returns (DualPoolHook.PoolConfig memory) {
         LiquidityBucket[] memory dist = new LiquidityBucket[](1);
         dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        return SmartPoolHook.PoolConfig({
+        return DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true,
@@ -132,7 +132,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
 
     function test_setRewardToken_rejectsPoolCurrency() public {
         vm.prank(owner);
-        vm.expectRevert(SmartPoolIncentivizedHook.RewardTokenIsPoolCurrency.selector);
+        vm.expectRevert(DualPoolIncentivizedHook.RewardTokenIsPoolCurrency.selector);
         hook.setRewardToken(testKey, IERC20(Currency.unwrap(currency0)));
     }
 
@@ -151,7 +151,7 @@ contract SmartPoolIncentivizedHookTest is Test, Deployers {
         reward.mint(owner, REWARD);
         vm.startPrank(owner);
         reward.approve(address(hook), REWARD);
-        vm.expectRevert(SmartPoolIncentivizedHook.RewardTokenNotConfigured.selector);
+        vm.expectRevert(DualPoolIncentivizedHook.RewardTokenNotConfigured.selector);
         hook.notifyRewardAmount(testKey, REWARD);
         vm.stopPrank();
     }

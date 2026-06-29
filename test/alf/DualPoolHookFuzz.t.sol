@@ -17,7 +17,7 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 

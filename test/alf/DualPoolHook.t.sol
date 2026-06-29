@@ -27,9 +27,9 @@ import {
     DepositLocked
 } from "../../src/alf/types/Shares.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
+import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
@@ -106,10 +106,10 @@ contract DualPoolHookTest is Test, Deployers {
     //                              HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _defaultConfig() internal view returns (SmartPoolHook.PoolConfig memory) {
+    function _defaultConfig() internal view returns (DualPoolHook.PoolConfig memory) {
         LiquidityBucket[] memory dist = new LiquidityBucket[](1);
         dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        return SmartPoolHook.PoolConfig({
+        return DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -739,7 +739,7 @@ contract DualPoolHookTest is Test, Deployers {
         });
         LiquidityBucket[] memory dist = new LiquidityBucket[](1);
         dist[0] = LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1709,7 +1709,7 @@ contract DualPoolHookTest is Test, Deployers {
 
         LiquidityBucket[] memory dist = new LiquidityBucket[](1);
         dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1781,7 +1781,7 @@ contract DualPoolHookTest is Test, Deployers {
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -2500,7 +2500,7 @@ contract ReentrantVault {
         } else if (mode == 0xbbbbbbbb) {
             LiquidityBucket[] memory dist = new LiquidityBucket[](1);
             dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-            SmartPoolHook(targetHook).setDistribution(targetKey, dist);
+            DualPoolHook(targetHook).setDistribution(targetKey, dist);
         }
         return 0;
     }

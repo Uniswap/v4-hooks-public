@@ -7,19 +7,19 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SmartPoolHook} from "./SmartPoolHook.sol";
+import {DualPoolHook} from "./DualPoolHook.sol";
 import {VaultId} from "./types/VaultId.sol";
 import {Rewards} from "./types/Rewards.sol";
 
-/// @title SmartPoolIncentivizedHook
+/// @title DualPoolIncentivizedHook
 /// @author Uniswap Labs
-/// @notice `SmartPoolHook` composed with the `Rewards` liquidity-incentives capability. LP shares
+/// @notice `DualPoolHook` composed with the `Rewards` liquidity-incentives capability. LP shares
 ///         earn a third reward token via Synthetix-style per-block accrual on the `BlockNumberish`
 ///         clock, on top of the JIT spread quoting and ERC-4626 rehypothecation inherited unchanged
-///         from `SmartPoolHook`.
+///         from `DualPoolHook`.
 ///
 ///         The composition adds no new v4 hook callback, so the permission flags (and the
-///         address-mining requirement) are identical to `SmartPoolHook`; it does not touch the
+///         address-mining requirement) are identical to `DualPoolHook`; it does not touch the
 ///         swap path; and it reuses the base's share ledger. The `Rewards` capability is held as a
 ///         plain storage field (`_rewards`), and its behavior is invoked on it directly via
 ///         type-driven free functions, as `_rewards.checkpoint(...)`. It wires
@@ -36,7 +36,7 @@ import {Rewards} from "./types/Rewards.sol";
 ///         pool's ERC-20 inventory tracked by `InventoryLib`. The owner cannot touch accrued LP
 ///         rewards; only the earning LP can {claimRewards}.
 /// @custom:security-contact security@uniswap.org
-contract SmartPoolIncentivizedHook is SmartPoolHook {
+contract DualPoolIncentivizedHook is DualPoolHook {
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
 
@@ -51,10 +51,10 @@ contract SmartPoolIncentivizedHook is SmartPoolHook {
 
     /// @param pm                  The Uniswap v4 PoolManager.
     /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_              Initial owner (see {SmartPoolBase}).
+    /// @param owner_              Initial owner (see {DualPoolBase}).
     /// @param maxMinDepositBlocks_ Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
     constructor(IPoolManager pm, uint32 maxGas_, address owner_, uint64 maxMinDepositBlocks_)
-        SmartPoolHook(pm, maxGas_, owner_, maxMinDepositBlocks_)
+        DualPoolHook(pm, maxGas_, owner_, maxMinDepositBlocks_)
     {}
 
     // ═══════════════════════════════════════════════════════════════════════════

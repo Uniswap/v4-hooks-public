@@ -5,7 +5,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 /// @dev Transient-storage namespace seed for the active per-bucket JIT liquidity array. Combined
 ///      with a `PoolId` to derive a per-pool base slot; see {activeLiquidityFor}.
-bytes32 constant ACTIVE_LIQUIDITY_NAMESPACE = keccak256("smartpoolhook.activeliq.v1");
+bytes32 constant ACTIVE_LIQUIDITY_NAMESPACE = keccak256("dualpoolhook.activeliq.v1");
 
 /// @title ActiveLiquidity
 /// @author Uniswap Labs

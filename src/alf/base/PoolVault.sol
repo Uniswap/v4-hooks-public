@@ -31,7 +31,7 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///         currencies and rehypothecation), the managed balances fed to the conversion, the
 ///         per-pool decimals offset and lock duration, the `BlockNumberish` clock, and the
 ///         `_onShareCheckpoint` accrual seam a composed capability overrides. It exposes
-///         `PoolKey`-flavored entry points so subclasses (e.g., SmartPoolHook) integrate
+///         `PoolKey`-flavored entry points so subclasses (e.g., DualPoolHook) integrate
 ///         naturally.
 ///
 ///         For every `(PoolId, Currency)`, PoolVault tracks three asset sources:

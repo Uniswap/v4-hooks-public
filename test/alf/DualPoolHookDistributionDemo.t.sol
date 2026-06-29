@@ -17,9 +17,9 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
+import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 
 /// @notice Demonstration tests showing JIT swap behavior under each of the
 ///         liquidity-distribution shapes documented in

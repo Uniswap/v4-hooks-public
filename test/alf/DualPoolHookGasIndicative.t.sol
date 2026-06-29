@@ -13,9 +13,9 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
+import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Isolated gas measurements for `getIndicativeQuote`. Each test sets up a fresh pool
