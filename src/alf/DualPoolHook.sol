@@ -259,6 +259,13 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
         _;
     }
 
+    /// @dev Reverts {DeadlineExpired} if the caller-supplied `deadline` has passed. Hoisted out of
+    ///      the LP entry points so the precondition stays visible in each signature.
+    modifier checkDeadline(uint256 deadline) {
+        if (block.timestamp > deadline) revert DeadlineExpired();
+        _;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -404,8 +411,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
         uint256 maxAmount0,
         uint256 maxAmount1,
         uint256 deadline
-    ) external nonReentrant whenJITNotInProgress returns (uint256 amount0, uint256 amount1) {
-        if (block.timestamp > deadline) revert DeadlineExpired();
+    ) external nonReentrant whenJITNotInProgress checkDeadline(deadline) returns (uint256 amount0, uint256 amount1) {
         _requireDepositAuth(key.toId());
         (amount0, amount1) = _deposit(key, msg.sender, msg.sender, sharesToMint);
         if (amount0 > maxAmount0 || amount1 > maxAmount1) revert SlippageExceeded();
@@ -433,9 +439,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
         uint256 minAmount0,
         uint256 minAmount1,
         uint256 deadline
-    ) external nonReentrant whenJITNotInProgress returns (uint256 amount0, uint256 amount1) {
-        if (block.timestamp > deadline) revert DeadlineExpired();
-
+    ) external nonReentrant whenJITNotInProgress checkDeadline(deadline) returns (uint256 amount0, uint256 amount1) {
         // Route through `poolManager.unlock` so the callback can redeem any pending ERC-6909
         // claims into `s.erc20` before the withdraw math runs. Between swaps,
         // `_depositAllToVaults` has swept `s.erc20` to 0 and `afterSwap` has minted positive
