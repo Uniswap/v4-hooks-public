@@ -18,6 +18,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
+import {OwnedALFHook} from "../../src/alf/base/OwnedALFHook.sol";
 import {SwapSimulator} from "../../src/alf/libraries/SwapSimulator.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
@@ -615,7 +616,7 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
     ///      use `transferOwnership` to rotate, never renounce.
     function test_renounceOwnership_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(SpreadQuoterBase.RenounceOwnershipDisabled.selector);
+        vm.expectRevert(OwnedALFHook.RenounceOwnershipDisabled.selector);
         hook.renounceOwnership();
     }
 }

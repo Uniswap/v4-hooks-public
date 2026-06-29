@@ -29,7 +29,7 @@ import {
 
 import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
+import {OwnedALFHook} from "../../src/alf/base/OwnedALFHook.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
@@ -297,14 +297,14 @@ contract DualPoolHookTest is Test, Deployers {
         );
     }
 
-    /// @dev `renounceOwnership` is overridden in `DualPoolBase` to revert. Renouncing
+    /// @dev `renounceOwnership` is overridden in `OwnedALFHook` to revert. Renouncing
     ///      would permanently brick every onlyOwner entry point (initializePool, bootstrap,
-    ///      setPoolLive, setExternalDeposits, setDistribution, refreshVaultApproval,
-    ///      setActiveTick, etc.) and orphan every pool referencing this hook. The operator
-    ///      must use `transferOwnership` to rotate, never renounce.
+    ///      setPoolLive, setExternalDeposits, setDistribution, refreshVaultApproval, etc.)
+    ///      and orphan every pool referencing this hook. The operator must use
+    ///      `transferOwnership` to rotate, never renounce.
     function test_renounceOwnership_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(DualPoolBase.RenounceOwnershipDisabled.selector);
+        vm.expectRevert(OwnedALFHook.RenounceOwnershipDisabled.selector);
         hook.renounceOwnership();
     }
 

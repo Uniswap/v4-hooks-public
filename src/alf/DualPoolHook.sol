@@ -21,7 +21,7 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {DualPoolBase} from "./base/DualPoolBase.sol";
+import {OwnedALFHook} from "./base/OwnedALFHook.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
 import {FeeLib} from "./libraries/FeeLib.sol";
@@ -93,7 +93,7 @@ import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol"
 ///         cycle is in flight. This blocks an owner-configured ERC4626 vault from re-entering LP
 ///         entry points mid-JIT.
 /// @custom:security-contact security@uniswap.org
-contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnlockCallback {
+contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -231,11 +231,11 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
     /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_              Initial contract owner. Transferable post-deployment via OZ
     ///                            `Ownable2Step` (`transferOwnership` + `acceptOwnership`);
-    ///                            `renounceOwnership` is disabled (see {DualPoolBase}). Key
+    ///                            `renounceOwnership` is disabled (see {OwnedALFHook}). Key
     ///                            loss without a pending transfer is unrecoverable.
     /// @param _maxMinDepositBlocks Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
     constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepositBlocks)
-        DualPoolBase(_pm, maxGas_, owner_)
+        OwnedALFHook(_pm, maxGas_, owner_)
     {
         maxMinDepositBlocks = _maxMinDepositBlocks;
     }

@@ -19,7 +19,6 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 
 /// @notice Demonstration tests showing JIT swap behavior under each of the
 ///         liquidity-distribution shapes documented in

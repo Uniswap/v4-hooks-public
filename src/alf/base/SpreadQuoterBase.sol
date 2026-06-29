@@ -10,10 +10,8 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {BaseALFHook} from "./BaseALFHook.sol";
+import {OwnedALFHook} from "./OwnedALFHook.sol";
 import {SwapSimulator} from "../libraries/SwapSimulator.sol";
-import {Liveness} from "../types/Liveness.sol";
 
 /// @title SpreadQuoterBase
 /// @author Uniswap Labs
@@ -24,14 +22,10 @@ import {Liveness} from "../types/Liveness.sol";
 ///         charges this fee natively on every swap. Owner has only a per-pool liveness flag
 ///         (`setPoolLive`) for pause/resume; pricing itself is immutable post-initialize.
 /// @custom:security-contact security@uniswap.org
-abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
+abstract contract SpreadQuoterBase is OwnedALFHook {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
     using StateLibrary for IPoolManager;
-
-    /// @notice Per-pool pause/resume flag. Pools default to paused after `manager.initialize`;
-    ///         the owner enables them via {setPoolLive}. Read externally through {livePools}.
-    Liveness internal _liveness;
 
     /// @notice Lower tick of the single permitted LP range per pool. LP add liquidity calls
     ///         must use exactly `[activeLowerTick, activeLowerTick + tickSpacing]`.
@@ -58,14 +52,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     /// @param activeLowerTick The prior active tick that still has liquidity referenced at it.
     error ActiveTickBandNonEmpty(int24 activeLowerTick);
 
-    /// @dev `renounceOwnership` was called. Renouncing would permanently disable every
-    ///      `onlyOwner` entry point (`initializePool`, `setPoolLive`, `setActiveTick`, and
-    ///      any subclass-added owner functions like `setAuthorizedLP`). Recovery would
-    ///      require redeploying the hook at a new flag-mined address and orphaning every
-    ///      existing pool. The operator is the single trust principal in this contract's
-    ///      model; their continuing presence is load-bearing.
-    error RenounceOwnershipDisabled();
-
     /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SpreadQuoter is
     ///      designed around a static fee fixed at pool creation; dynamic-fee pools require the
     ///      hook to maintain its own fee state and route every swap through a fee-update
@@ -75,39 +61,18 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     ///      value below `MAX_LP_FEE` instead.
     error DynamicFeeNotSupported();
 
-    /// @dev Direct `poolManager.initialize` for any SpreadQuoter-hooked pool is rejected;
-    ///      callers MUST go through the subclass's owner-only `initializePool` entry point so
-    ///      the pool's `sqrtPriceX96` (immutable post-init) cannot be front-run by a third
-    ///      party at a price the operator did not choose.
-    error DirectInitializeBlocked();
-
     /// @dev The PoolKey's hooks address does not match this contract: `initializePool` was
     ///      called with a key intended for a different hook.
     error InvalidHookAddress();
 
     /// @param _poolManager The Uniswap v4 PoolManager.
     /// @param maxGas_      Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_       Initial owner (Ownable2Step). Owner can toggle liveness and the active tick.
+    /// @param owner_       Initial owner. Owner can toggle liveness and the active tick.
     constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
-        BaseALFHook(_poolManager, maxGas_)
-        Ownable(owner_)
+        OwnedALFHook(_poolManager, maxGas_, owner_)
     {}
 
     // ──── IALFHook ────
-
-    /// @notice Always reports live; per-pool liveness is gated by {livePools}.
-    /// @dev    See {IALFHook.isLive}. Routers SHOULD also consult per-pool liveness for swap
-    ///         eligibility.
-    function isLive() external pure override returns (bool) {
-        return true;
-    }
-
-    /// @notice Whether `poolId` is currently quoting and executing swaps.
-    /// @param poolId The pool to read.
-    /// @return Whether the pool is live.
-    function livePools(PoolId poolId) external view returns (bool) {
-        return _liveness.isLive(poolId);
-    }
 
     /// @notice Simulate a swap up to a target price, returning both amounts.
     /// @dev Delegates to `SwapSimulator.simulateSwapToPrice`. The `DYNAMIC_FEE_FLAG` and
@@ -136,15 +101,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     // ──── Hook Lifecycle ────
-
-    /// @dev Reject direct `poolManager.initialize`. Per v4 `Hooks.noSelfCall`, the hook's own
-    ///      `poolManager.initialize` from `initializePool` skips this callback, so the only
-    ///      caller path that reaches here is an external party's direct attempt. Without this
-    ///      gate, anyone could front-run an operator-planned launch and pin the pool's
-    ///      `sqrtPriceX96` (immutable post-init) to a price the operator did not choose.
-    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
-        revert DirectInitializeBlocked();
-    }
 
     /// @notice Initialize a new SpreadQuoter pool at the operator's chosen price.
     /// @dev    `onlyOwner`-gated and routes through `poolManager.initialize` so v4's
@@ -229,16 +185,6 @@ abstract contract SpreadQuoterBase is BaseALFHook, Ownable2Step {
     }
 
     // ──── Owner Functions ────
-
-    /// @notice Disabled. The hook's design requires a live owner indefinitely; renouncing
-    ///         would permanently brick every `onlyOwner` entry point and orphan every pool
-    ///         referencing this hook. Use `Ownable2Step.transferOwnership` to rotate to a
-    ///         new operator address; never call this.
-    /// @dev    Mirrors the standard OZ pattern for contracts where administrative recovery
-    ///         is load-bearing. See `RenounceOwnershipDisabled` for the rationale.
-    function renounceOwnership() public pure override {
-        revert RenounceOwnershipDisabled();
-    }
 
     /// @notice Toggle liveness for a pool.
     /// @dev Pools default to paused (`false`) immediately after `manager.initialize`. The

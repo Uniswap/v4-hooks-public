@@ -51,7 +51,7 @@ contract DualPoolIncentivizedHook is DualPoolHook {
 
     /// @param pm                  The Uniswap v4 PoolManager.
     /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
-    /// @param owner_              Initial owner (see {DualPoolBase}).
+    /// @param owner_              Initial owner (see {OwnedALFHook}).
     /// @param maxMinDepositBlocks_ Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
     constructor(IPoolManager pm, uint32 maxGas_, address owner_, uint64 maxMinDepositBlocks_)
         DualPoolHook(pm, maxGas_, owner_, maxMinDepositBlocks_)

@@ -15,7 +15,6 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
 import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
-import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Isolated gas measurements for `getIndicativeQuote`. Each test sets up a fresh pool
