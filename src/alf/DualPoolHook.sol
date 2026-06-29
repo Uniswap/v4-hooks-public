@@ -17,7 +17,6 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
-import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -25,6 +24,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {DualPoolBase} from "./base/DualPoolBase.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
+import {FeeLib} from "./libraries/FeeLib.sol";
 import {
     Distribution,
     LiquidityBucket,
@@ -98,8 +98,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
-    using ProtocolFeeLibrary for uint24;
-    using ProtocolFeeLibrary for uint16;
     using LPFeeLibrary for uint24;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
@@ -935,7 +933,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
             uint24 protocolFee;
             (sqrtPriceX96, currentTick, protocolFee,) = poolManager.getSlot0(poolId);
             if (sqrtPriceX96 == 0) return (0, 0);
-            feePips = _composeEffectiveFee(feePips, protocolFee, zeroForOne);
+            feePips = FeeLib.effectiveSwapFee(feePips, protocolFee, zeroForOne);
         }
 
         uint128 liquidity = activeLiquidity(_distribution.get(poolId), sqrtPriceX96, currentTick, bal0, bal1);
@@ -965,11 +963,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
             amountIn = drainIn + drainFee;
             amountOut = outReserve;
         }
-    }
-
-    function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne) private pure returns (uint24) {
-        uint16 directional = zeroForOne ? protocolFee.getZeroForOneFee() : protocolFee.getOneForZeroFee();
-        return directional == 0 ? lpFee : directional.calculateSwapFee(lpFee);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

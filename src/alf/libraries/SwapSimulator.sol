@@ -7,7 +7,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BitMath} from "@uniswap/v4-core/src/libraries/BitMath.sol";
-import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
+import {FeeLib} from "./FeeLib.sol";
 
 /// @title SwapSimulator
 /// @author Uniswap Labs
@@ -17,8 +17,6 @@ import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibr
 /// @custom:security-contact security@uniswap.org
 library SwapSimulator {
     using StateLibrary for IPoolManager;
-    using ProtocolFeeLibrary for uint24;
-    using ProtocolFeeLibrary for uint16;
 
     /// @dev `lpFeePips` exceeds `SwapMath.MAX_SWAP_FEE` (1e6). Forwarding such a value into
     ///      `SwapMath.computeSwapStep`'s unchecked body would underflow `MAX_SWAP_FEE - fee`
@@ -132,10 +130,7 @@ library SwapSimulator {
             s.sqrtPriceLimitX96 = sqrtPriceLimitX96;
 
             // Combine protocol fee with LP fee override, mirroring Pool.sol's fee calculation.
-            uint16 directionalProtocolFee = zeroForOne ? protocolFee.getZeroForOneFee() : protocolFee.getOneForZeroFee();
-            if (directionalProtocolFee != 0) {
-                lpFeePips = directionalProtocolFee.calculateSwapFee(lpFeePips);
-            }
+            lpFeePips = FeeLib.effectiveSwapFee(lpFeePips, protocolFee, zeroForOne);
         }
         s.liquidity = manager.getLiquidity(poolId);
 
