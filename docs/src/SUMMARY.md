@@ -48,7 +48,6 @@
         - [MultiAssetShareMath](src/alf/base/vault/MultiAssetShareMath.sol/library.MultiAssetShareMath.md)
         - [MultiAssetVault](src/alf/base/vault/MultiAssetVault.sol/abstract.MultiAssetVault.md)
       - [BaseALFHook](src/alf/base/BaseALFHook.sol/abstract.BaseALFHook.md)
-      - [JITLockable](src/alf/base/JITLockable.sol/abstract.JITLockable.md)
       - [PoolVault](src/alf/base/PoolVault.sol/abstract.PoolVault.md)
       - [DualPoolBase](src/alf/base/DualPoolBase.sol/abstract.DualPoolBase.md)
       - [SpreadQuoterBase](src/alf/base/SpreadQuoterBase.sol/abstract.SpreadQuoterBase.md)

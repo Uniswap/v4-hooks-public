@@ -23,7 +23,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {DualPoolBase} from "./base/DualPoolBase.sol";
-import {JITLockable} from "./base/JITLockable.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 import {SettlementLib} from "./libraries/SettlementLib.sol";
 import {
@@ -35,6 +34,7 @@ import {
 } from "./types/Distribution.sol";
 import {ActiveLiquidity, activeLiquidityFor} from "./types/ActiveLiquidity.sol";
 import {DepositGate} from "./types/DepositGate.sol";
+import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol";
 
 /// @title DualPoolHook
 /// @author Uniswap Labs
@@ -88,11 +88,12 @@ import {DepositGate} from "./types/DepositGate.sol";
 ///
 ///         User-facing entry points (`bootstrap`, `addLiquidity`, `removeLiquidity`) carry the
 ///         OZ `nonReentrant` transient guard. PM-driven callbacks (`_beforeSwap`, `_afterSwap`)
-///         are not eligible for that guard (no fresh entry point), so they manage a separate
-///         `JIT_LOCK` transient slot and the LP entries reject calls while it is set. This
-///         blocks an owner-configured ERC4626 vault from re-entering LP entry points mid-JIT.
+///         are not eligible for that guard (no fresh entry point), so they manage the `JITLock`
+///         transient slots and the LP entries reject calls (via `whenJITNotInProgress`) while a
+///         cycle is in flight. This blocks an owner-configured ERC4626 vault from re-entering LP
+///         entry points mid-JIT.
 /// @custom:security-contact security@uniswap.org
-contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient, IUnlockCallback {
+contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -243,6 +244,19 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         DualPoolBase(_pm, maxGas_, owner_)
     {
         maxMinDepositBlocks = _maxMinDepositBlocks;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              MODIFIERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Reverts {JITInProgress} if any pool served by this hook has a JIT cycle in flight.
+    ///      Thin delegate over {requireJITNotInProgress}: the lock state and logic live in the
+    ///      `JITLock` type, while the modifier keeps the guard visible in each entry point's
+    ///      signature and hard to omit. Inherited by {DualPoolIncentivizedHook}.
+    modifier whenJITNotInProgress() {
+        requireJITNotInProgress();
+        _;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -719,9 +733,9 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///
     ///      A reentrant `_beforeSwap` on the same pool (e.g., from a malicious vault calling
     ///      `poolManager.swap(samePool)` during `_withdrawFromVault`) would corrupt the JIT
-    ///      lifecycle: the inner `_clearJITLock` would zero the per-pool slot while the outer
+    ///      lifecycle: the inner cycle's `clear` would zero the per-pool slot while the outer
     ///      cycle is still in flight, so the outer `_afterSwap` would short-circuit and leave
-    ///      the outer's deployed positions orphaned. Reject up-front.
+    ///      the outer's deployed positions orphaned. {JITLock.enter} rejects it up-front.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         internal
         override
@@ -730,7 +744,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         PoolId poolId = key.toId();
         _liveness.requireLive(poolId);
 
-        _enterJITLock(poolId);
+        jitLockFor(poolId).enter();
         _deployJIT(poolId, key);
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
@@ -739,7 +753,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     ///      currencies (debiting per-pool ERC-20 on settle), re-deposits remaining ERC-20 to
     ///      vaults, and clears the JIT lock. `_beforeSwap` always sets the lock when the pool
     ///      is live and reverts when it isn't, so reaching `_afterSwap` implies the lock is
-    ///      set; a defensive `_isJITLocked` read is unnecessary.
+    ///      set; a defensive lock read is unnecessary.
     function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
         internal
         override
@@ -749,7 +763,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         _removeJIT(poolId, key);
         _resolveNetDelta(poolId, key);
         _depositAllToVaults(poolId, key);
-        _clearJITLock(poolId);
+        jitLockFor(poolId).clear();
         return (IHooks.afterSwap.selector, 0);
     }
 

@@ -2,7 +2,7 @@
 [Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/DualPoolHook.sol)
 
 **Inherits:**
-[DualPoolBase](/src/alf/base/DualPoolBase.sol/abstract.DualPoolBase.md), [PoolVault](/src/alf/base/PoolVault.sol/abstract.PoolVault.md), [JITLockable](/src/alf/base/JITLockable.sol/abstract.JITLockable.md), ReentrancyGuardTransient
+[DualPoolBase](/src/alf/base/DualPoolBase.sol/abstract.DualPoolBase.md), [PoolVault](/src/alf/base/PoolVault.sol/abstract.PoolVault.md), ReentrancyGuardTransient
 
 **Title:**
 DualPoolHook

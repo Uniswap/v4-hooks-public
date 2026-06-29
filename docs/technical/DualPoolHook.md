@@ -22,7 +22,6 @@ The pool's ordinary v4 liquidity is therefore expected to be zero between swaps.
 contract DualPoolHook is
     DualPoolBase,
     PoolVault,
-    JITLockable,
     ReentrancyGuardTransient,
     IUnlockCallback
 ```
@@ -31,7 +30,6 @@ The split is intentional:
 
 - `DualPoolBase` provides the minimal ALF/v4 surface: PoolManager hook callback dispatch, per-pool `livePools` liveness, `IALFHook` metadata, and `beforeInitialize` blocking of direct PM init.
 - `PoolVault` (over `MultiAssetVault`) provides per-pool share accounting and the asset ledger across ERC4626 vault shares, ERC-6909 PoolManager claims, and raw ERC-20.
-- `JITLockable` provides transient per-pool and global JIT-cycle locks for reentrancy safety during swap callbacks.
 - `ReentrancyGuardTransient` protects user-facing LP entry points.
 - `IUnlockCallback` lets `removeLiquidity` redeem pending ERC-6909 claims inside a PoolManager unlock before withdraw math runs.
 
@@ -372,7 +370,7 @@ After a live swap's `beforeSwap`:
 4. Deposit all remaining tracked raw ERC-20 for the pool into configured vaults.
 5. `_clearJITLock(poolId)` — clear per-pool lock and decrement global counter.
 
-Transient storage holds per-bucket deployed liquidity (`_ACTIVE_LIQ_NAMESPACE`) and JIT locks (`JITLockable`). Neither survives past the transaction.
+Transient storage holds per-bucket deployed liquidity (the `ActiveLiquidity` type) and JIT locks (the `JITLock` type). Neither survives past the transaction.
 
 ## Quote and Simulation Views
 
@@ -423,12 +421,12 @@ Direct v4 LP adds/removes are blocked by hook callbacks. Only the hook itself ca
 There are two reentrancy defenses because there are two kinds of entry:
 
 1. User/admin entry points (`bootstrap`, `addLiquidity`, `removeLiquidity`, owner config) use OpenZeppelin's transient `nonReentrant`.
-2. PoolManager callbacks use `JITLockable` transient locks instead of the OZ guard (no fresh external entry on those paths).
+2. PoolManager callbacks use the `JITLock` type's transient locks instead of the OZ guard (no fresh external entry on those paths).
 
-`JITLockable` provides:
+The `JITLock` type (`src/alf/types/JITLock.sol`) provides:
 
-- A **per-pool lock**, set in `_enterJITLock` and cleared in `_clearJITLock`. `_enterJITLock` also rejects reentrant `_beforeSwap` on the same pool (which would orphan outer-cycle positions if an inner cycle cleared the lock early).
-- A **global in-flight counter**, read by `whenJITNotInProgress` to reject user/admin calls while any DualPool JIT cycle is active anywhere on this hook.
+- A **per-pool lock**, derived via `jitLockFor(poolId)`, set by `enter` (in `_beforeSwap`) and cleared by `clear` (in `_afterSwap`). `enter` also rejects reentrant `_beforeSwap` on the same pool (which would orphan outer-cycle positions if an inner cycle cleared the lock early).
+- A **global in-flight counter**, read by `requireJITNotInProgress` to reject user/admin calls while any DualPool JIT cycle is active anywhere on this hook. The hook exposes this through a thin `whenJITNotInProgress` modifier that simply calls the guard, so each gated entry point keeps the check visible in its signature.
 
 The global counter closes cross-pool reentry. For example, if a malicious vault callback from pool A tries to call `addLiquidity` on pool B during pool A's JIT cycle, pool B's per-pool lock may be false, but the global counter is nonzero, so the call reverts `JITInProgress`.
 
