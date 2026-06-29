@@ -191,10 +191,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
     ///      `minAmount0`/`minAmount1` to the caller. Caller's slippage bounds were violated.
     error SlippageExceeded();
 
-    /// @dev `setActiveTick` is disabled on DualPool. The hook routes liquidity through
-    ///      distribution buckets, not a single active tick. Use {setDistribution} instead.
-    error SetActiveTickDisabled();
-
     /// @dev Caller is not authorized for this entry point. Used by `_requireDepositAuth`
     ///      and `_beforeInitialize`. Owner gating is handled by OZ Ownable's
     ///      `OwnableUnauthorizedAccount`.
@@ -566,14 +562,6 @@ contract DualPoolHook is DualPoolBase, PoolVault, ReentrancyGuardTransient, IUnl
     /// @return Whether non-owner deposits are permitted.
     function externalDepositsEnabled(PoolId poolId) external view returns (bool) {
         return _depositGate.isOpen(poolId);
-    }
-
-    /// @notice Disabled: DualPool uses distribution buckets instead of one active LP tick.
-    /// @dev    Always reverts with {SetActiveTickDisabled}. The function exists only to satisfy
-    ///         the inherited interface; DualPool routes liquidity through {setDistribution}
-    ///         instead. Marked `pure` because no state is read or written.
-    function setActiveTick(PoolKey calldata, int24) external pure {
-        revert SetActiveTickDisabled();
     }
 
     /// @notice Enable or disable pool liveness for emergency pause/resume.

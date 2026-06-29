@@ -1954,25 +1954,6 @@ contract DualPoolHookTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                    setActiveTick DISABLED
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @dev DualPoolHook deploys multi-bucket distributions rather than a single
-    ///      active tick, so the compatibility setter is present but disabled.
-    function test_setActiveTick_reverts() public {
-        vm.prank(owner);
-        vm.expectRevert(DualPoolHook.SetActiveTickDisabled.selector);
-        hook.setActiveTick(testPoolKey, 0);
-    }
-
-    /// @dev `setActiveTick` is `pure` and reverts for any caller, not just non-owners.
-    function test_setActiveTick_revertsEvenForNonOwner() public {
-        vm.prank(makeAddr("notOwner"));
-        vm.expectRevert(DualPoolHook.SetActiveTickDisabled.selector);
-        hook.setActiveTick(testPoolKey, 0);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     //                          VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
