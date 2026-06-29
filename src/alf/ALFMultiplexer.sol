@@ -90,7 +90,19 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         the best individual indicative (the expected case) does not trigger a revert.
 ///
 ///         The baseline is the best pre-execution indicative across the targets, and it is not
-///         re-derived after execution. A candidate that wins quoting but then contributes
+///         re-derived after execution. A tier-1 indicative can be a constant-liquidity upper
+///         bound that overstates output for swaps large enough to exhaust a quoter's depth
+///         (e.g. a SmartPool extrapolating its in-range buckets to the price extreme), so each
+///         candidate's contribution to the baseline is first bounded by its declared effective
+///         output liquidity (`getEffectiveLiquidity`); see `_baselineContribution`. Without
+///         that bound a large swap against a deep-looking but shallow quoter would set an
+///         unreachable threshold and trip the check on a fair fill. The bound applies only to
+///         quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact
+///         against real pool state, and tier-3/4 opaque quoters cannot be bounded (the
+///         trusted-targets note below covers them). It is computed only when strict tolerance
+///         is enabled.
+///
+///         A candidate that wins quoting but then contributes
 ///         nothing (it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
 ///         it quoted) drops aggregate execution below that baseline and can trip the tolerance
 ///         revert even when the other candidates filled acceptably. This is intentional and
@@ -688,7 +700,7 @@ contract ALFMultiplexer is BaseHook {
     ///      so the baseline must track DELIVERABLE output, not a quoter's ranking estimate. A
     ///      tier-1 (IALFHook) `getIndicativeQuote` can be a constant-liquidity upper bound that
     ///      overstates output for a swap large enough to exhaust the quoter's depth (e.g.
-    ///      DualPool extrapolating its in-range buckets to the price extreme). Left unbounded,
+    ///      SmartPool extrapolating its in-range buckets to the price extreme). Left unbounded,
     ///      such a quote inflates the threshold and trips the check on an otherwise-acceptable
     ///      fill. Bound the contribution by the candidate's declared effective output liquidity:
     ///        - exact input: cap the expected output at the deliverable output reserve;
