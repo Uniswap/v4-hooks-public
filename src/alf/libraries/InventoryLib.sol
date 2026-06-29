@@ -147,6 +147,10 @@ library InventoryLib {
     ///         from the vault, then debit it.
     /// @dev For a non-vaulted bucket with insufficient raw, the `bal - amount` subtraction panics
     ///      on underflow (no sentinel). {CrossPoolShareLeak} guards the vaulted path.
+    /// @dev On the vaulted-shortfall path the bucket is set to `0` rather than computed: it
+    ///      withdraws exactly `shortfall = amount - bal`, so after crediting the withdrawal and
+    ///      debiting `amount` the bucket nets to zero (`bal + shortfall == amount`). Do not
+    ///      "fix" this into an arithmetic expression; the literal zero is the correct result.
     /// @param self   Capability storage.
     /// @param bucket The accounting partition to debit.
     /// @param amount The asset amount to make available and debit (token's native decimals).

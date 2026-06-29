@@ -71,7 +71,10 @@ function enter(JITLock self) {
 }
 
 /// @notice Clear the per-pool JIT lock and decrement the global in-flight counter.
-/// @dev Call at the end of a JIT cycle after a successful {enter}.
+/// @dev Call at the end of a JIT cycle after a successful {enter}. A matching prior {enter} is a
+///      hard precondition: the global counter decrement underflows otherwise. The pairing is
+///      structurally enforced by the hook's begin/end JIT cycle ({enter} in `beforeSwap`, {clear}
+///      in `afterSwap`), so {clear} is never reached without a preceding {enter}.
 /// @param self The pool's JIT lock.
 function clear(JITLock self) {
     bytes32 perPool = JITLock.unwrap(self);

@@ -60,7 +60,7 @@ function set(Distribution storage self, PoolId poolId, LiquidityBucket[] calldat
     if (n == 0 || n > MAX_BUCKETS) revert InvalidDistribution();
 
     uint256 totalWeight;
-    for (uint256 i; i < n; i++) {
+    for (uint256 i; i < n; ++i) {
         if (buckets[i].tickLower >= buckets[i].tickUpper) revert InvalidTickRange();
         // Reject ticks outside the v4 representable range; `TickMath.getSqrtPriceAtTick` would
         // otherwise revert later from inside allocation or quote paths, bricking quotes and swaps
@@ -78,7 +78,7 @@ function set(Distribution storage self, PoolId poolId, LiquidityBucket[] calldat
 
     delete self._inner[poolId];
 
-    for (uint256 i; i < n; i++) {
+    for (uint256 i; i < n; ++i) {
         self._inner[poolId].push(buckets[i]);
     }
 }

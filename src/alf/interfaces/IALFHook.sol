@@ -61,6 +61,11 @@ interface IALFHook is IERC165 {
     /// @dev Returns liquidity that can be accessed right now for trading. Always <= getReserves().
     ///      May differ from getReserves() if some liquidity is not available for deployment (e.g., from a vault with too much utilization).
     ///      Returns (0, 0) for hooks that do not manage off-pool reserves.
+    ///      Implementations SHOULD report fee-net, immediately-deliverable reserves: consumers (such as
+    ///      the ALFMultiplexer's reserve-bounded strict-tolerance baseline) treat the returned value as
+    ///      the deliverable output cap, a bound that is only sound when reserves are net of the fee a swap
+    ///      pays. An over-reported (gross) value weakens those consumers' deliverability bounds, which is
+    ///      part of the trusted-targets assumption such consumers make.
     /// @param key The pool key for the specific pool.
     /// @return token0 Immediately swappable token0 liquidity.
     /// @return token1 Immediately swappable token1 liquidity.

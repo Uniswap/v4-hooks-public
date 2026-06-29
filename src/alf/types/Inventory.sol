@@ -13,6 +13,11 @@ using SafeCast for uint256;
 /// @dev {debitERC20} was asked to pay more than the bucket's tracked ERC-20 balance.
 error InsufficientPoolBalance();
 
+/// @notice Emitted when a vault is bound to a bucket via {setVault} (`address(0)` unbinds to raw ERC-20).
+/// @param bucket The accounting partition reconfigured.
+/// @param vault  The ERC-4626 vault now bound to the bucket.
+event VaultBound(bytes32 indexed bucket, IERC4626 vault);
+
 /// @notice Packed per-bucket ERC-20 + ERC-6909 claim balance.
 /// @dev Co-located in one 32-byte slot so the pair-aware paths read both with a single SLOAD.
 ///      `uint128` per field dwarfs any plausible per-bucket amount; writes SafeCast.
@@ -102,6 +107,7 @@ function vaultOf(Inventory storage self, bytes32 bucket) view returns (IERC4626)
 /// @param vault  The ERC-4626 vault to bind (`address(0)` to hold the currency as raw ERC-20).
 function setVault(Inventory storage self, bytes32 bucket, IERC4626 vault) {
     self.vault[bucket] = vault;
+    emit VaultBound(bucket, vault);
 }
 
 /// @notice ERC-4626 shares this bucket owns.
@@ -205,5 +211,6 @@ function debitERC20(Inventory storage self, bytes32 bucket, uint256 amount) {
     CurrencyState storage s = self.state[bucket];
     uint256 bal = s.erc20;
     if (bal < amount) revert InsufficientPoolBalance();
+    // bare cast is safe: `bal` is read from a uint128 field, so `bal - amount < 2**128`.
     s.erc20 = uint128(bal - amount);
 }

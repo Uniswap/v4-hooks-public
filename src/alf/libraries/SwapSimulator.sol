@@ -103,7 +103,10 @@ library SwapSimulator {
     /// @param tickSpacing The pool's tick spacing.
     /// @param sqrtPriceLimitX96 The target price. Swap terminates when this price is reached
     ///        or the specified amount is exhausted, whichever comes first.
-    /// @return amountIn Total input consumed (including fees).
+    /// @dev `amountIn` is GROSS of the protocol fee: it mirrors `Pool.swap`'s swapper frame, which
+    ///      charges the LP fee plus the protocol fee, not the LP-fee-only portion. Consumers that
+    ///      need the LP-only input must net out the protocol fee themselves.
+    /// @return amountIn Total input consumed (gross of LP and protocol fees).
     /// @return amountOut Total output received.
     function simulateSwapToPrice(
         IPoolManager manager,
@@ -209,6 +212,7 @@ library SwapSimulator {
             // Clamp tickNext to valid range (MIN_TICK, MAX_TICK)
             assembly ("memory-safe") {
                 tickNext := signextend(2, tickNext)
+                // 887272 == TickMath.MAX_TICK (assembly cannot reference the Solidity constant)
                 if slt(tickNext, sub(0, 887272)) { tickNext := sub(0, 887272) }
                 if sgt(tickNext, 887272) { tickNext := 887272 }
             }
@@ -269,6 +273,9 @@ library SwapSimulator {
         // well within int256 range, so SafeCast.toInt256() checks are redundant.
         // Saves ~80 gas per step by skipping 3-4 SafeCast calls.
         assembly ("memory-safe") {
+            // Offsets track SwapState field order: sqrtPriceX96 @ slot 0 (s), amountRemaining @
+            // slot 3 (add(s, 0x60)), amountCalc @ slot 4 (add(s, 0x80)). Keep in sync with the
+            // struct layout above if fields are reordered.
             let sAmountRemaining := add(s, 0x60)
             let sAmountCalc := add(s, 0x80)
             mstore(s, sqrtPriceAfter)

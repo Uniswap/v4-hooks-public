@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -34,10 +35,12 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
     }
 
     /// @notice ERC-165 advertisement for the interfaces this contract implements.
-    /// @dev Stateless implementation (no inherited `ERC165` storage). Subclasses that implement
+    /// @dev Stateless implementation (no inherited `ERC165` storage). Advertises `IALFHook`,
+    ///      `IHooks` (implemented via `BaseHook`), and `IERC165`. Subclasses that implement
     ///      additional interfaces should override this and OR-in their own selectors.
     function supportsInterface(bytes4 interfaceId) public pure virtual returns (bool) {
-        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IERC165).interfaceId;
+        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IHooks).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @inheritdoc IALFHook
@@ -110,6 +113,11 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── DeltaResolver: _pay ────
 
+    /// @inheritdoc DeltaResolver
+    /// @dev Pays the PoolManager using v4's `Currency.transfer` rather than OZ `SafeERC20`, by
+    ///      design: this matches v4 periphery's `DeltaResolver` convention (the destination is the
+    ///      trusted PoolManager during an unlock, and `Currency.transfer` handles native ETH and
+    ///      the no-return-value ERC-20 quirk in the same path).
     function _pay(Currency token, address, uint256 amount) internal virtual override {
         token.transfer(address(poolManager), amount);
     }

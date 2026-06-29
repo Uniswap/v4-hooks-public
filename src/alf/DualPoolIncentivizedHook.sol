@@ -120,6 +120,11 @@ contract DualPoolIncentivizedHook is DualPoolHook {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Claim accrued reward tokens for the caller on a pool.
+    /// @dev `whenJITNotInProgress` is conservative gating: a claim only touches the non-pool reward
+    ///      token and the `Rewards` ledger, never the JIT-managed pool currencies. Since the claim
+    ///      makes an external `safeTransfer`, the blanket JIT guard is the simplest safe choice. The
+    ///      cost is that a claim reverts while any pool's swap is mid-flight, a minor liveness
+    ///      coupling rather than a safety issue.
     /// @param key The pool to claim from.
     /// @return amount Reward tokens transferred to the caller.
     function claimRewards(PoolKey calldata key) external nonReentrant whenJITNotInProgress returns (uint256 amount) {

@@ -255,6 +255,9 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
 
     /// @dev Reverts {DeadlineExpired} if the caller-supplied `deadline` has passed. Hoisted out of
     ///      the LP entry points so the precondition stays visible in each signature.
+    /// @dev Mixed-clock by design: deadlines compare against `block.timestamp` because they are
+    ///      wall-clock UX bounds, whereas the deposit lock (`minDepositBlocks`) and rewards accrual
+    ///      run on the block-based `BlockNumberish` clock as anti-MEV timing.
     modifier checkDeadline(uint256 deadline) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         _;

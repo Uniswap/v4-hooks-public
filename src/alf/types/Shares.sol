@@ -10,6 +10,9 @@ error InsufficientShares();
 error VaultNotBootstrapped();
 /// @dev Bootstrap was attempted on a vault that already holds shares.
 error VaultAlreadyBootstrapped();
+/// @dev {bindAssets} was called on a vault whose asset pair is already bound. The pair is fixed for
+///      the vault's lifetime, so re-binding is rejected.
+error AssetsAlreadyBound();
 /// @dev Bootstrap amounts produce zero shares (one or both received amounts is zero).
 error InsufficientBootstrap();
 /// @dev A withdrawal arrived before the depositor's lock elapsed
@@ -201,11 +204,15 @@ function checkUnlocked(Shares storage self, VaultId vaultId, address user, uint6
 
 /// @notice Bind the asset pair for a vault. The consumer calls this once at bootstrap, before
 ///         pulling assets, so the pair is fixed for the vault's lifetime.
+/// @dev    Reverts {AssetsAlreadyBound} on a re-bind so the immutability the NatSpec promises is
+///         enforced rather than assumed. Bootstrap calls this exactly once on an empty vault, so
+///         the guard is a no-op on the happy path.
 /// @param self    Shares ledger storage.
 /// @param vaultId The vault to bind.
 /// @param asset0  First asset.
 /// @param asset1  Second asset.
 function bindAssets(Shares storage self, VaultId vaultId, address asset0, address asset1) {
+    if (self.assets[vaultId].asset0 != address(0)) revert AssetsAlreadyBound();
     self.assets[vaultId] = Assets({asset0: asset0, asset1: asset1});
 }
 

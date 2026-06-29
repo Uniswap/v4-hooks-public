@@ -18,8 +18,10 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 ///         proportionally by it, making such attacks uneconomic regardless of bootstrap
 ///         size.
 ///
-///         All functions are `internal pure`. Stateless. Overflow-safe via Solady's
-///         512-bit `fullMulDiv` / `fullMulDivUp`.
+///         All functions are `internal pure` and stateless. The conversion helpers
+///         ({convertToAmounts}) are overflow-safe via Solady's 512-bit `fullMulDiv` /
+///         `fullMulDivUp`; {bootstrapShares} carries its own overflow precondition documented
+///         on that function (its `received0 * received1` product is a plain checked multiply).
 /// @custom:security-contact security@uniswap.org
 library MultiAssetShareMath {
     /// @notice Convert a share count to the equivalent two-asset amounts at the current
@@ -58,6 +60,11 @@ library MultiAssetShareMath {
     /// @notice Bootstrap shares for the first deposit at the bootstrapper-chosen ratio:
     ///         `sqrt(received0 * received1)` (Uniswap V2 style). Uses Solady's overflow-
     ///         safe integer sqrt.
+    /// @dev    `received0 * received1` is a plain checked multiply (not `fullMulDiv`); it panics
+    ///         on overflow. Precondition: `received0 * received1 < 2**256`. This is unreachable
+    ///         for real inventory because both inputs originate from uint128-packed balances, so
+    ///         the product is at most `2**256 - 2**129 + 1 < 2**256`. The sqrt itself cannot
+    ///         overflow once the product fits in uint256.
     /// @dev    Returns 0 if `received0 * received1 == 0`; the caller should treat that as
     ///         "insufficient bootstrap."
     function bootstrapShares(uint256 received0, uint256 received1) internal pure returns (uint256) {

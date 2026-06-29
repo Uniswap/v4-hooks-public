@@ -25,7 +25,8 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 ///      shared attestation data to the nested swaps.
 /// @param attestationData Shared attestation payload forwarded to nested quoter swaps.
 /// @param targets Targeted quoter list. Must be non-empty.
-/// @param strictTolerancePips Maximum relative deviation before revert, in parts per million.
+/// @param strictTolerancePips Maximum relative deviation before revert, in parts per million
+///                            (parts-per-million, not basis points: 10_000 pips = 1%).
 ///                            Set to 0 to disable strict tolerance checks.
 struct MultiplexerHookData {
     bytes attestationData;

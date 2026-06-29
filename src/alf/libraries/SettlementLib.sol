@@ -45,6 +45,8 @@ library SettlementLib {
     ///      `InsufficientPoolBalance` if the bucket's raw ledger is short). A positive delta mints
     ///      ERC-6909 claims (rather than `take`, since the swapper's input is not yet settled) and
     ///      records them on the bucket.
+    /// @dev `delta == 0` is a no-op: neither branch is taken, nothing is owed in either direction,
+    ///      and the bucket is left untouched.
     /// @param inventory   The consumer's `Inventory` storage; the bucket's raw ledger and claim
     ///                    counter are updated here.
     /// @param poolManager The v4 PoolManager to settle against.
@@ -67,6 +69,8 @@ library SettlementLib {
         } else if (delta > 0) {
             uint256 amount = uint256(delta);
             poolManager.mint(address(this), currency.toId(), amount);
+            // The `toUint128` inside `recordClaims` is the only magnitude backstop on this path;
+            // real v4 deltas are bounded by pool reserves and never approach `uint128.max`.
             inventory.recordClaims(bucket, amount);
         }
     }

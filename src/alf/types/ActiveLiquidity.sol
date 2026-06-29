@@ -29,7 +29,9 @@ bytes32 constant ACTIVE_LIQUIDITY_NAMESPACE = keccak256("dualpoolhook.activeliq.
 ///         so bucket `i` deploys `liq = 0` in swap 2, the deploy path skips the write (it only
 ///         {store}s when `liq > 0`), leaving slot `i` at `100` from swap 1. Without the clear,
 ///         swap 2's teardown would read `100` and try to remove a position that no longer exists,
-///         reverting the swap.
+///         reverting the swap. {store} drops zero writes itself, so a zeroed slot unambiguously
+///         means "no position deployed" regardless of caller discipline: the invariant is
+///         self-enforcing rather than relying on every caller to skip zero stores.
 /// @custom:security-contact security@uniswap.org
 type ActiveLiquidity is bytes32;
 
@@ -46,12 +48,14 @@ function activeLiquidityFor(PoolId poolId) pure returns (ActiveLiquidity) {
 /// @notice Record bucket `i`'s deployed liquidity in transient storage.
 /// @dev Writes to slot `base + i`. The addition wraps in the unlikely event the keccak base is
 ///      near `type(uint256).max`, matching the v4 transient-namespace convention; the bucket index
-///      is bounded well below that. Callers only {store} non-zero liquidity, so a zeroed slot
-///      unambiguously means "no position deployed for this bucket".
+///      is bounded well below that. A zero `liq` returns early without touching the slot, so a
+///      zeroed slot unambiguously means "no position deployed for this bucket" and the load-and-clear
+///      invariant holds without depending on callers to skip zero stores.
 /// @param self The pool's active-liquidity base slot.
 /// @param i    The bucket index.
 /// @param liq  The liquidity deployed for the bucket.
 function store(ActiveLiquidity self, uint256 i, uint128 liq) {
+    if (liq == 0) return;
     bytes32 base = ActiveLiquidity.unwrap(self);
     assembly ("memory-safe") {
         tstore(add(base, i), liq)
