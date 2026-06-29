@@ -65,7 +65,7 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///         PoolVault interacts with the configured per-currency vault solely through the
 ///         ERC-4626 interface (`deposit`, `withdraw`, `convertToAssets`, `convertToShares`,
 ///         `previewRedeem`). It deliberately does NOT read `maxWithdraw` on the hot paths
-///         (`_effectiveBalance`, `_withdrawFromVault`, `_ensureERC20`): curated/gated vaults
+///         (`_effectiveAssets`, `_withdrawFromVault`, `_ensureERC20`): curated/gated vaults
 ///         such as Morpho VaultV2 return `0` from `maxWithdraw` by construction because they
 ///         cannot honestly bound a single-block withdrawal cap across their internal
 ///         allocations. Effective-liquidity sizing instead uses `previewRedeem(shares)`,
@@ -89,7 +89,7 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///              charged entirely to LPs. At typical hook utilization this dwarfs the LP
 ///              fee revenue.
 ///
-///           2. LP share-math socialization. `_assetBalanceV4` reads `convertToAssets`
+///           2. LP share-math socialization. `_totalAssets` reads `convertToAssets`
 ///              (gross per EIP-4626), but actual `vault.deposit`/`vault.withdraw` net out
 ///              the fee. The mismatch is socialized: a depositor underpays the entry fee
 ///              (existing LPs subsidize), and a withdrawer over-extracts the gross
@@ -140,8 +140,9 @@ abstract contract PoolVault is BlockNumberish {
     ///      `_inventory.method(...)` directly. PoolVault is
     ///      the V4 binding: it owns the bucket derivation, re-exposes the `vaults` getter, and
     ///      delegates every asset/claim operation through thin `(PoolId, Currency)` wrappers
-    ///      (`_vaultOf`, `_setVault`, `_assetBalanceV4`, `_depositToVault`, `_redeemPoolClaims`,
-    ///      ...) so subclasses and the test harness keep their existing call surface.
+    ///      (`_vaultOf`, `_setVault`, `_depositToVault`, `_redeemPoolClaims`, ...) so subclasses
+    ///      and the test harness keep their existing call surface. Aggregate views
+    ///      (`_totalAssets`, `_effectiveAssets`) call `_inventory` directly.
     Inventory internal _inventory;
 
     /// @dev Two-asset proportional share ledger composed as a type-driven `Shares` storage field,
@@ -173,7 +174,7 @@ abstract contract PoolVault is BlockNumberish {
     /// @notice The JIT cycle's post-swap `vault.deposit` reverted (typically because the
     ///         vault's `maxDeposit` cap is reached, or a curated allocator declined). The
     ///         underlying ERC-20 stays in `_state.erc20` and is retried on the next swap.
-    ///         LP share math remains correct because `_assetBalanceV4` reads
+    ///         LP share math remains correct because `_totalAssets` reads
     ///         `s.erc20 + s.claims + vault`; LPs forgo vault yield on the
     ///         non-deposited portion until the cap loosens or operator intervention.
     /// @param poolId   The pool whose afterSwap re-deposit was skipped.
@@ -519,8 +520,9 @@ abstract contract PoolVault is BlockNumberish {
     }
 
     /// @dev Convert a share count to the equivalent token amounts for both assets, proportional to
-    ///      the pool's current managed balances. Reads `_assetBalanceV4` for each leg and the
-    ///      per-pool offset, then defers to the `Shares` ledger's virtual-offset formula
+    ///      the pool's current managed balances. Reads the gross managed balance
+    ///      (`Inventory.assetBalance`) for each leg and the per-pool offset, then defers to the
+    ///      `Shares` ledger's virtual-offset formula
     ///      (`amount = shares * (total + 1) / (supply + 10**offset)`). Reverts
     ///      {VaultNotBootstrapped} when the supply is zero.
     function _convertToAmounts(VaultId vaultId, address asset0, address asset1, uint256 shares, bool roundUp)
@@ -529,8 +531,8 @@ abstract contract PoolVault is BlockNumberish {
         returns (uint256 amount0, uint256 amount1)
     {
         PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
-        uint256 bal0 = _assetBalanceV4(poolId, Currency.wrap(asset0));
-        uint256 bal1 = _assetBalanceV4(poolId, Currency.wrap(asset1));
+        uint256 bal0 = _inventory.assetBalance(_bucket(poolId, Currency.wrap(asset0)));
+        uint256 bal1 = _inventory.assetBalance(_bucket(poolId, Currency.wrap(asset1)));
         return _shares.convertToAmounts(vaultId, bal0, bal1, _decimalsOffset(vaultId), shares, roundUp);
     }
 
@@ -553,67 +555,17 @@ abstract contract PoolVault is BlockNumberish {
     //                          ASSET ACCOUNTING (V4)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Total managed assets for a pool across both currencies.
+    /// @dev Total managed assets for a pool across both currencies, valuing each leg at its gross
+    ///      economic balance (`Inventory.assetBalance`: raw + claims + `convertToAssets(shares)`).
+    ///      LP share math reads this so claims are priced over the pool's true economic stake,
+    ///      including capital temporarily behind a vault pause or an unrealized exit fee. Contrast
+    ///      `_effectiveAssets`, which values the vault leg via `previewRedeem` for what is
+    ///      realizable right now. The trade-off is that a vault overstating `convertToAssets`
+    ///      inflates these balances and dilutes new depositors; bounded by the vault-trust model.
     function _totalAssets(PoolKey memory key) internal view returns (uint256 amount0, uint256 amount1) {
         PoolId poolId = key.toId();
-        amount0 = _assetBalanceV4(poolId, key.currency0);
-        amount1 = _assetBalanceV4(poolId, key.currency1);
-    }
-
-    /// @dev Total managed balance for a single (pool, currency) pair. Sums three sources:
-    ///      ERC4626 vault assets (via `convertToAssets`), ERC-6909 claims, and per-pool
-    ///      ERC-20 holdings.
-    ///
-    ///      Deliberate view-asymmetry with `_effectiveBalance`:
-    ///        - `_assetBalanceV4` uses `vault.convertToAssets(shares)`: the gross per-share
-    ///          economic value of the pool's vault stake, ignoring any vault-side exit fee
-    ///          or temporary throttle.
-    ///        - `_effectiveBalance` uses `vault.previewRedeem(shares)`: the net amount the
-    ///          vault would deliver right now if the hook called `withdraw`/`redeem` for
-    ///          those shares (i.e., after exit fees, but still subject to single-block
-    ///          liquidity races on curated/gated vaults).
-    ///
-    ///      Why the asymmetry: LP shares represent the pool's true economic claim, including
-    ///      capital that is temporarily locked behind a vault pause, a not-yet-realized exit
-    ///      fee, or a curated allocation. Sizing LP share math by `previewRedeem` would let
-    ///      a vault unilaterally tax LP exits (a vault that raises its exit-fee parameter
-    ///      between an LP deposit and an LP withdraw would shrink LP value even though the
-    ///      underlying economic stake is unchanged). The JIT cycle, by contrast, MUST size
-    ///      against what `vault.withdraw` will actually return mid-swap, which is exactly
-    ///      what `previewRedeem` reports.
-    ///
-    ///      Note that `previewRedeem` is a view at read-time; vault state could shift
-    ///      between the read and the actual `vault.withdraw` call mid-swap. When that
-    ///      happens, the vault reverts and the revert bubbles through `_pushAsset` →
-    ///      `beforeSwap` per the documented vault-compatibility model.
-    ///
-    ///      The trade-off: a vault that overstates `convertToAssets` (unrealized yield not
-    ///      actually withdrawable, buggy/adversarial vault) inflates `_assetBalanceV4` →
-    ///      inflates `previewDeposit`/`previewWithdraw` → dilutes new depositors and may
-    ///      cause `_ensureERC20` to revert mid-swap when the vault cannot satisfy the
-    ///      requested withdrawal. This is bounded by the documented vault-trust assumption:
-    ///      operators must use trusted ERC-4626 vaults.
-    function _assetBalanceV4(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.assetBalance(_bucket(poolId, currency));
-    }
-
-    /// @dev Net realizable balance for a single (pool, currency) pair. Same composition as
-    ///      `_assetBalanceV4`, but the vault contribution is the per-share `previewRedeem`
-    ///      output: the amount the vault would deliver if the hook redeemed exactly the
-    ///      pool's share count right now. Used by callers that need "what can actually be
-    ///      delivered to a swapper this block": JIT deployment sizing and indicative quotes.
-    ///
-    ///      Why `previewRedeem` and not `maxWithdraw`: curated/gated vaults like Morpho
-    ///      VaultV2 return `0` from `maxWithdraw` by construction (they cannot honestly
-    ///      bound a single-block withdrawal cap across their internal allocations), so a
-    ///      `maxWithdraw`-based sizing would silently degrade every such pool to zero
-    ///      deployable liquidity. `previewRedeem` is exact on VaultV2 (== `convertToAssets`)
-    ///      and on fee-charging vaults correctly reports the post-fee realizable value.
-    ///      Cross-pool isolation is automatic: `previewRedeem` is per-share, so pool A's
-    ///      reported balance is its own share-count × per-share value, independent of
-    ///      what other pools sharing the same vault hold.
-    function _effectiveBalance(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.effectiveBalance(_bucket(poolId, currency));
+        amount0 = _inventory.assetBalance(_bucket(poolId, key.currency0));
+        amount1 = _inventory.assetBalance(_bucket(poolId, key.currency1));
     }
 
     /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
@@ -621,14 +573,19 @@ abstract contract PoolVault is BlockNumberish {
         return _effectiveAssets(key.toId(), key.currency0, key.currency1);
     }
 
-    /// @dev Pool-level effective assets when the caller already has the PoolId cached.
+    /// @dev Pool-level effective assets when the caller already has the PoolId cached. Values each
+    ///      leg at its realizable balance (`Inventory.effectiveBalance`: raw + claims +
+    ///      `previewRedeem(shares)`), i.e. what the vault would deliver right now after any exit
+    ///      fee. JIT-deployment sizing and indicative quotes read this so a cycle never sizes
+    ///      against funds it cannot source. Contrast `_totalAssets`, which uses `convertToAssets`
+    ///      for the pool's full economic stake.
     function _effectiveAssets(PoolId poolId, Currency currency0, Currency currency1)
         internal
         view
         returns (uint256 amount0, uint256 amount1)
     {
-        amount0 = _effectiveBalance(poolId, currency0);
-        amount1 = _effectiveBalance(poolId, currency1);
+        amount0 = _inventory.effectiveBalance(_bucket(poolId, currency0));
+        amount1 = _inventory.effectiveBalance(_bucket(poolId, currency1));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

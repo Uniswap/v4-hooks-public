@@ -103,7 +103,7 @@ contract MockPoolVault is PoolVault {
     }
 
     function effectiveBalance(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _effectiveBalance(poolId, currency);
+        return _inventory.effectiveBalance(_bucket(poolId, currency));
     }
 }
 
@@ -591,7 +591,7 @@ contract PoolVaultTest is Test, Deployers {
     //  Per-pool previewRedeem sizing
     // ══════════════════════════════════════════════════════════
 
-    /// @dev `_effectiveBalance` reports the per-pool `previewRedeem(shares)` value. Two pools
+    /// @dev `effectiveBalance` reports the per-pool `previewRedeem(shares)` value. Two pools
     ///      sharing the same vault each see their own share-pro-rata exit value with no
     ///      cross-pool interference -- the per-share quantity is intrinsic to the vault, so
     ///      no per-pool capping math is needed in PoolVault.
@@ -631,7 +631,7 @@ contract PoolVaultTest is Test, Deployers {
     //  Morpho VaultV2 compatibility (maxWithdraw == 0 vaults)
     // ══════════════════════════════════════════════════════════
 
-    /// @dev With a VaultV2-shaped vault (`maxWithdraw == 0`), `_effectiveBalance` MUST still
+    /// @dev With a VaultV2-shaped vault (`maxWithdraw == 0`), `effectiveBalance` MUST still
     ///      reflect the pool's share-redemption value via `previewRedeem`. A pre-change
     ///      `maxWithdraw`-based sizing would have returned 0 here, silently degrading every
     ///      VaultV2 pool to zero deployable liquidity.
@@ -694,14 +694,14 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  Asymmetry: _assetBalanceV4 vs _effectiveBalance under exit fees
+    //  Asymmetry: totalAssets vs effectiveBalance under exit fees
     // ══════════════════════════════════════════════════════════
 
-    /// @dev Verifies the deliberate asymmetry between `_assetBalanceV4` (uses `convertToAssets`,
-    ///      reflects LP economic stake) and `_effectiveBalance` (uses `previewRedeem`, reflects
+    /// @dev Verifies the deliberate asymmetry between `totalAssets` (uses `convertToAssets`,
+    ///      reflects LP economic stake) and `effectiveBalance` (uses `previewRedeem`, reflects
     ///      the realizable-now value). On a vault that charges a withdrawal fee, the two views
     ///      MUST diverge; LP share math must NOT shrink by the exit-fee delta.
-    function test_assetBalanceV4_vs_effectiveBalance_withExitFee() public {
+    function test_totalAssets_vs_effectiveBalance_withExitFee() public {
         MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
         vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
 
@@ -721,10 +721,10 @@ contract PoolVaultTest is Test, Deployers {
         assertEq(totalBefore, totalAfter, "(a) LP share math unaffected by exit-fee change");
         assertEq(perShareBefore, perShareAfter, "(a) LP per-share withdraw amount unaffected by exit-fee change");
 
-        // (b) `_effectiveBalance` reflects the post-fee realizable value.
+        // (b) `effectiveBalance` reflects the post-fee realizable value.
         uint256 effective = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
         // Bootstrap deposited 1000e18 vault shares at 1:1, so previewRedeem = 1000 * (1 - 5%) = 950.
-        assertEq(effective, 950e18, "(b) _effectiveBalance reflects previewRedeem net of exit fee");
+        assertEq(effective, 950e18, "(b) effectiveBalance reflects previewRedeem net of exit fee");
         assertLt(effective, totalAfter, "(b) effective < totalAssets when exit fee is active");
     }
 }
