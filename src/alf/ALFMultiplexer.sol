@@ -92,7 +92,7 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         The baseline is the best PRE-execution indicative across the targets, and it is NOT
 ///         re-derived after execution. A tier-1 indicative can be a constant-liquidity UPPER
 ///         BOUND that overstates output for swaps large enough to exhaust a quoter's depth
-///         (e.g. a SmartPool extrapolating its in-range buckets to the price extreme), so each
+///         (e.g. a DualPool extrapolating its in-range buckets to the price extreme), so each
 ///         candidate's contribution to the baseline is first bounded by its declared effective
 ///         output liquidity (`getEffectiveLiquidity`); see `_baselineContribution`. Without
 ///         that bound a large swap against a deep-looking but shallow quoter would set an
@@ -700,7 +700,7 @@ contract ALFMultiplexer is BaseHook {
     ///      so the baseline must track DELIVERABLE output, not a quoter's ranking estimate. A
     ///      tier-1 (IALFHook) `getIndicativeQuote` can be a constant-liquidity upper bound that
     ///      overstates output for a swap large enough to exhaust the quoter's depth (e.g.
-    ///      SmartPool extrapolating its in-range buckets to the price extreme). Left unbounded,
+    ///      DualPool extrapolating its in-range buckets to the price extreme). Left unbounded,
     ///      such a quote inflates the threshold and trips the check on an otherwise-acceptable
     ///      fill. Bound the contribution by the candidate's declared effective output liquidity:
     ///        - exact input: cap the expected output at the deliverable output reserve;
@@ -766,7 +766,7 @@ contract ALFMultiplexer is BaseHook {
     ///      (tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
     ///      the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
     ///      hooks that override the AMM and do not advertise any indicative interface (e.g.
-    ///      SmartPoolHook predecessors, custom one-off integrations).
+    ///      DualPoolHook predecessors, custom one-off integrations).
     function _queryTargetBySwap(
         TargetedQuoter memory target,
         bytes memory attestationData,

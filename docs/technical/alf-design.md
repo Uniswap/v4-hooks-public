@@ -104,9 +104,9 @@ Extending `BaseALFHook` (or one of its subclasses) gives quoters a few things fo
 **Reference implementations in this branch:**
 
 - `SimpleSpreadQuoterHook` — minimal `SpreadQuoterBase` subclass with owner-restricted LP and single-tick concentration. Used as the baseline strategy and as a fixture for the auction hook tests.
-- `SmartPoolHook` — multi-range JIT spread quoter with ERC4626 vault rehypothecation. Idle inventory earns yield in vaults between swaps; the hook withdraws only the shortfall during each JIT cycle, deploys liquidity across owner-configured tick buckets, lets v4 execute against it, then re-deposits leftovers. LP shares are share-based via `PoolVault` (V2-style `sqrt(amount0 * amount1)` mint with locked `MINIMUM_SHARES`). Pricing is owner-controlled — the hook intentionally ignores `hookData` on swaps, so the signed-curve-update infrastructure inherited from `SpreadQuoterBase` is dormant.
+- `DualPoolHook` — multi-range JIT spread quoter with ERC4626 vault rehypothecation. Idle inventory earns yield in vaults between swaps; the hook withdraws only the shortfall during each JIT cycle, deploys liquidity across owner-configured tick buckets, lets v4 execute against it, then re-deposits leftovers. LP shares are share-based via `PoolVault` (V2-style `sqrt(amount0 * amount1)` mint with locked `MINIMUM_SHARES`). Pricing is owner-controlled — the hook intentionally ignores `hookData` on swaps, so the signed-curve-update infrastructure inherited from `SpreadQuoterBase` is dormant.
 
-`SmartPoolHook` is the strategy targeted for the upcoming external audit; the other reference quoters (open LP, Permit2 JIT, repositioning JIT) are tracked in follow-up work and will land as their own audit deliverables.
+`DualPoolHook` is the strategy targeted for the upcoming external audit; the other reference quoters (open LP, Permit2 JIT, repositioning JIT) are tracked in follow-up work and will land as their own audit deliverables.
 
 ## **Layer 1b: Atomic Auction Hook**
 
@@ -217,7 +217,7 @@ With per-quoter pools, liquidity provisioning becomes a quoter-level concern rat
 
 ### JIT LP with rehypothecation
 
-`SmartPoolHook` is the reference for this pattern. Idle inventory is held in ERC4626 vaults (vault shares + ERC-6909 claims + per-pool ERC-20 sweep) between swaps. Each `_beforeSwap` redeems claims, withdraws only the shortfall from vaults, and deploys liquidity across multiple owner-configured tick buckets. `_afterSwap` removes the positions, settles the net deltas, and re-deposits leftovers. LP accounting is share-based via `PoolVault`, with V2-style `sqrt(amount0 * amount1)` mint and locked `MINIMUM_SHARES` to defuse share-price inflation attacks.
+`DualPoolHook` is the reference for this pattern. Idle inventory is held in ERC4626 vaults (vault shares + ERC-6909 claims + per-pool ERC-20 sweep) between swaps. Each `_beforeSwap` redeems claims, withdraws only the shortfall from vaults, and deploys liquidity across multiple owner-configured tick buckets. `_afterSwap` removes the positions, settles the net deltas, and re-deposits leftovers. LP accounting is share-based via `PoolVault`, with V2-style `sqrt(amount0 * amount1)` mint and locked `MINIMUM_SHARES` to defuse share-price inflation attacks.
 
 ### Cross-pair inventory
 
@@ -267,14 +267,14 @@ The list below tracks what is in scope for the upcoming external audit (P0), wha
 - ✅ **`BaseALFHook` abstract base.** Standard hookData decoding, virtual `_resolveAttestation` extension point (default no-op), generic one-curve-per-block enforcement, default implementations of the read-only `IALFHook` methods, and `DeltaResolver` integration for settlement.
 - ✅ **`SpreadQuoterBase` abstract base.** Bid/ask fee override scaffolding, EIP-712 signed curve updates against an owner-managed `priceSigner`, single-tick LP enforcement, `swapToPrice` powered by `SwapSimulator`.
 - ✅ **`SwapSimulator` library.** Tick-walking swap simulation for indicative quotes and price-bounded planning. Quote-vs-execution fidelity is exercised by the test suite.
-- ✅ **`PoolVault` abstract base.** Multi-asset share math (vault shares + ERC-6909 claims + per-pool ERC-20) with V2-style mint and locked `MINIMUM_SHARES`. Used by `SmartPoolHook`.
-- ✅ **`SmartPoolHook` strategy hook.** Multi-range JIT spread quoter with ERC4626 vault rehypothecation. Audit deliverable for this branch.
+- ✅ **`PoolVault` abstract base.** Multi-asset share math (vault shares + ERC-6909 claims + per-pool ERC-20) with V2-style mint and locked `MINIMUM_SHARES`. Used by `DualPoolHook`.
+- ✅ **`DualPoolHook` strategy hook.** Multi-range JIT spread quoter with ERC4626 vault rehypothecation. Audit deliverable for this branch.
 - ✅ **`SimpleSpreadQuoterHook` baseline strategy.** Owner-restricted LP, single-tick concentration. Used as the auction hook's primary integration fixture.
 - ✅ **`ALFMultiplexer`.** Stateless onchain auction with greedy split fill, autonomous + pre-planned execution modes, tolerance enforcement, and v4 protocol fee handling via `ALFProtocolFees`. Nested swap correctness exercised under v4's unlock model in the test suite.
 
 ### P1 (fast-follows, separate audit cycles)
 
-- **Additional reference quoters.** Open LP, Permit2 JIT, and repositioning JIT variants are tracked in follow-up branches and will land as independent audit deliverables once `SmartPoolHook` is signed off.
+- **Additional reference quoters.** Open LP, Permit2 JIT, and repositioning JIT variants are tracked in follow-up branches and will land as independent audit deliverables once `DualPoolHook` is signed off.
 - **Router integration: hook discovery.** The router discovers ALF hooks through onchain event monitoring and manual registration, then queries them directly via `IALFHook`.
 - **Router integration: indicative quoting + reputation tracking.** The router calls `getIndicativeQuote` (and `swapToPrice` where helpful) on ALF hooks during routing and tracks indicative-vs-actual divergence and fill rate per quoter. Quoters with persistently poor fidelity are deprioritized.
 - **Router: full EV-based dispatch model.** Marginal expected value calculation incorporating fidelity scores, win rates, gas costs, and historical dispersion. Explore/exploit strategy with configurable budget.

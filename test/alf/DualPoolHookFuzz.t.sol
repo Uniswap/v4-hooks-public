@@ -17,23 +17,23 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
-/// @title SmartPoolHookFuzzTest
-/// @notice Stateless ("property") fuzzing for SmartPoolHook against a live, bootstrapped pool.
-///         Complements the stateful invariant suite (`SmartPoolInvariantTest`) by asserting
+/// @title DualPoolHookFuzzTest
+/// @notice Stateless ("property") fuzzing for DualPoolHook against a live, bootstrapped pool.
+///         Complements the stateful invariant suite (`DualPoolInvariantTest`) by asserting
 ///         per-operation properties over a wide input space: LP round-trip value conservation,
 ///         preview/quote fidelity that routers rely on, and the JIT zero-liquidity property.
 ///
 /// @dev    The pool is bootstrapped once in `setUp`. Stateless fuzz tests do NOT re-run `setUp`
 ///         between runs, so tests that mutate pool state (deposits, swaps) are written so the
 ///         asserted property holds regardless of accumulated state across runs.
-contract SmartPoolHookFuzzTest is Test, Deployers {
+contract DualPoolHookFuzzTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    SmartPoolHook public hook;
+    DualPoolHook public hook;
     MockERC4626 public vault0;
     MockERC4626 public vault1;
     MockERC20 token0;
@@ -62,8 +62,8 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
 
         testKey = PoolKey({
             currency0: currency0,
@@ -75,12 +75,12 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
         poolId = testKey.toId();
 
         // Three-bucket conservative distribution centered on tick 0 so swaps/quotes have depth.
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true,
@@ -178,7 +178,7 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
 
         // Cap currency0 one wei below the requirement → must revert.
         vm.prank(alice);
-        vm.expectRevert(SmartPoolHook.SlippageExceeded.selector);
+        vm.expectRevert(DualPoolHook.SlippageExceeded.selector);
         hook.addLiquidity(testKey, shares, p0 - 1, p1, type(uint256).max);
     }
 
@@ -216,7 +216,7 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
     }
 
     /// @notice HOOKDATA IS IGNORED: the indicative quote is identical whether `hookData` is
-    ///         empty or arbitrary bytes. SmartPool is a static-pricing strategy; integrators
+    ///         empty or arbitrary bytes. DualPool is a static-pricing strategy; integrators
     ///         must be able to pass anything (or nothing) without changing the price.
     /// forge-config: default.fuzz.runs = 128
     function testFuzz_indicativeQuote_ignoresHookData(uint256 amtSeed, bytes calldata hookData, bool zeroForOne)
@@ -265,12 +265,12 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
     /// forge-config: default.fuzz.runs = 256
     function testFuzz_setDistribution_validShapesRoundtrip(uint256 nSeed, uint256 widthSeed) public {
         uint256 n = bound(nSeed, 1, 8);
-        SmartPoolHook.LiquidityBucket[] memory dist = _validDistribution(n, widthSeed);
+        DualPoolHook.LiquidityBucket[] memory dist = _validDistribution(n, widthSeed);
 
         vm.prank(poolOwner);
         hook.setDistribution(testKey, dist);
 
-        SmartPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
+        DualPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
         assertEq(stored.length, n, "bucket count not stored");
 
         uint256 sum;
@@ -298,14 +298,14 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
         int24 lo1,
         int24 up1
     ) public {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](2);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: lo0, tickUpper: up0, weightBps: w0});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: lo1, tickUpper: up1, weightBps: w1});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](2);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: lo0, tickUpper: up0, weightBps: w0});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: lo1, tickUpper: up1, weightBps: w1});
 
         vm.prank(poolOwner);
         try hook.setDistribution(testKey, dist) {
             // Accepted → post-state must be fully valid.
-            SmartPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
+            DualPoolHook.LiquidityBucket[] memory stored = hook.getDistribution(poolId);
             uint256 sum;
             for (uint256 i; i < stored.length; i++) {
                 assertGt(stored[i].weightBps, 0, "stored zero weight");
@@ -326,9 +326,9 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
     function _validDistribution(uint256 n, uint256 widthSeed)
         internal
         pure
-        returns (SmartPoolHook.LiquidityBucket[] memory dist)
+        returns (DualPoolHook.LiquidityBucket[] memory dist)
     {
-        dist = new SmartPoolHook.LiquidityBucket[](n);
+        dist = new DualPoolHook.LiquidityBucket[](n);
         uint256 base = 10_000 / n;
         uint256 assigned;
         for (uint256 i; i < n; i++) {
@@ -338,7 +338,7 @@ contract SmartPoolHookFuzzTest is Test, Deployers {
             // and well inside MAX_TICK (max half-width here is (1_000 + 7) * 10 = 10_070 ticks).
             uint256 mult = bound(widthSeed, 1, 1_000) + i;
             int24 hw = int24(uint24(mult)) * TICK_SPACING;
-            dist[i] = SmartPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
+            dist[i] = DualPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
         }
     }
 }

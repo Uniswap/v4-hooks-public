@@ -1,8 +1,8 @@
-# SmartPoolHook Deep Dive
+# DualPoolHook Deep Dive
 
 ## Overview
 
-`SmartPoolHook` is the ALF reference strategy for a market maker that wants Uniswap v4 execution while keeping idle inventory productive between swaps. It combines:
+`DualPoolHook` is the ALF reference strategy for a market maker that wants Uniswap v4 execution while keeping idle inventory productive between swaps. It combines:
 
 - A static LP fee fixed at pool creation via `PoolKey.fee` (charged natively by v4 on each swap).
 - Just-in-time (JIT) liquidity: v4 LP positions exist only during a swap.
@@ -16,11 +16,11 @@ The pool's ordinary v4 liquidity is therefore expected to be zero between swaps.
 
 ## Contract Shape
 
-`SmartPoolHook` lives at `src/alf/SmartPoolHook.sol` and inherits:
+`DualPoolHook` lives at `src/alf/DualPoolHook.sol` and inherits:
 
 ```solidity
-contract SmartPoolHook is
-    SmartPoolBase,
+contract DualPoolHook is
+    DualPoolBase,
     PoolVault,
     JITLockable,
     ReentrancyGuardTransient,
@@ -29,13 +29,13 @@ contract SmartPoolHook is
 
 The split is intentional:
 
-- `SmartPoolBase` provides the minimal ALF/v4 surface: PoolManager hook callback dispatch, per-pool `livePools` liveness, `IALFHook` metadata, and `beforeInitialize` blocking of direct PM init.
+- `DualPoolBase` provides the minimal ALF/v4 surface: PoolManager hook callback dispatch, per-pool `livePools` liveness, `IALFHook` metadata, and `beforeInitialize` blocking of direct PM init.
 - `PoolVault` (over `MultiAssetVault`) provides per-pool share accounting and the asset ledger across ERC4626 vault shares, ERC-6909 PoolManager claims, and raw ERC-20.
 - `JITLockable` provides transient per-pool and global JIT-cycle locks for reentrancy safety during swap callbacks.
 - `ReentrancyGuardTransient` protects user-facing LP entry points.
 - `IUnlockCallback` lets `removeLiquidity` redeem pending ERC-6909 claims inside a PoolManager unlock before withdraw math runs.
 
-Note that, unlike other ALF hooks, `SmartPoolHook` does not inherit `BaseALFHook` or `SpreadQuoterBase`. It deliberately does not support signed curve updates, attestation-aware discounts, directional bid/ask overrides, or swap-time `hookData` pricing. The LP fee is immutable after `initializePool`; the owner controls only liveness, distribution, vault approvals, and deposit policy.
+Note that, unlike other ALF hooks, `DualPoolHook` does not inherit `BaseALFHook` or `SpreadQuoterBase`. It deliberately does not support signed curve updates, attestation-aware discounts, directional bid/ask overrides, or swap-time `hookData` pricing. The LP fee is immutable after `initializePool`; the owner controls only liveness, distribution, vault approvals, and deposit policy.
 
 Ownership uses OpenZeppelin `Ownable2Step` (transferable via two-step handoff), not a permanently fixed admin key.
 
@@ -51,7 +51,7 @@ The hook declares these v4 permissions:
 | `beforeSwap` | Deploys JIT liquidity (no fee override returned). |
 | `afterSwap` | Removes JIT liquidity, settles deltas, and re-vaults assets. |
 
-All return-delta flags are false. SmartPool does not use `BeforeSwapDelta` or `afterSwap` return deltas to synthesize execution. It lets the normal v4 swap math execute against temporarily deployed LP liquidity while v4 applies `key.fee` natively.
+All return-delta flags are false. DualPool does not use `BeforeSwapDelta` or `afterSwap` return deltas to synthesize execution. It lets the normal v4 swap math execute against temporarily deployed LP liquidity while v4 applies `key.fee` natively.
 
 ## Pool Initialization
 
@@ -73,7 +73,7 @@ The constructor also sets `maxMinDepositBlocks`, a deployment-wide ceiling on `m
 
 Initialization validates several invariants before the pool is usable:
 
-- `key.fee` must **not** carry `LPFeeLibrary.DYNAMIC_FEE_FLAG`. SmartPool uses a static fee fixed at pool creation; dynamic-fee pools are rejected with `DynamicFeeNotSupported`.
+- `key.fee` must **not** carry `LPFeeLibrary.DYNAMIC_FEE_FLAG`. DualPool uses a static fee fixed at pool creation; dynamic-fee pools are rejected with `DynamicFeeNotSupported`.
 - `key.fee` must be at most `LPFeeLibrary.MAX_LP_FEE`.
 - `key.hooks` must equal the hook address.
 - Native ETH (`address(0)`) is rejected. Operators should use wrapped ETH.
@@ -88,7 +88,7 @@ Vault addresses are effectively immutable for a pool. The hook sets max token al
 
 ## Pricing Model
 
-SmartPool does **not** maintain bid/ask spread state or return fee overrides from `beforeSwap`.
+DualPool does **not** maintain bid/ask spread state or return fee overrides from `beforeSwap`.
 
 - The LP fee is `key.fee`, set when the pool is created and never updated by the hook.
 - v4 charges that fee on the in-flight swap through normal swap math.
@@ -126,7 +126,7 @@ Buckets may overlap, be asymmetric, or be non-contiguous. Weights must sum to 10
 | Medium | `[-30, 30]` | 15% |
 | Wide | `[-60, 60]` | 10% |
 
-That is the conservative "most liquidity at the peg, some depth around it" shape. SmartPool can express more interesting structures because buckets do not need to be symmetric, nested, or contiguous. A few useful examples:
+That is the conservative "most liquidity at the peg, some depth around it" shape. DualPool can express more interesting structures because buckets do not need to be symmetric, nested, or contiguous. A few useful examples:
 
 ### Ultra-tight stable pair
 
@@ -228,7 +228,7 @@ Both views use the same effective balances and pre-budget math as JIT deployment
 
 ## Asset Accounting
 
-SmartPool uses `PoolVault` as a pool-local ledger. For every `(PoolId, Currency)`, it tracks:
+DualPool uses `PoolVault` as a pool-local ledger. For every `(PoolId, Currency)`, it tracks:
 
 - ERC4626 vault shares owned by this pool.
 - ERC-6909 claims held in the PoolManager for this pool.
@@ -256,7 +256,7 @@ LP share math (`previewDeposit`, `previewWithdraw`, pro-rata withdraws) uses **t
 
 ### ERC-6909 Claims
 
-After a swap, the hook may have a positive PoolManager delta. It cannot always `take` ERC-20 immediately because the swapper might not have settled by that point in the unlock flow. Instead, SmartPool mints ERC-6909 claims to itself and records them in the pool's ledger.
+After a swap, the hook may have a positive PoolManager delta. It cannot always `take` ERC-20 immediately because the swapper might not have settled by that point in the unlock flow. Instead, DualPool mints ERC-6909 claims to itself and records them in the pool's ledger.
 
 At the start of the next JIT deployment, `_redeemPoolClaims` burns those claims and takes the equivalent ERC-20 into the hook, crediting the pool's tracked raw balance. `removeLiquidity` also redeems claims inside `unlockCallback` before withdraw math, so LPs can exit when post-swap balances sit in claims rather than raw ERC-20 or vault shares.
 
@@ -271,7 +271,7 @@ mapping(VaultId => uint256) internal _totalShares;
 mapping(VaultId => mapping(address => uint256)) internal _userShares;
 ```
 
-(`VaultId` maps 1:1 with `PoolId` for SmartPool pools.)
+(`VaultId` maps 1:1 with `PoolId` for DualPool pools.)
 
 Inflation defense uses the EIP-4626 **virtual-shares** pattern: conversion math adds virtual assets and `10**decimalsOffset` virtual shares (default offset `12`) so post-bootstrap donation attacks are uneconomic. Bootstrap amounts must exceed a `BootstrapTooSmall` floor so the bootstrapper's economic claim is not permanently diluted by the virtual position.
 
@@ -314,7 +314,7 @@ The swap lifecycle is the heart of the contract.
 sequenceDiagram
     participant Router
     participant PM as PoolManager
-    participant Hook as SmartPoolHook
+    participant Hook as DualPoolHook
     participant Vault as ERC4626 Vaults
 
     Router->>PM: swap(key, params, hookData)
@@ -351,14 +351,14 @@ When the pool is live:
 The LP position salt is constant:
 
 ```solidity
-bytes32 private constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
+bytes32 private constant LP_SALT = bytes32(uint256(0x4455414C)); // "DUAL"
 ```
 
-That namespaces SmartPool's positions from other LP positions on the same pool.
+That namespaces DualPool's positions from other LP positions on the same pool.
 
 ### Swap Execution
 
-The PoolManager executes the swap using ordinary v4 swap math against the temporary positions. SmartPool does not return swap deltas; protocol fee behavior and swap accounting remain native to v4.
+The PoolManager executes the swap using ordinary v4 swap math against the temporary positions. DualPool does not return swap deltas; protocol fee behavior and swap accounting remain native to v4.
 
 ### `afterSwap`
 
@@ -376,7 +376,7 @@ Transient storage holds per-bucket deployed liquidity (`_ACTIVE_LIQ_NAMESPACE`) 
 
 ## Quote and Simulation Views
 
-SmartPool implements the ALF quote surface:
+DualPool implements the ALF quote surface:
 
 - `getIndicativeQuote(key, zeroForOne, amountSpecified, hookData)`
 - `swapToPrice(key, zeroForOne, amountSpecified, sqrtPriceLimitX96, hookData)`
@@ -428,7 +428,7 @@ There are two reentrancy defenses because there are two kinds of entry:
 `JITLockable` provides:
 
 - A **per-pool lock**, set in `_enterJITLock` and cleared in `_clearJITLock`. `_enterJITLock` also rejects reentrant `_beforeSwap` on the same pool (which would orphan outer-cycle positions if an inner cycle cleared the lock early).
-- A **global in-flight counter**, read by `whenJITNotInProgress` to reject user/admin calls while any SmartPool JIT cycle is active anywhere on this hook.
+- A **global in-flight counter**, read by `whenJITNotInProgress` to reject user/admin calls while any DualPool JIT cycle is active anywhere on this hook.
 
 The global counter closes cross-pool reentry. For example, if a malicious vault callback from pool A tries to call `addLiquidity` on pool B during pool A's JIT cycle, pool B's per-pool lock may be false, but the global counter is nonzero, so the call reverts `JITInProgress`.
 
@@ -445,7 +445,7 @@ The global counter closes cross-pool reentry. For example, if a malicious vault 
 
 The implementation is shaped around these invariants:
 
-- No persistent SmartPool v4 liquidity remains after a completed swap.
+- No persistent DualPool v4 liquidity remains after a completed swap.
 - Direct PoolManager initialization, add-liquidity, and remove-liquidity paths are blocked.
 - Pools reject dynamic-fee `PoolKey.fee`; pricing is static for the pool's lifetime.
 - Pools are not swappable until `bootstrap` succeeds.
@@ -454,13 +454,13 @@ The implementation is shaped around these invariants:
 - Pool ownership of assets is tracked per `(PoolId, Currency)`, not by global token balances.
 - Claims minted for one pool cannot be redeemed into another pool's ledger.
 - Distribution weights sum to exactly 10,000 bps and bucket count is bounded by 8.
-- User/admin mutators cannot run during any in-flight SmartPool JIT cycle.
-- `hookData` cannot change SmartPool pricing or fees.
+- User/admin mutators cannot run during any in-flight DualPool JIT cycle.
+- `hookData` cannot change DualPool pricing or fees.
 - JIT allocation pre-budgets per-bucket capital; indicative liquidity matches deployable buckets at the current tick.
 
 ## Test Coverage Map
 
-The main test suite is `test/alf/SmartPoolHook.t.sol`. It covers:
+The main test suite is `test/alf/DualPoolHook.t.sol`. It covers:
 
 - Pool initialization, owner checks, static-fee requirement (dynamic-fee rejection), max LP fee, and native-token rejection.
 - Feeless-vault probes (entry/exit fee rejection) and vault asset matching.
@@ -477,14 +477,14 @@ The main test suite is `test/alf/SmartPoolHook.t.sol`. It covers:
 - Reentrancy protections (vault callbacks, cross-pool JIT, same-pool swap reentry).
 - `setActiveTick` disabled, `setDistribution` tick validation, vault deposit/withdraw revert propagation.
 
-Related: `test/alf/SmartPoolInvariant.t.sol`, gas snapshots in `test/alf/SmartPoolHookGas*.t.sol`.
+Related: `test/alf/DualPoolInvariant.t.sol`, gas snapshots in `test/alf/DualPoolHookGas*.t.sol`.
 
 ## Operational Flow
 
-An operator using SmartPool normally follows this sequence:
+An operator using DualPool normally follows this sequence:
 
 1. Deploy the hook at an address whose v4 permission bits match `getHookPermissions`, with `maxMinDepositBlocks` set appropriately for the chain.
-2. Create a `PoolKey` with a **static** `fee` (not `DYNAMIC_FEE_FLAG`) and `hooks = SmartPoolHook`.
+2. Create a `PoolKey` with a **static** `fee` (not `DYNAMIC_FEE_FLAG`) and `hooks = DualPoolHook`.
 3. Call `initializePool` with initial price, distribution, deposit policy, vaults, and `minDepositBlocks`.
 4. Call `bootstrap` with the first token0/token1 inventory (pool becomes live).
 5. Optionally enable external deposits with `setExternalDeposits`.

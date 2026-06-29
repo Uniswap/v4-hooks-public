@@ -5,5 +5,5 @@
 - [BaseALFHook](BaseALFHook.sol/abstract.BaseALFHook.md)
 - [JITLockable](JITLockable.sol/abstract.JITLockable.md)
 - [PoolVault](PoolVault.sol/abstract.PoolVault.md)
-- [SmartPoolBase](SmartPoolBase.sol/abstract.SmartPoolBase.md)
+- [DualPoolBase](DualPoolBase.sol/abstract.DualPoolBase.md)
 - [SpreadQuoterBase](SpreadQuoterBase.sol/abstract.SpreadQuoterBase.md)

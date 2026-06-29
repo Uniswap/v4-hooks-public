@@ -17,7 +17,7 @@ tracking of raw ERC-20 attributed to the hook contract.
 and bootstrap/deposit/withdraw lifecycle. PoolVault overrides the three asset-I/O
 hooks (`_pullAsset`, `_pushAsset`, `_assetBalance`) to plumb V4 currency types and
 vault rehypothecation, and exposes `PoolKey`-flavored entry points so subclasses
-(e.g., SmartPoolHook) integrate naturally.
+(e.g., DualPoolHook) integrate naturally.
 For every `(PoolId, Currency)`, PoolVault tracks three asset sources:
 1. **ERC4626 vault shares** -- assets rehypothecated into yield-bearing vaults
 between swaps. Tracked per-pool via `_vaultShares` to isolate multi-pool

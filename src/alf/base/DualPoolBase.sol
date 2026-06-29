@@ -11,21 +11,21 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {BaseHook} from "../../base/BaseHook.sol";
 import {IALFHook} from "../interfaces/IALFHook.sol";
 
-/// @title SmartPoolBase
+/// @title DualPoolBase
 /// @author Uniswap Labs
-/// @notice Minimal ALF/v4 base for SmartPoolHook.
+/// @notice Minimal ALF/v4 base for DualPoolHook.
 /// @dev Pool fees are static per `PoolKey.fee` and immutable post-initialize. The owner has
 ///      only a per-pool liveness flag for pause/resume; pricing itself cannot be reconfigured
 ///      after deployment.
 /// @custom:security-contact security@uniswap.org
-abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHook {
+abstract contract DualPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHook {
     using PoolIdLibrary for PoolKey;
 
     /// @dev Gas budget declared for `getIndicativeQuote` staticcalls. Returned by `maxGas()`.
     uint32 private immutable _maxGas;
 
     /// @notice Whether each pool is currently quoting and executing swaps. Set by the
-    ///         subclass's guarded `initializePool` and toggled via {SmartPoolHook.setPoolLive}.
+    ///         subclass's guarded `initializePool` and toggled via {DualPoolHook.setPoolLive}.
     mapping(PoolId => bool) public livePools;
 
     /// @notice Emitted whenever a pool's liveness flag changes.
@@ -36,7 +36,7 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @dev A bucket's tick range is malformed (lower >= upper, out of `TickMath` range, or
     ///      not aligned to the pool's tickSpacing).
     error InvalidTickRange();
-    /// @dev Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
+    /// @dev Direct `poolManager.initialize` for any DualPool-hooked pool is rejected;
     ///      callers MUST go through the subclass's guarded `initializePool` entry point so
     ///      pricing, distribution, and vault config are validated before PM init runs.
     error DirectInitializeBlocked();
@@ -88,13 +88,13 @@ abstract contract SmartPoolBase is BaseHook, DeltaResolver, Ownable2Step, IALFHo
     /// @inheritdoc IALFHook
     /// @dev Always reports live; hook-level liveness is per-pool via `livePools[poolId]`.
     ///      Routers call this to reject offline hooks; this hook is always reachable, but
-    ///      individual pools may pause via {SmartPoolHook.setPoolLive}.
+    ///      individual pools may pause via {DualPoolHook.setPoolLive}.
     function isLive() external pure override returns (bool) {
         return true;
     }
 
     /// @inheritdoc IALFHook
-    /// @dev SmartPool's deployable single-contract build does not include the heavy virtual
+    /// @dev DualPool's deployable single-contract build does not include the heavy virtual
     ///      multi-range tick-walking quoter. Returning 0 is the IALFHook unsupported-quote path.
     function getIndicativeQuote(PoolKey calldata, bool, int256, bytes calldata)
         external

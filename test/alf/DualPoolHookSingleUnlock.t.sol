@@ -17,7 +17,7 @@ import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/Bala
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Minimal router that performs TWO swaps on the same pool inside a SINGLE
@@ -67,16 +67,16 @@ contract SingleUnlockDoubleSwapper is IUnlockCallback {
     }
 }
 
-/// @title SmartPoolHookSingleUnlockTest
-/// @notice Regression for multiple swaps on the same SmartPool pool within a single v4 unlock.
+/// @title DualPoolHookSingleUnlockTest
+/// @notice Regression for multiple swaps on the same DualPool pool within a single v4 unlock.
 ///         Asserts the desired behavior (the batch succeeds); fails on the pre-fix code where the
 ///         second swap reverts trying to `take` claims the PoolManager does not yet physically
 ///         hold.
-contract SmartPoolHookSingleUnlockTest is Test, Deployers {
+contract DualPoolHookSingleUnlockTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    SmartPoolHook public hook;
+    DualPoolHook public hook;
     MockERC4626 public vault0;
     MockERC4626 public vault1;
     MockERC20 token0;
@@ -106,8 +106,8 @@ contract SmartPoolHookSingleUnlockTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
 
         testKey = PoolKey({
             currency0: currency0,
@@ -118,9 +118,9 @@ contract SmartPoolHookSingleUnlockTest is Test, Deployers {
         });
         poolId = testKey.toId();
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -151,7 +151,7 @@ contract SmartPoolHookSingleUnlockTest is Test, Deployers {
     ///      to `take` the underlying from the PoolManager, but the first swapper's input is not
     ///      yet settled, so the PoolManager's physical balance is short and the transfer reverts.
     function test_doubleSwapSingleUnlock_succeeds() public {
-        // Pre-state: an isolated SmartPool keeps inventory in the vault, so the PoolManager
+        // Pre-state: an isolated DualPool keeps inventory in the vault, so the PoolManager
         // physically holds ~no token0 — the condition under which the bug bites.
         assertEq(token0.balanceOf(address(manager)), 0, "precondition: PM holds no token0");
 

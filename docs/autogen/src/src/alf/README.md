@@ -7,4 +7,4 @@
 - [types](/src/alf/types)
 - [ALFMultiplexer](ALFMultiplexer.sol/contract.ALFMultiplexer.md)
 - [SimpleSpreadQuoterHook](SimpleSpreadQuoterHook.sol/contract.SimpleSpreadQuoterHook.md)
-- [SmartPoolHook](SmartPoolHook.sol/contract.SmartPoolHook.md)
+- [DualPoolHook](DualPoolHook.sol/contract.DualPoolHook.md)

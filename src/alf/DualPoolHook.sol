@@ -23,11 +23,11 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {SmartPoolBase} from "./base/SmartPoolBase.sol";
+import {DualPoolBase} from "./base/DualPoolBase.sol";
 import {JITLockable} from "./base/JITLockable.sol";
 import {PoolVault} from "./base/PoolVault.sol";
 
-/// @title SmartPoolHook
+/// @title DualPoolHook
 /// @author Uniswap Labs
 /// @notice JIT quoter with ERC4626 vault rehypothecation and multi-range liquidity
 ///         distribution. Pricing is fully static — pool fees are set at deploy time via
@@ -83,7 +83,7 @@ import {PoolVault} from "./base/PoolVault.sol";
 ///         `JIT_LOCK` transient slot and the LP entries reject calls while it is set. This
 ///         blocks an owner-configured ERC4626 vault from re-entering LP entry points mid-JIT.
 /// @custom:security-contact security@uniswap.org
-contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient, IUnlockCallback {
+contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTransient, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -94,7 +94,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     using SafeERC20 for IERC20;
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
-    bytes32 private constant LP_SALT = bytes32(uint256(0x534D5254)); // "SMRT"
+    bytes32 private constant LP_SALT = bytes32(uint256(0x4455414C)); // "DUAL"
 
     /// @notice Maximum number of buckets per pool. Bounds gas cost of the JIT cycle:
     ///         each bucket requires one modifyLiquidity call to deploy and one to remove,
@@ -111,7 +111,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      the duration of a swap callback pair (`_beforeSwap` deploys, `_afterSwap` removes),
     ///      so transient storage is the natural fit — avoids the cold/warm SSTORE penalty
     ///      (~22K cold, ~5K warm) per bucket that storage-backed tracking incurs.
-    bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("smartpoolhook.activeliq.v1");
+    bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("dualpoolhook.activeliq.v1");
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              TYPES
@@ -215,7 +215,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      `minAmount0`/`minAmount1` to the caller. Caller's slippage bounds were violated.
     error SlippageExceeded();
 
-    /// @dev `setActiveTick` is disabled on SmartPool. The hook routes liquidity through
+    /// @dev `setActiveTick` is disabled on DualPool. The hook routes liquidity through
     ///      distribution buckets, not a single active tick. Use {setDistribution} instead.
     error SetActiveTickDisabled();
 
@@ -242,7 +242,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     ///      behalf of our own `poolManager.unlock` call) may invoke it.
     error UnauthorizedCallback();
 
-    /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SmartPool is
+    /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). DualPool is
     ///      designed around a static fee fixed at pool creation; dynamic-fee pools would
     ///      require the hook to maintain its own fee state and route every swap through a
     ///      fee-update callback, which the contract is explicitly not built for. Use a
@@ -266,11 +266,11 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @param maxGas_             Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_              Initial contract owner. Transferable post-deployment via OZ
     ///                            `Ownable2Step` (`transferOwnership` + `acceptOwnership`);
-    ///                            `renounceOwnership` is disabled (see {SmartPoolBase}). Key
+    ///                            `renounceOwnership` is disabled (see {DualPoolBase}). Key
     ///                            loss without a pending transfer is unrecoverable.
     /// @param _maxMinDepositBlocks Per-deployment upper bound on `PoolConfig.minDepositBlocks`.
     constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepositBlocks)
-        SmartPoolBase(_pm, maxGas_, owner_)
+        DualPoolBase(_pm, maxGas_, owner_)
     {
         maxMinDepositBlocks = _maxMinDepositBlocks;
     }
@@ -307,7 +307,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     function initializePool(PoolKey calldata key, PoolConfig calldata config) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeNotSupported();
-        // SmartPool enforces a static fee that is fixed at pool creation. Reject dynamic-fee
+        // DualPool enforces a static fee that is fixed at pool creation. Reject dynamic-fee
         // pools at init so the contract-level invariant ("pricing is fully static, set at
         // deploy time via PoolKey.fee") is enforced at the boundary instead of merely
         // documented. See contract-level NatSpec.
@@ -579,9 +579,9 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         emit ExternalDepositsUpdated(key.toId(), enabled);
     }
 
-    /// @notice Disabled: SmartPool uses distribution buckets instead of one active LP tick.
+    /// @notice Disabled: DualPool uses distribution buckets instead of one active LP tick.
     /// @dev    Always reverts with {SetActiveTickDisabled}. The function exists only to satisfy
-    ///         the inherited interface; SmartPool routes liquidity through {setDistribution}
+    ///         the inherited interface; DualPool routes liquidity through {setDistribution}
     ///         instead. Marked `pure` because no state is read or written.
     function setActiveTick(PoolKey calldata, int24) external pure {
         revert SetActiveTickDisabled();
@@ -619,7 +619,7 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
         return _effectiveAssets(key);
     }
 
-    /// @notice Indicative quote against hypothetical SmartPool JIT liquidity.
+    /// @notice Indicative quote against hypothetical DualPool JIT liquidity.
     /// @dev    Uses current active distribution-bucket liquidity for a compact view quote.
     ///         Ignores hookData; pricing is the static `key.fee`.
     ///

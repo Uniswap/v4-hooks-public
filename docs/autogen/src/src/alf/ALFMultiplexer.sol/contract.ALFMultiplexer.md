@@ -418,7 +418,7 @@ Resolve a per-target quote. First tries the cheap waterfall in `_queryTargetView
 (tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
 the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
 hooks that override the AMM and do not advertise any indicative interface (e.g.
-SmartPoolHook predecessors, custom one-off integrations).
+DualPoolHook predecessors, custom one-off integrations).
 
 
 ```solidity

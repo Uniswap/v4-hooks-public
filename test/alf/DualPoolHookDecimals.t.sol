@@ -13,19 +13,19 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
-/// @title SmartPoolHookDecimalsTest
+/// @title DualPoolHookDecimalsTest
 /// @notice Covers the per-pool virtual-shares offset derived from the pair's token decimals.
 ///         Before this was added, the hardcoded `_decimalsOffset = 12` made low-decimal pairs
 ///         (e.g. 6-decimal stablecoins) require ~100M tokens/side to bootstrap, effectively a
 ///         pool-creation DoS for the 6-decimal stablecoin pairs.
-contract SmartPoolHookDecimalsTest is Test, Deployers {
+contract DualPoolHookDecimalsTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
 
-    SmartPoolHook hook;
+    DualPoolHook hook;
     address poolOwner = makeAddr("poolOwner");
     uint24 constant FEE = 1_000;
     int24 constant TICK_SPACING = 10;
@@ -37,8 +37,8 @@ contract SmartPoolHookDecimalsTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), poolOwner, type(uint64).max), address(hook));
     }
 
     /// @dev Create + initialize a pool over two freshly-minted tokens of the given decimals.
@@ -56,9 +56,9 @@ contract SmartPoolHookDecimalsTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,

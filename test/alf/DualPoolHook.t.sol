@@ -22,24 +22,24 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
-import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
 import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
-/// @title SmartPoolHookTest
-/// @notice End-to-end tests for SmartPoolHook covering pool lifecycle, JIT execution,
+/// @title DualPoolHookTest
+/// @notice End-to-end tests for DualPoolHook covering pool lifecycle, JIT execution,
 ///         token compatibility, multi-pool isolation, reentrancy, pricing-state syncing,
 ///         and quote-vs-execution fidelity.
-contract SmartPoolHookTest is Test, Deployers {
+contract DualPoolHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
     using BalanceDeltaLibrary for BalanceDelta;
 
-    SmartPoolHook public hook;
+    DualPoolHook public hook;
 
     MockERC4626 public vault0;
     MockERC4626 public vault1;
@@ -58,7 +58,7 @@ contract SmartPoolHookTest is Test, Deployers {
     uint24 constant FEE_PIPS = 1_000; // 0.1%
 
     /// @dev Exact-output spot checks still assert to the wei; broad quote/execution tests use
-    ///      a small relative tolerance because SmartPool now uses a compact indicative quote.
+    ///      a small relative tolerance because DualPool now uses a compact indicative quote.
     uint256 constant ABS_TOLERANCE = 1;
     uint256 constant INDICATIVE_REL_TOLERANCE = 5e14; // 5 bps
 
@@ -81,8 +81,8 @@ contract SmartPoolHookTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
 
         testPoolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
@@ -98,10 +98,10 @@ contract SmartPoolHookTest is Test, Deployers {
     //                              HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _defaultConfig() internal view returns (SmartPoolHook.PoolConfig memory) {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        return SmartPoolHook.PoolConfig({
+    function _defaultConfig() internal view returns (DualPoolHook.PoolConfig memory) {
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        return DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -146,14 +146,14 @@ contract SmartPoolHookTest is Test, Deployers {
         internal
         returns (PoolKey memory key, PoolId id)
     {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         id = key.toId();
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true,
@@ -212,15 +212,15 @@ contract SmartPoolHookTest is Test, Deployers {
     /// @dev Replace the pool's distribution with the canonical 3-bucket fixture used by
     ///      quote-fidelity tests: 75% tight, 15% medium, 10% wide — all symmetric around 0.
     function _useMultiBucketDistribution() internal {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7500});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7500});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1500});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1000});
         vm.prank(owner);
         hook.setDistribution(testPoolKey, dist);
     }
 
-    /// @dev Compares `getIndicativeQuote` output to actual swap execution. SmartPool uses a
+    /// @dev Compares `getIndicativeQuote` output to actual swap execution. DualPool uses a
     ///      compact current-liquidity quote so the deployable hook keeps its composability
     ///      surface without carrying the full virtual tick-walk simulator.
     ///
@@ -252,7 +252,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
     function test_initializePool_setsConfig() public view {
         assertFalse(hook.externalDepositsEnabled(testPoolId));
-        SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         assertEq(dist.length, 1);
         assertEq(dist[0].tickLower, -10);
         assertEq(dist[0].tickUpper, 10);
@@ -271,14 +271,14 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key2 = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 20, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 10_000});
 
         vm.prank(alice);
         vm.expectRevert();
         hook.initializePool(
             key2,
-            SmartPoolHook.PoolConfig({
+            DualPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
                 distribution: dist,
                 allowExternalDeposits: false,
@@ -289,20 +289,20 @@ contract SmartPoolHookTest is Test, Deployers {
         );
     }
 
-    /// @dev `renounceOwnership` is overridden in `SmartPoolBase` to revert. Renouncing
+    /// @dev `renounceOwnership` is overridden in `DualPoolBase` to revert. Renouncing
     ///      would permanently brick every onlyOwner entry point (initializePool, bootstrap,
     ///      setPoolLive, setExternalDeposits, setDistribution, refreshVaultApproval,
     ///      setActiveTick, etc.) and orphan every pool referencing this hook. The operator
     ///      must use `transferOwnership` to rotate, never renounce.
     function test_renounceOwnership_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(SmartPoolBase.RenounceOwnershipDisabled.selector);
+        vm.expectRevert(DualPoolBase.RenounceOwnershipDisabled.selector);
         hook.renounceOwnership();
     }
 
     function test_initializePool_revertsOnNativeCurrency0() public {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
 
         PoolKey memory nativeKey = PoolKey({
             currency0: Currency.wrap(address(0)),
@@ -311,7 +311,7 @@ contract SmartPoolHookTest is Test, Deployers {
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -320,14 +320,14 @@ contract SmartPoolHookTest is Test, Deployers {
             minDepositBlocks: 0
         });
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
+        vm.expectRevert(DualPoolHook.NativeNotSupported.selector);
         hook.initializePool(nativeKey, cfg);
     }
 
     /// @dev Ordering normally puts native ETH at currency0; we test currency1=native defensively.
     function test_initializePool_revertsOnNativeCurrency1() public {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
 
         PoolKey memory weirdKey = PoolKey({
             currency0: currency0,
@@ -336,7 +336,7 @@ contract SmartPoolHookTest is Test, Deployers {
             tickSpacing: 10,
             hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -345,14 +345,14 @@ contract SmartPoolHookTest is Test, Deployers {
             minDepositBlocks: 0
         });
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.NativeNotSupported.selector);
+        vm.expectRevert(DualPoolHook.NativeNotSupported.selector);
         hook.initializePool(weirdKey, cfg);
     }
 
     function test_initializePool_revertsAboveMaxLPFee() public {
         // Fees are static (`PoolKey.fee`); v4's PoolManager rejects fees > MAX_LP_FEE on init.
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory key2 = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -360,7 +360,7 @@ contract SmartPoolHookTest is Test, Deployers {
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory bad = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory bad = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -373,13 +373,13 @@ contract SmartPoolHookTest is Test, Deployers {
         hook.initializePool(key2, bad);
     }
 
-    /// @dev SmartPool's pricing is statically fixed at pool creation via `PoolKey.fee`. The
+    /// @dev DualPool's pricing is statically fixed at pool creation via `PoolKey.fee`. The
     ///      v4 PoolManager treats `fee == DYNAMIC_FEE_FLAG (0x800000)` as a signal that the
     ///      hook will set the fee dynamically each swap, which this hook does NOT implement.
     ///      Reject at init so the static-fee contract invariant is enforced at the boundary.
     function test_initializePool_revertsOnDynamicFeeFlag() public {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory dynKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -387,7 +387,7 @@ contract SmartPoolHookTest is Test, Deployers {
             tickSpacing: 60,
             hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -396,7 +396,7 @@ contract SmartPoolHookTest is Test, Deployers {
             minDepositBlocks: 0
         });
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.DynamicFeeNotSupported.selector);
+        vm.expectRevert(DualPoolHook.DynamicFeeNotSupported.selector);
         hook.initializePool(dynKey, cfg);
     }
 
@@ -408,12 +408,12 @@ contract SmartPoolHookTest is Test, Deployers {
         MockMorphoVaultV2 feeVault0 = new MockMorphoVaultV2(ERC20(address(token0)));
         feeVault0.setEntryFeeBps(10); // 10 bps entry fee — well above any rounding noise
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory feeKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -432,12 +432,12 @@ contract SmartPoolHookTest is Test, Deployers {
         MockMorphoVaultV2 feeVault1 = new MockMorphoVaultV2(ERC20(address(token1)));
         feeVault1.setExitFeeBps(10); // 10 bps exit fee
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory feeKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -475,12 +475,12 @@ contract SmartPoolHookTest is Test, Deployers {
         );
         assertEq(yieldVault1.previewRedeem(probe), yieldVault1.convertToAssets(probe), "vault is feeless on exit");
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory feeKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -723,15 +723,15 @@ contract SmartPoolHookTest is Test, Deployers {
         );
         // Vary the base address slightly so it differs from the setUp hook.
         address tightAddr = address(uint160(uint256(type(uint160).max - 1) & clearAllHookPermissionsMask | flags));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, uint64(100)), tightAddr);
-        SmartPoolHook tight = SmartPoolHook(tightAddr);
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, uint64(100)), tightAddr);
+        DualPoolHook tight = DualPoolHook(tightAddr);
 
         PoolKey memory key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 11, hooks: IHooks(tightAddr)
         });
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -741,7 +741,7 @@ contract SmartPoolHookTest is Test, Deployers {
         });
         vm.prank(owner);
         vm.expectRevert(
-            abi.encodeWithSelector(SmartPoolHook.MinDepositBlocksTooLarge.selector, uint64(101), uint64(100))
+            abi.encodeWithSelector(DualPoolHook.MinDepositBlocksTooLarge.selector, uint64(101), uint64(100))
         );
         tight.initializePool(key, cfg);
     }
@@ -766,14 +766,14 @@ contract SmartPoolHookTest is Test, Deployers {
         MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
         MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory mvKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         PoolId mvId = mvKey.toId();
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true,
@@ -837,20 +837,20 @@ contract SmartPoolHookTest is Test, Deployers {
     ///      crafted data must revert.
     function test_unlockCallback_revertsForUnauthorizedCaller() public {
         bytes memory payload = abi.encode(testPoolKey, owner, uint256(1));
-        vm.expectRevert(SmartPoolHook.UnauthorizedCallback.selector);
+        vm.expectRevert(DualPoolHook.UnauthorizedCallback.selector);
         hook.unlockCallback(payload);
     }
 
     /// @dev Helper: deploy a fresh pool with the given lock duration. The pool uses a
     ///      distinct tickSpacing so its PoolId differs from `testPoolKey`'s.
     function _initLockedPool(uint64 lockBlocks) internal returns (PoolKey memory key, PoolId id) {
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -12, tickUpper: 12, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -12, tickUpper: 12, weightBps: 10_000});
         key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 12, hooks: IHooks(address(hook))
         });
         id = key.toId();
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true,
@@ -954,7 +954,7 @@ contract SmartPoolHookTest is Test, Deployers {
                 CustomRevert.WrappedError.selector,
                 address(hook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(SmartPoolHook.PoolNotLive.selector, testPoolId),
+                abi.encodeWithSelector(DualPoolHook.PoolNotLive.selector, testPoolId),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
@@ -1049,7 +1049,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), need0);
         token1.approve(address(hook), need1);
-        vm.expectRevert(SmartPoolHook.Unauthorized.selector);
+        vm.expectRevert(DualPoolHook.Unauthorized.selector);
         hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp);
         vm.stopPrank();
 
@@ -1113,13 +1113,13 @@ contract SmartPoolHookTest is Test, Deployers {
         MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
         MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory mvKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         PoolId mvId = mvKey.toId();
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1191,10 +1191,10 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //              hookData IGNORED BY SmartPoolHook (BY DESIGN)
+    //              hookData IGNORED BY DualPoolHook (BY DESIGN)
     // ═══════════════════════════════════════════════════════════════════════════
     //
-    //  SmartPoolHook overrides `_beforeSwap`, `getIndicativeQuote`, and `swapToPrice`
+    //  DualPoolHook overrides `_beforeSwap`, `getIndicativeQuote`, and `swapToPrice`
     //  to ignore hookData entirely — pricing is fully owner-controlled.
 
     function test_swap_ignoresHookData() public {
@@ -1674,9 +1674,9 @@ contract SmartPoolHookTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1742,13 +1742,13 @@ contract SmartPoolHookTest is Test, Deployers {
         MockMorphoVaultV2 mv0 = new MockMorphoVaultV2(ERC20(address(token0)));
         MockMorphoVaultV2 mv1 = new MockMorphoVaultV2(ERC20(address(token1)));
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
         PoolKey memory mvKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
         PoolId mvId = mvKey.toId();
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1856,15 +1856,15 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 11, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -11, tickUpper: 11, weightBps: 10_000});
 
         SwapReentrantVault evilVault1 = new SwapReentrantVault();
         // Pre-configure so `initializePool`'s `vault.asset() == currency` check passes and the
         // malicious `withdraw` is wired to swap on this pool.
         evilVault1.configure(Currency.unwrap(currency1), address(manager), key);
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -1924,18 +1924,18 @@ contract SmartPoolHookTest is Test, Deployers {
     //                    setActiveTick DISABLED
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev SmartPoolHook deploys multi-bucket distributions rather than a single
+    /// @dev DualPoolHook deploys multi-bucket distributions rather than a single
     ///      active tick, so the compatibility setter is present but disabled.
     function test_setActiveTick_reverts() public {
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.SetActiveTickDisabled.selector);
+        vm.expectRevert(DualPoolHook.SetActiveTickDisabled.selector);
         hook.setActiveTick(testPoolKey, 0);
     }
 
     /// @dev `setActiveTick` is `pure` and reverts for any caller, not just non-owners.
     function test_setActiveTick_revertsEvenForNonOwner() public {
         vm.prank(makeAddr("notOwner"));
-        vm.expectRevert(SmartPoolHook.SetActiveTickDisabled.selector);
+        vm.expectRevert(DualPoolHook.SetActiveTickDisabled.selector);
         hook.setActiveTick(testPoolKey, 0);
     }
 
@@ -2027,10 +2027,10 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_quoteFidelity_asymmetricDistribution() public {
         _depositAsOperator(10_000e18);
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -10, weightBps: 5000});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3000});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: 10, tickUpper: 60, weightBps: 2000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -10, weightBps: 5000});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3000});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: 10, tickUpper: 60, weightBps: 2000});
         vm.prank(owner);
         hook.setDistribution(testPoolKey, dist);
 
@@ -2079,9 +2079,9 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_quoteFidelity_tickBoundary_sharedAtZero() public {
         _depositAsOperator(10_000e18);
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](2);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 0, weightBps: 5000});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 10, weightBps: 5000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](2);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 0, weightBps: 5000});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 10, weightBps: 5000});
         vm.prank(owner);
         hook.setDistribution(testPoolKey, dist);
 
@@ -2102,15 +2102,15 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_quoteFidelity_maxBuckets() public {
         _depositAsOperator(10_000e18);
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](8);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -80, tickUpper: -60, weightBps: 1250});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -40, weightBps: 1250});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -40, tickUpper: -20, weightBps: 1250});
-        dist[3] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 0, weightBps: 1250});
-        dist[4] = SmartPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 20, weightBps: 1250});
-        dist[5] = SmartPoolHook.LiquidityBucket({tickLower: 20, tickUpper: 40, weightBps: 1250});
-        dist[6] = SmartPoolHook.LiquidityBucket({tickLower: 40, tickUpper: 60, weightBps: 1250});
-        dist[7] = SmartPoolHook.LiquidityBucket({tickLower: 60, tickUpper: 80, weightBps: 1250});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](8);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -80, tickUpper: -60, weightBps: 1250});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: -40, weightBps: 1250});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -40, tickUpper: -20, weightBps: 1250});
+        dist[3] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 0, weightBps: 1250});
+        dist[4] = DualPoolHook.LiquidityBucket({tickLower: 0, tickUpper: 20, weightBps: 1250});
+        dist[5] = DualPoolHook.LiquidityBucket({tickLower: 20, tickUpper: 40, weightBps: 1250});
+        dist[6] = DualPoolHook.LiquidityBucket({tickLower: 40, tickUpper: 60, weightBps: 1250});
+        dist[7] = DualPoolHook.LiquidityBucket({tickLower: 60, tickUpper: 80, weightBps: 1250});
         vm.prank(owner);
         hook.setDistribution(testPoolKey, dist);
 
@@ -2144,10 +2144,10 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key =
             PoolKey({currency0: c0, currency1: c1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))});
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -2256,7 +2256,7 @@ contract SmartPoolHookTest is Test, Deployers {
         token0.approve(address(hook), want0);
         token1.approve(address(hook), want1);
         // Set max < actual required → revert.
-        vm.expectRevert(SmartPoolHook.SlippageExceeded.selector);
+        vm.expectRevert(DualPoolHook.SlippageExceeded.selector);
         hook.addLiquidity(testPoolKey, 100e18, want0 - 1, want1, block.timestamp);
         vm.stopPrank();
     }
@@ -2272,7 +2272,7 @@ contract SmartPoolHookTest is Test, Deployers {
         vm.startPrank(alice);
         token0.approve(address(hook), 100e18);
         token1.approve(address(hook), 100e18);
-        vm.expectRevert(SmartPoolHook.DeadlineExpired.selector);
+        vm.expectRevert(DualPoolHook.DeadlineExpired.selector);
         hook.addLiquidity(testPoolKey, 100e18, type(uint256).max, type(uint256).max, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -2285,7 +2285,7 @@ contract SmartPoolHookTest is Test, Deployers {
 
         vm.prank(owner);
         // Require strictly more than will be returned → revert.
-        vm.expectRevert(SmartPoolHook.SlippageExceeded.selector);
+        vm.expectRevert(DualPoolHook.SlippageExceeded.selector);
         hook.removeLiquidity(testPoolKey, ownerShares, expect0 + 1, expect1, block.timestamp);
     }
 
@@ -2296,14 +2296,14 @@ contract SmartPoolHookTest is Test, Deployers {
         PoolKey memory key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
 
         vm.prank(owner);
-        vm.expectRevert(SmartPoolHook.VaultAssetMismatch.selector);
+        vm.expectRevert(DualPoolHook.VaultAssetMismatch.selector);
         hook.initializePool(
             key,
-            SmartPoolHook.PoolConfig({
+            DualPoolHook.PoolConfig({
                 sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
                 distribution: dist,
                 allowExternalDeposits: false,
@@ -2318,16 +2318,16 @@ contract SmartPoolHookTest is Test, Deployers {
     function test_setDistribution_revertsOnTickOutOfRange() public {
         // tickLower below MIN_TICK with valid spacing alignment.
         int24 belowMin = ((TickMath.MIN_TICK - 100) / 10) * 10; // aligned to tickSpacing 10
-        SmartPoolHook.LiquidityBucket[] memory bad = new SmartPoolHook.LiquidityBucket[](1);
-        bad[0] = SmartPoolHook.LiquidityBucket({tickLower: belowMin, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory bad = new DualPoolHook.LiquidityBucket[](1);
+        bad[0] = DualPoolHook.LiquidityBucket({tickLower: belowMin, tickUpper: 10, weightBps: 10_000});
         vm.prank(owner);
         vm.expectRevert(bytes4(keccak256("InvalidTickRange()")));
         hook.setDistribution(testPoolKey, bad);
 
         // tickUpper above MAX_TICK.
         int24 aboveMax = ((TickMath.MAX_TICK + 100) / 10) * 10;
-        SmartPoolHook.LiquidityBucket[] memory bad2 = new SmartPoolHook.LiquidityBucket[](1);
-        bad2[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: aboveMax, weightBps: 10_000});
+        DualPoolHook.LiquidityBucket[] memory bad2 = new DualPoolHook.LiquidityBucket[](1);
+        bad2[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: aboveMax, weightBps: 10_000});
         vm.prank(owner);
         vm.expectRevert(bytes4(keccak256("InvalidTickRange()")));
         hook.setDistribution(testPoolKey, bad2);
@@ -2463,12 +2463,11 @@ contract ReentrantVault {
 
     function deposit(uint256, address) external returns (uint256) {
         if (mode == 0xaaaaaaaa) {
-            SmartPoolHook(targetHook)
-                .addLiquidity(targetKey, 1, type(uint256).max, type(uint256).max, type(uint256).max);
+            DualPoolHook(targetHook).addLiquidity(targetKey, 1, type(uint256).max, type(uint256).max, type(uint256).max);
         } else if (mode == 0xbbbbbbbb) {
-            SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-            dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-            SmartPoolHook(targetHook).setDistribution(targetKey, dist);
+            DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+            dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+            DualPoolHook(targetHook).setDistribution(targetKey, dist);
         }
         return 0;
     }

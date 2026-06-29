@@ -24,7 +24,7 @@ The loop exits early on `amountRemaining == 0` or hitting the price limit; this
 cap only fires for runaway walks.
 4_096 covers every legitimate use of the library:
 - SpreadQuoter single-band: <10 steps
-- SmartPoolHook 8-bucket distributions at typical spacings: <100 steps
+- DualPoolHook 8-bucket distributions at typical spacings: <100 steps
 - Extreme wide-bucket configs spanning many bitmap words: still well under
 while still bounding the worst case to ~20M gas at ~5K gas/iter (well under one
 block, so an on-chain caller without a `{gas:}` envelope OOGs the call, not the

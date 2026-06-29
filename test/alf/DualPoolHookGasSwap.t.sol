@@ -14,14 +14,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
-/// @notice Focused gas guard for SmartPool's real JIT swap path.
-contract SmartPoolHookGasSwapTest is Test, Deployers {
+/// @notice Focused gas guard for DualPool's real JIT swap path.
+contract DualPoolHookGasSwapTest is Test, Deployers {
     using SafeERC20 for IERC20;
 
-    SmartPoolHook public hook;
+    DualPoolHook public hook;
     address owner = makeAddr("owner");
     MockERC20 token0;
     MockERC20 token1;
@@ -44,27 +44,27 @@ contract SmartPoolHookGasSwapTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
     }
 
     function test_gas_singleBucketVaultedSwap() public {
         PoolKey memory key = _initPool(_singleBucket(), true);
 
         swap(key, true, -100 ether, "");
-        uint256 gasUsed = vm.snapshotGasLastCall("SmartPoolHook_swap_singleBucket_withVault");
+        uint256 gasUsed = vm.snapshotGasLastCall("DualPoolHook_swap_singleBucket_withVault");
 
         assertLt(gasUsed, SINGLE_BUCKET_VAULTED_SWAP_GAS_TARGET, "single-bucket vaulted swap gas");
     }
 
-    function _initPool(SmartPoolHook.LiquidityBucket[] memory dist, bool withVault)
+    function _initPool(DualPoolHook.LiquidityBucket[] memory dist, bool withVault)
         internal
         returns (PoolKey memory key)
     {
         key = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -85,8 +85,8 @@ contract SmartPoolHookGasSwapTest is Test, Deployers {
         vm.roll(block.number + 1);
     }
 
-    function _singleBucket() internal pure returns (SmartPoolHook.LiquidityBucket[] memory dist) {
-        dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+    function _singleBucket() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
+        dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
     }
 }

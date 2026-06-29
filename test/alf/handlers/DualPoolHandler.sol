@@ -11,11 +11,11 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-import {SmartPoolHook} from "../../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../../src/alf/DualPoolHook.sol";
 import {MockERC4626} from "../mocks/MockERC4626.sol";
 
-/// @title SmartPoolHandler
-/// @notice Foundry invariant-test handler that bounded-fuzzes SmartPoolHook through a sequence
+/// @title DualPoolHandler
+/// @notice Foundry invariant-test handler that bounded-fuzzes DualPoolHook through a sequence
 ///         of LP, swap, and yield operations across a fixed actor set. Tracks ghost variables so
 ///         the invariant test can assert solvency, share-supply parity, and JIT lock cleanliness.
 ///
@@ -23,12 +23,12 @@ import {MockERC4626} from "../mocks/MockERC4626.sol";
 ///         cases (zero-share deposits, oversized withdrawals, swaps against an empty pool) that
 ///         the protocol correctly rejects. Reverts are normal; the invariants must hold over the
 ///         post-state of every successful operation.
-contract SmartPoolHandler is Test {
+contract DualPoolHandler is Test {
     using PoolIdLibrary for PoolKey;
 
     // ──── System-under-test wiring ────
 
-    SmartPoolHook public immutable hook;
+    DualPoolHook public immutable hook;
     IPoolManager public immutable manager;
     PoolSwapTest public immutable swapRouter;
     PoolKey public key;
@@ -49,7 +49,7 @@ contract SmartPoolHandler is Test {
     // ──── Ghost variables ────
     //
     //  Track expectations across the fuzz run that the post-state of any individual op cannot
-    //  test directly. Asserted by `invariant_*` functions in SmartPoolInvariantTest.
+    //  test directly. Asserted by `invariant_*` functions in DualPoolInvariantTest.
 
     uint256 public ghost_totalDeposited0;
     uint256 public ghost_totalDeposited1;
@@ -67,7 +67,7 @@ contract SmartPoolHandler is Test {
     uint256 public ghost_setDistributionCalls;
 
     constructor(
-        SmartPoolHook _hook,
+        DualPoolHook _hook,
         IPoolManager _manager,
         PoolSwapTest _swapRouter,
         PoolKey memory _key,
@@ -241,7 +241,7 @@ contract SmartPoolHandler is Test {
         ghost_setDistributionCalls++;
 
         uint256 n = bound(nSeed, 1, 8);
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](n);
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](n);
         uint256 base = 10_000 / n;
         uint256 assigned;
         for (uint256 i; i < n; i++) {
@@ -249,7 +249,7 @@ contract SmartPoolHandler is Test {
             if (i != n - 1) assigned += base;
             uint256 mult = bound(widthSeed, 1, 1_000) + i;
             int24 hw = int24(uint24(mult)) * key.tickSpacing;
-            dist[i] = SmartPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
+            dist[i] = DualPoolHook.LiquidityBucket({tickLower: -hw, tickUpper: hw, weightBps: w});
         }
 
         vm.prank(hook.owner());

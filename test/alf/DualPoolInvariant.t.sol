@@ -14,12 +14,12 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
-import {SmartPoolHandler} from "./handlers/SmartPoolHandler.sol";
+import {DualPoolHandler} from "./handlers/DualPoolHandler.sol";
 
-/// @title SmartPoolInvariantTest
-/// @notice Foundry invariant suite for SmartPoolHook. Drives the pool through random sequences
+/// @title DualPoolInvariantTest
+/// @notice Foundry invariant suite for DualPoolHook. Drives the pool through random sequences
 ///         of LP, swap, and yield operations across a fixed actor set, then asserts protocol-wide
 ///         invariants on the post-state of every successful sequence.
 ///
@@ -27,12 +27,12 @@ import {SmartPoolHandler} from "./handlers/SmartPoolHandler.sol";
 ///         allowed to revert on edge cases (e.g., zero-share withdrawal, vault shortfall on a
 ///         large swap). The invariants must hold over the post-state of every operation, not
 ///         every attempted call.
-contract SmartPoolInvariantTest is Test, Deployers {
+contract DualPoolInvariantTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    SmartPoolHook public hook;
-    SmartPoolHandler public handler;
+    DualPoolHook public hook;
+    DualPoolHandler public handler;
 
     MockERC4626 public vault0;
     MockERC4626 public vault1;
@@ -71,8 +71,8 @@ contract SmartPoolInvariantTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
 
         testPoolKey = PoolKey({
             currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 10, hooks: IHooks(address(hook))
@@ -80,12 +80,12 @@ contract SmartPoolInvariantTest is Test, Deployers {
         testPoolId = testPoolKey.toId();
 
         // Use a 3-bucket "conservative" distribution to exercise multi-bucket allocation paths.
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](3);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
 
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: true, // Critical: handler actors are external addresses
@@ -116,8 +116,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
         actorList[2] = bob;
         actorList[3] = charlie;
 
-        handler =
-            new SmartPoolHandler(hook, manager, swapRouter, testPoolKey, token0, token1, vault0, vault1, actorList);
+        handler = new DualPoolHandler(hook, manager, swapRouter, testPoolKey, token0, token1, vault0, vault1, actorList);
 
         // Restrict invariant fuzzing to handler functions — without this, forge-fuzz would
         // try to call any external function on any deployed contract, exploding the search
@@ -126,12 +125,12 @@ contract SmartPoolInvariantTest is Test, Deployers {
 
         // Selectors the handler exposes. Forge will pick from this set uniformly.
         bytes4[] memory selectors = new bytes4[](6);
-        selectors[0] = SmartPoolHandler.addLiquidity.selector;
-        selectors[1] = SmartPoolHandler.removeLiquidity.selector;
-        selectors[2] = SmartPoolHandler.swap.selector;
-        selectors[3] = SmartPoolHandler.simulateYield.selector;
-        selectors[4] = SmartPoolHandler.warpTime.selector;
-        selectors[5] = SmartPoolHandler.setDistribution.selector;
+        selectors[0] = DualPoolHandler.addLiquidity.selector;
+        selectors[1] = DualPoolHandler.removeLiquidity.selector;
+        selectors[2] = DualPoolHandler.swap.selector;
+        selectors[3] = DualPoolHandler.simulateYield.selector;
+        selectors[4] = DualPoolHandler.warpTime.selector;
+        selectors[5] = DualPoolHandler.setDistribution.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -154,7 +153,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
 
     /// @notice INV-DIST-1: distribution weights always sum to exactly 10_000 bps.
     function invariant_distributionWeightsSumTo10000() public view {
-        SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         uint256 totalWeight;
         for (uint256 i; i < dist.length; i++) {
             totalWeight += dist[i].weightBps;
@@ -164,7 +163,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
 
     /// @notice INV-DIST-2: bucket count is bounded `[1, MAX_BUCKETS=8]`.
     function invariant_distributionBucketCountBounded() public view {
-        SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         assertGe(dist.length, 1, "INV-DIST-2: zero buckets");
         assertLe(dist.length, 8, "INV-DIST-2: too many buckets");
     }
@@ -197,7 +196,7 @@ contract SmartPoolInvariantTest is Test, Deployers {
     /// @dev    The validator rejects zero-weight buckets at write time; this is a
     ///         post-condition cross-check.
     function invariant_distributionAllWeightsNonZero() public view {
-        SmartPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
+        DualPoolHook.LiquidityBucket[] memory dist = hook.getDistribution(testPoolId);
         for (uint256 i; i < dist.length; i++) {
             assertGt(dist[i].weightBps, 0, "INV-DIST: zero-weight bucket present");
         }

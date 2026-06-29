@@ -1,16 +1,16 @@
-# SmartPoolBase
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/base/SmartPoolBase.sol)
+# DualPoolBase
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/base/DualPoolBase.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver, Ownable2Step, [IALFHook](/src/alf/interfaces/IALFHook.sol/interface.IALFHook.md)
 
 **Title:**
-SmartPoolBase
+DualPoolBase
 
 **Author:**
 Uniswap Labs
 
-Minimal ALF/v4 base for SmartPoolHook.
+Minimal ALF/v4 base for DualPoolHook.
 
 Pool fees are static per `PoolKey.fee` and immutable post-initialize. The owner has
 only a per-pool liveness flag for pause/resume; pricing itself cannot be reconfigured
@@ -32,7 +32,7 @@ uint32 private immutable _maxGas
 
 ### livePools
 Whether each pool is currently quoting and executing swaps. Set by the
-subclass's guarded `initializePool` and toggled via {SmartPoolHook.setPoolLive}.
+subclass's guarded `initializePool` and toggled via {DualPoolHook.setPoolLive}.
 
 
 ```solidity
@@ -96,7 +96,7 @@ Whether this hook is currently live and accepting swaps.
 
 Always reports live; hook-level liveness is per-pool via `livePools[poolId]`.
 Routers call this to reject offline hooks; this hook is always reachable, but
-individual pools may pause via {SmartPoolHook.setPoolLive}.
+individual pools may pause via {DualPoolHook.setPoolLive}.
 
 
 ```solidity
@@ -107,7 +107,7 @@ function isLive() external pure override returns (bool);
 
 Get an indicative quote for routing purposes.
 
-SmartPool's deployable single-contract build does not include the heavy virtual
+DualPool's deployable single-contract build does not include the heavy virtual
 multi-range tick-walking quoter. Returning 0 is the IALFHook unsupported-quote path.
 
 
@@ -268,7 +268,7 @@ error InvalidTickRange();
 ```
 
 ### DirectInitializeBlocked
-Direct `poolManager.initialize` for any SmartPool-hooked pool is rejected;
+Direct `poolManager.initialize` for any DualPool-hooked pool is rejected;
 callers MUST go through the subclass's guarded `initializePool` entry point so
 pricing, distribution, and vault config are validated before PM init runs.
 

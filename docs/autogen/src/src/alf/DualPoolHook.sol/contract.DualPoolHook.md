@@ -1,11 +1,11 @@
-# SmartPoolHook
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/0c68c6912ec9b3df692fd62740997db52f245b7d/src/alf/SmartPoolHook.sol)
+# DualPoolHook
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/DualPoolHook.sol)
 
 **Inherits:**
-[SmartPoolBase](/src/alf/base/SmartPoolBase.sol/abstract.SmartPoolBase.md), [PoolVault](/src/alf/base/PoolVault.sol/abstract.PoolVault.md), [JITLockable](/src/alf/base/JITLockable.sol/abstract.JITLockable.md), ReentrancyGuardTransient, IUnlockCallback
+[DualPoolBase](/src/alf/base/DualPoolBase.sol/abstract.DualPoolBase.md), [PoolVault](/src/alf/base/PoolVault.sol/abstract.PoolVault.md), [JITLockable](/src/alf/base/JITLockable.sol/abstract.JITLockable.md), ReentrancyGuardTransient
 
 **Title:**
-SmartPoolHook
+DualPoolHook
 
 **Author:**
 Uniswap Labs
@@ -63,7 +63,7 @@ from positions created by other hooks or LPs on the same pool.
 
 
 ```solidity
-bytes32 private constant LP_SALT = bytes32(uint256(0x534D5254))
+bytes32 private constant LP_SALT = bytes32(uint256(0x4455414C))
 ```
 
 
@@ -87,7 +87,7 @@ so transient storage is the natural fit — avoids the cold/warm SSTORE penalty
 
 
 ```solidity
-bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("smartpoolhook.activeliq.v1")
+bytes32 private constant _ACTIVE_LIQ_NAMESPACE = keccak256("dualpoolhook.activeliq.v1")
 ```
 
 
@@ -110,33 +110,20 @@ mapping(PoolId => LiquidityBucket[]) internal _distribution
 ```
 
 
-### maxMinDepositBlocks
-Per-deployment upper bound on `PoolConfig.minDepositBlocks`, in
-`BlockNumberish`-clock blocks. Set at construction so each chain deployment
-can pick a chain-appropriate ceiling at deployment, immutable thereafter.
-
-
-```solidity
-uint64 public immutable maxMinDepositBlocks
-```
-
-
 ## Functions
 ### constructor
 
 
 ```solidity
-constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepositBlocks)
-    SmartPoolBase(_pm, maxGas_, owner_);
+constructor(IPoolManager _pm, uint32 maxGas_, address owner_) DualPoolBase(_pm, maxGas_, owner_);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`_pm`|`IPoolManager`|                The Uniswap v4 PoolManager.|
-|`maxGas_`|`uint32`|            Gas budget declared for `getIndicativeQuote` staticcalls.|
-|`owner_`|`address`|             Initial contract owner. Transferable post-deployment via OZ `Ownable2Step` (`transferOwnership` + `acceptOwnership`); `renounceOwnership` is disabled (see {SmartPoolBase}). Key loss without a pending transfer is unrecoverable.|
-|`_maxMinDepositBlocks`|`uint64`|Per-deployment upper bound on `PoolConfig.minDepositBlocks`.|
+|`_pm`|`IPoolManager`|    The Uniswap v4 PoolManager.|
+|`maxGas_`|`uint32`|Gas budget declared for `getIndicativeQuote` staticcalls.|
+|`owner_`|`address`| Immutable contract owner. Cannot be changed post-deployment; key loss or compromise is unrecoverable. See {DualPoolBase}.|
 
 
 ### initializePool
@@ -144,23 +131,13 @@ constructor(IPoolManager _pm, uint32 maxGas_, address owner_, uint64 _maxMinDepo
 Initialize a new pool with vaults and liquidity distribution.
 
 Calls `poolManager.initialize` internally. The pool's LP fee is taken from
-`key.fee` and is static — it cannot be changed post-deployment. The vault
-BINDING is permanent — set at creation and cannot be changed — but the standing
-token allowance granted to each vault is revocable in an emergency via
-`emergencyRevokeVault`. The distribution can be updated later via
-`setDistribution`.
+`key.fee` and is static — it cannot be changed post-deployment. Vaults are
+permanent — set at creation and cannot be changed. The distribution can be
+updated later via `setDistribution`.
 Native ETH (currency `address(0)`) is rejected — wrap as WETH instead.
-The pool is created **not live**: swaps revert with `PoolNotLive` until the
-owner calls `bootstrap`, which mints the first shares AND flips liveness on.
-This closes the post-init, pre-bootstrap window in which a swapper could
-shift `slot0.sqrtPriceX96` against a zero-liquidity pool. After bootstrap,
-the owner can pause/unpause via `setPoolLive`.
-`config.minDepositBlocks` is recorded once and immutable thereafter. Its unit
-is defined as blocks; this works consistently across chains by way of the
-`BlockNumberish` library which returns the L2 sequencer's local block number
-on Arbitrum and `block.number` elsewhere. A value of `0` means NO lock applies
-and same-block deposit-then-withdraw is allowed; for a same-block ban set `1`.
-Values above `maxMinDepositBlocks` are disallowed.
+The pool is initialized as live; toggle via `setPoolLive` for emergency pause.
+The pool is **not seeded** by `initializePool`; the owner must call `bootstrap`
+to mint the first shares before any swaps or external deposits can occur.
 
 
 ```solidity
@@ -170,8 +147,8 @@ function initializePool(PoolKey calldata key, PoolConfig calldata config) extern
 
 |Name|Type|Description|
 |----|----|-----------|
-|`key`|`PoolKey`|   The PoolKey (must reference this hook). `key.fee` is the static LP fee; pools with the `LPFeeLibrary.DYNAMIC_FEE_FLAG` set are rejected.|
-|`config`|`PoolConfig`|Pool configuration including distribution, vaults, permissions, and the deposit-lock duration.|
+|`key`|`PoolKey`|   The PoolKey (must reference this hook). `key.fee` is the static LP fee.|
+|`config`|`PoolConfig`|Pool configuration including distribution, vaults, and permissions.|
 
 **Returns**
 
@@ -183,7 +160,7 @@ function initializePool(PoolKey calldata key, PoolConfig calldata config) extern
 ### bootstrap
 
 Seed a pool with the first deposit. Mints `sqrt(amount0 * amount1)` shares
-to the owner AND flips the pool to live, enabling swaps for the first time.
+to the owner.
 
 Only the owner may bootstrap. The owner-supplied amounts set the initial
 share/asset ratio, which is critical for asymmetric-decimal pairs (e.g.,
@@ -191,9 +168,6 @@ USDC/WETH) where a naïve 1-wei-of-each bootstrap would either be unaffordable
 or set a meaningless price. Inflation defense is provided by virtual-shares
 offsets in the conversion math (see {PoolVault._convertToAmounts}). Reverts
 if the pool is already bootstrapped or if `sqrt(amount0 * amount1) == 0`.
-Bootstrap is the sole trigger that flips a newly-initialized pool to live:
-this closes the init→bootstrap window in which a swap could move slot0's
-`sqrtPriceX96` against a zero-liquidity pool.
 
 
 ```solidity
@@ -300,36 +274,6 @@ function removeLiquidity(
 |`amount1`|`uint256`|    Actual currency1 transferred to the caller.|
 
 
-### unlockCallback
-
-Called by the pool manager on `msg.sender` when the manager is unlocked
-
-Only callable by the PoolManager as a re-entrant continuation of our own
-`poolManager.unlock` call inside `removeLiquidity`. Anyone calling this directly
-with crafted data could trigger an arbitrary LP withdraw, so the `msg.sender`
-check is critical.
-The encoded payload is `(PoolKey key, address owner, uint256 sharesToBurn)`. The
-callback redeems both currencies' ERC-6909 claims first (cheap inside an unlock
-context, satisfies the `s.erc20`-only inspection in `_ensureERC20`), then runs
-`_withdraw` to mint payouts to `owner`.
-
-
-```solidity
-function unlockCallback(bytes calldata data) external returns (bytes memory);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`data`|`bytes`|The data that was passed to the call to unlock|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`bytes`|Any data that you want to be returned from the unlock call|
-
-
 ### setDistribution
 
 Replace the liquidity distribution for a pool.
@@ -358,10 +302,8 @@ function setDistribution(PoolKey calldata key, LiquidityBucket[] calldata bucket
 Refresh the max-approval the hook grants to a pool's ERC-4626 vault.
 
 Recovery path for vaults whose allowance is unexpectedly consumed or reset.
-`forceApprove` internally zeroes-then-sets for USDT-style tokens whose
-`approve` reverts on a non-zero existing allowance, so a single call covers
-both the well-behaved and the zero-out-first cases. No-op if the pool has no
-vault configured for `currency`.
+Zeroes the existing allowance first (USDT-safe) before re-approving to
+`type(uint256).max`. No-op if the pool has no vault configured for `currency`.
 
 
 ```solidity
@@ -373,47 +315,6 @@ function refreshVaultApproval(PoolKey calldata key, Currency currency) external 
 |----|----|-----------|
 |`key`|`PoolKey`|     The pool whose vault allowance should be refreshed.|
 |`currency`|`Currency`|Which side (currency0 or currency1) to refresh.|
-
-
-### emergencyRevokeVault
-
-Emergency incident-response lever for a suspect vault: in one atomic action,
-pause the pool, disable external deposits, zero BOTH currencies' vault allowances,
-and best-effort withdraw the pool's vault-held assets back into the hook. Use when
-a configured vault is suspected compromised, paused, or pending a risky upgrade.
-
-The pool's vault binding is immutable, so this does NOT remove the vault. Four
-actions run in order; the first three always succeed, the fourth is best-effort:
-1. Pause (`livePools = false`): blocks swaps so the JIT cycle stops touching
-the vault.
-2. Disable external deposits: load-bearing, because `addLiquidity` is NOT gated
-on liveness, so an external depositor could otherwise re-arm the allowance
-via `_ensureVaultAllowance` on the deposit path even while the pool is paused.
-3. Zero both vault allowances: removes the standing `type(uint256).max` grant
-that lets a vault `transferFrom` the hook's RAW balance of that currency
-(including ERC-20 attributed to OTHER pools sharing it; see {PoolVault}
-`Vault trust model`).
-4. Best-effort drain (`_drainVaultBestEffort`): redeems the pool's vault shares
-back to raw ERC-20, rescuing assets ALREADY inside the vault, which step 3
-alone does not protect. Wrapped in try/catch: if the vault is bricked/paused
-and reverts on redeem, the rescue is skipped (emits {PoolVault-VaultDrainSkipped})
-but the revocation + pause above still hold. `nonReentrant` because this is
-the only owner path that makes an external call to the (untrusted) vault.
-`removeLiquidity` is intentionally left open so LPs can still exit; it needs no
-hook to vault allowance, so exits neither re-arm the exposure nor get trapped. To
-resume normal operation the owner re-approves via [refreshVaultApproval](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#refreshvaultapproval) and
-re-enables liveness / external deposits, which re-arms the exposure, so the
-underlying vault incident must be resolved first.
-
-
-```solidity
-function emergencyRevokeVault(PoolKey calldata key) external onlyOwner nonReentrant whenJITNotInProgress;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`key`|`PoolKey`|The pool whose vault exposure to revoke.|
 
 
 ### setExternalDeposits
@@ -434,10 +335,10 @@ function setExternalDeposits(PoolKey calldata key, bool enabled) external onlyOw
 
 ### setActiveTick
 
-Disabled: SmartPool uses distribution buckets instead of one active LP tick.
+Disabled: DualPool uses distribution buckets instead of one active LP tick.
 
-Always reverts with [SetActiveTickDisabled](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#setactivetickdisabled). The function exists only to satisfy
-the inherited interface; SmartPool routes liquidity through [setDistribution](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#setdistribution)
+Always reverts with [SetActiveTickDisabled](/src/alf/DualPoolHook.sol/contract.DualPoolHook.md#setactivetickdisabled). The function exists only to satisfy
+the inherited interface; DualPool routes liquidity through [setDistribution](/src/alf/DualPoolHook.sol/contract.DualPoolHook.md#setdistribution)
 instead. Marked `pure` because no state is read or written.
 
 
@@ -449,7 +350,7 @@ function setActiveTick(PoolKey calldata, int24) external pure;
 
 Enable or disable pool liveness for emergency pause/resume.
 
-When toggled to false, `_beforeSwap` reverts with [PoolNotLive](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#poolnotlive), pausing the
+When toggled to false, `_beforeSwap` reverts with [PoolNotLive](/src/alf/DualPoolHook.sol/contract.DualPoolHook.md#poolnotlive), pausing the
 pool for swaps. The static fee (`key.fee`) is unaffected — re-enabling
 immediately restores trading at the original rate.
 
@@ -480,11 +381,8 @@ function getReserves(PoolKey calldata key) external view override returns (uint2
 
 Assets available for immediate swapping.
 
-Sizes vault-side balance via `vault.previewRedeem(shares)` so the reported
-number reflects the net realizable exit value (accounting for any vault-side
-exit fee) rather than the gross `convertToAssets` figure. Curated/gated
-vaults that return `0` from `maxWithdraw` (Morpho VaultV2 and similar) are
-correctly sized via `previewRedeem` instead.
+Caps vault-side balance at `vault.maxWithdraw(this)` so paused, capped, or
+utilization-constrained vaults are reflected.
 
 
 ```solidity
@@ -497,7 +395,7 @@ function getEffectiveLiquidity(PoolKey calldata key)
 
 ### getIndicativeQuote
 
-Indicative quote against hypothetical SmartPool JIT liquidity.
+Indicative quote against hypothetical DualPool JIT liquidity.
 
 Uses current active distribution-bucket liquidity for a compact view quote.
 Ignores hookData; pricing is the static `key.fee`.
@@ -714,15 +612,8 @@ function _deployBuckets(
 Remove all active JIT positions deployed in `_deployJIT`. Iterates the distribution
 and removes each bucket that has non-zero active liquidity (read from transient
 storage). After removal, the hook's cumulative delta reflects the net position from
-the deploy-swap-remove cycle.
-Slots are cleared after read (`tstore(slot, 0)`), NOT relied on to auto-clear at
-end of transaction. Transient storage scopes to the transaction, not the unlock —
-so for multiple swaps on the same pool within one transaction, slot values would
-otherwise persist across cycles. If bucket `i` deployed `liq = 100` in swap 1 and
-the price moved such that bucket `i` deploys `liq = 0` in swap 2,
-`_deployBuckets` skips the write (guarded by `liq > 0`), leaving `slot[i] = 100`
-from swap 1. Without the clear here, swap 2's `_removeJIT` would tload `100` and
-try to remove a position that doesn't exist, reverting the swap.
+the deploy-swap-remove cycle. Transient slots auto-clear at end of transaction, so
+we don't bother zeroing them — saves a TSTORE per bucket.
 
 
 ```solidity
@@ -882,12 +773,6 @@ Emitted when a new pool is initialized via `initializePool`.
 event PoolCreated(PoolId indexed poolId);
 ```
 
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The pool that was created.|
-
 ### DistributionUpdated
 Emitted when the liquidity distribution is replaced via `setDistribution`.
 
@@ -895,43 +780,6 @@ Emitted when the liquidity distribution is replaced via `setDistribution`.
 ```solidity
 event DistributionUpdated(PoolId indexed poolId);
 ```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The pool whose distribution was updated.|
-
-### ExternalDepositsUpdated
-Emitted when external deposits are enabled or disabled via `setExternalDeposits`.
-
-
-```solidity
-event ExternalDepositsUpdated(PoolId indexed poolId, bool enabled);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The pool whose external deposits were enabled or disabled.|
-|`enabled`|`bool`|Whether external deposits are enabled.|
-
-### EmergencyVaultRevoked
-Emitted when the owner triggers `emergencyRevokeVault`: the pool is paused,
-external deposits are disabled, and both vault token allowances are zeroed in a
-single action. A monitoring signal that a vault incident response is in progress.
-
-
-```solidity
-event EmergencyVaultRevoked(PoolId indexed poolId);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`poolId`|`PoolId`|The pool whose vault exposure was revoked.|
 
 ## Errors
 ### LiquidityNotAllowed
@@ -1000,8 +848,8 @@ error SlippageExceeded();
 ```
 
 ### SetActiveTickDisabled
-`setActiveTick` is disabled on SmartPool. The hook routes liquidity through
-distribution buckets, not a single active tick. Use [setDistribution](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#setdistribution) instead.
+`setActiveTick` is disabled on DualPool. The hook routes liquidity through
+distribution buckets, not a single active tick. Use [setDistribution](/src/alf/DualPoolHook.sol/contract.DualPoolHook.md#setdistribution) instead.
 
 
 ```solidity
@@ -1020,7 +868,7 @@ error Unauthorized();
 
 ### PoolNotLive
 `_beforeSwap` was invoked on a pool whose `live` flag is false. Owner pauses
-the pool via [setPoolLive](/src/alf/SmartPoolHook.sol/contract.SmartPoolHook.md#setpoollive); while paused, swaps revert here so routers and
+the pool via [setPoolLive](/src/alf/DualPoolHook.sol/contract.DualPoolHook.md#setpoollive); while paused, swaps revert here so routers and
 aggregators see an explicit failure instead of executing against zero JIT
 liquidity.
 
@@ -1034,44 +882,6 @@ error PoolNotLive(PoolId poolId);
 |Name|Type|Description|
 |----|----|-----------|
 |`poolId`|`PoolId`|The pool whose live flag is currently false.|
-
-### MinDepositBlocksTooLarge
-Operator-supplied `PoolConfig.minDepositBlocks` exceeds the per-deployment upper
-bound (`maxMinDepositBlocks`).
-
-
-```solidity
-error MinDepositBlocksTooLarge(uint64 supplied, uint64 max);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`supplied`|`uint64`|The value the operator provided in `PoolConfig`.|
-|`max`|`uint64`|     The deployment-wide ceiling set at construction.|
-
-### UnauthorizedCallback
-`unlockCallback` was invoked by an address other than the PoolManager. The callback
-reads encoded arguments and triggers an LP withdraw; only the PoolManager (acting on
-behalf of our own `poolManager.unlock` call) may invoke it.
-
-
-```solidity
-error UnauthorizedCallback();
-```
-
-### DynamicFeeNotSupported
-`key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). SmartPool is
-designed around a static fee fixed at pool creation; dynamic-fee pools would
-require the hook to maintain its own fee state and route every swap through a
-fee-update callback, which the contract is explicitly not built for. Use a
-concrete `uint24` fee value below `MAX_LP_FEE` instead.
-
-
-```solidity
-error DynamicFeeNotSupported();
-```
 
 ## Structs
 ### LiquidityBucket
@@ -1105,7 +915,6 @@ struct PoolConfig {
     bool allowExternalDeposits;
     IERC4626 vault0;
     IERC4626 vault1;
-    uint64 minDepositBlocks;
 }
 ```
 
@@ -1118,5 +927,4 @@ struct PoolConfig {
 |`allowExternalDeposits`|`bool`|Whether non-owner addresses may call `addLiquidity`.|
 |`vault0`|`IERC4626`|              ERC4626 vault for currency0 (address(0) to hold as ERC-20).|
 |`vault1`|`IERC4626`|              ERC4626 vault for currency1 (address(0) to hold as ERC-20).|
-|`minDepositBlocks`|`uint64`|    Per-pool deposit lock duration. `0` (default) means NO lock and same-block deposit-then-withdraw is allowed. Must be `<= maxMinDepositBlocks`. Immutable after `initializePool`.|
 

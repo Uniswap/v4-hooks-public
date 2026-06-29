@@ -13,7 +13,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
 import {MultiAssetVault} from "../../src/alf/base/vault/MultiAssetVault.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
@@ -43,15 +43,15 @@ contract MockFeeOnTransferERC20 is MockERC20 {
     }
 }
 
-/// @title SmartPoolHookFeeOnTransferTest
+/// @title DualPoolHookFeeOnTransferTest
 /// @notice Fee-on-transfer / rebasing tokens are unsupported: an inbound LP transfer that
 ///         delivers less than requested must revert `TransferReceiptShortfall` on BOTH the
 ///         bootstrap and the addLiquidity paths, so a fee-charging token can never seed a pool
 ///         (which would otherwise record balances the hook can never settle, bricking swaps).
-contract SmartPoolHookFeeOnTransferTest is Test, Deployers {
+contract DualPoolHookFeeOnTransferTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
 
-    SmartPoolHook hook;
+    DualPoolHook hook;
     MockFeeOnTransferERC20 t0;
     MockFeeOnTransferERC20 t1;
     PoolKey poolKey;
@@ -69,8 +69,8 @@ contract SmartPoolHookFeeOnTransferTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
 
         poolKey = PoolKey({
             currency0: Currency.wrap(address(t0)),
@@ -80,9 +80,9 @@ contract SmartPoolHookFeeOnTransferTest is Test, Deployers {
             hooks: IHooks(address(hook))
         });
 
-        SmartPoolHook.LiquidityBucket[] memory dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.LiquidityBucket[] memory dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,

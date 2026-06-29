@@ -13,15 +13,15 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-import {SmartPoolHook} from "../../src/alf/SmartPoolHook.sol";
-import {SmartPoolBase} from "../../src/alf/base/SmartPoolBase.sol";
+import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
+import {DualPoolBase} from "../../src/alf/base/DualPoolBase.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
 /// @notice Isolated gas measurements for `getIndicativeQuote`. Each test sets up a fresh pool
 ///         and runs *only* the quote call inside the gasleft() window so the reported numbers
 ///         exclude bootstrap, deposit, and assertion overhead.
-contract SmartPoolHookGasIndicativeTest is Test, Deployers {
-    SmartPoolHook public hook;
+contract DualPoolHookGasIndicativeTest is Test, Deployers {
+    DualPoolHook public hook;
     address owner = makeAddr("owner");
     MockERC20 token0;
     MockERC20 token1;
@@ -43,8 +43,8 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
             Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
         );
-        hook = SmartPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("SmartPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
+        hook = DualPoolHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
+        deployCodeTo("DualPoolHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook));
     }
 
     function test_gas_singleBucket_noVault() public {
@@ -103,7 +103,7 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
         console2.log("  1F0 100 t1  :", g - gasleft(), "gas");
     }
 
-    function _initPool(SmartPoolHook.LiquidityBucket[] memory dist, int24 tickSpacing, bool withVault)
+    function _initPool(DualPoolHook.LiquidityBucket[] memory dist, int24 tickSpacing, bool withVault)
         internal
         returns (PoolKey memory key)
     {
@@ -114,7 +114,7 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
             tickSpacing: tickSpacing,
             hooks: IHooks(address(hook))
         });
-        SmartPoolHook.PoolConfig memory cfg = SmartPoolHook.PoolConfig({
+        DualPoolHook.PoolConfig memory cfg = DualPoolHook.PoolConfig({
             sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
             distribution: dist,
             allowExternalDeposits: false,
@@ -135,27 +135,27 @@ contract SmartPoolHookGasIndicativeTest is Test, Deployers {
         vm.roll(block.number + 1);
     }
 
-    function _singleBucket() internal pure returns (SmartPoolHook.LiquidityBucket[] memory dist) {
-        dist = new SmartPoolHook.LiquidityBucket[](1);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+    function _singleBucket() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
+        dist = new DualPoolHook.LiquidityBucket[](1);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
     }
 
-    function _conservative() internal pure returns (SmartPoolHook.LiquidityBucket[] memory dist) {
-        dist = new SmartPoolHook.LiquidityBucket[](3);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+    function _conservative() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
+        dist = new DualPoolHook.LiquidityBucket[](3);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 7_500});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_500});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
     }
 
-    function _eightBuckets() internal pure returns (SmartPoolHook.LiquidityBucket[] memory dist) {
-        dist = new SmartPoolHook.LiquidityBucket[](8);
-        dist[0] = SmartPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_000});
-        dist[1] = SmartPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
-        dist[2] = SmartPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_000});
-        dist[3] = SmartPoolHook.LiquidityBucket({tickLower: -40, tickUpper: 40, weightBps: 1_000});
-        dist[4] = SmartPoolHook.LiquidityBucket({tickLower: -50, tickUpper: 50, weightBps: 1_000});
-        dist[5] = SmartPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
-        dist[6] = SmartPoolHook.LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 1_000});
-        dist[7] = SmartPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
+    function _eightBuckets() internal pure returns (DualPoolHook.LiquidityBucket[] memory dist) {
+        dist = new DualPoolHook.LiquidityBucket[](8);
+        dist[0] = DualPoolHook.LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 3_000});
+        dist[1] = DualPoolHook.LiquidityBucket({tickLower: -20, tickUpper: 20, weightBps: 1_500});
+        dist[2] = DualPoolHook.LiquidityBucket({tickLower: -30, tickUpper: 30, weightBps: 1_000});
+        dist[3] = DualPoolHook.LiquidityBucket({tickLower: -40, tickUpper: 40, weightBps: 1_000});
+        dist[4] = DualPoolHook.LiquidityBucket({tickLower: -50, tickUpper: 50, weightBps: 1_000});
+        dist[5] = DualPoolHook.LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 1_000});
+        dist[6] = DualPoolHook.LiquidityBucket({tickLower: -80, tickUpper: 80, weightBps: 1_000});
+        dist[7] = DualPoolHook.LiquidityBucket({tickLower: -100, tickUpper: 100, weightBps: 500});
     }
 }
