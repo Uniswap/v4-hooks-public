@@ -332,6 +332,8 @@ contract ALFMultiplexer is BaseHook {
     ///      back the simulated candidate swap, including hook state, PoolManager state, ERC-20
     ///      transfers, vault calls, and transient deltas. Reverts with {NotSelf} if invoked by
     ///      any caller other than this contract.
+    /// @dev Precondition: `amountSpecified != 0`. Reachable only via the contract's own self-call;
+    ///      zero-amount targets are filtered out upstream before this is invoked.
     /// @param poolKey        The candidate quoter's pool key.
     /// @param zeroForOne     The swap direction.
     /// @param amountSpecified The swap amount (negative = exact input, positive = exact output).
@@ -401,8 +403,10 @@ contract ALFMultiplexer is BaseHook {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // 1. Build sorted candidates and execute greedy split fill.
-        (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote) =
+        // 1. Build sorted candidates and execute greedy split fill. `_multiplexAndSwap` decodes
+        //    the MultiplexerHookData once and threads `strictTolerancePips` back out so the
+        //    tolerance check below need not re-decode the full struct.
+        (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote, uint256 tol) =
             _multiplexAndSwap(key, params.zeroForOne, params.amountSpecified, hookData);
 
         // 2. Tolerance enforcement (downside-only). The "downside" direction depends on swap
@@ -411,28 +415,25 @@ contract ALFMultiplexer is BaseHook {
         //    `executed` and `bestQuote` are in the candidate frame: v4 charges each
         //    candidate's protocol fee natively on the nested swap and the multiplexer
         //    itself does not charge a fee on top, so no frame conversion is needed.
-        if (hookData.length > 0) {
-            uint256 tol = abi.decode(hookData, (MultiplexerHookData)).strictTolerancePips;
-            if (tol > 0) {
-                // No baseline ⇒ no protection. Refuse rather than silently accept.
-                if (bestQuote == 0) revert MissingQuoteBaseline();
+        if (tol > 0) {
+            // No baseline ⇒ no protection. Refuse rather than silently accept.
+            if (bestQuote == 0) revert MissingQuoteBaseline();
 
-                // `bestQuote` is the best pre-execution indicative and is not re-derived here.
-                // A candidate that won quoting but then reverted (soft-skipped) or under-filled
-                // leaves `executed` below it and trips the revert below; fail-safe, but callers
-                // must enable strict tolerance only over trusted targets. See contract NatSpec
-                // "Tolerance Enforcement".
-                uint256 executed = _extractOutput(totalDelta, params);
-                if (params.amountSpecified < 0) {
-                    if (executed < bestQuote) {
-                        uint256 dev = bestQuote - executed;
-                        if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
-                    }
-                } else {
-                    if (executed > bestQuote) {
-                        uint256 dev = executed - bestQuote;
-                        if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
-                    }
+            // `bestQuote` is the best pre-execution indicative and is not re-derived here.
+            // A candidate that won quoting but then reverted (soft-skipped) or under-filled
+            // leaves `executed` below it and trips the revert below; fail-safe, but callers
+            // must enable strict tolerance only over trusted targets. See contract NatSpec
+            // "Tolerance Enforcement".
+            uint256 executed = _extractOutput(totalDelta, params);
+            if (params.amountSpecified < 0) {
+                if (executed < bestQuote) {
+                    uint256 dev = bestQuote - executed;
+                    if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
+                }
+            } else {
+                if (executed > bestQuote) {
+                    uint256 dev = executed - bestQuote;
+                    if (dev * PIPS_DENOMINATOR > bestQuote * tol) revert QuoteDeviation(bestQuote, executed);
                 }
             }
         }
@@ -465,13 +466,17 @@ contract ALFMultiplexer is BaseHook {
     /// @return primaryQuoter  The first quoter in fill order.
     /// @return bestQuote      The strict-tolerance baseline (best individual indicative, reserve-
     ///                       bounded when strict tolerance is enabled). 0 if skipped.
+    /// @return strictTolerancePips The caller's strict-tolerance setting, decoded once here and
+    ///                       returned so `_beforeSwap` does not re-decode the full hookData.
     function _multiplexAndSwap(PoolKey calldata key, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
-        returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
+        returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote, uint256 strictTolerancePips)
     {
         if (hookData.length == 0) revert TargetsRequired();
         MultiplexerHookData memory ahd = abi.decode(hookData, (MultiplexerHookData));
         if (ahd.targets.length == 0) revert TargetsRequired();
+
+        strictTolerancePips = ahd.strictTolerancePips;
 
         // Every target must trade the virtual pool's exact currency pair. A target on a different
         // pair opens deltas in currencies the virtual pool can't represent; `_toBeforeSwapDelta`
@@ -565,24 +570,13 @@ contract ALFMultiplexer is BaseHook {
         if (!foundValid) revert NoValidQuotes();
     }
 
-    /// @dev Query a single targeted quoter for its indicative quote. Performs three checks:
-    ///      1. `isLive()`: skip quoters that report themselves as offline
-    ///      2. `maxGas()`: read the declared gas budget for the indicative call
-    ///      3. `getIndicativeQuote()`: call with the gas budget, catch failures
-    ///
-    ///      Returns (0, "") if any step fails. Failures are soft: the quoter is skipped
-    ///      without reverting the entire multiplexer.
-    ///
-    ///      Constructs the per-quoter ALFHookData by pairing the shared attestation data
-    ///      with the target's quoter-specific curve update data.
-    /// @param target          The targeted quoter (pool key + curve update data).
-    /// @param attestationData Shared attestation payload from the MultiplexerHookData.
-    /// @param zeroForOne      The swap direction.
-    /// @param amountSpecified The swap amount.
-    /// @return q              The indicative quote (0 if invalid/failed).
-    /// @return quoterHookData The constructed ALFHookData for nested execution.
     /// @dev Resolve an indicative quote for a single target via the cheapest accurate path
-    ///      available. Waterfall, in order of preference:
+    ///      available. Performs liveness/gas-budget/attestation checks for tier-1 quoters and
+    ///      returns (0, "") on any soft failure so the caller skips the quoter without reverting
+    ///      the whole multiplexer. Constructs the per-quoter ALFHookData by pairing the shared
+    ///      attestation data with the target's quoter-specific curve update data.
+    ///
+    ///      Waterfall, in order of preference:
     ///
     ///        1. **IALFHook** (ERC-165 detected): full liveness/gas-budget/attestation path.
     ///        2. **SwapSimulator** (vanilla CFMM or light hook): tick-walks the pool's real
@@ -595,6 +589,12 @@ contract ALFMultiplexer is BaseHook {
     ///
     ///      The caller (`_queryTargetBySwap`) uses tiers 1-3's result directly when non-zero
     ///      and only falls back to tier 4 when this returns `(0, "")`.
+    /// @param target          The targeted quoter (pool key + curve update data).
+    /// @param attestationData Shared attestation payload from the MultiplexerHookData.
+    /// @param zeroForOne      The swap direction.
+    /// @param amountSpecified The swap amount.
+    /// @return q              The indicative quote (0 if invalid/failed).
+    /// @return quoterHookData The constructed ALFHookData for nested execution.
     function _queryTargetView(
         TargetedQuoter memory target,
         bytes memory attestationData,
@@ -739,6 +739,47 @@ contract ALFMultiplexer is BaseHook {
         return uint256(amountSpecified) <= outReserve ? indicative : 0;
     }
 
+    /// @dev Fold one candidate's already-queried indicative `q` into the running strict-tolerance
+    ///      baseline. Bounds the contribution by deliverable reserves (`_baselineContribution`)
+    ///      when `boundBaseline` is set, and keeps it if it improves on `currentBest`. Shared by
+    ///      the autonomous (`_prepareCandidates`) and pre-planned (`_queryBestIndicative`)
+    ///      baseline reductions so the logic lives in one place.
+    ///
+    ///      PRESERVED DIVERGENCE: pre-planned mode always bounds (its only caller is the strict
+    ///      path), so it passes `boundBaseline = true`; autonomous mode bounds only when strict
+    ///      tolerance is enabled, so it passes `boundBaseline = (strictTolerancePips > 0)`. When
+    ///      `boundBaseline` is false the raw indicative is used as the contribution unchanged.
+    ///
+    ///      `currentBest == 0` is the unset sentinel (a real baseline is always > 0; a bounded
+    ///      contribution of 0 means "drop from baseline"). For exact input the highest output
+    ///      wins; for exact output the lowest input wins.
+    /// @param poolKey      The candidate's pool key.
+    /// @param q            The candidate's already-queried indicative quote (0 means no quote).
+    /// @param zeroForOne   The swap direction.
+    /// @param swapAmount   The swap amount (negative = exact input).
+    /// @param boundBaseline Whether to bound the contribution by deliverable reserves.
+    /// @param currentBest  The running best baseline (0 if unset).
+    /// @return best        The updated running best baseline.
+    function _bestBoundedIndicative(
+        PoolKey memory poolKey,
+        uint256 q,
+        bool zeroForOne,
+        int256 swapAmount,
+        bool boundBaseline,
+        uint256 currentBest
+    ) internal view returns (uint256 best) {
+        best = currentBest;
+        if (q == 0) return best;
+
+        uint256 contribution = boundBaseline ? _baselineContribution(poolKey, q, zeroForOne, swapAmount) : q;
+        if (contribution == 0) return best;
+
+        bool isExactInput = swapAmount < 0;
+        if (best == 0 || (isExactInput ? contribution > best : contribution < best)) {
+            best = contribution;
+        }
+    }
+
     /// @dev True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
     ///      pool. The hook (if any) must not:
     ///        - return a `beforeSwap` delta (could override curve output)
@@ -800,6 +841,12 @@ contract ALFMultiplexer is BaseHook {
         }
     }
 
+    /// @dev Local QuoteSwap parser, kept instead of `QuoterRevert.parseQuoteAmount`: that helper
+    ///      REVERTS (`UnexpectedRevertBytes`) on a non-`QuoteSwap` selector, but the tier-4
+    ///      fallback must SOFT-FAIL — a candidate self-swap that reverts with any other error has
+    ///      to yield 0 here so the quoter is skipped, not abort the whole multiplexer. This
+    ///      version also length-gates the reason to the exact `selector + uint256` encoding (36
+    ///      bytes) before reading it.
     function _parseQuoteOrZero(bytes memory reason) internal pure returns (uint256 quoteAmount) {
         if (reason.length != 36) return 0;
 
@@ -815,6 +862,57 @@ contract ALFMultiplexer is BaseHook {
     // ═══════════════════════════════════════════════════════════════════════════
     //                          SPLIT FILL
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev The "filled" component of a candidate's swap delta, used to decrement `remaining`.
+    ///        exact input:  filled = input consumed (negative): `remaining -= negative` → less negative
+    ///        exact output: filled = output received (positive): `remaining -= positive` → less positive
+    ///      Both converge `remaining` toward zero. Written identically in both fill loops.
+    function _filledComponent(BalanceDelta delta, bool zeroForOne, bool exactInput) internal pure returns (int128) {
+        return exactInput
+            ? (zeroForOne ? delta.amount0() : delta.amount1())
+            : (zeroForOne ? delta.amount1() : delta.amount0());
+    }
+
+    /// @dev Execute a single candidate fill: the nested `poolManager.swap` wrapped in try/catch,
+    ///      followed by extraction of the filled component and the per-fill telemetry emit.
+    ///      Shared by both the autonomous (`_executeFills`) and pre-planned (`_runPrePlannedFills`)
+    ///      loops, which differ only in how they derive `amount` and `limit`.
+    ///
+    ///      SOFT-FAIL: a reverting candidate (vault DoS, malicious hook, etc.) is caught, its
+    ///      transient state (hook state, PM deltas, ERC-20 transfers, vault calls) rolled back by
+    ///      EVM revert semantics, `FillFailed` emitted, and `(0, ZERO_DELTA, false)` returned so
+    ///      the caller leaves `remaining`/`totalDelta` unchanged and the next candidate inherits
+    ///      the original budget.
+    /// @param poolKey    The candidate's pool key.
+    /// @param hookData   hookData forwarded to the candidate's swap.
+    /// @param zeroForOne The swap direction.
+    /// @param exactInput Whether the outer swap is exact input.
+    /// @param amount     The amount to request from this candidate (already clamped by the caller).
+    /// @param limit      The `sqrtPriceLimitX96` for this candidate's swap.
+    /// @return filled    The filled component (see `_filledComponent`); 0 on soft-fail.
+    /// @return delta     The candidate's swap delta; ZERO on soft-fail.
+    /// @return ok        True when the swap succeeded; false on soft-fail.
+    function _fillCandidate(
+        PoolKey memory poolKey,
+        bytes memory hookData,
+        bool zeroForOne,
+        bool exactInput,
+        int256 amount,
+        uint160 limit
+    ) internal returns (int128 filled, BalanceDelta delta, bool ok) {
+        try poolManager.swap(
+            poolKey, SwapParams({zeroForOne: zeroForOne, amountSpecified: amount, sqrtPriceLimitX96: limit}), hookData
+        ) returns (
+            BalanceDelta d
+        ) {
+            delta = d;
+            filled = _filledComponent(d, zeroForOne, exactInput);
+            ok = true;
+            emit FillExecuted(address(poolKey.hooks), d.amount0(), d.amount1());
+        } catch {
+            emit FillFailed(address(poolKey.hooks));
+        }
+    }
 
     /// @dev Returns true if any target has a non-zero amountSpecified, indicating the router
     ///      has pre-planned the split and the multiplexer should execute in the given order.
@@ -879,24 +977,18 @@ contract ALFMultiplexer is BaseHook {
         totalDelta = _runPrePlannedFills(ahd, zeroForOne, swapAmount);
     }
 
-    /// @dev Query all targets for indicatives and return the best one.
-    ///      Used by pre-planned mode only when tolerance enforcement is enabled.
+    /// @dev Query all targets for indicatives and return the best one. Used by pre-planned mode
+    ///      only when tolerance enforcement is enabled, so it ALWAYS bounds each contribution by
+    ///      deliverable reserves (`boundBaseline = true`): an over-optimistic ranking quote must
+    ///      not inflate the threshold. Shares the per-candidate reduction with the autonomous
+    ///      baseline via `_bestBoundedIndicative`.
     function _queryBestIndicative(MultiplexerHookData memory ahd, bool zeroForOne, int256 swapAmount)
         internal
         returns (uint256 best)
     {
-        bool exactInput = swapAmount < 0;
         for (uint256 i = 0; i < ahd.targets.length; i++) {
             (uint256 q,) = _queryTargetBySwap(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
-            if (q == 0) continue;
-            // Strict tolerance is the only caller, so always bound the contribution by deliverable
-            // reserves (see `_baselineContribution`) — an over-optimistic ranking quote must not
-            // inflate the threshold.
-            uint256 contribution = _baselineContribution(ahd.targets[i].poolKey, q, zeroForOne, swapAmount);
-            if (contribution == 0) continue;
-            if (best == 0 || (exactInput ? contribution > best : contribution < best)) {
-                best = contribution;
-            }
+            best = _bestBoundedIndicative(ahd.targets[i].poolKey, q, zeroForOne, swapAmount, true, best);
         }
     }
 
@@ -940,24 +1032,14 @@ contract ALFMultiplexer is BaseHook {
             }
             if (thisAmount == 0) continue;
 
-            // Wrapped in try/catch so a single failing target does not abort the entire
-            // pre-planned multiplexer; soft-fail per target, mirroring the autonomous-mode contract.
-            try poolManager.swap(
-                ahd.targets[i].poolKey,
-                SwapParams({zeroForOne: zeroForOne, amountSpecified: thisAmount, sqrtPriceLimitX96: noLimit}),
-                quoterHookData
-            ) returns (
-                BalanceDelta delta
-            ) {
-                int128 filled = exactInput
-                    ? (zeroForOne ? delta.amount0() : delta.amount1())
-                    : (zeroForOne ? delta.amount1() : delta.amount0());
+            // Shared per-candidate fill step (try/catch swap + extraction + FillExecuted/FillFailed).
+            // Soft-fails per target so a single failing target does not abort the whole multiplexer,
+            // mirroring the autonomous-mode contract. Pre-planned uses `noLimit` for every leg.
+            (int128 filled, BalanceDelta delta, bool ok) =
+                _fillCandidate(ahd.targets[i].poolKey, quoterHookData, zeroForOne, exactInput, thisAmount, noLimit);
+            if (ok) {
                 remaining -= int256(filled);
                 totalDelta = totalDelta + delta;
-
-                emit FillExecuted(address(ahd.targets[i].poolKey.hooks), delta.amount0(), delta.amount1());
-            } catch {
-                emit FillFailed(address(ahd.targets[i].poolKey.hooks));
             }
         }
 
@@ -1013,8 +1095,9 @@ contract ALFMultiplexer is BaseHook {
             if (q == 0) continue;
 
             // Read the quoter's current pool price for price limit computation during fills.
-            // This is a snapshot: the price won't change before we fill this candidate because
-            // each pool is filled at most once during the split fill.
+            // This is a snapshot: the price won't change before we fill this candidate, assuming
+            // the target pools are distinct (duplicate PoolKeys in `targets` are not deduped, so a
+            // pool that appears twice would be filled twice and the second snapshot would be stale).
             (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(ahd.targets[i].poolKey.toId());
 
             candidates[count] = FillCandidate({
@@ -1022,22 +1105,13 @@ contract ALFMultiplexer is BaseHook {
             });
             count++;
 
-            // Track the best individual quote as the strict-tolerance baseline. When strict
-            // tolerance is on, bound each contribution by the candidate's deliverable reserves
-            // (see `_baselineContribution`) so an over-optimistic ranking quote cannot inflate the
-            // threshold; the raw indicative still drives ranking via the `indicative` field above.
-            // `bestIndividual == 0` is the unset sentinel (a real baseline is always > 0; a
-            // bounded contribution of 0 means "drop from baseline"). For exact input: highest
-            // output = best. For exact output: lowest input = best.
-            uint256 contribution =
-                boundBaseline ? _baselineContribution(ahd.targets[i].poolKey, q, zeroForOne, swapAmount) : q;
-            if (
-                contribution != 0
-                    && (bestIndividual == 0
-                        || (isExactInput ? contribution > bestIndividual : contribution < bestIndividual))
-            ) {
-                bestIndividual = contribution;
-            }
+            // Fold this candidate's indicative into the best-individual strict-tolerance baseline.
+            // `boundBaseline` preserves the autonomous-vs-pre-planned divergence: autonomous bounds
+            // only under strict tolerance; pre-planned always bounds. The raw indicative still
+            // drives ranking via the `indicative` field above. See `_bestBoundedIndicative`.
+            bestIndividual = _bestBoundedIndicative(
+                ahd.targets[i].poolKey, q, zeroForOne, swapAmount, boundBaseline, bestIndividual
+            );
         }
 
         if (count == 0) revert NoValidQuotes();
@@ -1046,13 +1120,13 @@ contract ALFMultiplexer is BaseHook {
         //   exact input:  highest output first (descending)
         //   exact output: lowest required input first (ascending)
         for (uint256 i = 1; i < count; i++) {
-            FillCandidate memory key = candidates[i];
+            FillCandidate memory pivot = candidates[i];
             uint256 j = i;
-            while (j > 0 && _worseQuote(candidates[j - 1].indicative, key.indicative, isExactInput)) {
+            while (j > 0 && _worseQuote(candidates[j - 1].indicative, pivot.indicative, isExactInput)) {
                 candidates[j] = candidates[j - 1];
                 j--;
             }
-            candidates[j] = key;
+            candidates[j] = pivot;
         }
     }
 
@@ -1122,33 +1196,16 @@ contract ALFMultiplexer is BaseHook {
                 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
             }
 
-            // Execute the nested swap on this candidate's pool. Wrapped in try/catch so a single
-            // failing target (vault DoS, malicious hook, etc.) is soft-skipped and the multiplexer
-            // continues with the next candidate; matches the indicative-phase soft-fail
-            // semantics in INV-MUX-3 instead of leaving fill-phase as a hard-fail asymmetry.
-            try poolManager.swap(
-                candidates[i].poolKey,
-                SwapParams({zeroForOne: zeroForOne, amountSpecified: remaining, sqrtPriceLimitX96: limit}),
-                candidates[i].hookData
-            ) returns (
-                BalanceDelta delta
-            ) {
-                // Extract the "filled" component from the delta and update remaining.
-                //   exact input:  filled = input consumed (negative), so remaining -= negative → less negative
-                //   exact output: filled = output received (positive), so remaining -= positive → less positive
-                // Both converge remaining toward zero.
-                int128 filled = exactInput
-                    ? (zeroForOne ? delta.amount0() : delta.amount1())
-                    : (zeroForOne ? delta.amount1() : delta.amount0());
+            // Shared per-candidate fill step (try/catch swap + extraction + FillExecuted/FillFailed).
+            // Soft-skips a single failing target (vault DoS, malicious hook, etc.) so the multiplexer
+            // continues with the next candidate; matches the indicative-phase soft-fail semantics in
+            // INV-MUX-3 instead of leaving fill-phase as a hard-fail asymmetry. On soft-fail
+            // `remaining`/`totalDelta` are left unchanged and the next candidate inherits the budget.
+            (int128 filled, BalanceDelta delta, bool ok) =
+                _fillCandidate(candidates[i].poolKey, candidates[i].hookData, zeroForOne, exactInput, remaining, limit);
+            if (ok) {
                 remaining -= int256(filled);
                 totalDelta = totalDelta + delta;
-
-                emit FillExecuted(address(candidates[i].poolKey.hooks), delta.amount0(), delta.amount1());
-            } catch {
-                // Soft-fail: the failing candidate's transient state (hook state, PM deltas,
-                // ERC-20 transfers, vault calls) is rolled back by EVM revert semantics.
-                // remaining/totalDelta are unchanged; the next candidate inherits the original budget.
-                emit FillFailed(address(candidates[i].poolKey.hooks));
             }
         }
 
