@@ -1,0 +1,375 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "forge-std/Test.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {WETH} from "solmate/src/tokens/WETH.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
+import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
+import {UniswapXAggregator} from "../../../src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol";
+import {IReactor} from "@uniswapx/interfaces/IReactor.sol";
+import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
+import {MockUniswapXReactor} from "./mocks/MockUniswapXReactor.sol";
+
+contract UniswapXAggregatorUnitTest is Test {
+    using PoolIdLibrary for PoolKey;
+
+    IPoolManager public poolManager;
+    SafePoolSwapTest public swapRouter;
+    MockUniswapXReactor public reactor;
+    WETH public weth;
+    UniswapXAggregator public hook;
+
+    MockERC20 public tokenA; // order input token
+    MockERC20 public tokenB; // order output token
+    MockERC20 public usdc;
+
+    uint24 constant FEE = 3000;
+    int24 constant TICK_SPACING = 60;
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    uint160 constant MIN_PRICE = TickMath.MIN_SQRT_PRICE + 1;
+    uint160 constant MAX_PRICE = TickMath.MAX_SQRT_PRICE - 1;
+
+    Currency constant NATIVE = Currency.wrap(address(0));
+
+    address public maker = makeAddr("maker"); // UniswapX order swapper
+    address public alice = makeAddr("alice"); // V4 swapper
+
+    function setUp() public {
+        poolManager =
+            IPoolManager(vm.deployCode("foundry-out/PoolManager.sol/PoolManager.json", abi.encode(address(this))));
+        swapRouter = new SafePoolSwapTest(poolManager);
+        reactor = new MockUniswapXReactor();
+        weth = new WETH();
+
+        hook = _deployHook();
+
+        tokenA = new MockERC20("TokenA", "TKA", 18);
+        tokenB = new MockERC20("TokenB", "TKB", 18);
+        usdc = new MockERC20("USDC", "USDC", 6);
+    }
+
+    function _deployHook() internal returns (UniswapXAggregator) {
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        );
+        bytes memory constructorArgs = abi.encode(poolManager, IReactor(address(reactor)), address(weth));
+        (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapXAggregator).creationCode, constructorArgs);
+        return new UniswapXAggregator{salt: salt}(poolManager, IReactor(address(reactor)), address(weth));
+    }
+
+    function _initPool(Currency c0, Currency c1) internal returns (PoolKey memory key) {
+        (Currency currency0, Currency currency1) = Currency.unwrap(c0) < Currency.unwrap(c1) ? (c0, c1) : (c1, c0);
+        key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        poolManager.initialize(key, SQRT_PRICE_1_1);
+    }
+
+    /// @dev Build the SignedOrder hookData for an order: maker gives `inAmt` of `inTok`, wants `outAmt` of `outTok`.
+    function _order(address inTok, uint256 inAmt, address outTok, uint256 outAmt) internal view returns (bytes memory) {
+        MockUniswapXReactor.MockOrder memory o = MockUniswapXReactor.MockOrder({
+            swapper: maker,
+            inputToken: inTok,
+            inputAmount: inAmt,
+            outputToken: outTok,
+            outputAmount: outAmt,
+            outputRecipient: maker
+        });
+        return abi.encode(SignedOrder({order: abi.encode(o), sig: ""}));
+    }
+
+    /// @dev Compute the swap direction so that `take` (alice's input) is the order output and `settle` is the input.
+    function _zeroForOne(PoolKey memory key, Currency takeCurrency) internal pure returns (bool) {
+        return Currency.unwrap(takeCurrency) == Currency.unwrap(key.currency0);
+    }
+
+    // ─────────────────────────── ERC20 / ERC20 ───────────────────────────
+
+    function test_fillOrder_exactIn_erc20() public {
+        uint256 inAmt = 100 ether; // maker gives tokenA
+        uint256 outAmt = 99 ether; // maker wants tokenB
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        // maker funds + approves the reactor for the order input
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+
+        // PoolManager float so the hook can take tokenB before alice settles
+        tokenB.mint(address(poolManager), 1000 ether);
+
+        // alice (v4 swapper) provides tokenB
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenA.balanceOf(maker), 0, "maker spent input");
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received output");
+        assertEq(tokenB.balanceOf(alice), 0, "alice spent tokenB");
+        assertEq(tokenA.balanceOf(alice), inAmt, "alice received tokenA");
+        assertEq(tokenA.balanceOf(address(hook)), 0, "hook holds no tokenA");
+        assertEq(tokenB.balanceOf(address(hook)), 0, "hook holds no tokenB");
+    }
+
+    function test_fillOrder_exactOut_erc20() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        // Exact-out: alice specifies the desired output amount (the order's input amount)
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: int256(inAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received output");
+        assertEq(tokenA.balanceOf(alice), inAmt, "alice received exact tokenA");
+        assertEq(tokenB.balanceOf(alice), 0, "alice spent tokenB");
+    }
+
+    function test_fillOrder_amountMismatch_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        // Ask for an exact-in amount that does not equal the order's output amount → all-or-nothing revert.
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(50 ether),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+    }
+
+    function test_swap_withoutOrderData_reverts() public {
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        tokenB.mint(alice, 99 ether);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(99 ether),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            "" // no order
+        );
+    }
+
+    // ─────────────────────────── ETH / WETH ───────────────────────────
+
+    function test_fillOrder_orderOutputsWeth_wrapsNative() public {
+        uint256 inAmt = 100e6; // maker gives USDC
+        uint256 outAmt = 1 ether; // maker wants WETH
+
+        PoolKey memory key = _initPool(NATIVE, Currency.wrap(address(usdc)));
+
+        usdc.mint(maker, inAmt);
+        vm.prank(maker);
+        usdc.approve(address(reactor), type(uint256).max);
+
+        // PoolManager native float so the hook can take ETH before alice settles
+        vm.deal(address(poolManager), 100 ether);
+
+        // alice provides native ETH
+        vm.deal(alice, outAmt);
+
+        Currency takeCurrency = NATIVE;
+        bytes memory hookData = _order(address(usdc), inAmt, address(weth), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap{value: outAmt}(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(usdc.balanceOf(maker), 0, "maker spent usdc");
+        assertEq(weth.balanceOf(maker), outAmt, "maker received WETH");
+        assertEq(alice.balance, 0, "alice spent ETH");
+        assertEq(usdc.balanceOf(alice), inAmt, "alice received usdc");
+        assertEq(address(hook).balance, 0, "hook holds no ETH");
+        assertEq(weth.balanceOf(address(hook)), 0, "hook holds no WETH");
+    }
+
+    function test_fillOrder_orderOutputsNativeEth() public {
+        uint256 inAmt = 100e6; // maker gives USDC
+        uint256 outAmt = 1 ether; // maker wants native ETH
+
+        PoolKey memory key = _initPool(NATIVE, Currency.wrap(address(usdc)));
+
+        usdc.mint(maker, inAmt);
+        vm.prank(maker);
+        usdc.approve(address(reactor), type(uint256).max);
+
+        vm.deal(address(poolManager), 100 ether);
+        vm.deal(alice, outAmt);
+
+        Currency takeCurrency = NATIVE;
+        bytes memory hookData = _order(address(usdc), inAmt, address(0), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap{value: outAmt}(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(usdc.balanceOf(maker), 0, "maker spent usdc");
+        assertEq(maker.balance, outAmt, "maker received ETH");
+        assertEq(usdc.balanceOf(alice), inAmt, "alice received usdc");
+        assertEq(address(hook).balance, 0, "hook holds no ETH");
+    }
+
+    function test_fillOrder_orderInputsWeth_unwrapsToNative() public {
+        uint256 inAmt = 1 ether; // maker gives WETH
+        uint256 outAmt = 100e6; // maker wants USDC
+
+        PoolKey memory key = _initPool(NATIVE, Currency.wrap(address(usdc)));
+
+        // maker funds WETH and approves the reactor
+        vm.deal(maker, inAmt);
+        vm.prank(maker);
+        weth.deposit{value: inAmt}();
+        vm.prank(maker);
+        weth.approve(address(reactor), type(uint256).max);
+
+        // PoolManager USDC float so the hook can take it before alice settles
+        usdc.mint(address(poolManager), 1000e6);
+
+        // alice provides USDC
+        usdc.mint(alice, outAmt);
+        vm.prank(alice);
+        usdc.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(usdc));
+        bytes memory hookData = _order(address(weth), inAmt, address(usdc), outAmt);
+
+        uint256 aliceEthBefore = alice.balance;
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(weth.balanceOf(maker), 0, "maker spent WETH");
+        assertEq(usdc.balanceOf(maker), outAmt, "maker received usdc");
+        assertEq(usdc.balanceOf(alice), 0, "alice spent usdc");
+        assertEq(alice.balance - aliceEthBefore, inAmt, "alice received native ETH");
+        assertEq(weth.balanceOf(address(hook)), 0, "hook holds no WETH");
+        assertEq(address(hook).balance, 0, "hook holds no ETH");
+    }
+
+    // ─────────────────────────── access control / quoting ───────────────────────────
+
+    function test_reactorCallback_unauthorized_reverts() public {
+        ResolvedOrder[] memory resolved = new ResolvedOrder[](1);
+        vm.expectRevert(UniswapXAggregator.ProhibitedEntry.selector);
+        hook.reactorCallback(resolved, abi.encode(NATIVE, NATIVE));
+    }
+
+    function test_quote_reverts() public {
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        vm.expectRevert(UniswapXAggregator.QuoteNotSupported.selector);
+        hook.quote(true, -int256(1 ether), key.toId());
+    }
+
+    function test_pseudoTotalValueLocked_reverts() public {
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        vm.expectRevert(UniswapXAggregator.TVLNotSupported.selector);
+        hook.pseudoTotalValueLocked(key.toId());
+    }
+
+    receive() external payable {}
+}

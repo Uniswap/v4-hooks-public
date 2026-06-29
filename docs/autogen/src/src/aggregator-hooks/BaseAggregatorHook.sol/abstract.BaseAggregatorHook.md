@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/396c7ee0f0e458881657d92ca6d17cb49381d408/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56fe7f485c8d67008228c24d14664f55752c8c93/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -218,6 +218,7 @@ function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams ca
 ```solidity
 function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
     internal
+    virtual
     override
     returns (bytes4, BeforeSwapDelta, uint24);
 ```
