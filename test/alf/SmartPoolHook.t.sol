@@ -1220,6 +1220,65 @@ contract SmartPoolHookTest is Test, Deployers {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    //              INDICATIVE RESERVE CAP (fix 2)
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    //  The single-step constant-liquidity estimate extrapolates in-range bucket depth to the
+    //  price extreme, so for swaps large enough to exhaust the deployed buckets it would report
+    //  far more output than the pool holds. The quote is capped at the effective output reserve.
+
+    /// @dev A swap large enough to exhaust the buckets must not quote more output than the pool
+    ///      can deliver: the exact-input estimate is capped at the effective output reserve.
+    function test_indicativeQuote_cappedAtEffectiveReserve_exactIn() public {
+        _depositAsOperator(1_000e18);
+        (uint256 eff0, uint256 eff1) = hook.getEffectiveLiquidity(testPoolKey);
+        assertGt(eff1, 0, "precondition: pool has reserves");
+
+        // Huge exact-input ZF1 (output = token1) caps at the token1 reserve.
+        uint256 qZF1 = hook.getIndicativeQuote(testPoolKey, true, -int256(type(int128).max), "");
+        assertEq(qZF1, eff1, "ZF1 indicative caps at effective token1 reserve");
+
+        // Huge exact-input 1F0 (output = token0) caps at the token0 reserve.
+        uint256 q1F0 = hook.getIndicativeQuote(testPoolKey, false, -int256(type(int128).max), "");
+        assertEq(q1F0, eff0, "1F0 indicative caps at effective token0 reserve");
+    }
+
+    /// @dev A small swap stays well below the reserve cap, so the cap is inactive and the quote is
+    ///      the unmodified constant-liquidity estimate.
+    function test_indicativeQuote_smallSwapUnaffectedByCap() public {
+        _depositAsOperator(1_000e18);
+        (, uint256 eff1) = hook.getEffectiveLiquidity(testPoolKey);
+
+        uint256 q = hook.getIndicativeQuote(testPoolKey, true, -1e18, "");
+        assertGt(q, 0, "non-zero");
+        assertLt(q, eff1, "small-swap output is well below the reserve cap");
+    }
+
+    /// @dev Exact output that exceeds deliverable reserves has no honest fill, so the quote is 0;
+    ///      a request within reserves still returns a positive required input.
+    function test_indicativeQuote_exactOutBeyondReservesReturnsZero() public {
+        _depositAsOperator(1_000e18);
+        (, uint256 eff1) = hook.getEffectiveLiquidity(testPoolKey);
+
+        uint256 qTooBig = hook.getIndicativeQuote(testPoolKey, true, int256(eff1 + 1e18), "");
+        assertEq(qTooBig, 0, "exact-out beyond reserves returns 0 (no quote)");
+
+        uint256 qOk = hook.getIndicativeQuote(testPoolKey, true, int256(1e18), "");
+        assertGt(qOk, 0, "exact-out within reserves returns required input");
+    }
+
+    /// @dev The cap keeps `getIndicativeQuote` and `swapToPrice` consistent: both go through
+    ///      `_simulateIndicative`, so the capped output leg matches even at the full price range.
+    function test_indicativeQuote_capConsistentWithSwapToPrice() public {
+        _depositAsOperator(1_000e18);
+        uint160 limit = TickMath.MIN_SQRT_PRICE + 1;
+
+        uint256 q = hook.getIndicativeQuote(testPoolKey, true, -int256(type(int128).max), "");
+        (, uint256 outAmt) = hook.swapToPrice(testPoolKey, true, -int256(type(int128).max), limit, "");
+        assertEq(q, outAmt, "capped getIndicativeQuote must match swapToPrice output leg");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //                          YIELD ACCRUAL
     // ═══════════════════════════════════════════════════════════════════════════
 

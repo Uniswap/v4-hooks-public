@@ -622,6 +622,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     /// @notice Indicative quote against hypothetical SmartPool JIT liquidity.
     /// @dev    Uses current active distribution-bucket liquidity for a compact view quote.
     ///         Ignores hookData; pricing is the static `key.fee`.
+    ///
+    ///         The estimate is a single constant-liquidity `computeSwapStep` (see
+    ///         `_simulateIndicative`): it extrapolates the in-range bucket depth toward the
+    ///         price limit, so for a swap large enough to exhaust the deployed buckets in a real
+    ///         JIT cycle the raw step would report far more output than the pool holds (it can
+    ///         exceed reserves several times over). `_simulateIndicative` therefore caps the
+    ///         output leg at the effective output reserve. For exact output this returns 0 when
+    ///         the requested output exceeds what the pool can deliver, since there is no honest
+    ///         fill to price. The result stays an upper bound fit for ranking, not a precise
+    ///         execution prediction; binding slippage protection belongs in the caller/router.
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata)
         external
         view
@@ -630,7 +640,16 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
     {
         uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
         (uint256 amountIn, uint256 amountOut) = _simulateIndicative(key, zeroForOne, amountSpecified, limit);
-        outputAmount = amountSpecified < 0 ? amountOut : amountIn;
+        if (amountSpecified < 0) {
+            // Exact input: expected output, already capped at the deliverable reserve.
+            outputAmount = amountOut;
+        } else {
+            // Exact output: required input. `_simulateIndicative` caps `amountOut` at the
+            // deliverable reserve, so `amountOut < amountSpecified` means the pool cannot honor
+            // the requested output. Return 0 (no quote) instead of an input figure priced for an
+            // unachievable fill.
+            outputAmount = amountOut >= uint256(amountSpecified) ? amountIn : 0;
+        }
     }
 
     /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
@@ -1065,6 +1084,18 @@ contract SmartPoolHook is SmartPoolBase, PoolVault, JITLockable, ReentrancyGuard
             SwapMath.computeSwapStep(sqrtPriceX96, sqrtPriceLimitX96, liquidity, amountSpecified, feePips);
         amountIn = stepIn + feeAmount;
         amountOut = stepOut;
+
+        // Physical-capacity bound. `computeSwapStep` treats the current in-range bucket depth as a
+        // constant-liquidity curve extending all the way to `sqrtPriceLimitX96`. For a swap large
+        // enough to exhaust the deployed buckets in a real JIT cycle the price would hit the
+        // outermost bucket edge and stop, so the constant-liquidity step overstates output and can
+        // exceed reserves several times over. Cap the output leg at the effective reserve of the
+        // output token (`bal0`/`bal1` are the effective, immediately-redeemable balances read
+        // above) — the most a JIT cycle could ever pay out. The input leg is left as the raw
+        // request: when the output is reserve-capped the reported price is deliberately
+        // unattractive, which is the correct signal that the pool cannot absorb the full size.
+        uint256 outReserve = zeroForOne ? bal1 : bal0;
+        if (amountOut > outReserve) amountOut = outReserve;
     }
 
     function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne) private pure returns (uint24) {

@@ -397,6 +397,8 @@ The quote path uses:
 
 This is a compact quote, not a full virtual tick-walking simulator over all bucket boundary crossings. Tests assert tight relative fidelity (on the order of a few bps) rather than exact equality for broad cases. Routers should treat persistent quote/execution divergence as a routing reputation signal.
 
+**Reserve cap.** Because the step extrapolates the current in-range bucket depth as a constant-liquidity curve to the price extreme, a swap large enough to exhaust the deployed buckets in a real JIT cycle would otherwise report far more output than the pool holds (it can exceed reserves several times over). `_simulateIndicative` therefore caps the output leg at the effective output reserve, so the quote can never exceed `getEffectiveLiquidity`'s output side. For exact output, `getIndicativeQuote` returns `0` when the requested output exceeds deliverable reserves (no honest fill to price). The cap also applies to `swapToPrice`, so the two views stay consistent. The result remains an upper bound fit for ranking; binding slippage protection belongs in the caller/router (a minimum-output / maximum-input check), not in the indicative.
+
 ## Access Control
 
 The owner is set at deployment and transferable via `Ownable2Step`. Loss or compromise of the owner key is recoverable only if a pending transfer was already initiated.
