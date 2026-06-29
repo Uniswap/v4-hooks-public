@@ -91,13 +91,19 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
 
     // ──── LP Gating ────
 
+    /// @dev Reverts {UnauthorizedLP} unless `sender` is an authorized LP. The guard for both LP
+    ///      callbacks, so the authorization check stays in one place rather than inlined per site.
+    function _requireAuthorizedLP(address sender) private view {
+        if (!authorizedLPs[sender]) revert UnauthorizedLP();
+    }
+
     function _beforeAddLiquidity(
         address sender,
         PoolKey calldata key,
         ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal view override returns (bytes4) {
-        if (!authorizedLPs[sender]) revert UnauthorizedLP();
+        _requireAuthorizedLP(sender);
         _enforceActiveTick(key, params);
         return IHooks.beforeAddLiquidity.selector;
     }
@@ -108,7 +114,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
         override
         returns (bytes4)
     {
-        if (!authorizedLPs[sender]) revert UnauthorizedLP();
+        _requireAuthorizedLP(sender);
         return IHooks.beforeRemoveLiquidity.selector;
     }
 
@@ -122,7 +128,7 @@ contract SimpleSpreadQuoterHook is SpreadQuoterBase {
     ///         any pool gated by this hook makes that position un-removable until
     ///         `lp` is re-authorized. Owners MUST sequence revocations as
     ///         "drain (have `lp` remove its positions) then revoke", never the reverse.
-    ///         See the contract-level `Trust model` NatSpec for more context onthe operator-only
+    ///         See the contract-level `Trust model` NatSpec for more context on the operator-only
     ///         design intent and the trade-offs involved.
     /// @param lp         The address to authorize or revoke.
     /// @param authorized True to grant LP access, false to revoke.
