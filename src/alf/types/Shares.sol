@@ -209,6 +209,28 @@ function bindAssets(Shares storage self, VaultId vaultId, address asset0, addres
     self.assets[vaultId] = Assets({asset0: asset0, asset1: asset1});
 }
 
+/// @notice Compute the bootstrap share supply from received amounts and enforce the
+///         inflation-defense floor. A bootstrap mints `sqrt(received0 * received1)` (V2-style).
+/// @dev Reverts {InsufficientBootstrap} when the geometric mean rounds to zero, and
+///      {BootstrapTooSmall} when it falls below `100 * 10**offset` (~1% drift). Below the floor the
+///      bootstrapper permanently loses non-trivial seed capital to the EIP-4626 virtual position,
+///      and a later attacker can cheaply capture the remainder via small deposits (the virtual-share
+///      defense protects future depositors from each other, not the bootstrapper themselves). Pure
+///      policy, co-located with the ledger that {creditBootstrap} writes.
+/// @param received0 Token0 actually received by the vault (post FoT/rebasing reconciliation).
+/// @param received1 Token1 actually received by the vault.
+/// @param offset    The vault's decimals offset, which sets the floor scale.
+/// @return sharesMinted The bootstrap share supply to credit.
+function computeBootstrapShares(uint256 received0, uint256 received1, uint8 offset)
+    pure
+    returns (uint256 sharesMinted)
+{
+    sharesMinted = MultiAssetShareMath.bootstrapShares(received0, received1);
+    if (sharesMinted == 0) revert InsufficientBootstrap();
+    uint256 minShares = 100 * 10 ** uint256(offset);
+    if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
+}
+
 /// @notice Credit the full bootstrap supply to `to` and stamp their deposit block. Sets both the
 ///         total and the holder balance to `sharesMinted` (a bootstrap mints into an empty vault).
 /// @param self         Shares ledger storage.

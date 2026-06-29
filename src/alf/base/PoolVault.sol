@@ -10,9 +10,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {BlockNumberish} from "@uniswap/blocknumberish/src/BlockNumberish.sol";
-import {MultiAssetShareMath} from "./vault/MultiAssetShareMath.sol";
 import {VaultId} from "../types/VaultId.sol";
-import {Shares, Assets, InsufficientBootstrap, BootstrapTooSmall} from "../types/Shares.sol";
+import {Shares, Assets, InsufficientBootstrap, computeBootstrapShares} from "../types/Shares.sol";
 import {Inventory} from "../types/Inventory.sol";
 import {InventoryLib} from "../libraries/InventoryLib.sol";
 
@@ -448,17 +447,9 @@ abstract contract PoolVault is BlockNumberish {
         uint256 received1 = _pullAsset(vaultId, asset1, from, amount1);
         if (received0 == 0 || received1 == 0) revert InsufficientBootstrap();
 
-        sharesMinted = MultiAssetShareMath.bootstrapShares(received0, received1);
-        if (sharesMinted == 0) revert InsufficientBootstrap();
-
-        // Inflation-defense floor: bootstrap shares must dwarf the virtual position so the
-        // bootstrapper's economic claim is close to 100%. `100 * 10**offset` corresponds to ~1%
-        // drift; below it the bootstrapper permanently loses non-trivial seed capital to the
-        // virtual position, and a later attacker can cheaply capture the remainder via small
-        // deposits (the EIP-4626 defense protects future depositors from each other, not the
-        // bootstrapper themselves).
-        uint256 minShares = 100 * 10 ** uint256(_decimalsOffset(vaultId));
-        if (sharesMinted < minShares) revert BootstrapTooSmall(sharesMinted, minShares);
+        // Bootstrap share supply + inflation-defense floor are share-ledger policy; `Shares` owns
+        // the computation (see {computeBootstrapShares}), this contract only supplies the I/O.
+        sharesMinted = computeBootstrapShares(received0, received1, _decimalsOffset(vaultId));
 
         _onShareCheckpoint(vaultId, to, 0, 0);
 
