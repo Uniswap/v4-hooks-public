@@ -52,8 +52,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
 
     error TokensNotSupported(address token0, address token1);
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
-    error ExactInExceedsCapacity();
-    error ExactOutExceedsCapacity();
+    error ExceedsCapacity();
 
     /// @param _manager The Uniswap V4 PoolManager contract
     /// @param _litePSM The LitePSM or LitePSMWrapper contract
@@ -105,8 +104,8 @@ contract LitePSMAggregator is BaseAggregatorHook {
     ///      - buyGem (stable→gem): capped at the gem balance held in `pocket()`. This is exact.
     ///
     ///      When an amount exceeds available capacity:
-    ///      - Exact-in: reverts with ExactInExceedsCapacity (the full input cannot be processed)
-    ///      - Exact-out: reverts with ExactOutExceedsCapacity (the desired output cannot be sourced)
+    ///      - Exact-in: reverts with ExceedsCapacity (the full input cannot be processed)
+    ///      - Exact-out: reverts with ExceedsCapacity (the desired output cannot be sourced)
     function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
         view
@@ -131,12 +130,12 @@ contract LitePSMAggregator is BaseAggregatorHook {
             uint256 amountIn = uint256(-amountSpecified);
             if (isSellingGem) {
                 // Exact-in gem → stable
-                if (amountIn > sellGemCap) revert ExactInExceedsCapacity();
+                if (amountIn > sellGemCap) revert ExceedsCapacity();
                 amountUnspecified = amountIn * to18ConversionFactor * (WAD - tin) / WAD;
             } else {
                 // Exact-in stable → gem: compute gem output then check cap
                 uint256 gemOut = amountIn * WAD / (to18ConversionFactor * (WAD + tout));
-                if (gemOut > buyGemCap) revert ExactInExceedsCapacity();
+                if (gemOut > buyGemCap) revert ExceedsCapacity();
                 amountUnspecified = gemOut;
             }
         } else {
@@ -146,11 +145,11 @@ contract LitePSMAggregator is BaseAggregatorHook {
                 // Division-first avoids overflow when sellGemCap is large (e.g. buf = type(uint256).max).
                 uint256 denom = to18ConversionFactor * (WAD - tin);
                 uint256 gemRequired = (amountOut * WAD + denom - 1) / denom;
-                if (gemRequired > sellGemCap) revert ExactOutExceedsCapacity();
+                if (gemRequired > sellGemCap) revert ExceedsCapacity();
                 amountUnspecified = gemRequired;
             } else {
                 // Exact-out gem: check directly against pocket balance
-                if (amountOut > buyGemCap) revert ExactOutExceedsCapacity();
+                if (amountOut > buyGemCap) revert ExceedsCapacity();
                 amountUnspecified = (amountOut * to18ConversionFactor * (WAD + tout) + WAD - 1) / WAD;
             }
         }

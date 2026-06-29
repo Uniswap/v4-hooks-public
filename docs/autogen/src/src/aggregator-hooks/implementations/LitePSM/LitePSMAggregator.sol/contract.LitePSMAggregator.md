@@ -1,5 +1,5 @@
 # LitePSMAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9c7cbaffe0f8d313cc3a336ac2fb5d0852684139/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b134d11cfb9e1067b3595e5b2b4ecc1e7eb38365/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -125,8 +125,8 @@ is only accessible via the Vat and is not exposed by the LitePSMWrapper. In prac
 buf is kept below the debt ceiling, so this proxy is conservative and accurate.
 - buyGem (stable→gem): capped at the gem balance held in `pocket()`. This is exact.
 When an amount exceeds available capacity:
-- Exact-in: returns 0 (the full input cannot be processed)
-- Exact-out: reverts with ExactOutExceedsCapacity (the desired output cannot be sourced)
+- Exact-in: reverts with ExceedsCapacity (the full input cannot be processed)
+- Exact-out: reverts with ExceedsCapacity (the desired output cannot be sourced)
 
 
 ```solidity
@@ -188,10 +188,10 @@ error TokensNotSupported(address token0, address token1);
 error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
 ```
 
-### ExactOutExceedsCapacity
+### ExceedsCapacity
 
 ```solidity
-error ExactOutExceedsCapacity();
+error ExceedsCapacity();
 ```
 
 ## Structs

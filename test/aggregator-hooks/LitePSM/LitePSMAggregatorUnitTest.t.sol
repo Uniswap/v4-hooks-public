@@ -366,7 +366,7 @@ contract LitePSMAggregatorUnitTest is Test {
         assertGt(quotedAtCap, 0, "Quote at cap > 0");
 
         // One unit over cap: must revert
-        vm.expectRevert(LitePSMAggregator.ExactInExceedsCapacity.selector);
+        vm.expectRevert(LitePSMAggregator.ExceedsCapacity.selector);
         hook.quote(usdcToUsds, -int256(capUsdc + 1), poolId);
     }
 
@@ -382,7 +382,7 @@ contract LitePSMAggregatorUnitTest is Test {
         assertGt(quotedAtCap, 0, "Quote at exactly sellGemCap succeeds");
 
         // One wei over the max USDS capacity: must revert
-        vm.expectRevert(LitePSMAggregator.ExactOutExceedsCapacity.selector);
+        vm.expectRevert(LitePSMAggregator.ExceedsCapacity.selector);
         hook.quote(usdcToUsds, int256(maxUsdsOut + 1), poolId);
     }
 
@@ -393,7 +393,7 @@ contract LitePSMAggregatorUnitTest is Test {
         uint256 usdsIn = (psmUsdcBalance + 1) * 1e12; // would yield psmUsdcBalance + 1 USDC out
         bool usdsToUsdc = !_isUsdcCurrency0();
 
-        vm.expectRevert(LitePSMAggregator.ExactInExceedsCapacity.selector);
+        vm.expectRevert(LitePSMAggregator.ExceedsCapacity.selector);
         hook.quote(usdsToUsdc, -int256(usdsIn), poolId);
     }
 
@@ -406,7 +406,7 @@ contract LitePSMAggregatorUnitTest is Test {
         assertGt(quotedAtCap, 0, "Quote at exactly buyGemCap succeeds");
 
         // One unit over cap: must revert
-        vm.expectRevert(LitePSMAggregator.ExactOutExceedsCapacity.selector);
+        vm.expectRevert(LitePSMAggregator.ExceedsCapacity.selector);
         hook.quote(usdsToUsdc, int256(psmUsdcBalance + 1), poolId);
     }
 
