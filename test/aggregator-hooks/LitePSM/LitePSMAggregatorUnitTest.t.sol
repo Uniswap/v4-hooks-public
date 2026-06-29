@@ -356,7 +356,7 @@ contract LitePSMAggregatorUnitTest is Test {
     // ── Capacity limit tests ──────────────────────────────────────────────────
 
     /// @dev sellGemCap = buf / to18ConversionFactor. With buf = 500k * 1e18, cap = 500k USDC.
-    function test_quote_exactIn_sellGem_exceedsSellGemCap_returnsZero() public {
+    function test_quote_exactIn_sellGem_exceedsSellGemCap_reverts() public {
         uint256 capUsdc = 500_000 * 1e6;
         psm.setBuf(capUsdc * 1e12); // buf in WAD = capUsdc * to18ConversionFactor
         bool usdcToUsds = _isUsdcCurrency0();
@@ -365,9 +365,9 @@ contract LitePSMAggregatorUnitTest is Test {
         uint256 quotedAtCap = hook.quote(usdcToUsds, -int256(capUsdc), poolId);
         assertGt(quotedAtCap, 0, "Quote at cap > 0");
 
-        // One unit over cap: must return 0
-        uint256 quotedOverCap = hook.quote(usdcToUsds, -int256(capUsdc + 1), poolId);
-        assertEq(quotedOverCap, 0, "Quote over sellGemCap == 0");
+        // One unit over cap: must revert
+        vm.expectRevert(LitePSMAggregator.ExactInExceedsCapacity.selector);
+        hook.quote(usdcToUsds, -int256(capUsdc + 1), poolId);
     }
 
     function test_quote_exactOut_sellGem_exceedsSellGemCap_reverts() public {
@@ -386,15 +386,15 @@ contract LitePSMAggregatorUnitTest is Test {
         hook.quote(usdcToUsds, int256(maxUsdsOut + 1), poolId);
     }
 
-    function test_quote_exactIn_buyGem_exceedsBuyGemCap_returnsZero() public {
+    function test_quote_exactIn_buyGem_exceedsBuyGemCap_reverts() public {
         // buyGemCap = gem balance in pocket = psm's USDC balance (MockLitePSM is its own pocket)
         uint256 psmUsdcBalance = usdc.balanceOf(address(psm));
         // Input USDS that would require more USDC out than the pocket holds (no fee)
         uint256 usdsIn = (psmUsdcBalance + 1) * 1e12; // would yield psmUsdcBalance + 1 USDC out
         bool usdsToUsdc = !_isUsdcCurrency0();
 
-        uint256 quoted = hook.quote(usdsToUsdc, -int256(usdsIn), poolId);
-        assertEq(quoted, 0, "Quote over buyGemCap == 0");
+        vm.expectRevert(LitePSMAggregator.ExactInExceedsCapacity.selector);
+        hook.quote(usdsToUsdc, -int256(usdsIn), poolId);
     }
 
     function test_quote_exactOut_buyGem_exceedsBuyGemCap_reverts() public {

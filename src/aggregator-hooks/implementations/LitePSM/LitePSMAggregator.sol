@@ -52,6 +52,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
 
     error TokensNotSupported(address token0, address token1);
     error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
+    error ExactInExceedsCapacity();
     error ExactOutExceedsCapacity();
 
     /// @param _manager The Uniswap V4 PoolManager contract
@@ -104,7 +105,7 @@ contract LitePSMAggregator is BaseAggregatorHook {
     ///      - buyGem (stable→gem): capped at the gem balance held in `pocket()`. This is exact.
     ///
     ///      When an amount exceeds available capacity:
-    ///      - Exact-in: returns 0 (the full input cannot be processed)
+    ///      - Exact-in: reverts with ExactInExceedsCapacity (the full input cannot be processed)
     ///      - Exact-out: reverts with ExactOutExceedsCapacity (the desired output cannot be sourced)
     function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
         internal
@@ -130,12 +131,12 @@ contract LitePSMAggregator is BaseAggregatorHook {
             uint256 amountIn = uint256(-amountSpecified);
             if (isSellingGem) {
                 // Exact-in gem → stable
-                if (amountIn > sellGemCap) return 0;
+                if (amountIn > sellGemCap) revert ExactInExceedsCapacity();
                 amountUnspecified = amountIn * to18ConversionFactor * (WAD - tin) / WAD;
             } else {
                 // Exact-in stable → gem: compute gem output then check cap
                 uint256 gemOut = amountIn * WAD / (to18ConversionFactor * (WAD + tout));
-                if (gemOut > buyGemCap) return 0;
+                if (gemOut > buyGemCap) revert ExactInExceedsCapacity();
                 amountUnspecified = gemOut;
             }
         } else {
