@@ -16,6 +16,12 @@ contract MockQuoterHook is BaseALFHook {
     uint256 public attestedPriceReturn;
     bool public live;
 
+    // Settable effective liquidity so tests can decouple the (possibly inflated) indicative from
+    // honestly-reported deliverable reserves — exercises the multiplexer's reserve-bounded
+    // strict-tolerance baseline. Defaults to (0, 0), matching BaseALFHook (no off-pool reserves).
+    uint256 public effLiq0;
+    uint256 public effLiq1;
+
     // Track calls for assertions
     bool public lastCallAttested;
     address public lastCallAttester;
@@ -54,6 +60,15 @@ contract MockQuoterHook is BaseALFHook {
 
     function setLive(bool _live) external {
         live = _live;
+    }
+
+    function setEffectiveLiquidity(uint256 e0, uint256 e1) external {
+        effLiq0 = e0;
+        effLiq1 = e1;
+    }
+
+    function getEffectiveLiquidity(PoolKey calldata) external view override returns (uint256, uint256) {
+        return (effLiq0, effLiq1);
     }
 
     function _price(PoolKey calldata, bool, int256, bool isAttested, address) internal view override returns (uint256) {

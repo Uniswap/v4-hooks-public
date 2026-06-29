@@ -143,7 +143,7 @@ The auction hook's virtual pool has zero liquidity — all execution happens via
 ### Notes
 
 - Intuitively the auction hook is most valuable on mainnet and other slow or potentially adversarial builder environments, while direct routing is optimal for cheap gas and trusted sequencer setups like Base.
-- Tolerance enforcement (`strictTolerancePips`) lets the router cap how far the executed price can drift from the indicative inside the auction transaction, providing an onchain backstop on top of the router's offchain reputation model.
+- Tolerance enforcement (`strictTolerancePips`) lets the router cap how far the executed price can drift from the baseline inside the auction transaction, providing an onchain backstop on top of the router's offchain reputation model. The baseline is the best pre-execution indicative, but each candidate's contribution is first bounded by its declared `getEffectiveLiquidity` (see `_baselineContribution`): a tier-1 indicative can be a constant-liquidity upper bound that overstates output for large swaps, and without the bound it would set an unreachable threshold and trip the check on a fair fill. The bound only reaches quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact and tier-3/4 opaque quoters cannot be bounded, which is why strict tolerance is a backstop over trusted targets and not a substitute for a router-side minimum-output / maximum-input check.
 - Some metrics to weigh when deciding to use the auction hook vs direct routing:
 
     | **Property** | **Direct Routing** | **Auction Hook** |

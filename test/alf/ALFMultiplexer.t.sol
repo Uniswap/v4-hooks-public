@@ -23,6 +23,7 @@ import {ALFMultiplexer} from "../../src/alf/ALFMultiplexer.sol";
 import {SimpleSpreadQuoterHook} from "../../src/alf/SimpleSpreadQuoterHook.sol";
 import {SpreadQuoterBase} from "../../src/alf/base/SpreadQuoterBase.sol";
 import {MultiplexerHookData, TargetedQuoter} from "../../src/alf/types/MultiplexerTypes.sol";
+import {MockQuoterHook} from "./mocks/MockQuoterHook.sol";
 
 contract ALFMultiplexerTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -34,12 +35,17 @@ contract ALFMultiplexerTest is Test, Deployers {
     SimpleSpreadQuoterHook public quoterA;
     SimpleSpreadQuoterHook public quoterB;
 
+    // Tier-1 (IALFHook) quoter used to exercise the reserve-bounded strict-tolerance baseline:
+    // it can over-report its indicative while honestly reporting tiny effective liquidity.
+    MockQuoterHook public mockQuoter;
+
     address ownerA = makeAddr("ownerA");
     address ownerB = makeAddr("ownerB");
 
     PoolKey multiplexerPoolKey;
     PoolKey quoterAPoolKey;
     PoolKey quoterBPoolKey;
+    PoolKey mockQuoterPoolKey;
 
     function setUp() public {
         deployFreshManagerAndRouters();
@@ -106,6 +112,19 @@ contract ALFMultiplexerTest is Test, Deployers {
         quoterA.setPoolLive(quoterAPoolKey, true);
         vm.prank(ownerB);
         quoterB.setPoolLive(quoterBPoolKey, true);
+
+        // ── Deploy a tier-1 mock quoter (its pool is left UNINITIALIZED on purpose: it quotes
+        //    but fills nothing, soft-skipped during execution — the "wins quoting, delivers
+        //    nothing" case the reserve-bounded baseline must tolerate). ──
+        uint160 mockFlags =
+            uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
+        mockQuoter = MockQuoterHook(
+            address(uint160((uint256(type(uint160).max) - (1 << 20)) & clearAllHookPermissionsMask | mockFlags))
+        );
+        deployCodeTo("MockQuoterHook", abi.encode(manager, uint32(500_000)), address(mockQuoter));
+        mockQuoterPoolKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: 3000, tickSpacing: 60, hooks: IHooks(address(mockQuoter))
+        });
     }
 
     // ──── Helpers ────
@@ -419,6 +438,58 @@ contract ALFMultiplexerTest is Test, Deployers {
         BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 0));
         assertEq(delta.amount0(), -1e18);
         assertTrue(delta.amount1() > 0);
+    }
+
+    /// @dev Reserve-bounded baseline (fix 1). A tier-1 quoter reports a wildly inflated indicative
+    ///      (1000e18) but honest, tiny effective liquidity and delivers nothing on execution (its
+    ///      pool is uninitialized → soft-skipped). Without bounding the baseline by the quoter's
+    ///      declared `getEffectiveLiquidity`, the inflated quote would set an unreachable threshold
+    ///      and trip the strict check on quoterB's perfectly fair fill. With the bound, a tight 1%
+    ///      tolerance still passes.
+    function test_strict_reserveBoundedBaseline_inflatedQuoterDoesNotTrip() public {
+        mockQuoter.setPrice(1000e18, 0); // absurd indicative, dwarfs any real fill
+        mockQuoter.setEffectiveLiquidity(1e15, 1e15); // honest: it can deliver almost nothing
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: mockQuoterPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        // 1% tolerance: only satisfiable if the baseline is bounded to deliverable reserves.
+        BalanceDelta delta = swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 10_000));
+        assertEq(delta.amount0(), -1e18, "full input consumed");
+        assertGt(delta.amount1(), 0, "received output from quoterB");
+    }
+
+    /// @dev Control for {test_strict_reserveBoundedBaseline_inflatedQuoterDoesNotTrip}: a quoter
+    ///      with a high indicative but NO declared reserves (effective liquidity 0,0) cannot be
+    ///      bounded, so the unreachable threshold survives and strict tolerance trips. Confirms the
+    ///      bound is what saves the swap, and documents the trusted-targets residual.
+    function test_strict_unboundableQuoterStillTrips() public {
+        mockQuoter.setPrice(1000e18, 0);
+        mockQuoter.setEffectiveLiquidity(0, 0); // reports no reserves → nothing to bound against
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: mockQuoterPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        vm.expectRevert();
+        swap(multiplexerPoolKey, true, -1e18, _buildStrictHookDataWithTolerance(targets, 10_000));
+    }
+
+    /// @dev Ranking is unaffected by the baseline bound: the offchain `quote()` view still elects
+    ///      the highest RAW indicative and returns it verbatim. The reserve bound shapes only the
+    ///      on-chain strict-tolerance baseline, not candidate selection.
+    function test_quote_rankingUsesRawIndicative_notReserveBounded() public {
+        mockQuoter.setPrice(1000e18, 0);
+        mockQuoter.setEffectiveLiquidity(1e15, 1e15);
+
+        TargetedQuoter[] memory targets = new TargetedQuoter[](2);
+        targets[0] = TargetedQuoter({poolKey: mockQuoterPoolKey, amountSpecified: 0});
+        targets[1] = TargetedQuoter({poolKey: quoterBPoolKey, amountSpecified: 0});
+
+        (, address winner, uint256 bestQuote,) = multiplexer.quote(true, -1e18, _buildTargetedHookData(targets));
+        assertEq(winner, address(mockQuoter), "ranking selects the highest raw indicative");
+        assertEq(bestQuote, 1000e18, "quote() returns the raw indicative, not reserve-bounded");
     }
 
     // ════════════════════════════════════════════

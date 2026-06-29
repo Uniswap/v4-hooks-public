@@ -90,7 +90,19 @@ import {IIndicativeQuote} from "../interfaces/IIndicativeQuote.sol";
 ///         the best individual indicative (the expected case) does not trigger a revert.
 ///
 ///         The baseline is the best PRE-execution indicative across the targets, and it is NOT
-///         re-derived after execution. A candidate that wins quoting but then contributes
+///         re-derived after execution. A tier-1 indicative can be a constant-liquidity UPPER
+///         BOUND that overstates output for swaps large enough to exhaust a quoter's depth
+///         (e.g. a SmartPool extrapolating its in-range buckets to the price extreme), so each
+///         candidate's contribution to the baseline is first bounded by its declared effective
+///         output liquidity (`getEffectiveLiquidity`); see `_baselineContribution`. Without
+///         that bound a large swap against a deep-looking but shallow quoter would set an
+///         unreachable threshold and trip the check on a fair fill. The bound applies only to
+///         quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact
+///         against real pool state, and tier-3/4 opaque quoters cannot be bounded (the
+///         trusted-targets note below covers them). It is computed only when strict tolerance
+///         is enabled.
+///
+///         A candidate that wins quoting but then contributes
 ///         nothing — it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
 ///         it quoted — drops aggregate execution below that baseline and can trip the tolerance
 ///         revert even when the other candidates filled acceptably. This is intentional and
@@ -182,11 +194,11 @@ contract ALFMultiplexer is BaseHook {
     error InsufficientLiquidity();
 
     /// @dev Strict tolerance check failed. For exact input, effective output was below the
-    ///      best individual indicative output by more than `strictTolerancePips`; for exact
-    ///      output, effective input paid was above the best individual indicative input by
+    ///      reserve-bounded baseline output by more than `strictTolerancePips`; for exact
+    ///      output, effective input paid was above the reserve-bounded baseline input by
     ///      more than `strictTolerancePips`.
-    /// @param indicative The best individual indicative quote used as the tolerance baseline
-    ///                   (output for exact input, input for exact output).
+    /// @param indicative The reserve-bounded baseline used for the tolerance check (output for
+    ///                   exact input, input for exact output). See `_baselineContribution`.
     /// @param executed The effective executed amount compared to the baseline (output for
     ///                 exact input, input paid for exact output).
     error QuoteDeviation(uint256 indicative, uint256 executed);
@@ -233,7 +245,9 @@ contract ALFMultiplexer is BaseHook {
     /// @param primaryQuoter The first quoter in the sorted fill order (best indicative).
     /// @param zeroForOne    The swap direction.
     /// @param amountSpecified The original swap amount (negative = exact input).
-    /// @param bestQuote     The best individual indicative quote (tolerance baseline).
+    /// @param bestQuote     The strict-tolerance baseline: the best individual indicative,
+    ///                      reserve-bounded (see `_baselineContribution`) when strict tolerance
+    ///                      is enabled; the raw best indicative otherwise.
     event MultiplexerExecuted(
         address indexed primaryQuoter, bool zeroForOne, int256 amountSpecified, uint256 bestQuote
     );
@@ -449,7 +463,8 @@ contract ALFMultiplexer is BaseHook {
     /// @param hookData   ABI-encoded MultiplexerHookData from the caller.
     /// @return totalDelta     Accumulated BalanceDelta across all fills.
     /// @return primaryQuoter  The first quoter in fill order.
-    /// @return bestQuote      The best individual indicative (tolerance baseline). 0 if skipped.
+    /// @return bestQuote      The strict-tolerance baseline (best individual indicative, reserve-
+    ///                       bounded when strict tolerance is enabled). 0 if skipped.
     function _multiplexAndSwap(PoolKey calldata key, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
         internal
         returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote)
@@ -680,6 +695,50 @@ contract ALFMultiplexer is BaseHook {
         }
     }
 
+    /// @dev Reserve-aware strict-tolerance baseline contribution for one candidate. The strict
+    ///      check (see `_beforeSwap`) compares actual aggregate execution against this baseline,
+    ///      so the baseline must track DELIVERABLE output, not a quoter's ranking estimate. A
+    ///      tier-1 (IALFHook) `getIndicativeQuote` can be a constant-liquidity upper bound that
+    ///      overstates output for a swap large enough to exhaust the quoter's depth (e.g.
+    ///      SmartPool extrapolating its in-range buckets to the price extreme). Left unbounded,
+    ///      such a quote inflates the threshold and trips the check on an otherwise-acceptable
+    ///      fill. Bound the contribution by the candidate's declared effective output liquidity:
+    ///        - exact input: cap the expected output at the deliverable output reserve;
+    ///        - exact output: drop the candidate (return 0) when it cannot deliver the requested
+    ///          output, so it cannot set an optimistically-low input baseline.
+    ///      Candidates that are not IALFHook (tier-2 simulator quotes are already exact against
+    ///      real pool state; tier-3 IIndicativeQuote and tier-4 opaque hooks expose no reserve
+    ///      view) or that report zero reserves are returned unbounded — there is no cheaper
+    ///      on-chain depth signal to bound them with. That residual is exactly why strict
+    ///      tolerance is documented as safe only over trusted targets. Ranking/sort is unaffected;
+    ///      this shapes only the strict-tolerance baseline, and runs only when strict tolerance is
+    ///      enabled.
+    function _baselineContribution(PoolKey memory poolKey, uint256 indicative, bool zeroForOne, int256 amountSpecified)
+        internal
+        view
+        returns (uint256)
+    {
+        address hook = address(poolKey.hooks);
+        if (!_supportsInterface(hook, type(IALFHook).interfaceId)) return indicative;
+
+        uint256 outReserve;
+        try IALFHook(hook).getEffectiveLiquidity(poolKey) returns (uint256 r0, uint256 r1) {
+            outReserve = zeroForOne ? r1 : r0;
+        } catch {
+            return indicative;
+        }
+        // A quoter that reports no reserves gives nothing to bound against — keep the raw
+        // indicative rather than zeroing the baseline for a pool that may hold on-pool depth.
+        if (outReserve == 0) return indicative;
+
+        if (amountSpecified < 0) {
+            return indicative < outReserve ? indicative : outReserve;
+        }
+        // Exact output: the requested output is `amountSpecified`. If it exceeds deliverable
+        // reserves the candidate cannot honor it; drop it from the baseline.
+        return uint256(amountSpecified) <= outReserve ? indicative : 0;
+    }
+
     /// @dev True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
     ///      pool. The hook (if any) must NOT:
     ///        - return a `beforeSwap` delta (could override curve output)
@@ -830,8 +889,13 @@ contract ALFMultiplexer is BaseHook {
         for (uint256 i = 0; i < ahd.targets.length; i++) {
             (uint256 q,) = _queryTargetBySwap(ahd.targets[i], ahd.attestationData, zeroForOne, swapAmount);
             if (q == 0) continue;
-            if (best == 0 || (exactInput ? q > best : q < best)) {
-                best = q;
+            // Strict tolerance is the only caller, so always bound the contribution by deliverable
+            // reserves (see `_baselineContribution`) — an over-optimistic ranking quote must not
+            // inflate the threshold.
+            uint256 contribution = _baselineContribution(ahd.targets[i].poolKey, q, zeroForOne, swapAmount);
+            if (contribution == 0) continue;
+            if (best == 0 || (exactInput ? contribution > best : contribution < best)) {
+                best = contribution;
             }
         }
     }
@@ -929,12 +993,18 @@ contract ALFMultiplexer is BaseHook {
     /// @param ahd        Decoded MultiplexerHookData.
     /// @return candidates    Array of valid candidates, sorted best-first.
     /// @return count         Number of valid candidates (may be < candidates.length).
-    /// @return bestIndividual The best individual indicative quote (tolerance baseline).
+    /// @return bestIndividual The strict-tolerance baseline: the best individual indicative,
+    ///                        reserve-bounded (see `_baselineContribution`) when strict tolerance
+    ///                        is enabled; the raw best indicative otherwise (telemetry only).
     function _prepareCandidates(bool zeroForOne, int256 swapAmount, MultiplexerHookData memory ahd)
         internal
         returns (FillCandidate[] memory candidates, uint256 count, uint256 bestIndividual)
     {
         bool isExactInput = swapAmount < 0;
+        // Bound the strict-tolerance baseline by deliverable reserves only when strict tolerance
+        // is enabled — the extra per-candidate reserve query is wasted work otherwise, and the
+        // non-strict baseline is telemetry only (it gates nothing).
+        bool boundBaseline = ahd.strictTolerancePips > 0;
         candidates = new FillCandidate[](ahd.targets.length);
 
         for (uint256 i = 0; i < ahd.targets.length; i++) {
@@ -950,13 +1020,24 @@ contract ALFMultiplexer is BaseHook {
             candidates[count] = FillCandidate({
                 poolKey: ahd.targets[i].poolKey, hookData: quoterHookData, sqrtPriceX96: sqrtPriceX96, indicative: q
             });
-
-            // Track the best individual indicative for tolerance checking.
-            // For exact input: highest output = best. For exact output: lowest input = best.
-            if (count == 0 || (isExactInput ? q > bestIndividual : q < bestIndividual)) {
-                bestIndividual = q;
-            }
             count++;
+
+            // Track the best individual quote as the strict-tolerance baseline. When strict
+            // tolerance is on, bound each contribution by the candidate's deliverable reserves
+            // (see `_baselineContribution`) so an over-optimistic ranking quote cannot inflate the
+            // threshold; the raw indicative still drives ranking via the `indicative` field above.
+            // `bestIndividual == 0` is the unset sentinel (a real baseline is always > 0; a
+            // bounded contribution of 0 means "drop from baseline"). For exact input: highest
+            // output = best. For exact output: lowest input = best.
+            uint256 contribution =
+                boundBaseline ? _baselineContribution(ahd.targets[i].poolKey, q, zeroForOne, swapAmount) : q;
+            if (
+                contribution != 0
+                    && (bestIndividual == 0
+                        || (isExactInput ? contribution > bestIndividual : contribution < bestIndividual))
+            ) {
+                bestIndividual = contribution;
+            }
         }
 
         if (count == 0) revert NoValidQuotes();
