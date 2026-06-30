@@ -3,8 +3,13 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {JITLock, JITInProgress, jitLockFor, anyJITInProgress, requireJITNotInProgress} from
-    "../../src/alf/types/JITLock.sol";
+import {
+    JITLock,
+    JITInProgress,
+    jitLockFor,
+    anyJITInProgress,
+    requireJITNotInProgress
+} from "../../src/alf/types/JITLock.sol";
 
 /// @notice Harness exercising the type's transient lock. Each scenario is a SINGLE external call so
 ///         the whole sequence runs in one transaction: EIP-1153 transient storage is cleared at the
