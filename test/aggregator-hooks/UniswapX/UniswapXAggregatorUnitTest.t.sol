@@ -18,6 +18,7 @@ import {UniswapXAggregator} from "../../../src/aggregator-hooks/implementations/
 import {IReactor} from "@uniswapx/interfaces/IReactor.sol";
 import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
 import {MockUniswapXReactor} from "./mocks/MockUniswapXReactor.sol";
+import {BaseHookDataAggregator} from "../../../src/aggregator-hooks/BaseHookDataAggregator.sol";
 
 contract UniswapXAggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -361,7 +362,7 @@ contract UniswapXAggregatorUnitTest is Test {
 
     function test_quote_reverts() public {
         PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
-        vm.expectRevert(UniswapXAggregator.QuoteNotSupported.selector);
+        vm.expectRevert(BaseHookDataAggregator.QuoteNotSupported.selector);
         hook.quote(true, -int256(1 ether), key.toId());
     }
 

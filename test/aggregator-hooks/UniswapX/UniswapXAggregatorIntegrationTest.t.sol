@@ -292,5 +292,57 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         assertEq(tokenB.balanceOf(alice), outStart - outEnd, "alice only paid the decayed amount");
     }
 
+    /// @dev `quoteWithHookData` resolves the order (via the OrderQuoter) to the exact fill amounts.
+    function test_quoteWithHookData_returnsResolvedAmounts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        // The quoter calls the reactor (which pulls the maker's input before rolling back), so the order must
+        // be fundable: maker funded + Permit2-approved.
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+
+        ExclusiveDutchOrder memory order =
+            _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), outAmt, outAmt, 0);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // exact-in: swapper provides the order's output (tokenB) and receives the order's input (tokenA).
+        uint256 quotedIn = hook.quoteWithHookData(zeroForOne, -int256(outAmt), key.toId(), hookData);
+        assertEq(quotedIn, inAmt, "exact-in quote = order input amount");
+
+        // exact-out: swapper wants the order's input (tokenA) and pays the order's output (tokenB).
+        uint256 quotedOut = hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData);
+        assertEq(quotedOut, outAmt, "exact-out quote = order output amount");
+    }
+
+    /// @dev `quoteWithHookData` reflects Dutch decay: same order quotes differently as time advances.
+    function test_quoteWithHookData_appliesDutchDecay() public {
+        uint256 inAmt = 50 ether;
+        uint256 outStart = 110 ether;
+        uint256 outEnd = 100 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+
+        ExclusiveDutchOrder memory order =
+            _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), outStart, outEnd, 0);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // At decayStartTime (now), the required output is the start amount.
+        assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outStart, "decay start");
+
+        // At decayEndTime, it has fully decayed to the end amount.
+        vm.warp(order.decayEndTime);
+        assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outEnd, "decay end");
+    }
+
     receive() external payable {}
 }

@@ -26,6 +26,7 @@ abstract contract BaseHookDataAggregator is BaseAggregatorHook {
     /// @notice Thrown if the hookData-less `_conductSwap` overload is somehow reached. Hooks built on this base
     ///         only implement the hookData-aware overload.
     error HookDataRequired();
+    error QuoteNotSupported();
 
     constructor(IPoolManager _manager, string memory _aggregatorHookVersion)
         BaseAggregatorHook(_manager, _aggregatorHookVersion)
@@ -111,4 +112,44 @@ abstract contract BaseHookDataAggregator is BaseAggregatorHook {
         PoolId poolId,
         bytes calldata hookData
     ) internal virtual returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
+
+    /// @inheritdoc BaseAggregatorHook
+    /// @dev Router-style quoting (no hookData) cannot resolve a per-swap order, so it is unsupported. Use
+    ///      {quoteWithHookData} instead, supplying the order as hookData.
+    function _rawQuote(bool, int256, PoolId) internal virtual override returns (uint256) {
+        revert QuoteNotSupported();
+    }
+
+    /// @notice Returns the raw quote for a swap whose behaviour depends on `hookData`, without protocol fees.
+    /// @dev Mirror of {_rawQuote} for hookData-driven hooks. Implementations resolve `hookData` to the
+    ///      unspecified-side amount; whether this can be `view` depends on the implementation.
+    function _rawQuoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId poolId, bytes calldata hookData)
+        internal
+        virtual
+        returns (uint256 amountUnspecified);
+
+    /// @notice hookData-aware analogue of {BaseAggregatorHook.quote}: resolves the order/intent in `hookData` and
+    ///         applies the protocol fee the same way the standard quote does.
+    function quoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId poolId, bytes calldata hookData)
+        external
+        returns (uint256 amountUnspecified)
+    {
+        amountUnspecified = _rawQuoteWithHookData(zeroToOne, amountSpecified, poolId, hookData);
+
+        uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
+
+        if (protocolFee == 0) return amountUnspecified;
+
+        if (tokenJar == address(0)) pollTokenJar();
+        if (tokenJar == address(0)) return amountUnspecified;
+
+        bool isExactInput = amountSpecified < 0;
+        uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
+
+        if (isExactInput) {
+            amountUnspecified -= feeAmount;
+        } else {
+            amountUnspecified += feeAmount;
+        }
+    } 
 }

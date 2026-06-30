@@ -16,6 +16,7 @@ import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {IReactor} from "@uniswapx/interfaces/IReactor.sol";
 import {IReactorCallback} from "@uniswapx/interfaces/IReactorCallback.sol";
 import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
+import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 
 /// @title UniswapXAggregator
 /// @notice Uniswap V4 hook whose "liquidity source" is a single UniswapX order (e.g. a Dutch order)
@@ -27,8 +28,9 @@ import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
 /// @dev    Original Dutch orders are all-or-nothing: the V4 swap amount must exactly match the resolved order
 ///         amounts, otherwise the swap reverts. Each swap consumes one order passed fresh via `hookData`, so a
 ///         single deployed pool is reusable across many orders for the same token pair.
-/// @dev    Routing-style quoting is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert because the
-///         order is only known at swap time (via `hookData`), not when a router calls those view functions.
+/// @dev    Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert
+///         because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
+///         via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
 /// @dev    Protocol fees must remain 0 for pools using this hook. A non-zero protocol fee would skim the
 ///         unspecified currency, but an exact order fill leaves no surplus to cover it, causing settlement to fail.
 contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
@@ -39,6 +41,8 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     IReactor public immutable reactor;
     /// @notice The canonical wrapped-native token, used to bridge V4 native ETH and order WETH
     address public immutable weth;
+    /// @notice Lens used to resolve an order (Dutch decay applied) into its current input/output amounts
+    OrderQuoter public immutable orderQuoter;
 
     /// @notice Tracks which V4 pools have been registered with this hook
     mapping(PoolId => bool) public registered;
@@ -61,7 +65,6 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     error OrderOutputMismatch();
     error OrderAmountMismatch();
     error NativeTransferFailed();
-    error QuoteNotSupported();
     error TVLNotSupported();
 
     constructor(IPoolManager _manager, IReactor _reactor, address _weth)
@@ -69,6 +72,85 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     {
         reactor = _reactor;
         weth = _weth;
+        orderQuoter = new OrderQuoter();
+    }
+
+    /// @inheritdoc BaseHookDataAggregator
+    /// @dev Resolves the order in `hookData` (Dutch decay applied) via the OrderQuoter and returns the amount on
+    ///      the side opposite `amountSpecified`. The order fully determines both amounts, so `zeroToOne`/`poolId`
+    ///      are unused. NOTE: like UniswapX's OrderQuoter this is NOT a view — it calls the reactor (pulling the
+    ///      maker's input via Permit2 before rolling back), so it requires a funded, approved, validly-signed order
+    ///      and cannot be `staticcall`-ed.
+    function _rawQuoteWithHookData(bool, int256 amountSpecified, PoolId, bytes calldata hookData)
+        internal
+        override
+        returns (uint256 amountUnspecified)
+    {
+        if (hookData.length == 0) revert NoOrderData();
+        SignedOrder memory order = abi.decode(hookData, (SignedOrder));
+
+        ResolvedOrder memory resolved = orderQuoter.quote(order.order, order.sig);
+
+        // Sum the order's outputs (the fill requires all outputs share one token = the V4 swapper's input currency).
+        uint256 orderOutput;
+        for (uint256 i = 0; i < resolved.outputs.length; i++) {
+            orderOutput += resolved.outputs[i].amount;
+        }
+
+        // The hook fills atomically: the V4 swapper provides the order's OUTPUT and receives its INPUT.
+        // exact-in  (amountSpecified < 0): swapper specified the input it provides (order output) -> receives order input
+        // exact-out (amountSpecified > 0): swapper specified the output it wants (order input)   -> pays order output
+        return amountSpecified < 0 ? resolved.input.amount : orderOutput;
+    }
+
+    /// @inheritdoc IReactorCallback
+    /// @dev Called by the reactor mid-execution. Sources the order's output from the PoolManager (the V4
+    ///      swapper's input), converting between native ETH and WETH as needed.
+    function reactorCallback(ResolvedOrder[] memory resolvedOrders, bytes memory callbackData) external override {
+        if (!_getTransientInflight()) revert ProhibitedEntry();
+        if (msg.sender != address(reactor)) revert UnauthorizedCaller();
+
+        (Currency settleCurrency, Currency takeCurrency) = abi.decode(callbackData, (Currency, Currency));
+
+        ResolvedOrder memory resolved = resolvedOrders[0];
+
+        // The order's input token (received by this hook) must correspond to the V4 swapper's output currency.
+        if (!_matches(settleCurrency, address(resolved.input.token))) revert OrderInputMismatch();
+
+        // Sum the order's outputs; all outputs must share the same token and correspond to the take currency.
+        if (resolved.outputs.length == 0) revert NoOrderOutputs();
+        address outputToken = resolved.outputs[0].token;
+        if (!_matches(takeCurrency, outputToken)) revert OrderOutputMismatch();
+        uint256 outputAmount;
+        for (uint256 i = 0; i < resolved.outputs.length; i++) {
+            if (resolved.outputs[i].token != outputToken) revert InconsistentOrderOutputs();
+            outputAmount += resolved.outputs[i].amount;
+        }
+
+        // Pull the V4 swapper's input from the PoolManager into this hook (native ETH or ERC20).
+        poolManager.take(takeCurrency, address(this), outputAmount);
+
+        // Convert what we hold into the order's output token so the reactor can deliver it.
+        if (outputToken == address(0)) {
+            // Order pays native ETH: ensure we hold ETH, then forward it to the reactor (it pays the
+            // recipient from its own balance after this callback returns).
+            if (!takeCurrency.isAddressZero()) IWETH9(weth).withdraw(outputAmount);
+            (bool ok,) = address(reactor).call{value: outputAmount}("");
+            if (!ok) revert NativeTransferFailed();
+        } else if (outputToken == weth) {
+            // Order pays WETH: ensure we hold WETH (wrap if we took native ETH). The reactor pulls it via approval.
+            if (takeCurrency.isAddressZero()) IWETH9(weth).deposit{value: outputAmount}();
+        }
+        // Otherwise the order's output is an ordinary ERC20 equal to `takeCurrency`; the reactor pulls it via approval.
+
+        _setTransientResolved(RESOLVED_INPUT_SLOT, resolved.input.amount);
+        _setTransientResolved(RESOLVED_OUTPUT_SLOT, outputAmount);
+    }
+
+    /// @inheritdoc BaseAggregatorHook
+    /// @dev No persistent liquidity exists; TVL is undefined for an order-filling hook.
+    function pseudoTotalValueLocked(PoolId) external pure override returns (uint256, uint256) {
+        revert TVLNotSupported();
     }
 
     /// @notice Returns true if `token` represents native ETH on the order side, accounting for WETH equivalence
@@ -147,62 +229,6 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
 
         // Leave the order's input token in this hook so the base `_internalSettle` settles `settleCurrency`.
         return (amountSettle, amountTake, false);
-    }
-
-    /// @inheritdoc IReactorCallback
-    /// @dev Called by the reactor mid-execution. Sources the order's output from the PoolManager (the V4
-    ///      swapper's input), converting between native ETH and WETH as needed.
-    function reactorCallback(ResolvedOrder[] memory resolvedOrders, bytes memory callbackData) external override {
-        if (!_getTransientInflight()) revert ProhibitedEntry();
-        if (msg.sender != address(reactor)) revert UnauthorizedCaller();
-
-        (Currency settleCurrency, Currency takeCurrency) = abi.decode(callbackData, (Currency, Currency));
-
-        ResolvedOrder memory resolved = resolvedOrders[0];
-
-        // The order's input token (received by this hook) must correspond to the V4 swapper's output currency.
-        if (!_matches(settleCurrency, address(resolved.input.token))) revert OrderInputMismatch();
-
-        // Sum the order's outputs; all outputs must share the same token and correspond to the take currency.
-        if (resolved.outputs.length == 0) revert NoOrderOutputs();
-        address outputToken = resolved.outputs[0].token;
-        if (!_matches(takeCurrency, outputToken)) revert OrderOutputMismatch();
-        uint256 outputAmount;
-        for (uint256 i = 0; i < resolved.outputs.length; i++) {
-            if (resolved.outputs[i].token != outputToken) revert InconsistentOrderOutputs();
-            outputAmount += resolved.outputs[i].amount;
-        }
-
-        // Pull the V4 swapper's input from the PoolManager into this hook (native ETH or ERC20).
-        poolManager.take(takeCurrency, address(this), outputAmount);
-
-        // Convert what we hold into the order's output token so the reactor can deliver it.
-        if (outputToken == address(0)) {
-            // Order pays native ETH: ensure we hold ETH, then forward it to the reactor (it pays the
-            // recipient from its own balance after this callback returns).
-            if (!takeCurrency.isAddressZero()) IWETH9(weth).withdraw(outputAmount);
-            (bool ok,) = address(reactor).call{value: outputAmount}("");
-            if (!ok) revert NativeTransferFailed();
-        } else if (outputToken == weth) {
-            // Order pays WETH: ensure we hold WETH (wrap if we took native ETH). The reactor pulls it via approval.
-            if (takeCurrency.isAddressZero()) IWETH9(weth).deposit{value: outputAmount}();
-        }
-        // Otherwise the order's output is an ordinary ERC20 equal to `takeCurrency`; the reactor pulls it via approval.
-
-        _setTransientResolved(RESOLVED_INPUT_SLOT, resolved.input.amount);
-        _setTransientResolved(RESOLVED_OUTPUT_SLOT, outputAmount);
-    }
-
-    /// @inheritdoc BaseAggregatorHook
-    /// @dev Router-style quoting cannot resolve a per-swap order, so quoting is unsupported.
-    function _rawQuote(bool, int256, PoolId) internal pure override returns (uint256) {
-        revert QuoteNotSupported();
-    }
-
-    /// @inheritdoc BaseAggregatorHook
-    /// @dev No persistent liquidity exists; TVL is undefined for an order-filling hook.
-    function pseudoTotalValueLocked(PoolId) external pure override returns (uint256, uint256) {
-        revert TVLNotSupported();
     }
 
     function _setTransientInflight(bool value) private {
