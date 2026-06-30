@@ -16,6 +16,7 @@ import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientSta
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
+import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
@@ -91,6 +92,7 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     using ProtocolFeeLibrary for uint24;
     using ProtocolFeeLibrary for uint16;
     using LPFeeLibrary for uint24;
+    using SafeCast for uint256;
     using SafeERC20 for IERC20;
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
@@ -653,6 +655,11 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
     }
 
     /// @notice Simulate a price-bounded swap against hypothetical JIT liquidity.
+    /// @dev Returns both legs of the fill. When the swap would exhaust the deployable output
+    ///      reserve, both legs are recomputed as the exact-output cost of draining that reserve, so
+    ///      the returned (amountIn, amountOut) pair is always internally consistent: amountIn prices
+    ///      exactly amountOut. The result is non-binding; binding slippage protection belongs in the
+    ///      caller. See `_simulateIndicative`.
     function swapToPrice(
         PoolKey calldata key,
         bool zeroForOne,
@@ -1086,16 +1093,24 @@ contract DualPoolHook is DualPoolBase, PoolVault, JITLockable, ReentrancyGuardTr
         amountOut = stepOut;
 
         // Physical-capacity bound. `computeSwapStep` treats the current in-range bucket depth as a
-        // constant-liquidity curve extending all the way to `sqrtPriceLimitX96`. For a swap large
-        // enough to exhaust the deployed buckets in a real JIT cycle the price would hit the
-        // outermost bucket edge and stop, so the constant-liquidity step overstates output and can
-        // exceed reserves several times over. Cap the output leg at the effective reserve of the
-        // output token (`bal0`/`bal1` are the effective, immediately-redeemable balances read
-        // above) — the most a JIT cycle could ever pay out. The input leg is left as the raw
-        // request: when the output is reserve-capped the reported price is deliberately
-        // unattractive, which is the correct signal that the pool cannot absorb the full size.
+        // constant-liquidity curve extending all the way to `sqrtPriceLimitX96`, so for a swap large
+        // enough to exhaust the deployed buckets it overstates output and can exceed reserves several
+        // times over. The pool can deliver at most the effective output reserve (`bal0`/`bal1` are the
+        // effective, immediately-redeemable balances read above), so when the raw step exceeds it the
+        // reserve, not the price limit or the specified amount, is the binding constraint. Recompute
+        // both legs as the exact-output cost of draining `outReserve` along the same curve so the
+        // returned (amountIn, amountOut) pair stays internally consistent: the input is priced for
+        // output the pool can actually deliver, never an over-claimed constant-liquidity step. Since
+        // `outReserve < stepOut` is reachable toward the limit, the exact-output step is fully
+        // satisfied before the price extreme, so the recomputed pair is exact.
         uint256 outReserve = zeroForOne ? bal1 : bal0;
-        if (amountOut > outReserve) amountOut = outReserve;
+        if (amountOut > outReserve) {
+            uint160 drainLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+            (, uint256 drainIn,, uint256 drainFee) =
+                SwapMath.computeSwapStep(sqrtPriceX96, drainLimit, liquidity, outReserve.toInt256(), feePips);
+            amountIn = drainIn + drainFee;
+            amountOut = outReserve;
+        }
     }
 
     function _composeEffectiveFee(uint24 lpFee, uint24 protocolFee, bool zeroForOne) private pure returns (uint24) {

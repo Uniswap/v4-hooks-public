@@ -1278,6 +1278,31 @@ contract DualPoolHookTest is Test, Deployers {
         assertEq(q, outAmt, "capped getIndicativeQuote must match swapToPrice output leg");
     }
 
+    /// @dev When the reserve cap binds, `swapToPrice` recomputes the input leg as the exact-output
+    ///      cost of draining the deliverable reserve, so the returned (amountIn, amountOut) pair is
+    ///      internally consistent: `amountIn` prices exactly `amountOut`. Unlike `getIndicativeQuote`,
+    ///      `swapToPrice` returns the capped partial fill rather than zeroing, since the pair is the
+    ///      honest maximal drain a split planner can route against.
+    function test_swapToPrice_capRecomputesConsistentInputLeg() public {
+        _depositAsOperator(1_000e18);
+        (, uint256 eff1) = hook.getEffectiveLiquidity(testPoolKey);
+        uint160 limit = TickMath.MIN_SQRT_PRICE + 1;
+
+        // Huge exact-input ZF1: output caps at the token1 reserve, input leg recomputed for the drain.
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -int256(type(int128).max), limit, "");
+        assertEq(aout, eff1, "exact-input output leg caps at effective token1 reserve");
+        assertGt(ain, 0, "input leg must be priced for the deliverable drain");
+
+        // The recomputed input must equal the exact-output cost of producing the capped output.
+        uint256 requiredIn = hook.getIndicativeQuote(testPoolKey, true, int256(aout), "");
+        assertEq(ain, requiredIn, "swapToPrice input leg must price exactly its capped output leg");
+
+        // Exact-output beyond reserves returns the same capped drain pair, not (0, 0).
+        (uint256 ain2, uint256 aout2) = hook.swapToPrice(testPoolKey, true, int256(eff1 + 1e18), limit, "");
+        assertEq(aout2, eff1, "exact-output beyond reserves returns the capped drain output");
+        assertEq(ain2, ain, "exact-output drain pair matches the exact-input drain pair");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                          YIELD ACCRUAL
     // ═══════════════════════════════════════════════════════════════════════════
