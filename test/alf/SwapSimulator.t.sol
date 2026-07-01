@@ -157,22 +157,36 @@ contract SwapSimulatorTest is Test, Deployers {
     ///      exit condition (`amountRemaining == 0`, `price == limit`) fires before the
     ///      `MAX_WALK_STEPS` cap. The cap must exit gracefully with the partial (here zero)
     ///      result instead of reverting or walking the full range.
+    ///
+    ///      The cap is proven by a gas RATIO against a reference walk that terminates
+    ///      naturally below the cap (~3.5k words, from tick 0 to MIN). Capped, the
+    ///      pathological walk costs ~4096/3466 = ~1.18x the reference; uncapped it would
+    ///      cost ~2x. A ratio bound stays valid under coverage instrumentation, which
+    ///      inflates both walks proportionally (an absolute gas bound does not).
     function test_simulate_walkCap_boundsPathologicalEmptyWalk() public {
-        PoolKey memory sparse =
+        // Reference: ~3.5k-word empty walk that finishes before the cap.
+        PoolKey memory refKey =
             PoolKey({currency0: currency0, currency1: currency1, fee: 100, tickSpacing: 1, hooks: IHooks(address(0))});
-        manager.initialize(sparse, TickMath.getSqrtPriceAtTick(887_200));
+        manager.initialize(refKey, Constants.SQRT_PRICE_1_1);
 
         uint256 gasBefore = gasleft();
+        harness.simulateToPrice(manager, refKey.toId(), true, -1e30, 100, 1, TickMath.MIN_SQRT_PRICE + 1);
+        uint256 gasReference = gasBefore - gasleft();
+
+        // Pathological: ~6.9k-word walk that only the cap can bound.
+        PoolKey memory sparse =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 200, tickSpacing: 1, hooks: IHooks(address(0))});
+        manager.initialize(sparse, TickMath.getSqrtPriceAtTick(887_200));
+
+        gasBefore = gasleft();
         (uint256 amountIn, uint256 amountOut) =
-            harness.simulateToPrice(manager, sparse.toId(), true, -1e30, 100, 1, TickMath.MIN_SQRT_PRICE + 1);
-        uint256 gasUsed = gasBefore - gasleft();
+            harness.simulateToPrice(manager, sparse.toId(), true, -1e30, 200, 1, TickMath.MIN_SQRT_PRICE + 1);
+        uint256 gasCapped = gasBefore - gasleft();
 
         assertEq(amountIn, 0, "empty pool consumes nothing");
         assertEq(amountOut, 0, "empty pool outputs nothing");
-        // The capped walk (4_096 iterations, cold extsload per bitmap word) measures ~28M gas;
-        // the uncapped walk would need ~6.9k iterations (~48M). A bound between the two proves
-        // the cap fired.
-        assertLt(gasUsed, 35_000_000, "walk bounded by MAX_WALK_STEPS");
+        // Capped/reference ratio ≈ 1.18; uncapped/reference ≈ 2.0. 1.6 splits the regimes.
+        assertLt(gasCapped, (gasReference * 16) / 10, "walk bounded by MAX_WALK_STEPS");
     }
 
     // ══════════════════════════════════════════════════════════
