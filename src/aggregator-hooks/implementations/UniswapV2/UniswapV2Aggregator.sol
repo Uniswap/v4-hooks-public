@@ -53,7 +53,6 @@ contract UniswapV2Aggregator is BaseAggregatorHook {
     function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1) {
         address pairAddr = poolIdToExternalPair[poolId];
         if (pairAddr == address(0)) revert PoolDoesNotExist();
-        PoolKey storage poolKey = _canonicalPoolKeyByAddress[pairAddr];
         (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pairAddr).getReserves();
         amount0 = uint256(reserve0);
         amount1 = uint256(reserve1);
