@@ -1,5 +1,5 @@
 # FluidDexT1Aggregator
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IDexCallback](/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
 Implements Fluid's IDexCallback interface for swap callbacks
 
 
-## State Variables
+## Constants
 ### fluidPool
 The Fluid DEX T1 pool
 
@@ -49,22 +49,6 @@ IFluidDexResolver public immutable fluidDexResolver
 ```
 
 
-### localPoolId
-The Uniswap V4 pool ID associated with this aggregator
-
-
-```solidity
-PoolId public localPoolId
-```
-
-
-### _isReversed
-
-```solidity
-bool private _isReversed
-```
-
-
 ### FLUID_NATIVE_CURRENCY
 
 ```solidity
@@ -90,6 +74,23 @@ uint256 private constant INACCURACY_BUFFER = 20
 
 ```solidity
 uint256 private constant INACCURACY_SCALE = 1_000_000
+```
+
+
+## State Variables
+### localPoolId
+The Uniswap V4 pool ID associated with this aggregator
+
+
+```solidity
+PoolId public localPoolId
+```
+
+
+### _isReversed
+
+```solidity
+bool private _isReversed
 ```
 
 

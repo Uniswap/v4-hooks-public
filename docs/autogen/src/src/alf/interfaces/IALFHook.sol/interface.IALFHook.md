@@ -1,8 +1,8 @@
 # IALFHook
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/interfaces/IALFHook.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/alf/interfaces/IALFHook.sol)
 
 **Inherits:**
-IERC165
+IERC165, [IHookStats](/src/alf/interfaces/IHookStats.sol/interface.IHookStats.md)
 
 **Title:**
 IALFHook
@@ -82,58 +82,6 @@ getIndicativeQuote calls fail, resulting in router deprioritization.
 ```solidity
 function maxGas() external view returns (uint32);
 ```
-
-### getReserves
-
-Total reserves managed by the hook (true TVL).
-
-Should include ALL assets under management: ERC-20 balances, ERC-6909 claims,
-vault deposits, rehypothecated assets, etc. Returns (0, 0) for hooks that do
-not manage off-pool reserves.
-
-
-```solidity
-function getReserves(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`key`|`PoolKey`|The pool key for the specific pool.|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`token0`|`uint256`|Total amount of token0 reserves.|
-|`token1`|`uint256`|Total amount of token1 reserves.|
-
-
-### getEffectiveLiquidity
-
-Assets available for immediate swapping.
-
-Returns liquidity that can be accessed right now for trading. Always <= getReserves().
-May differ from getReserves() if some liquidity is not available for deployment (e.g., from a vault with too much utilization).
-Returns (0, 0) for hooks that do not manage off-pool reserves.
-
-
-```solidity
-function getEffectiveLiquidity(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`key`|`PoolKey`|The pool key for the specific pool.|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`token0`|`uint256`|Immediately swappable token0 liquidity.|
-|`token1`|`uint256`|Immediately swappable token1 liquidity.|
-
 
 ### swapToPrice
 

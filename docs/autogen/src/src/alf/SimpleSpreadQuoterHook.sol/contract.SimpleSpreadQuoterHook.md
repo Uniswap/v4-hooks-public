@@ -1,5 +1,5 @@
 # SimpleSpreadQuoterHook
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/SimpleSpreadQuoterHook.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/alf/SimpleSpreadQuoterHook.sol)
 
 **Inherits:**
 [SpreadQuoterBase](/src/alf/base/SpreadQuoterBase.sol/abstract.SpreadQuoterBase.md)
@@ -13,6 +13,31 @@ Uniswap Labs
 Spread quoter with owner-restricted LP. Only authorized addresses can add or
 remove liquidity, and all LP must be concentrated in a single tick spacing at
 the active tick. Owner controls pricing via a single symmetric fee override.
+## Trust model: `authorizedLPs` is operator-only, not a public LP allowlist
+`authorizedLPs` is designed as an allowlist of addresses controlled by a single
+trust principal (the operator), not as a registry of independent third-party LPs.
+Typical configurations: a treasury contract + an algorithmic-execution hot wallet;
+a multisig + a routine-operations EOA; a primary and a backup. All entries are
+expected to be in coordination with one another.
+The hook does not track per-LP positions. Two consequences follow:
+1. **Revocation locks the revoked LP's outstanding funds.** If LP A holds a v4
+position in this pool and the owner calls `setAuthorizedLP(A, false)`, A's
+subsequent `removeLiquidity` reverts at `_beforeRemoveLiquidity`'s
+authorization check. A's funds remain locked until re-authorization. Owners
+MUST sequence "drain then revoke" when retiring an LP address.
+2. **`setActiveTick` enforces drain-before-relocate.** The base now refuses to
+move `activeLowerTick` while liquidity is still referenced at the prior band
+(reverts with `ActiveTickBandNonEmpty`). Operators MUST have the authorized
+LP remove its position at the old tick before calling `setActiveTick` with a
+different value. Setting the same tick remains an idempotent no-op.
+Use cases that need genuine multi-tenant LP (independent users supplying
+liquidity, hook manages spread) are out of scope for this contract and would
+require a separate hook with per-LP position tracking.
+
+This is not intended as a production-ready hook. It is a reference implementation
+designed to demonstrate the core mechanics of a spread-based quoter where LP is
+controlled by a single owner. Although it may work for simple use cases, it is not
+expected to be used in production as-is.
 
 **Note:**
 security-contact: security@uniswap.org
@@ -49,14 +74,24 @@ constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
 
 The v4 hook permissions for this contract.
 
-`beforeInitialize` blocks direct PM init (force operator to use
-`initializePool`); `afterInitialize` registers the active tick;
-`beforeAddLiquidity` / `beforeRemoveLiquidity` enforce the LP allowlist;
-`beforeSwap` applies the LP fee override.
+`beforeInitialize` blocks direct PM init (forces operator to use
+`initializePool`); `beforeAddLiquidity` / `beforeRemoveLiquidity` enforce the LP
+allowlist; `beforeSwap` enforces the liveness flag. Pricing is fully static
+(`key.fee`); no LP fee override is returned from `_beforeSwap`.
 
 
 ```solidity
 function getHookPermissions() public pure override returns (Hooks.Permissions memory);
+```
+
+### _requireAuthorizedLP
+
+Reverts [UnauthorizedLP](/src/alf/SimpleSpreadQuoterHook.sol/contract.SimpleSpreadQuoterHook.md#unauthorizedlp) unless `sender` is an authorized LP. The guard for both LP
+callbacks, so the authorization check stays in one place rather than inlined per site.
+
+
+```solidity
+function _requireAuthorizedLP(address sender) private view;
 ```
 
 ### _beforeAddLiquidity
@@ -87,6 +122,13 @@ function _beforeRemoveLiquidity(address sender, PoolKey calldata, ModifyLiquidit
 Authorize or revoke an address for LP operations.
 
 Only the owner may toggle authorization. Emits [AuthorizedLPUpdated](/src/alf/SimpleSpreadQuoterHook.sol/contract.SimpleSpreadQuoterHook.md#authorizedlpupdated).
+**Warning: revocation locks outstanding liquidity.** This contract has no
+per-LP position tracking, so revoking `lp` while `lp` holds a v4 position in
+any pool gated by this hook makes that position un-removable until
+`lp` is re-authorized. Owners MUST sequence revocations as
+"drain (have `lp` remove its positions) then revoke", never the reverse.
+See the contract-level `Trust model` NatSpec for more context on the operator-only
+design intent and the trade-offs involved.
 
 
 ```solidity

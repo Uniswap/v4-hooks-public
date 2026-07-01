@@ -1,8 +1,8 @@
 # ALFMultiplexer
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/alf/ALFMultiplexer.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/alf/ALFMultiplexer.sol)
 
 **Inherits:**
-[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), Ownable
+[BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)
 
 **Title:**
 ALFMultiplexer
@@ -21,17 +21,17 @@ swap flow across candidates in order of indicative quality.
 Per candidate, the multiplexer probes for indicative pricing in order of richness.
 Tier selection is purely a property of the candidate's PoolKey (hook flags +
 ERC-165 advertisement); the router doesn't need to know which tier will fire.
-1. **IALFHook** (ERC-165 detected) — the rich path: liveness check, gas budget,
+1. **IALFHook** (ERC-165 detected): the rich path: liveness check, gas budget,
 attestation, and per-candidate ALFHookData.
-2. **SwapSimulator** — for vanilla CFMM pools and hooks that don't override the
+2. **SwapSimulator**: for vanilla CFMM pools and hooks that don't override the
 swap curve (no `beforeSwap` / `afterSwap` returns-delta flags, no dynamic-fee
 hook with `BEFORE_SWAP_FLAG`). Walks the pool's real state via extsload;
 exact in-frame.
-3. **IIndicativeQuote** (ERC-165 detected) — minimal view-style quote surface for
+3. **IIndicativeQuote** (ERC-165 detected): minimal view-style quote surface for
 hooks that override the curve (PropAMM hooks, aggregator hooks). Invoked via
 low-level `staticcall` so non-`view` implementations can satisfy the interface,
 but state writes revert.
-4. **Reverting self-swap** — universal fallback for opaque hooks; only reached
+4. **Reverting self-swap**: universal fallback for opaque hooks; only reached
 from the execution path (view-side `quote()` returns no quote for these).
 ## Execution Model: Greedy Split Fill
 Rather than picking a single winner, the multiplexer fills candidates sequentially from
@@ -45,22 +45,57 @@ to the next candidate. The result is an approximately optimal split that:
 - Degenerates to single-quoter execution when only one target is provided
 - Works identically for exact-input and exact-output swaps
 ## Delta Forwarding
-The multiplexer's virtual pool has zero liquidity — all execution happens via nested
+The multiplexer's virtual pool has zero liquidity; all execution happens via nested
 `poolManager.swap()` calls on the candidates' real pools. The accumulated BalanceDelta
 from all fills is negated into a `BeforeSwapDelta` that offsets the virtual pool's
 swap, ensuring the multiplexer's net position is zero. The outer caller receives
 the aggregate execution as their swap result.
 ## Protocol Fees
 The multiplexer does not charge a protocol fee on its own virtual pool. v4 charges
-the protocol fee natively on each NESTED candidate swap (against the candidate's
+the protocol fee natively on each nested candidate swap (against the candidate's
 own pool), so layering an additional multiplexer-level fee would double-charge
 users. Operators who want to collect fees through this routing path SHOULD
 configure them on the underlying candidate pools.
 ## Tolerance Enforcement
 Callers may set `strictTolerancePips` in MultiplexerHookData to revert if aggregate
 execution falls below the best individual indicative by more than the specified
-tolerance. This is a downside-only check — split fill producing more output than
+tolerance. This is a downside-only check: split fill producing more output than
 the best individual indicative (the expected case) does not trigger a revert.
+The baseline is the best pre-execution indicative across the targets, and it is not
+re-derived after execution. A tier-1 indicative can be a constant-liquidity upper
+bound that overstates output for swaps large enough to exhaust a quoter's depth
+(e.g. a DualPool extrapolating its in-range buckets to the price extreme), so each
+candidate's contribution to the baseline is first bounded by its declared effective
+output liquidity (`getEffectiveLiquidity`); see `_baselineContribution`. Without
+that bound a large swap against a deep-looking but shallow quoter would set an
+unreachable threshold and trip the check on a fair fill. The bound applies only to
+quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact
+against real pool state, and tier-3/4 opaque quoters cannot be bounded (the
+trusted-targets note below covers them). It is computed only when strict tolerance
+is enabled.
+A candidate that wins quoting but then contributes
+nothing (it reverts and is soft-skipped (see Greedy Split Fill), or fills less than
+it quoted) drops aggregate execution below that baseline and can trip the tolerance
+revert even when the other candidates filled acceptably. This is intentional and
+fail-safe (the check is downside-only, so the worst outcome is a revert, never a
+bad fill), but it means a flaky or adversarial candidate in the target set can force
+a revert ("quote-baiting") for a caller who enabled strict tolerance. Enable strict
+tolerance only over trusted targets; otherwise bound slippage with a router-side
+minimum-output / maximum-input check, which measures the actual aggregate execution
+rather than a per-candidate pre-execution baseline. Hard-failing the
+baseline-setting candidate instead of soft-skipping it would not help: its revert
+would still abort the swap, and would break soft-fail resilience for the common
+(non-strict) path, so the soft-skip is kept.
+## Slippage Control: the outer `sqrtPriceLimitX96` is not enforced
+The `sqrtPriceLimitX96` a caller passes on the outer swap to the multiplexer pool has
+no effect on execution. The real swaps run as nested `poolManager.swap` calls inside
+`_beforeSwap`, and those derive their own per-candidate price limits; the outer limit
+is never propagated to them. The multiplexer then returns a `BeforeSwapDelta` that
+offsets the outer swap, so the virtual pool itself performs no price-bounded
+execution either. Callers MUST bound slippage via `strictTolerancePips` and/or a
+minimum-output (or maximum-input) check in their own router. Treating the outer
+`sqrtPriceLimitX96` as an onchain price bound (as one would for an ordinary v4 pool)
+provides no protection here.
 ## Call Flow
 ```
 Router → poolManager.swap(multiplexerPool, hookData=[targets])
@@ -89,19 +124,29 @@ the candidate's own pool design.
 security-contact: security@uniswap.org
 
 
+## Constants
+### PIPS_DENOMINATOR
+Parts-per-million denominator that gives `strictTolerancePips` its unit. Aggregate
+execution fails the tolerance when `deviation * PIPS_DENOMINATOR > baseline * pips`.
+
+
+```solidity
+uint256 private constant PIPS_DENOMINATOR = 1_000_000
+```
+
+
 ## Functions
 ### constructor
 
 
 ```solidity
-constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Ownable(_owner);
+constructor(IPoolManager _poolManager) BaseHook(_poolManager);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`_poolManager`|`IPoolManager`|The Uniswap v4 PoolManager.|
-|`_owner`|`address`|      Initial owner.|
 
 
 ### getHookPermissions
@@ -162,6 +207,9 @@ back the simulated candidate swap, including hook state, PoolManager state, ERC-
 transfers, vault calls, and transient deltas. Reverts with [NotSelf](/src/alf/ALFMultiplexer.sol/contract.ALFMultiplexer.md#notself) if invoked by
 any caller other than this contract.
 
+Precondition: `amountSpecified != 0`. Reachable only via the contract's own self-call;
+zero-amount targets are filtered out upstream before this is invoked.
+
 
 ```solidity
 function quoteTargetBySwap(
@@ -190,7 +238,7 @@ function quoteTargetBySwap(
 ### _beforeAddLiquidity
 
 Blocks all liquidity additions. The multiplexer pool is a virtual dispatch mechanism
-with zero liquidity — all real execution happens on candidates' pools.
+with zero liquidity; all real execution happens on candidates' pools.
 
 
 ```solidity
@@ -236,7 +284,7 @@ function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, 
 Top-level multiplex-and-execute. Detects the execution mode from the hookData:
 **Autonomous mode** (all targets have amountSpecified = 0):
 Queries indicatives, sorts candidates by quote quality, and executes a greedy
-split fill with price limits. Fully self-contained.
+split fill with price limits. Self-contained.
 **Pre-planned mode** (any target has amountSpecified != 0):
 Executes targets in the given order with their specified amounts. A target
 with amountSpecified = 0 receives whatever remains. Skips sorting. Indicatives
@@ -244,15 +292,15 @@ are queried only if tolerance enforcement is enabled.
 
 
 ```solidity
-function _multiplexAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
+function _multiplexAndSwap(PoolKey calldata key, bool zeroForOne, int256 swapAmount, bytes calldata hookData)
     internal
-    returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote);
+    returns (BalanceDelta totalDelta, address primaryQuoter, uint256 bestQuote, uint256 strictTolerancePips);
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`<none>`|`PoolKey`||
+|`key`|`PoolKey`||
 |`zeroForOne`|`bool`|The swap direction.|
 |`swapAmount`|`int256`|The swap amount (after protocol fee deduction for exact input).|
 |`hookData`|`bytes`|  ABI-encoded MultiplexerHookData from the caller.|
@@ -263,13 +311,14 @@ function _multiplexAndSwap(PoolKey calldata, bool zeroForOne, int256 swapAmount,
 |----|----|-----------|
 |`totalDelta`|`BalanceDelta`|    Accumulated BalanceDelta across all fills.|
 |`primaryQuoter`|`address`| The first quoter in fill order.|
-|`bestQuote`|`uint256`|     The best individual indicative (tolerance baseline). 0 if skipped.|
+|`bestQuote`|`uint256`|     The strict-tolerance baseline (best individual indicative, reserve- bounded when strict tolerance is enabled). 0 if skipped.|
+|`strictTolerancePips`|`uint256`|The caller's strict-tolerance setting, decoded once here and returned so `_beforeSwap` does not re-decode the full hookData.|
 
 
 ### _multiplex
 
 Single-winner selection used by the `quote()` view function. Iterates all targets
-and returns the quoter with the best indicative quote. Does NOT execute any swaps.
+and returns the quoter with the best indicative quote. Does not execute any swaps.
 
 
 ```solidity
@@ -317,26 +366,21 @@ function _runTargeted(
 
 ### _queryTargetView
 
-Query a single targeted quoter for its indicative quote. Performs three checks:
-1. `isLive()` — skip quoters that report themselves as offline
-2. `maxGas()` — read the declared gas budget for the indicative call
-3. `getIndicativeQuote()` — call with the gas budget, catch failures
-Returns (0, "") if any step fails. Failures are soft — the quoter is skipped
-without reverting the entire multiplexer.
-Constructs the per-quoter ALFHookData by pairing the shared attestation data
-with the target's quoter-specific curve update data.
-
 Resolve an indicative quote for a single target via the cheapest accurate path
-available. Waterfall, in order of preference:
-1. **IALFHook** (ERC-165 detected) — full liveness/gas-budget/attestation path.
-2. **SwapSimulator** (vanilla CFMM or light hook) — tick-walks the pool's real
+available. Performs liveness/gas-budget/attestation checks for tier-1 quoters and
+returns (0, "") on any soft failure so the caller skips the quoter without reverting
+the whole multiplexer. Constructs the per-quoter ALFHookData by pairing the shared
+attestation data with the target's quoter-specific curve update data.
+Waterfall, in order of preference:
+1. **IALFHook** (ERC-165 detected): full liveness/gas-budget/attestation path.
+2. **SwapSimulator** (vanilla CFMM or light hook): tick-walks the pool's real
 state via `extsload`. Exact when nothing outside the AMM curve modifies the
 swap result. See `_isSimulatorSafe` for the gate.
-3. **IIndicativeQuote** (ERC-165 detected) — cheap view-style quote exposed by
+3. **IIndicativeQuote** (ERC-165 detected): cheap view-style quote exposed by
 hooks that override the AMM curve (e.g. PropAMM aggregators).
-4. **Reverting self-swap** — signaled by returning `q == 0` here; the actual swap
+4. **Reverting self-swap**: signaled by returning `q == 0` here; the actual swap
 attempt happens in `_queryTargetBySwap`.
-The caller (`_queryTargetBySwap`) uses tiers 1–3's result directly when non-zero
+The caller (`_queryTargetBySwap`) uses tiers 1-3's result directly when non-zero
 and only falls back to tier 4 when this returns `(0, "")`.
 
 
@@ -393,10 +437,83 @@ bypasses `try/catch` for hookless pools.
 function _supportsInterface(address hook, bytes4 interfaceId) internal view returns (bool ok);
 ```
 
+### _baselineContribution
+
+Reserve-aware strict-tolerance baseline contribution for one candidate. The strict
+check (see `_beforeSwap`) compares actual aggregate execution against this baseline,
+so the baseline must track DELIVERABLE output, not a quoter's ranking estimate. A
+tier-1 (IALFHook) `getIndicativeQuote` can be a constant-liquidity upper bound that
+overstates output for a swap large enough to exhaust the quoter's depth (e.g.
+DualPool extrapolating its in-range buckets to the price extreme). Left unbounded,
+such a quote inflates the threshold and trips the check on an otherwise-acceptable
+fill. Bound the contribution by the candidate's declared effective output liquidity:
+- exact input: cap the expected output at the deliverable output reserve;
+- exact output: drop the candidate (return 0) when it cannot deliver the requested
+output, so it cannot set an optimistically-low input baseline.
+Candidates that are not IALFHook (tier-2 simulator quotes are already exact against
+real pool state; tier-3 IIndicativeQuote and tier-4 opaque hooks expose no reserve
+view) or that report zero reserves are returned unbounded — there is no cheaper
+on-chain depth signal to bound them with. That residual is exactly why strict
+tolerance is documented as safe only over trusted targets. Ranking/sort is unaffected;
+this shapes only the strict-tolerance baseline, and runs only when strict tolerance is
+enabled.
+
+
+```solidity
+function _baselineContribution(PoolKey memory poolKey, uint256 indicative, bool zeroForOne, int256 amountSpecified)
+    internal
+    view
+    returns (uint256);
+```
+
+### _bestBoundedIndicative
+
+Fold one candidate's already-queried indicative `q` into the running strict-tolerance
+baseline. Bounds the contribution by deliverable reserves (`_baselineContribution`)
+when `boundBaseline` is set, and keeps it if it improves on `currentBest`. Shared by
+the autonomous (`_prepareCandidates`) and pre-planned (`_queryBestIndicative`)
+baseline reductions so the logic lives in one place.
+PRESERVED DIVERGENCE: pre-planned mode always bounds (its only caller is the strict
+path), so it passes `boundBaseline = true`; autonomous mode bounds only when strict
+tolerance is enabled, so it passes `boundBaseline = (strictTolerancePips > 0)`. When
+`boundBaseline` is false the raw indicative is used as the contribution unchanged.
+`currentBest == 0` is the unset sentinel (a real baseline is always > 0; a bounded
+contribution of 0 means "drop from baseline"). For exact input the highest output
+wins; for exact output the lowest input wins.
+
+
+```solidity
+function _bestBoundedIndicative(
+    PoolKey memory poolKey,
+    uint256 q,
+    bool zeroForOne,
+    int256 swapAmount,
+    bool boundBaseline,
+    uint256 currentBest
+) internal view returns (uint256 best);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|     The candidate's pool key.|
+|`q`|`uint256`|           The candidate's already-queried indicative quote (0 means no quote).|
+|`zeroForOne`|`bool`|  The swap direction.|
+|`swapAmount`|`int256`|  The swap amount (negative = exact input).|
+|`boundBaseline`|`bool`|Whether to bound the contribution by deliverable reserves.|
+|`currentBest`|`uint256`| The running best baseline (0 if unset).|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`best`|`uint256`|       The updated running best baseline.|
+
+
 ### _isSimulatorSafe
 
 True when `SwapSimulator.simulateSwap` will produce an exact-in-frame quote for the
-pool. The hook (if any) must NOT:
+pool. The hook (if any) must not:
 - return a `beforeSwap` delta (could override curve output)
 - return an `afterSwap` delta (could adjust post-swap delta)
 - have `BEFORE_SWAP_FLAG` set AND be a dynamic-fee pool (would let the hook push an
@@ -415,7 +532,7 @@ function _isSimulatorSafe(PoolKey memory key) internal pure returns (bool);
 ### _queryTargetBySwap
 
 Resolve a per-target quote. First tries the cheap waterfall in `_queryTargetView`
-(tiers 1–3); if every tier declines (`q == 0` after the view path), falls through to
+(tiers 1-3); if every tier declines (`q == 0` after the view path), falls through to
 the expensive but universal reverting-self-swap tier-4 fallback. Tier 4 supports
 hooks that override the AMM and do not advertise any indicative interface (e.g.
 DualPoolHook predecessors, custom one-off integrations).
@@ -432,10 +549,72 @@ function _queryTargetBySwap(
 
 ### _parseQuoteOrZero
 
+Local QuoteSwap parser, kept instead of `QuoterRevert.parseQuoteAmount`: that helper
+REVERTS (`UnexpectedRevertBytes`) on a non-`QuoteSwap` selector, but the tier-4
+fallback must SOFT-FAIL — a candidate self-swap that reverts with any other error has
+to yield 0 here so the quoter is skipped, not abort the whole multiplexer. This
+version also length-gates the reason to the exact `selector + uint256` encoding (36
+bytes) before reading it.
+
 
 ```solidity
 function _parseQuoteOrZero(bytes memory reason) internal pure returns (uint256 quoteAmount);
 ```
+
+### _filledComponent
+
+The "filled" component of a candidate's swap delta, used to decrement `remaining`.
+exact input:  filled = input consumed (negative): `remaining -= negative` → less negative
+exact output: filled = output received (positive): `remaining -= positive` → less positive
+Both converge `remaining` toward zero. Written identically in both fill loops.
+
+
+```solidity
+function _filledComponent(BalanceDelta delta, bool zeroForOne, bool exactInput) internal pure returns (int128);
+```
+
+### _fillCandidate
+
+Execute a single candidate fill: the nested `poolManager.swap` wrapped in try/catch,
+followed by extraction of the filled component and the per-fill telemetry emit.
+Shared by both the autonomous (`_executeFills`) and pre-planned (`_runPrePlannedFills`)
+loops, which differ only in how they derive `amount` and `limit`.
+SOFT-FAIL: a reverting candidate (vault DoS, malicious hook, etc.) is caught, its
+transient state (hook state, PM deltas, ERC-20 transfers, vault calls) rolled back by
+EVM revert semantics, `FillFailed` emitted, and `(0, ZERO_DELTA, false)` returned so
+the caller leaves `remaining`/`totalDelta` unchanged and the next candidate inherits
+the original budget.
+
+
+```solidity
+function _fillCandidate(
+    PoolKey memory poolKey,
+    bytes memory hookData,
+    bool zeroForOne,
+    bool exactInput,
+    int256 amount,
+    uint160 limit
+) internal returns (int128 filled, BalanceDelta delta, bool ok);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`poolKey`|`PoolKey`|   The candidate's pool key.|
+|`hookData`|`bytes`|  hookData forwarded to the candidate's swap.|
+|`zeroForOne`|`bool`|The swap direction.|
+|`exactInput`|`bool`|Whether the outer swap is exact input.|
+|`amount`|`int256`|    The amount to request from this candidate (already clamped by the caller).|
+|`limit`|`uint160`|     The `sqrtPriceLimitX96` for this candidate's swap.|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`filled`|`int128`|   The filled component (see `_filledComponent`); 0 on soft-fail.|
+|`delta`|`BalanceDelta`|    The candidate's swap delta; ZERO on soft-fail.|
+|`ok`|`bool`|       True when the swap succeeded; false on soft-fail.|
+
 
 ### _isPrePlanned
 
@@ -496,8 +675,11 @@ function _executePrePlanned(MultiplexerHookData memory ahd, bool zeroForOne, int
 
 ### _queryBestIndicative
 
-Query all targets for indicatives and return the best one.
-Used by pre-planned mode only when tolerance enforcement is enabled.
+Query all targets for indicatives and return the best one. Used by pre-planned mode
+only when tolerance enforcement is enabled, so it ALWAYS bounds each contribution by
+deliverable reserves (`boundBaseline = true`): an over-optimistic ranking quote must
+not inflate the threshold. Shares the per-candidate reduction with the autonomous
+baseline via `_bestBoundedIndicative`.
 
 
 ```solidity
@@ -559,7 +741,7 @@ function _prepareCandidates(bool zeroForOne, int256 swapAmount, MultiplexerHookD
 |----|----|-----------|
 |`candidates`|`FillCandidate[]`|   Array of valid candidates, sorted best-first.|
 |`count`|`uint256`|        Number of valid candidates (may be < candidates.length).|
-|`bestIndividual`|`uint256`|The best individual indicative quote (tolerance baseline).|
+|`bestIndividual`|`uint256`|The strict-tolerance baseline: the best individual indicative, reserve-bounded (see `_baselineContribution`) when strict tolerance is enabled; the raw best indicative otherwise (telemetry only).|
 
 
 ### _executeFills
@@ -581,7 +763,7 @@ the same tick), the next candidate's price can't serve as a valid limit because 
 requires `limit < currentPrice` (zeroForOne) or `limit > currentPrice` (oneForZero).
 In this case, the limit falls through to the extreme (MIN/MAX), which means the
 current candidate is fully drained before moving to the next. This is correct but
-not optimal for the degenerate equal-price case — acceptable since the sort by
+not optimal for the degenerate equal-price case, but acceptable since the sort by
 indicative ensures the better quoter (by fee/liquidity) fills first regardless.
 ## Remaining Tracking
 For exact input (amountSpecified < 0):
@@ -639,7 +821,7 @@ function _extractOutput(BalanceDelta delta, SwapParams calldata params) internal
 
 Convert the accumulated BalanceDelta from nested fills into a BeforeSwapDelta
 that offsets the virtual pool's swap. The multiplexer charges no fee of its
-own — protocol fees flow through the candidates' nested v4 swaps natively.
+own; protocol fees flow through the candidates' nested v4 swaps natively.
 
 
 ```solidity
@@ -667,7 +849,7 @@ event MultiplexerExecuted(
 |`primaryQuoter`|`address`|The first quoter in the sorted fill order (best indicative).|
 |`zeroForOne`|`bool`|   The swap direction.|
 |`amountSpecified`|`int256`|The original swap amount (negative = exact input).|
-|`bestQuote`|`uint256`|    The best individual indicative quote (tolerance baseline).|
+|`bestQuote`|`uint256`|    The strict-tolerance baseline: the best individual indicative, reserve-bounded (see `_baselineContribution`) when strict tolerance is enabled; the raw best indicative otherwise.|
 
 ### FillExecuted
 Emitted for each individual fill during a split fill execution.
@@ -734,8 +916,8 @@ error InsufficientLiquidity();
 
 ### QuoteDeviation
 Strict tolerance check failed. For exact input, effective output was below the
-best individual indicative output by more than `strictTolerancePips`; for exact
-output, effective input paid was above the best individual indicative input by
+reserve-bounded baseline output by more than `strictTolerancePips`; for exact
+output, effective input paid was above the reserve-bounded baseline input by
 more than `strictTolerancePips`.
 
 
@@ -747,7 +929,7 @@ error QuoteDeviation(uint256 indicative, uint256 executed);
 
 |Name|Type|Description|
 |----|----|-----------|
-|`indicative`|`uint256`|The best individual indicative quote used as the tolerance baseline (output for exact input, input for exact output).|
+|`indicative`|`uint256`|The reserve-bounded baseline used for the tolerance check (output for exact input, input for exact output). See `_baselineContribution`.|
 |`executed`|`uint256`|The effective executed amount compared to the baseline (output for exact input, input paid for exact output).|
 
 ### NotSelf
@@ -770,7 +952,7 @@ error TargetsRequired();
 ### MissingQuoteBaseline
 `strictTolerancePips > 0` but no indicative baseline could be established (every
 candidate's quote query failed). Strict tolerance has nothing to compare against,
-so the swap is refused — the caller asked for a guarantee the multiplexer cannot make.
+so the swap is refused: the caller asked for a guarantee the multiplexer cannot make.
 
 
 ```solidity
@@ -796,6 +978,34 @@ produces malformed downstream fills.
 
 ```solidity
 error TargetsOverAllocated();
+```
+
+### TargetCurrencyMismatch
+A target's pool trades a different currency pair than the multiplexer's virtual pool.
+The virtual pool's `BeforeSwapDelta` can only offset deltas in its own
+`currency0`/`currency1`, so a mismatched-pair fill would leave non-netting deltas and
+revert the unlock with the opaque `CurrencyNotSettled`. Caught up front instead.
+
+
+```solidity
+error TargetCurrencyMismatch(uint256 index);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The index of the offending target in the `targets` array.|
+
+### UnrepresentableDelta
+An accumulated delta component equals `type(int128).min`, which `_toBeforeSwapDelta`
+cannot negate (overflow in 0.8.x). Unreachable through normal fills (v4's checked
+`toInt128` casts bound real deltas far below this) but surfaced as a clear error
+rather than an opaque arithmetic panic if a crafted candidate delta ever hits it.
+
+
+```solidity
+error UnrepresentableDelta();
 ```
 
 ## Structs

@@ -1,5 +1,5 @@
 # FeeConfiguration
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/stable/base/FeeConfiguration.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/stable/base/FeeConfiguration.sol)
 
 **Inherits:**
 [IFeeConfiguration](/src/stable/interfaces/IFeeConfiguration.sol/interface.IFeeConfiguration.md), BlockNumberish
@@ -10,7 +10,7 @@ FeeConfiguration
 Abstract contract that implements the IFeeConfiguration interface
 
 
-## State Variables
+## Constants
 ### MAX_OPTIMAL_FEE_E6
 The maximum optimal fee in 1e6 precision: 1% (1e4 out of 1e6)
 
@@ -29,6 +29,7 @@ uint256 public constant MAX_TARGET_MULTIPLIER = 100
 ```
 
 
+## State Variables
 ### configManager
 The address of the config manager
 

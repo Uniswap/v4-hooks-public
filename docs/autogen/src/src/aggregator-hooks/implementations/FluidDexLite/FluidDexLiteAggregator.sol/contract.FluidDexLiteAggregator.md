@@ -1,5 +1,5 @@
 # FluidDexLiteAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/3f6bc966a9bb92f3653b399dedead4d6e95c20a7/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IFluidDexLiteCallback](/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol/interface.IFluidDexLiteCallback.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Fluid DEX Lite pools
 Implements the IFluidDexLiteCallback interface for swap callbacks
 
 
-## State Variables
+## Constants
 ### fluidDexLite
 The Fluid DEX Lite contract
 
@@ -31,6 +31,21 @@ IFluidDexLiteResolver public immutable fluidDexLiteResolver
 ```
 
 
+### salt
+
+```solidity
+bytes32 private immutable salt
+```
+
+
+### FLUID_NATIVE_CURRENCY
+
+```solidity
+address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+```
+
+
+## State Variables
 ### dexKey
 The key identifying the Fluid DEX Lite pool
 
@@ -53,20 +68,6 @@ PoolId public localPoolId
 
 ```solidity
 bool private _isReversed
-```
-
-
-### salt
-
-```solidity
-bytes32 private immutable salt
-```
-
-
-### FLUID_NATIVE_CURRENCY
-
-```solidity
-address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 ```
 
 

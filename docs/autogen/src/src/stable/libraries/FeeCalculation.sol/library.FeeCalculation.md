@@ -1,5 +1,5 @@
 # FeeCalculation
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/fb38bd58a3855b38f1e6e41a9ca471e83744f2b7/src/stable/libraries/FeeCalculation.sol)
+[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/9ca86fbc7a5f56be0963bea4dd445ca15a270071/src/stable/libraries/FeeCalculation.sol)
 
 **Title:**
 FeeCalculation
@@ -7,7 +7,7 @@ FeeCalculation
 Library providing core mathematical functions for calculating dynamic swap fees
 
 
-## State Variables
+## Constants
 ### ONE_E6
 Scalar for pips precision (1e6 = 100%)
 
