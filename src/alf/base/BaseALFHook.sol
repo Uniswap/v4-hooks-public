@@ -9,6 +9,7 @@ import {BaseHook} from "../../base/BaseHook.sol";
 import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IALFHook, ALFHookData} from "../interfaces/IALFHook.sol";
+import {IHookStats} from "../interfaces/IHookStats.sol";
 
 /// @title BaseALFHook
 /// @author Uniswap Labs
@@ -60,12 +61,12 @@ abstract contract BaseALFHook is BaseHook, DeltaResolver, IALFHook {
 
     // ──── Reserves (default: no off-pool reserves) ────
 
-    /// @inheritdoc IALFHook
+    /// @inheritdoc IHookStats
     function getReserves(PoolKey calldata) external view virtual override returns (uint256, uint256) {
         return (0, 0);
     }
 
-    /// @inheritdoc IALFHook
+    /// @inheritdoc IHookStats
     function getEffectiveLiquidity(PoolKey calldata) external view virtual override returns (uint256, uint256) {
         return (0, 0);
     }

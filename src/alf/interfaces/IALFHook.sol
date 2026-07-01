@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {IHookStats} from "./IHookStats.sol";
 
 /// @notice Standard hookData encoding for ALF hooks.
 /// @dev Callers MUST encode hookData as `abi.encode(ALFHookData(...))`.
@@ -18,7 +19,7 @@ struct ALFHookData {
 ///      and hook metadata. Hooks expose their own capabilities directly rather than
 ///      relying on a separate registry contract.
 /// @custom:security-contact security@uniswap.org
-interface IALFHook is IERC165 {
+interface IALFHook is IERC165, IHookStats {
     /// @notice Get an indicative quote for routing purposes.
     /// @dev MUST be a view function. Callers invoke via staticcall.
     /// @dev MUST NOT revert under normal conditions. If the quoter cannot
@@ -47,29 +48,6 @@ interface IALFHook is IERC165 {
     /// @dev Hooks that exceed their declared maxGas will have their
     ///      getIndicativeQuote calls fail, resulting in router deprioritization.
     function maxGas() external view returns (uint32);
-
-    /// @notice Total reserves managed by the hook (true TVL).
-    /// @dev Should include all assets under management: ERC-20 balances, ERC-6909 claims,
-    ///      vault deposits, rehypothecated assets, etc. Returns (0, 0) for hooks that do
-    ///      not manage off-pool reserves.
-    /// @param key The pool key for the specific pool.
-    /// @return token0 Total amount of token0 reserves.
-    /// @return token1 Total amount of token1 reserves.
-    function getReserves(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
-
-    /// @notice Assets available for immediate swapping.
-    /// @dev Returns liquidity that can be accessed right now for trading. Always <= getReserves().
-    ///      May differ from getReserves() if some liquidity is not available for deployment (e.g., from a vault with too much utilization).
-    ///      Returns (0, 0) for hooks that do not manage off-pool reserves.
-    ///      Implementations SHOULD report fee-net, immediately-deliverable reserves: consumers (such as
-    ///      the ALFMultiplexer's reserve-bounded strict-tolerance baseline) treat the returned value as
-    ///      the deliverable output cap, a bound that is only sound when reserves are net of the fee a swap
-    ///      pays. An over-reported (gross) value weakens those consumers' deliverability bounds, which is
-    ///      part of the trusted-targets assumption such consumers make.
-    /// @param key The pool key for the specific pool.
-    /// @return token0 Immediately swappable token0 liquidity.
-    /// @return token1 Immediately swappable token1 liquidity.
-    function getEffectiveLiquidity(PoolKey calldata key) external view returns (uint256 token0, uint256 token1);
 
     /// @notice Simulate a swap up to a target price, returning both input consumed and output received.
     /// @dev Used by the multiplexer and router for split fill planning. The swap terminates
