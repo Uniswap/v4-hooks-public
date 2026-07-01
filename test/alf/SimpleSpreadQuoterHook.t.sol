@@ -487,6 +487,29 @@ contract SimpleSpreadQuoterHookTest is Test, Deployers {
         assertEq(aout, 0);
     }
 
+    /// @dev A paused pool must not produce a price-bounded simulation: routers reading
+    ///      `swapToPrice` for split planning would otherwise plan flow into a pool whose
+    ///      `beforeSwap` rejects it.
+    function test_swapToPrice_pausedPool_returnsZero() public {
+        vm.prank(owner);
+        hook.setPoolLive(testPoolKey, false);
+
+        (uint256 ain, uint256 aout) = hook.swapToPrice(testPoolKey, true, -1e18, TickMath.MIN_SQRT_PRICE + 1, "");
+        assertEq(ain, 0, "paused pool simulates no input");
+        assertEq(aout, 0, "paused pool simulates no output");
+    }
+
+    /// @dev `initializePool` must reject a PoolKey referencing a different hook: accepting it
+    ///      would register active-tick state for a pool this hook does not serve.
+    function test_initializePool_revertsOnWrongHookAddress() public {
+        PoolKey memory foreign = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(0xBEEF))
+        });
+        vm.prank(owner);
+        vm.expectRevert(SpreadQuoterBase.InvalidHookAddress.selector);
+        hook.initializePool(foreign, Constants.SQRT_PRICE_1_1);
+    }
+
     /// @dev Defense-in-depth: `SwapSimulator` validates `lpFeePips <= MAX_SWAP_FEE` (1e6)
     ///      directly so out-of-range fees fail fast with a clear `InvalidLpFeePips` error
     ///      instead of corrupting `SwapMath.computeSwapStep`'s unchecked subtraction.
