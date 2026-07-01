@@ -8,7 +8,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {DualPoolHook} from "../../../src/alf/DualPoolHook.sol";
@@ -26,6 +26,7 @@ import {MockERC4626} from "../mocks/MockERC4626.sol";
 ///         post-state of every successful operation.
 contract DualPoolHandler is Test {
     using PoolIdLibrary for PoolKey;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     // ──── System-under-test wiring ────
 
@@ -58,6 +59,14 @@ contract DualPoolHandler is Test {
     uint256 public ghost_totalWithdrawn1;
     uint256 public ghost_totalYieldInjected0;
     uint256 public ghost_totalYieldInjected1;
+
+    /// @dev Net token flow into the pool from swaps, per side (signed). A swap changes the hook's
+    ///      position by the negation of the swapper's delta, so the pool's token0 change for a fill
+    ///      is `-delta.amount0()` (positive = pool received token0, negative = pool paid it out).
+    ///      Consumed by the per-side value-conservation invariant, which must account for swap flow
+    ///      on top of deposits/yield/bootstrap.
+    int256 public ghost_swapNetIn0;
+    int256 public ghost_swapNetIn1;
 
     /// @dev Per-call counters — useful for diagnostics if invariants regress.
     uint256 public ghost_addLiquidityCalls;
@@ -206,9 +215,14 @@ contract DualPoolHandler is Test {
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         ) returns (
-            BalanceDelta
-        ) {}
-            catch {}
+            BalanceDelta d
+        ) {
+            // Pool's token change = negation of the swapper's delta. Accumulate net inflow per side
+            // so the value-conservation invariant can bound LP withdrawals by everything that ever
+            // entered the pool (deposits + yield + bootstrap + swap flow).
+            ghost_swapNetIn0 += -int256(d.amount0());
+            ghost_swapNetIn1 += -int256(d.amount1());
+        } catch {}
     }
 
     /// @notice Inject yield into one of the vaults. Tests that LP shares correctly accrue
