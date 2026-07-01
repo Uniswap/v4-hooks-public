@@ -31,10 +31,10 @@ via_ir = false
 optimizer_runs = 200
 
 [fuzz]
-runs = 10
+runs = 512
 
 [invariant]
-runs = 32
+runs = 512
 depth = 32
 fail_on_revert = false
 shrink_run_limit = 1024
