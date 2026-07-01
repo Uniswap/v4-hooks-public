@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -21,6 +21,8 @@ import {
     DepositLocked
 } from "../../src/alf/types/Shares.sol";
 import {PoolVault} from "../../src/alf/base/PoolVault.sol";
+import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
+import {InsufficientPoolBalance} from "../../src/alf/types/Inventory.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
@@ -88,6 +90,14 @@ contract MockPoolVault is PoolVault {
 
     function withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) external {
         _withdrawFromVault(poolId, currency, amount);
+    }
+
+    function drainVaultBestEffort(PoolId poolId, Currency currency) external {
+        _drainVaultBestEffort(poolId, currency);
+    }
+
+    function debitPoolERC20(PoolId poolId, Currency currency, uint256 amount) external {
+        _debitPoolERC20(poolId, currency, amount);
     }
 
     function getVaultShares(PoolId poolId, Currency currency) external view returns (uint256) {
@@ -726,5 +736,192 @@ contract PoolVaultTest is Test, Deployers {
         // Bootstrap deposited 1000e18 vault shares at 1:1, so previewRedeem = 1000 * (1 - 5%) = 950.
         assertEq(effective, 950e18, "(b) effectiveBalance reflects previewRedeem net of exit fee");
         assertLt(effective, totalAfter, "(b) effective < totalAssets when exit fee is active");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Zero-amount lifecycle edges
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev A zero-share deposit converts to zero token amounts on both legs, so the pull path's
+    ///      `want == 0` early return fires and no transfer occurs. Locks in that the degenerate
+    ///      call is a harmless no-op rather than a revert or a spurious 1-wei round-up pull.
+    function test_deposit_zeroShares_pullsNothing() public {
+        _bootstrap(alice, 1000e18);
+
+        uint256 supplyBefore = vault.totalShares(poolIdA);
+        uint256 balBefore = token0.balanceOf(bob);
+
+        vm.prank(bob);
+        (uint256 a0, uint256 a1) = vault.deposit(poolKeyA, bob, bob, 0);
+
+        assertEq(a0, 0, "no asset0 pulled for zero shares");
+        assertEq(a1, 0, "no asset1 pulled for zero shares");
+        assertEq(vault.totalShares(poolIdA), supplyBefore, "supply unchanged");
+        assertEq(vault.userShares(poolIdA, bob), 0, "no shares minted");
+        assertEq(token0.balanceOf(bob), balBefore, "no tokens moved");
+    }
+
+    /// @dev A zero-share withdraw converts to zero token amounts, so the push path's
+    ///      `amount == 0` early return fires: no vault interaction, no transfer.
+    function test_withdraw_zeroShares_pushesNothing() public {
+        _bootstrap(alice, 1000e18);
+
+        uint256 sharesBefore = vault.userShares(poolIdA, alice);
+        uint256 vaultSharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+
+        (uint256 a0, uint256 a1) = vault.withdraw(poolKeyA, alice, alice, 0);
+
+        assertEq(a0, 0, "no asset0 pushed for zero shares");
+        assertEq(a1, 0, "no asset1 pushed for zero shares");
+        assertEq(vault.userShares(poolIdA, alice), sharesBefore, "share balance unchanged");
+        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), vaultSharesBefore, "vault untouched");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Non-vaulted shortfall + cross-pool share-leak guards
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev For a non-vaulted pool with insufficient raw ERC-20, `_ensureERC20`'s
+    ///      `bal - amount` underflows and panics: there is deliberately no sentinel revert
+    ///      (see InventoryLib.ensureERC20 NatSpec). Locks the documented failure mode in.
+    function test_ensureERC20_nonVaultedShortfall_panics() public {
+        _bootstrapPool(poolKeyB, alice, 500e18); // unvaulted: _erc20[B] = 500e18
+
+        vm.expectRevert(stdError.arithmeticError);
+        vault.ensureERC20(poolIdB, poolKeyB.currency0, 500e18 + 1);
+    }
+
+    /// @dev `CrossPoolShareLeak` fires when a vault redemption consumes more shares than the
+    ///      bucket owns. Real vaults cannot normally do this; mock the vault's `withdraw`
+    ///      return to simulate a corrupted/adversarial share consumption.
+    function test_withdrawFromVault_revertsOnCrossPoolShareLeak() public {
+        _bootstrap(alice, 1000e18); // bucket owns 1000e18 vault0 shares (1:1)
+
+        uint256 poolShares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        vm.mockCall(
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.withdraw.selector, 100e18, address(vault), address(vault)),
+            abi.encode(poolShares + 1)
+        );
+
+        vm.expectRevert(InventoryLib.CrossPoolShareLeak.selector);
+        vault.withdrawFromVault(poolIdA, poolKeyA.currency0, 100e18);
+    }
+
+    /// @dev Same guard on the `_ensureERC20` vaulted-shortfall path.
+    function test_ensureERC20_revertsOnCrossPoolShareLeak() public {
+        _bootstrap(alice, 1000e18);
+
+        uint256 poolShares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        vm.mockCall(
+            address(vault0),
+            abi.encodeWithSelector(IERC4626.withdraw.selector, 100e18, address(vault), address(vault)),
+            abi.encode(poolShares + 1)
+        );
+
+        vm.expectRevert(InventoryLib.CrossPoolShareLeak.selector);
+        vault.ensureERC20(poolIdA, poolKeyA.currency0, 100e18);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Best-effort vault deposit (afterSwap re-deposit semantics)
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev When the vault rejects the afterSwap-style re-deposit, `_depositAllToVault`
+    ///      soft-fails: the raw ERC-20 stays on the pool's ledger, vault shares are untouched,
+    ///      and `VaultDepositSkipped` carries the vault's raw revert data for diagnostics.
+    function test_depositAllToVault_skipsAndEmitsOnVaultRejection() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+        _bootstrap(alice, 1000e18);
+
+        // Pull 100 back to the raw ledger so the sweep has something to push.
+        vault.withdrawFromVault(poolIdA, poolKeyA.currency0, 100e18);
+        assertEq(vault.getERC20(poolIdA, poolKeyA.currency0), 100e18);
+
+        vv2.setDepositShortfall(true);
+        uint256 sharesBefore = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit PoolVault.VaultDepositSkipped(
+            poolIdA, poolKeyA.currency0, 100e18, abi.encodeWithSelector(MockMorphoVaultV2.DepositShortfall.selector)
+        );
+        vault.depositAllToVault(poolIdA, poolKeyA.currency0);
+
+        assertEq(vault.getERC20(poolIdA, poolKeyA.currency0), 100e18, "raw ledger intact after skip");
+        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), sharesBefore, "vault shares untouched");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Best-effort vault drain (emergency rescue leg)
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev Cooperative vault: the full position redeems back to the raw ledger and
+    ///      `VaultDrained` reports shares and assets.
+    function test_drainVaultBestEffort_cooperativeVault_drainsToERC20() public {
+        _bootstrap(alice, 1000e18);
+        uint256 shares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        assertGt(shares, 0);
+
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit PoolVault.VaultDrained(poolIdA, poolKeyA.currency0, shares, 1000e18);
+        vault.drainVaultBestEffort(poolIdA, poolKeyA.currency0);
+
+        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), 0, "position fully redeemed");
+        assertEq(vault.getERC20(poolIdA, poolKeyA.currency0), 1000e18, "assets credited to raw ledger");
+    }
+
+    /// @dev Bricked vault: the redeem reverts, the drain is skipped (shares intact, no raw
+    ///      credit), and `VaultDrainSkipped` carries the vault's revert data. The surrounding
+    ///      emergency action must not be blocked by the failed rescue.
+    function test_drainVaultBestEffort_brickedVault_skipsAndKeepsShares() public {
+        MockMorphoVaultV2 vv2 = new MockMorphoVaultV2(ERC20(address(token0)));
+        vault.setVault(poolIdA, poolKeyA.currency0, IERC4626(address(vv2)));
+        _bootstrap(alice, 1000e18);
+
+        uint256 shares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
+        vv2.setWithdrawShortfall(true);
+
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit PoolVault.VaultDrainSkipped(
+            poolIdA, poolKeyA.currency0, shares, abi.encodeWithSelector(MockMorphoVaultV2.WithdrawShortfall.selector)
+        );
+        vault.drainVaultBestEffort(poolIdA, poolKeyA.currency0);
+
+        assertEq(vault.getVaultShares(poolIdA, poolKeyA.currency0), shares, "shares intact after skipped drain");
+        assertEq(vault.getERC20(poolIdA, poolKeyA.currency0), 0, "no raw credit on failed drain");
+    }
+
+    /// @dev Nothing to drain (no vault shares): silent no-op, no event.
+    function test_drainVaultBestEffort_noPosition_isNoOp() public {
+        _bootstrapPool(poolKeyB, alice, 500e18); // unvaulted pool
+
+        vm.recordLogs();
+        vault.drainVaultBestEffort(poolIdB, poolKeyB.currency0);
+
+        assertEq(vm.getRecordedLogs().length, 0, "no events for an empty drain");
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 500e18, "raw ledger untouched");
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  Per-pool ERC-20 debit (post-settlement bookkeeping)
+    // ══════════════════════════════════════════════════════════
+
+    function test_debitPoolERC20_debitsLedger() public {
+        _bootstrapPool(poolKeyB, alice, 500e18);
+
+        vault.debitPoolERC20(poolIdB, poolKeyB.currency0, 200e18);
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 300e18);
+
+        // Zero-amount debit is a no-op.
+        vault.debitPoolERC20(poolIdB, poolKeyB.currency0, 0);
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 300e18);
+    }
+
+    function test_debitPoolERC20_revertsWhenLedgerShort() public {
+        _bootstrapPool(poolKeyB, alice, 500e18);
+
+        vm.expectRevert(InsufficientPoolBalance.selector);
+        vault.debitPoolERC20(poolIdB, poolKeyB.currency0, 500e18 + 1);
     }
 }
