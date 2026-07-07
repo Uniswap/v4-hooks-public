@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56fe7f485c8d67008228c24d14664f55752c8c93/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0e2a638cfe0c29f77da09c6febd9c4124618114b/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
@@ -18,8 +18,15 @@ Original Dutch orders are all-or-nothing: the V4 swap amount must exactly match 
 amounts, otherwise the swap reverts. Each swap consumes one order passed fresh via `hookData`, so a
 single deployed pool is reusable across many orders for the same token pair.
 
-Routing-style quoting is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert because the
-order is only known at swap time (via `hookData`), not when a router calls those view functions.
+Stateless across pools: this hook holds no per-pool configuration (the order fully determines the
+token pair and amounts at swap time), so one deployed hook instance can be the `hooks` address for
+any number of V4 pools — no per-pool factory or deployment is needed. Simply mine one hook address
+(see `AggregatorHookMiner`/`HookMiner`), deploy it once, then call `PoolManager.initialize` directly
+for each pool that should use it.
+
+Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert
+because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
+via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
 
 Protocol fees must remain 0 for pools using this hook. A non-zero protocol fee would skim the
 unspecified currency, but an exact order fill leaves no surplus to cover it, causing settlement to fail.
@@ -41,6 +48,15 @@ The canonical wrapped-native token, used to bridge V4 native ETH and order WETH
 
 ```solidity
 address public immutable weth
+```
+
+
+### orderQuoter
+Lens used to resolve an order (Dutch decay applied) into its current input/output amounts
+
+
+```solidity
+OrderQuoter public immutable orderQuoter
 ```
 
 
@@ -81,6 +97,52 @@ bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e
 ```solidity
 constructor(IPoolManager _manager, IReactor _reactor, address _weth)
     BaseHookDataAggregator(_manager, "UniswapXAggregator v1.0");
+```
+
+### _rawQuoteWithHookData
+
+Returns the raw quote for a swap whose behaviour depends on `hookData`, without protocol fees.
+
+Resolves the order in `hookData` (Dutch decay applied) via the OrderQuoter and returns the amount on
+the side opposite `amountSpecified`. The order fully determines both amounts, so `zeroToOne`/`poolId`
+are unused. NOTE: like UniswapX's OrderQuoter this is NOT a view — it calls the reactor (pulling the
+maker's input via Permit2 before rolling back), so it requires a funded, approved, validly-signed order
+and cannot be `staticcall`-ed.
+
+
+```solidity
+function _rawQuoteWithHookData(bool, int256 amountSpecified, PoolId, bytes calldata hookData)
+    internal
+    override
+    returns (uint256 amountUnspecified);
+```
+
+### reactorCallback
+
+Called by the reactor during the execution of an order
+
+Called by the reactor mid-execution. Sources the order's output from the PoolManager (the V4
+swapper's input), converting between native ETH and WETH as needed.
+
+
+```solidity
+function reactorCallback(ResolvedOrder[] memory resolvedOrders, bytes memory callbackData) external override;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`resolvedOrders`|`ResolvedOrder[]`|Has inputs and outputs|
+|`callbackData`|`bytes`|The callbackData specified for an order execution|
+
+
+### pseudoTotalValueLocked
+
+No persistent liquidity exists; TVL is undefined for an order-filling hook.
+
+
+```solidity
+function pseudoTotalValueLocked(PoolId) external pure override returns (uint256, uint256);
 ```
 
 ### _isEthClass
@@ -142,59 +204,6 @@ function _conductSwap(
 |`amountTake`|`uint256`|The amount of the currency being taken (swapper's input amount)|
 |`hasSettled`|`bool`|Whether the swap has been settled inside of the _conductSwap function|
 
-
-### reactorCallback
-
-Called by the reactor during the execution of an order
-
-Called by the reactor mid-execution. Sources the order's output from the PoolManager (the V4
-swapper's input), converting between native ETH and WETH as needed.
-
-
-```solidity
-function reactorCallback(ResolvedOrder[] memory resolvedOrders, bytes memory callbackData) external override;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`resolvedOrders`|`ResolvedOrder[]`|Has inputs and outputs|
-|`callbackData`|`bytes`|The callbackData specified for an order execution|
-
-
-### _rawQuote
-
-Returns the raw quote from the underlying liquidity source without protocol fees
-
-Router-style quoting cannot resolve a per-swap order, so quoting is unsupported.
-
-
-```solidity
-function _rawQuote(bool, int256, PoolId) internal pure override returns (uint256);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`bool`||
-|`<none>`|`int256`||
-|`<none>`|`PoolId`||
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`uint256`|amountUnspecified The raw unspecified amount before protocol fee adjustment|
-
-
-### pseudoTotalValueLocked
-
-No persistent liquidity exists; TVL is undefined for an order-filling hook.
-
-
-```solidity
-function pseudoTotalValueLocked(PoolId) external pure override returns (uint256, uint256);
-```
 
 ### _setTransientInflight
 
@@ -283,12 +292,6 @@ error OrderAmountMismatch();
 
 ```solidity
 error NativeTransferFailed();
-```
-
-### QuoteNotSupported
-
-```solidity
-error QuoteNotSupported();
 ```
 
 ### TVLNotSupported

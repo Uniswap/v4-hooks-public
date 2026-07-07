@@ -59,7 +59,6 @@
         - [UniswapV3Aggregator](src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol/contract.UniswapV3Aggregator.md)
       - [❱ UniswapX](src/aggregator-hooks/implementations/UniswapX/README.md)
         - [UniswapXAggregator](src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol/contract.UniswapXAggregator.md)
-        - [UniswapXAggregatorFactory](src/aggregator-hooks/implementations/UniswapX/UniswapXAggregatorFactory.sol/contract.UniswapXAggregatorFactory.md)
     - [❱ interfaces](src/aggregator-hooks/interfaces/README.md)
       - [IAggregatorHook](src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md)
     - [❱ utils](src/aggregator-hooks/utils/README.md)

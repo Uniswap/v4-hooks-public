@@ -1,5 +1,5 @@
 # BaseHookDataAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56fe7f485c8d67008228c24d14664f55752c8c93/src/aggregator-hooks/BaseHookDataAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0e2a638cfe0c29f77da09c6febd9c4124618114b/src/aggregator-hooks/BaseHookDataAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -116,6 +116,59 @@ function _conductSwap(
 |`hasSettled`|`bool`|Whether the swap has been settled inside of the _conductSwap function|
 
 
+### _rawQuote
+
+Returns the raw quote from the underlying liquidity source without protocol fees
+
+Router-style quoting (no hookData) cannot resolve a per-swap order, so it is unsupported. Use
+[quoteWithHookData](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md#quotewithhookdata) instead, supplying the order as hookData.
+
+
+```solidity
+function _rawQuote(bool, int256, PoolId) internal virtual override returns (uint256);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bool`||
+|`<none>`|`int256`||
+|`<none>`|`PoolId`||
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`uint256`|amountUnspecified The raw unspecified amount before protocol fee adjustment|
+
+
+### _rawQuoteWithHookData
+
+Returns the raw quote for a swap whose behaviour depends on `hookData`, without protocol fees.
+
+Mirror of [_rawQuote](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md#_rawquote) for hookData-driven hooks. Implementations resolve `hookData` to the
+unspecified-side amount; whether this can be `view` depends on the implementation.
+
+
+```solidity
+function _rawQuoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId poolId, bytes calldata hookData)
+    internal
+    virtual
+    returns (uint256 amountUnspecified);
+```
+
+### quoteWithHookData
+
+hookData-aware analogue of {BaseAggregatorHook.quote}: resolves the order/intent in `hookData` and
+applies the protocol fee the same way the standard quote does.
+
+
+```solidity
+function quoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId poolId, bytes calldata hookData)
+    external
+    returns (uint256 amountUnspecified);
+```
+
 ## Errors
 ### HookDataRequired
 Thrown if the hookData-less `_conductSwap` overload is somehow reached. Hooks built on this base
@@ -124,5 +177,11 @@ only implement the hookData-aware overload.
 
 ```solidity
 error HookDataRequired();
+```
+
+### QuoteNotSupported
+
+```solidity
+error QuoteNotSupported();
 ```
 

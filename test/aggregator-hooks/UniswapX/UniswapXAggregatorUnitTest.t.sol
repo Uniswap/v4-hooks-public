@@ -231,6 +231,66 @@ contract UniswapXAggregatorUnitTest is Test {
         );
     }
 
+    /// @dev A single deployed hook instance must be usable as the hook for many independent V4 pools at once —
+    ///      there is no per-hook, single-pool restriction (and thus no need for a one-hook-per-pool factory).
+    function test_singleHookInstance_servesMultiplePoolsConcurrently() public {
+        PoolKey memory poolAB = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        PoolKey memory poolAC = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(usdc)));
+
+        assertTrue(hook.registered(poolAB.toId()), "pool A/B registered on shared hook");
+        assertTrue(hook.registered(poolAC.toId()), "pool A/C registered on shared hook");
+
+        // Fill an order through poolAB.
+        uint256 inAmtAB = 100 ether;
+        uint256 outAmtAB = 99 ether;
+        tokenA.mint(maker, inAmtAB);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmtAB);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeAB = Currency.wrap(address(tokenB));
+        vm.prank(alice);
+        swapRouter.swap(
+            poolAB,
+            SwapParams({
+                zeroForOne: _zeroForOne(poolAB, takeAB),
+                amountSpecified: -int256(outAmtAB),
+                sqrtPriceLimitX96: _zeroForOne(poolAB, takeAB) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            _order(address(tokenA), inAmtAB, address(tokenB), outAmtAB)
+        );
+        assertEq(tokenB.balanceOf(maker), outAmtAB, "maker filled via pool A/B");
+
+        // Fill a different order, for a different token pair, through poolAC on the very same hook instance.
+        uint256 inAmtAC = 50 ether;
+        uint256 outAmtAC = 200e6;
+        tokenA.mint(maker, inAmtAC);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        usdc.mint(address(poolManager), 10_000e6);
+        usdc.mint(alice, outAmtAC);
+        vm.prank(alice);
+        usdc.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeAC = Currency.wrap(address(usdc));
+        vm.prank(alice);
+        swapRouter.swap(
+            poolAC,
+            SwapParams({
+                zeroForOne: _zeroForOne(poolAC, takeAC),
+                amountSpecified: -int256(outAmtAC),
+                sqrtPriceLimitX96: _zeroForOne(poolAC, takeAC) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            _order(address(tokenA), inAmtAC, address(usdc), outAmtAC)
+        );
+        assertEq(usdc.balanceOf(maker), outAmtAC, "maker filled via pool A/C on the same hook instance");
+    }
+
     // ─────────────────────────── ETH / WETH ───────────────────────────
 
     function test_fillOrder_orderOutputsWeth_wrapsNative() public {

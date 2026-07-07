@@ -28,6 +28,11 @@ import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 /// @dev    Original Dutch orders are all-or-nothing: the V4 swap amount must exactly match the resolved order
 ///         amounts, otherwise the swap reverts. Each swap consumes one order passed fresh via `hookData`, so a
 ///         single deployed pool is reusable across many orders for the same token pair.
+/// @dev    Stateless across pools: this hook holds no per-pool configuration (the order fully determines the
+///         token pair and amounts at swap time), so one deployed hook instance can be the `hooks` address for
+///         any number of V4 pools — no per-pool factory or deployment is needed. Simply mine one hook address
+///         (see `AggregatorHookMiner`/`HookMiner`), deploy it once, then call `PoolManager.initialize` directly
+///         for each pool that should use it.
 /// @dev    Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert
 ///         because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
 ///         via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
