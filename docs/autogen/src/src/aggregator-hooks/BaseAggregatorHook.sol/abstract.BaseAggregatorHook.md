@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/396c7ee0f0e458881657d92ca6d17cb49381d408/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c412d0df54019a2d85a44ecc3bfad10840edfaa5/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -31,7 +31,7 @@ Initializes the hook with required dependencies
 
 
 ```solidity
-constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(10);
+constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(25);
 ```
 **Parameters**
 
@@ -129,7 +129,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 Returns the hook's self-reported behavioral flags.
 
 Return 0 to indicate no self-classification (falls through to defaultFee).
-Flags are OR'd constants from HookFeeFlags — see that library for the vocabulary.
+The bitfield is opaque to the policy; see the governance guide for active conventions.
 
 
 ```solidity
