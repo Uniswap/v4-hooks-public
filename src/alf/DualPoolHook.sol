@@ -348,7 +348,14 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         // bootstrap value before the owner's bootstrap transaction lands. `bootstrap` flips
         // liveness to true after the first deposit succeeds.
         emit PoolCreated(poolId);
+        _onPoolInitialized(key);
     }
+
+    /// @notice Seam fired at the end of {initializePool}, after the pool exists. Lets a derived
+    ///         capability observe or veto a newly-initialized pool (e.g. to keep reward-token
+    ///         custody disjoint from every pool currency). The base implementation is a no-op.
+    /// @param key The pool that was just initialized.
+    function _onPoolInitialized(PoolKey calldata key) internal virtual {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                        EXTERNAL: LP DEPOSIT / WITHDRAW

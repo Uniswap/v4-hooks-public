@@ -321,3 +321,189 @@ contract AlfIncentivizedRegressionTest is Test, Deployers {
         hook.removeLiquidity(key, sniperBal, 0, 0, type(uint256).max); // exit after minimum hold
     }
 }
+
+/// @title AlfRewardCustodyRegressionTest
+/// @notice Regression for review finding L-02: reward-token custody was commingled across the pools
+///         on a single hook, so the `RewardRateTooHigh` solvency guard and the "reward token never
+///         aliases pool inventory" NatSpec did not hold hook-wide. Locks the fix — reward tokens are
+///         disjoint from every pool currency in BOTH directions, and a reward token shared across
+///         pools stays per-pool solvent via the `Reward.committed` reservation.
+contract AlfRewardCustodyRegressionTest is Test, Deployers {
+    using PoolIdLibrary for PoolKey;
+
+    DualPoolIncentivizedHook hook;
+    MockERC20 reward;
+
+    // Pool A: currency0/currency1 from Deployers.
+    MockERC20 a0;
+    MockERC20 a1;
+    MockERC4626 va0;
+    MockERC4626 va1;
+    PoolKey keyA;
+
+    // Pool B: a second, disjoint currency pair on the same hook, sharing A's reward token.
+    MockERC20 b0;
+    MockERC20 b1;
+    MockERC4626 vb0;
+    MockERC4626 vb1;
+    PoolKey keyB;
+
+    address owner = makeAddr("owner");
+
+    uint24 constant FEE = 1_000;
+    int24 constant TS = 10;
+    uint256 constant DURATION = 1_000; // → rate = REWARD/DURATION = 1 ether/block (no dust)
+    uint256 constant REWARD = 1_000 ether;
+    uint256 constant SEED = 1 ether;
+
+    function setUp() public {
+        deployFreshManagerAndRouters();
+        deployMintAndApprove2Currencies();
+        a0 = MockERC20(Currency.unwrap(currency0));
+        a1 = MockERC20(Currency.unwrap(currency1));
+        va0 = new MockERC4626(ERC20(address(a0)));
+        va1 = new MockERC4626(ERC20(address(a1)));
+
+        (b0, b1) = _sorted(new MockERC20("B0", "B0", 18), new MockERC20("B1", "B1", 18));
+        vb0 = new MockERC4626(ERC20(address(b0)));
+        vb1 = new MockERC4626(ERC20(address(b1)));
+
+        reward = new MockERC20("Reward", "RWD", 18);
+
+        uint160 flags = uint160(
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+        );
+        hook = DualPoolIncentivizedHook(
+            address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags))
+        );
+        deployCodeTo(
+            "DualPoolIncentivizedHook", abi.encode(manager, uint32(100_000), owner, type(uint64).max), address(hook)
+        );
+
+        keyA = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE, tickSpacing: TS, hooks: IHooks(address(hook))
+        });
+        keyB = PoolKey({
+            currency0: Currency.wrap(address(b0)),
+            currency1: Currency.wrap(address(b1)),
+            fee: FEE,
+            tickSpacing: TS,
+            hooks: IHooks(address(hook))
+        });
+
+        vm.startPrank(owner);
+        hook.initializePool(keyA, _config(va0, va1));
+        hook.initializePool(keyB, _config(vb0, vb1));
+        vm.stopPrank();
+    }
+
+    // ─────────────────────────────────────────── Helpers ───────────────────────────────────────────
+
+    function _sorted(MockERC20 x, MockERC20 y) internal pure returns (MockERC20, MockERC20) {
+        return address(x) < address(y) ? (x, y) : (y, x);
+    }
+
+    function _config(MockERC4626 v0, MockERC4626 v1) internal pure returns (DualPoolHook.PoolConfig memory) {
+        LiquidityBucket[] memory dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -10, tickUpper: 10, weightBps: 10_000});
+        return DualPoolHook.PoolConfig({
+            sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+            distribution: dist,
+            allowExternalDeposits: true,
+            vault0: IERC4626(address(v0)),
+            vault1: IERC4626(address(v1)),
+            minDepositBlocks: 0
+        });
+    }
+
+    function _bootstrap(PoolKey memory k, MockERC20 t0, MockERC20 t1, uint256 amt) internal {
+        t0.mint(owner, amt);
+        t1.mint(owner, amt);
+        vm.startPrank(owner);
+        t0.approve(address(hook), amt);
+        t1.approve(address(hook), amt);
+        hook.bootstrap(k, amt, amt);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+    }
+
+    function _configureAndFund(PoolKey memory k, uint256 amount) internal {
+        vm.startPrank(owner);
+        hook.setRewardToken(k, IERC20(address(reward)));
+        hook.setRewardsDuration(k, DURATION);
+        reward.mint(owner, amount);
+        reward.approve(address(hook), amount);
+        hook.notifyRewardAmount(k, amount);
+        vm.stopPrank();
+    }
+
+    // ───────────────────────────────── L-02: custody disjointness ──────────────────────────────────
+
+    /// @notice L-02 (forward): a reward token is rejected if it is ANY initialized pool's currency,
+    ///         not merely the configured pool's own pair — so pool B's currency cannot back pool A.
+    function test_L02_setRewardToken_rejectsSiblingPoolCurrency() public {
+        vm.prank(owner);
+        vm.expectRevert(DualPoolIncentivizedHook.RewardTokenIsPoolCurrency.selector);
+        hook.setRewardToken(keyA, IERC20(address(b0)));
+    }
+
+    /// @notice L-02 (reverse): once a reward token is bound, a new pool cannot be initialized on it
+    ///         as a currency, or that reward token's custody would alias the new pool's inventory.
+    function test_L02_initializePool_rejectsCurrencyThatIsBoundRewardToken() public {
+        vm.prank(owner);
+        hook.setRewardToken(keyA, IERC20(address(reward)));
+
+        MockERC20 other = new MockERC20("C", "C", 18);
+        (MockERC20 c0, MockERC20 c1) = _sorted(reward, other);
+        MockERC4626 vc0 = new MockERC4626(ERC20(address(c0)));
+        MockERC4626 vc1 = new MockERC4626(ERC20(address(c1)));
+        PoolKey memory keyC = PoolKey({
+            currency0: Currency.wrap(address(c0)),
+            currency1: Currency.wrap(address(c1)),
+            fee: FEE,
+            tickSpacing: TS,
+            hooks: IHooks(address(hook))
+        });
+
+        vm.prank(owner);
+        vm.expectRevert(DualPoolIncentivizedHook.PoolCurrencyIsRewardToken.selector);
+        hook.initializePool(keyC, _config(vc0, vc1));
+    }
+
+    // ──────────────────────────────── L-02: shared-token solvency ──────────────────────────────────
+
+    /// @notice L-02: one reward token may incentivize several pools, and each pool's emissions are
+    ///         funded strictly from its own contribution. Both pools fund REWARD of the SAME token;
+    ///         after a full period each accrues ~REWARD, draining one pool leaves the other's accrual
+    ///         and claimable balance intact, and the shared pot serves both without shortfall.
+    function test_L02_sharedRewardTokenPerPoolSolventAndIsolated() public {
+        _bootstrap(keyA, a0, a1, SEED);
+        _bootstrap(keyB, b0, b1, SEED);
+        _configureAndFund(keyA, REWARD);
+        _configureAndFund(keyB, REWARD); // SAME token on a second pool — supported, must stay solvent
+
+        assertEq(reward.balanceOf(address(hook)), 2 * REWARD, "both pools' fundings held in the shared token");
+
+        vm.roll(block.number + DURATION); // full period for both
+
+        uint256 earnedA = hook.earned(keyA, owner);
+        uint256 earnedB = hook.earned(keyB, owner);
+        assertApproxEqAbs(earnedA, REWARD, 1e9, "pool A accrues ~ its own funding");
+        assertApproxEqAbs(earnedB, REWARD, 1e9, "pool B accrues ~ its own funding");
+
+        // Drain pool A fully; pool B's reservation must be untouched by A's claim.
+        vm.prank(owner);
+        uint256 paidA = hook.claimRewards(keyA);
+        assertApproxEqAbs(paidA, REWARD, 1e9, "A claim ~ A funding");
+        assertApproxEqAbs(hook.earned(keyB, owner), earnedB, 1, "B accrual unaffected by A's claim");
+
+        // Pool B still claims in full: its tokens were reserved, not consumed by pool A's claim.
+        vm.prank(owner);
+        uint256 paidB = hook.claimRewards(keyB);
+        assertApproxEqAbs(paidB, REWARD, 1e9, "B claim ~ B funding");
+
+        assertApproxEqAbs(reward.balanceOf(address(hook)), 0, 1e10, "shared pot served both pools, ~empty");
+        assertEq(reward.balanceOf(owner), paidA + paidB, "owner received exactly both claims");
+    }
+}

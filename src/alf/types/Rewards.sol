@@ -57,6 +57,9 @@ uint256 constant REWARDS_PRECISION = 1e18;
 /// @param rewardRate             Reward tokens distributed per block during the period.
 /// @param lastUpdateBlock        Block of the last global index checkpoint.
 /// @param rewardPerTokenStored   Accumulated reward per share, scaled by `REWARDS_PRECISION`.
+/// @param committed              Reward tokens funded to this vault but not yet paid out
+///                               (funded minus claimed). Reserves this vault's share of a reward
+///                               token that may be shared with sibling vaults on the same consumer.
 /// @param userRewardPerTokenPaid Per-user index snapshot at their last checkpoint.
 /// @param rewards                Per-user settled, claimable reward balance.
 struct Reward {
@@ -66,6 +69,7 @@ struct Reward {
     uint256 rewardRate;
     uint256 lastUpdateBlock;
     uint256 rewardPerTokenStored;
+    uint256 committed;
     mapping(address user => uint256) userRewardPerTokenPaid;
     mapping(address user => uint256) rewards;
 }
@@ -95,10 +99,24 @@ struct Reward {
 ///         The consumer holds a `Rewards` storage field and calls these free functions on it
 ///         directly, as `rewards.checkpoint(...)`. The reward token, period, and per-user
 ///         accounting are isolated per `VaultId`.
-/// @param _inner The per-`VaultId` reward program state.
+///
+///         ## Shared-token solvency
+///
+///         A single consumer serves many vaults, and two vaults may legitimately use the same
+///         reward token (e.g. one incentive token across pools). Custody of that token is therefore
+///         shared, so the per-vault solvency guard must not bound a vault's rate against the
+///         consumer's aggregate balance (which also backs sibling vaults). Each vault instead
+///         reserves the tokens funded to it (`Reward.committed`), the reservations are summed per
+///         token in `_committedByToken`, and {notifyRewardAmount} bounds a vault's rate against only
+///         the balance NOT reserved by other vaults sharing the token. Claims release the
+///         reservation as tokens leave. This keeps each vault's emissions funded from its own
+///         contributions even when the token is shared.
+/// @param _inner            The per-`VaultId` reward program state.
+/// @param _committedByToken Sum of `Reward.committed` across all vaults sharing a given reward token.
 /// @custom:security-contact security@uniswap.org
 struct Rewards {
     mapping(VaultId vaultId => Reward) _inner;
+    mapping(address token => uint256) _committedByToken;
 }
 
 using {
@@ -237,15 +255,18 @@ function earned(
 /// @notice Fund a new reward period (or top up the active one).
 /// @dev The consumer MUST have already transferred `reward` of the reward token to its own
 ///      custody. Settles the global index first, recomputes `rewardRate` (folding in any leftover
-///      from an active period), and bounds the rate against `onHandBalance` so accrual can never
-///      outrun funding. The consumer passes its post-transfer reward-token balance (free functions
-///      have no `address(this)` of their own). Reverts {RewardTokenNotSet},
-///      {RewardsDurationNotSet}, or {RewardRateTooHigh}.
+///      from an active period), reserves the freshly-funded tokens for this vault
+///      (`Reward.committed`), and bounds the rate against only the balance NOT reserved by sibling
+///      vaults sharing the token. The consumer passes its post-transfer reward-token balance (free
+///      functions have no `address(this)` of their own); this function subtracts other vaults'
+///      reservations, so a vault can never fund its rate from a sibling vault's tokens even when the
+///      reward token is shared. Reverts {RewardTokenNotSet}, {RewardsDurationNotSet}, or
+///      {RewardRateTooHigh}.
 /// @param self          Capability storage.
 /// @param id            The vault to fund.
 /// @param reward        Reward tokens added to the period (token's native decimals).
 /// @param totalSupply   Current total shares outstanding (for the index settle).
-/// @param onHandBalance The consumer's current reward-token balance (post-transfer), bounding the rate.
+/// @param onHandBalance The consumer's current balance of THIS vault's reward token (post-transfer).
 /// @param nowBlock      The consumer's current block (from `_getBlockNumberish()`).
 /// @return self_ The capability storage, for chaining.
 function notifyRewardAmount(
@@ -271,8 +292,18 @@ function notifyRewardAmount(
         r.rewardRate = (reward + leftover) / duration;
     }
 
-    // The rate must be coverable by the reward tokens actually held by the consumer.
-    if (r.rewardRate > onHandBalance / duration) revert RewardRateTooHigh();
+    // Reserve the freshly-funded tokens for THIS vault, then bound the rate against only the balance
+    // not already reserved by sibling vaults sharing the reward token. `onHandBalance` is the
+    // consumer's whole balance of the token, which also backs those siblings; subtracting their
+    // reservations yields the tokens actually available to this vault (this vault's own reservation
+    // plus any unreserved surplus). balanceOf >= total reservations always holds, so the subtraction
+    // cannot underflow.
+    address token = address(r.token);
+    r.committed += reward;
+    self._committedByToken[token] += reward;
+    uint256 reservedByOthers = self._committedByToken[token] - r.committed;
+    uint256 available = onHandBalance - reservedByOthers;
+    if (r.rewardRate > available / duration) revert RewardRateTooHigh();
 
     r.lastUpdateBlock = nowBlock;
     r.periodFinishBlock = nowBlock + duration;
@@ -303,6 +334,12 @@ function claim(
     amount = r.rewards[user];
     if (amount > 0) {
         r.rewards[user] = 0;
+        // Release this vault's reservation as the tokens leave. Clamp to the reservation so a payout
+        // funded from unreserved surplus (e.g. a direct token donation) cannot underflow it; the
+        // surplus belongs to no vault, so consuming it reserves nothing to release.
+        uint256 release = amount < r.committed ? amount : r.committed;
+        r.committed -= release;
+        self._committedByToken[address(r.token)] -= release;
         r.token.safeTransfer(user, amount);
         emit RewardPaid(id, user, amount);
     }
