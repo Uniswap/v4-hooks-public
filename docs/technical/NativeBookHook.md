@@ -91,7 +91,8 @@ swaps and do not require router-provided `hookData`.
   candidates. `retirePositions(maxRetire)` bounds keeper-paid removals. Stale
   positions can remain active until swaps or keepers retire them.
 - `isLive()` is hook-level liveness for ALF discovery. Pool-level liveness is
-  still `poolLive[poolId]` and is enforced during `beforeSwap`.
+  the shared `Liveness` capability (read via `livePools(poolId)`) and is
+  enforced during `beforeSwap`.
 - ALF quotes are whole-pool native-v4 quotes. Routers that also route directly
   against the same v4 pool must deduplicate by pool id or use a NativeBook-aware
   adapter; this hook does not expose a separate book-only curve.
