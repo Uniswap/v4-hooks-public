@@ -1,30 +1,52 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
+// Libraries
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {BinMath} from "./libraries/BinMath.sol";
+
+// Types
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {DeltaResolver} from "@uniswap/v4-periphery/src/base/DeltaResolver.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {BaseHook} from "../base/BaseHook.sol";
+import {BookConfig, PoolConfig} from "./types/BookConfig.sol";
+import {MakerInventory} from "./types/MakerInventory.sol";
+import {
+    BookPositions,
+    PositionInfo,
+    Side,
+    positionId as derivePositionId,
+    positionSalt,
+    isRetirable
+} from "./types/BookPositions.sol";
+import {
+    BinCapacity,
+    InvalidBinOffset,
+    validOffset,
+    validateDistinctOffsets,
+    replaceLadderStructHash,
+    cancelLadderStructHash
+} from "./types/Ladder.sol";
+import {jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol";
+
+// Interfaces
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {IALFHook} from "./interfaces/IALFHook.sol";
-import {IHookStats} from "./interfaces/IHookStats.sol";
-import {NativeBookQuoter, INativeBookQuoterSource} from "./NativeBookQuoter.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {INativeBookQuoterSource} from "./interfaces/INativeBookQuoterSource.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+// Contracts
+import {OwnedALFHook} from "./base/OwnedALFHook.sol";
+import {NativeBookQuoter} from "./NativeBookQuoter.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
@@ -35,44 +57,31 @@ import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/Signa
 /// @dev Makers express bids/asks as bounded capacity in canonical bins. The hook owns the
 ///      underlying v4 positions, keyed by maker-specific salts, so swaps execute through the
 ///      native v4 swap loop while the hook enforces quote-ladder shape and one-shot expiry.
+///
+///      The contract is a thin shell over type-driven capabilities: `BookConfig` (per-pool
+///      parameters), `MakerInventory` (maker custody), `BookPositions` (the position registry
+///      and retirement cursor), `Ladder` (order shape and EIP-712 hashing), and `BinMath`
+///      (bin geometry), with `Liveness` and the metadata/settlement surface inherited from
+///      {OwnedALFHook}. The shell wires `msg.sender`, emits events, enforces access control,
+///      and drives the PoolManager; domain logic lives in the types.
+///
+///      ## Reentrancy
+///
+///      User-facing entry points carry the OZ `nonReentrant` transient guard plus
+///      `whenJITNotInProgress`. `_beforeSwap` (no fresh entry point, so ineligible for the OZ
+///      guard) wraps its bounded retirement scan in the per-pool `JITLock`: maker payouts
+///      during retirement are external token transfers, and the lock stops a token callback
+///      from reentering the LP/inventory entry points or the same pool's swap path mid-scan.
 /// @custom:security-contact security@uniswap.org
-contract NativeBookHook is
-    BaseHook,
-    DeltaResolver,
-    IUnlockCallback,
-    IALFHook,
-    Ownable,
-    ReentrancyGuardTransient,
-    EIP712,
-    Nonces
-{
+contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonces, IUnlockCallback {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
-    using TransientSlot for *;
 
-    uint8 public constant MIN_BINS_PER_SIDE = 1;
-    uint8 public constant MAX_BINS_PER_SIDE = 32;
-    uint8 public constant MAX_MAKER_BINS = 32;
-    uint8 public constant MAX_RETIRE_PER_SWAP = 16;
-    uint32 public constant INDICATIVE_QUOTE_GAS = 5_000_000;
-
-    NativeBookQuoter public immutable quoter;
-
-    bytes32 private constant _SALT_NAMESPACE = keccak256("alf.native-book.salt.v1");
-    bytes32 private constant _HOOK_SETTLEMENT_SLOT = keccak256("alf.native-book.hook-settlement.v1");
-    bytes32 public constant BIN_CAPACITY_TYPEHASH = keccak256("BinCapacity(int8 offset,uint128 amount)");
-    bytes32 public constant REPLACE_LADDER_TYPEHASH = keccak256(
-        "ReplaceLadder(address maker,bytes32 poolId,BinCapacity[] bids,BinCapacity[] asks,uint40 ttl,int24 expectedRefTick,uint24 maxTickDeviation,uint256 nonce,uint256 deadline)BinCapacity(int8 offset,uint128 amount)"
-    );
-    bytes32 public constant CANCEL_LADDER_TYPEHASH =
-        keccak256("CancelLadder(address maker,bytes32 poolId,uint256 nonce,uint256 deadline)");
-
-    enum Side {
-        Bid,
-        Ask
-    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              TYPES
+    // ═══════════════════════════════════════════════════════════════════════════
 
     enum UnlockAction {
         ReplaceLadder,
@@ -80,52 +89,6 @@ contract NativeBookHook is
         RetirePosition,
         RetirePositions,
         ClaimFees
-    }
-
-    /// @notice Pool-level parameters for canonical maker bins.
-    /// @param binSpacingTicks Width of each book bin. Must be positive and aligned to the pool tick spacing.
-    /// @param binsPerSide Number of canonical bid/ask bins available on each side.
-    /// @param maxMakerBins Maximum active bins a single maker can maintain per pool.
-    /// @param maxRetirePerSwap Maximum stale/crossed positions retired opportunistically per swap hook.
-    /// @param maxQuoteTtl Maximum ladder lifetime, in seconds.
-    /// @param minBinLiquidity Minimum v4 liquidity for a newly posted bin.
-    struct PoolConfig {
-        int24 binSpacingTicks;
-        uint8 binsPerSide;
-        uint8 maxMakerBins;
-        uint8 maxRetirePerSwap;
-        uint40 maxQuoteTtl;
-        uint128 minBinLiquidity;
-    }
-
-    /// @notice Maker-supplied capacity for one canonical bin.
-    /// @dev Bids use negative offsets below the reference bin. Asks use positive offsets above
-    ///      the reference bin. Offset zero is reserved as the current-price gap.
-    /// @param offset Canonical bin offset from the current reference bin.
-    /// @param amount Maker output amount to deploy into this bin.
-    struct BinCapacity {
-        int8 offset;
-        uint128 amount;
-    }
-
-    /// @notice Hook-owned position metadata for one maker/bin.
-    /// @param maker Maker that owns this quote.
-    /// @param poolId Pool this quote belongs to.
-    /// @param side Bid or ask.
-    /// @param tickLower Native v4 position lower tick.
-    /// @param tickUpper Native v4 position upper tick.
-    /// @param liquidity Native v4 liquidity currently deployed.
-    /// @param expiry Unix timestamp after which the quote can be retired.
-    /// @param active Whether this slot currently owns native v4 liquidity.
-    struct PositionInfo {
-        address maker;
-        PoolId poolId;
-        Side side;
-        int24 tickLower;
-        int24 tickUpper;
-        uint128 liquidity;
-        uint40 expiry;
-        bool active;
     }
 
     struct ReplaceCallbackData {
@@ -164,18 +127,28 @@ contract NativeBookHook is
         uint256 maxRetire;
     }
 
-    mapping(PoolId => PoolConfig) public poolConfigs;
-    mapping(PoolId => bool) public poolLive;
-    mapping(bytes32 => PositionInfo) public positions;
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              STATE
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    mapping(address => mapping(address => uint256)) private _inventory;
+    /// @notice External quote helper backing the IALFHook view surface.
+    NativeBookQuoter public immutable quoter;
 
-    mapping(bytes32 => bytes32[]) private _makerPositions;
-    mapping(bytes32 => uint256) private _makerPositionIndex;
+    /// @dev Per-pool canonical book configuration, as a type-driven `BookConfig`. Set once in
+    ///      `initializePool`, read on the ladder and swap paths.
+    BookConfig internal _config;
 
-    mapping(PoolId => bytes32[]) private _activePositions;
-    mapping(bytes32 => uint256) private _activePositionIndex;
-    mapping(PoolId => uint256) private _retireCursor;
+    /// @dev Maker-scoped custody ledger, as a type-driven `MakerInventory`. Funded via
+    ///      `deposit`/`depositFor`, consumed when bins post, credited by removals and fees.
+    MakerInventory internal _makerInventory;
+
+    /// @dev The position registry, as a type-driven `BookPositions`: metadata by id plus the
+    ///      maker and pool indexes and the bounded-retirement cursor.
+    BookPositions internal _book;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              EVENTS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     event PoolCreated(
         PoolId indexed poolId,
@@ -188,7 +161,6 @@ contract NativeBookHook is
         int24 tick,
         PoolConfig config
     );
-    event PoolLivenessUpdated(PoolId indexed poolId, address indexed updater, bool oldLive, bool newLive);
     event InventoryDeposited(
         address indexed maker,
         address indexed currency,
@@ -256,50 +228,80 @@ contract NativeBookHook is
         PoolId indexed poolId, address indexed caller, uint256 candidateCount, uint256 maxRetire, uint256 retired
     );
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              ERRORS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev `unlockCallback` was invoked by an address other than the PoolManager.
     error CallbackOnlyPoolManager();
-    error DirectInitializeBlocked();
+    /// @dev The PoolKey's hooks address does not match this contract.
     error InvalidHookAddress();
+    /// @dev Native ETH (`address(0)`) is unsupported: maker payments are pulled from arbitrary
+    ///      maker addresses during PoolManager settlement, which has no native-value path.
     error InvalidNativeCurrency();
-    error InvalidPoolConfig();
-    error InvalidBinOffset();
+    /// @dev Ladder TTL is zero, exceeds the pool's `maxQuoteTtl`, or outlives the signature
+    ///      deadline; or the ladder's bin count exceeds the pool's `maxMakerBins`.
     error InvalidQuoteTtl();
+    /// @dev A posted bin's computed v4 liquidity is below the pool's `minBinLiquidity` floor.
     error InvalidBinLiquidity();
+    /// @dev The EIP-712 signature deadline has passed.
     error SignatureExpired();
+    /// @dev The EIP-712 signature does not recover to the maker.
     error InvalidSignature();
+    /// @dev The position id does not reference an active position in the supplied pool.
     error InvalidPosition();
+    /// @dev The maker address is zero.
     error InvalidMaker();
-    error InvalidPayer();
+    /// @dev The withdrawal recipient address is zero.
     error InvalidRecipient();
+    /// @dev A zero amount was supplied where a positive amount is required, or a deposit
+    ///      credited nothing after transfer accounting.
     error ZeroAmount();
-    error InsufficientInventory(address maker, address currency, uint256 available, uint256 required);
-    error DuplicateBinOffset();
-    error DuplicatePosition();
-    error RefTickSlippage(int24 expectedRefTick, int24 actualRefTick, uint24 maxTickDeviation);
-    error PoolNotLive(PoolId poolId);
+    /// @dev The ladder's total bin count exceeds the pool's `maxMakerBins`.
+    error TooManyBins();
+    /// @dev `retirePosition` targeted a position that is neither expired nor crossed.
     error PositionNotRetirable();
+    /// @dev External LP tried to mint a position exactly one bin wide. That range is reserved
+    ///      for the book so third-party positions cannot masquerade as maker bins.
     error ReservedBookRange();
     /// @dev Keeper batch candidates are capped by `maxRetire` so caller-paid scan work is explicit.
     error TooManyRetireCandidates(uint256 candidates, uint256 maxRetire);
-    error HookSettlementInProgress();
 
-    modifier noHookSettlement() {
-        if (_hookSettlementEntered()) revert HookSettlementInProgress();
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              MODIFIERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Reverts {JITInProgress} while `_beforeSwap`'s retirement scan is in flight anywhere
+    ///      in the hook. Blocks maker-token callbacks from reentering inventory and ladder entry
+    ///      points mid-settlement. Thin delegate over {requireJITNotInProgress}.
+    modifier whenJITNotInProgress() {
+        requireJITNotInProgress();
         _;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                              CONSTRUCTOR
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @param _poolManager The Uniswap v4 PoolManager.
+    /// @param maxGas_ Gas budget declared for `getIndicativeQuote` staticcalls.
     /// @param owner_ Initial owner for pool initialization and liveness controls.
-    constructor(IPoolManager _poolManager, address owner_)
-        BaseHook(_poolManager)
-        Ownable(owner_)
+    constructor(IPoolManager _poolManager, uint32 maxGas_, address owner_)
+        OwnedALFHook(_poolManager, maxGas_, owner_)
         EIP712("NativeBookHook", "1")
     {
         quoter = new NativeBookQuoter(_poolManager);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: POOL ADMINISTRATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @notice Initialize a pool and store its canonical book-bin configuration.
     /// @dev Native ETH is intentionally unsupported in this hook because maker payments are
-    ///      pulled from arbitrary maker addresses during PoolManager settlement.
+    ///      pulled from arbitrary maker addresses during PoolManager settlement. The pool is
+    ///      flipped live immediately: the book starts empty, so there is no pre-seed window
+    ///      to protect.
     /// @param key Pool key. The hook address must be this contract.
     /// @param sqrtPriceX96 Initial pool price.
     /// @param config Canonical book configuration for this pool.
@@ -311,12 +313,10 @@ contract NativeBookHook is
     {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert InvalidNativeCurrency();
-        _validateConfig(key, config);
 
         PoolId poolId = key.toId();
-        poolConfigs[poolId] = config;
+        _config.set(poolId, key.tickSpacing, config);
         tick = poolManager.initialize(key, sqrtPriceX96);
-        poolLive[poolId] = true;
 
         emit PoolCreated(
             poolId,
@@ -329,18 +329,19 @@ contract NativeBookHook is
             tick,
             config
         );
-        emit PoolLivenessUpdated(poolId, msg.sender, false, true);
+        _liveness.setLive(poolId, true);
     }
 
     /// @notice Toggle swap liveness for a pool.
     /// @param key Pool key.
     /// @param live New liveness value.
-    function setPoolLive(PoolKey calldata key, bool live) external onlyOwner {
-        PoolId poolId = key.toId();
-        bool oldLive = poolLive[poolId];
-        poolLive[poolId] = live;
-        emit PoolLivenessUpdated(poolId, msg.sender, oldLive, live);
+    function setPoolLive(PoolKey calldata key, bool live) external onlyOwner whenJITNotInProgress {
+        _liveness.setLive(key.toId(), live);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: MAKER INVENTORY
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deposit inventory for the caller.
     /// @param currency ERC-20 currency to deposit. Native ETH is unsupported.
@@ -348,7 +349,7 @@ contract NativeBookHook is
     /// @return credited Amount credited to the caller's inventory.
     function deposit(Currency currency, uint256 amount)
         external
-        noHookSettlement
+        whenJITNotInProgress
         nonReentrant
         returns (uint256 credited)
     {
@@ -362,49 +363,38 @@ contract NativeBookHook is
     /// @return credited Amount credited to the maker's inventory.
     function depositFor(address maker, Currency currency, uint256 amount)
         public
-        noHookSettlement
+        whenJITNotInProgress
         nonReentrant
         returns (uint256 credited)
     {
         credited = _depositFor(maker, currency, amount);
     }
 
-    function _depositFor(address maker, Currency currency, uint256 amount) internal returns (uint256 credited) {
-        if (maker == address(0)) revert InvalidMaker();
-        if (currency.isAddressZero()) revert InvalidNativeCurrency();
-        if (amount == 0) revert ZeroAmount();
-
-        IERC20 token = IERC20(Currency.unwrap(currency));
-        uint256 balanceBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amount);
-        credited = token.balanceOf(address(this)) - balanceBefore;
-        if (credited == 0) revert ZeroAmount();
-
-        _inventory[maker][Currency.unwrap(currency)] += credited;
-        emit InventoryDeposited(maker, Currency.unwrap(currency), msg.sender, amount, credited);
-    }
-
     /// @notice Withdraw unused maker inventory.
     /// @param currency ERC-20 currency to withdraw.
     /// @param amount Amount to withdraw from the caller's inventory.
     /// @param recipient Address receiving the ERC-20 transfer.
-    function withdraw(Currency currency, uint256 amount, address recipient) external noHookSettlement nonReentrant {
+    function withdraw(Currency currency, uint256 amount, address recipient) external whenJITNotInProgress nonReentrant {
         if (currency.isAddressZero()) revert InvalidNativeCurrency();
         if (amount == 0) revert ZeroAmount();
         if (recipient == address(0)) revert InvalidRecipient();
 
-        _debitInventory(msg.sender, currency, amount);
+        _makerInventory.debit(msg.sender, currency, amount);
         IERC20(Currency.unwrap(currency)).safeTransfer(recipient, amount);
         emit InventoryWithdrawn(msg.sender, Currency.unwrap(currency), recipient, amount);
     }
 
     /// @notice Return a maker's withdrawable inventory balance.
     function inventoryBalance(address maker, Currency currency) external view returns (uint256) {
-        return _inventory[maker][Currency.unwrap(currency)];
+        return _makerInventory.balanceOf(maker, currency);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: LADDER MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @notice Replace the caller's whole maker ladder for a pool.
-    /// @dev Existing active bins are removed and proceeds are paid to the maker before new
+    /// @dev Existing active bins are removed and proceeds are credited to the maker before new
     ///      canonical bins are posted. New bins consume the maker's deposited inventory.
     /// @param key Pool key.
     /// @param bids Bid capacities. Offsets must be negative.
@@ -417,9 +407,9 @@ contract NativeBookHook is
         uint40 ttl,
         int24 expectedRefTick,
         uint24 maxTickDeviation
-    ) external noHookSettlement nonReentrant {
+    ) external whenJITNotInProgress nonReentrant {
         _validateLadderInput(key.toId(), bids.length, asks.length, ttl);
-        _validateDistinctOffsets(bids, asks);
+        validateDistinctOffsets(bids, asks);
 
         uint256 nonce = _useNonce(msg.sender);
         uint40 expiry = uint40(block.timestamp) + ttl;
@@ -453,16 +443,17 @@ contract NativeBookHook is
         uint24 maxTickDeviation,
         uint256 deadline,
         bytes calldata signature
-    ) external noHookSettlement nonReentrant {
+    ) external whenJITNotInProgress nonReentrant {
         if (block.timestamp > deadline) revert SignatureExpired();
         PoolId poolId = key.toId();
         _validateLadderInput(poolId, bids.length, asks.length, ttl);
-        _validateDistinctOffsets(bids, asks);
+        validateDistinctOffsets(bids, asks);
         if (block.timestamp + ttl > deadline) revert InvalidQuoteTtl();
 
         uint256 nonce = _useNonce(maker);
-        bytes32 digest =
-            _hashReplaceLadder(key, maker, bids, asks, ttl, expectedRefTick, maxTickDeviation, nonce, deadline);
+        bytes32 digest = _hashTypedDataV4(
+            replaceLadderStructHash(poolId, maker, bids, asks, ttl, expectedRefTick, maxTickDeviation, nonce, deadline)
+        );
         if (!SignatureChecker.isValidSignatureNowCalldata(maker, digest, signature)) revert InvalidSignature();
 
         uint40 expiry = uint40(block.timestamp) + ttl;
@@ -478,7 +469,7 @@ contract NativeBookHook is
 
     /// @notice Cancel all active bins for the caller in a pool and credit proceeds to caller inventory.
     /// @param key Pool key.
-    function cancelLadder(PoolKey calldata key) external noHookSettlement nonReentrant {
+    function cancelLadder(PoolKey calldata key) external whenJITNotInProgress nonReentrant {
         uint256 nonce = _useNonce(msg.sender);
         poolManager.unlock(
             abi.encode(UnlockAction.CancelLadder, CancelCallbackData(msg.sender, msg.sender, key, nonce, 0, false))
@@ -493,13 +484,13 @@ contract NativeBookHook is
     /// @param signature Maker EIP-712 signature.
     function cancelLadderWithSig(PoolKey calldata key, address maker, uint256 deadline, bytes calldata signature)
         external
-        noHookSettlement
+        whenJITNotInProgress
         nonReentrant
     {
         if (block.timestamp > deadline) revert SignatureExpired();
 
         uint256 nonce = _useNonce(maker);
-        bytes32 digest = _hashCancelLadder(key, maker, nonce, deadline);
+        bytes32 digest = _hashTypedDataV4(cancelLadderStructHash(key.toId(), maker, nonce, deadline));
         if (!SignatureChecker.isValidSignatureNowCalldata(maker, digest, signature)) revert InvalidSignature();
 
         poolManager.unlock(
@@ -507,20 +498,16 @@ contract NativeBookHook is
         );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: KEEPER MAINTENANCE
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @notice Retire an expired or crossed position for any maker.
     /// @dev This is public so keepers can clean stale bins without the maker being online.
     /// @param key Pool key.
     /// @param positionId Position identifier emitted or read from {makerPositionAt}.
-    function retirePosition(PoolKey calldata key, bytes32 positionId) external noHookSettlement nonReentrant {
+    function retirePosition(PoolKey calldata key, bytes32 positionId) external whenJITNotInProgress nonReentrant {
         poolManager.unlock(abi.encode(UnlockAction.RetirePosition, RetireCallbackData(msg.sender, key, positionId)));
-    }
-
-    /// @notice Claim accrued swap fees for one active maker bin without removing its liquidity.
-    /// @dev Anyone can call this because proceeds are always credited to the maker recorded on the position.
-    /// @param key Pool key.
-    /// @param positionId Position identifier emitted or read from {makerPositionAt}.
-    function claimFees(PoolKey calldata key, bytes32 positionId) external noHookSettlement nonReentrant {
-        poolManager.unlock(abi.encode(UnlockAction.ClaimFees, RetireCallbackData(msg.sender, key, positionId)));
     }
 
     /// @notice Retire a bounded set of expired or crossed positions.
@@ -532,7 +519,7 @@ contract NativeBookHook is
     /// @return retired Number of positions retired.
     function retirePositions(PoolKey calldata key, bytes32[] calldata positionIds, uint256 maxRetire)
         external
-        noHookSettlement
+        whenJITNotInProgress
         nonReentrant
         returns (uint256 retired)
     {
@@ -547,6 +534,18 @@ contract NativeBookHook is
         retired = abi.decode(result, (uint256));
     }
 
+    /// @notice Claim accrued swap fees for one active maker bin without removing its liquidity.
+    /// @dev Anyone can call this because proceeds are always credited to the maker recorded on the position.
+    /// @param key Pool key.
+    /// @param positionId Position identifier emitted or read from {makerPositionAt}.
+    function claimFees(PoolKey calldata key, bytes32 positionId) external whenJITNotInProgress nonReentrant {
+        poolManager.unlock(abi.encode(UnlockAction.ClaimFees, RetireCallbackData(msg.sender, key, positionId)));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: VIEWS
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @notice Return the EIP-712 digest a maker signs for {replaceLadderWithSig}.
     function hashReplaceLadder(
         PoolKey calldata key,
@@ -559,7 +558,11 @@ contract NativeBookHook is
         uint256 nonce,
         uint256 deadline
     ) external view returns (bytes32) {
-        return _hashReplaceLadder(key, maker, bids, asks, ttl, expectedRefTick, maxTickDeviation, nonce, deadline);
+        return _hashTypedDataV4(
+            replaceLadderStructHash(
+                key.toId(), maker, bids, asks, ttl, expectedRefTick, maxTickDeviation, nonce, deadline
+            )
+        );
     }
 
     /// @notice Return the EIP-712 digest a maker signs for {cancelLadderWithSig}.
@@ -568,12 +571,22 @@ contract NativeBookHook is
         view
         returns (bytes32)
     {
-        return _hashCancelLadder(key, maker, nonce, deadline);
+        return _hashTypedDataV4(cancelLadderStructHash(key.toId(), maker, nonce, deadline));
+    }
+
+    /// @notice Return canonical native-book configuration for a pool.
+    function poolConfigs(PoolId poolId) external view returns (PoolConfig memory) {
+        return _config.get(poolId);
+    }
+
+    /// @notice Return metadata for a hook-owned maker position.
+    function positions(bytes32 positionId) external view returns (PositionInfo memory) {
+        return _book.get(positionId);
     }
 
     /// @notice Number of active position ids currently tracked for a maker and pool.
     function makerPositionCount(PoolId poolId, address maker) external view returns (uint256) {
-        return _makerPositions[_makerKey(poolId, maker)].length;
+        return _book.makerCount(poolId, maker);
     }
 
     /// @notice Return a maker's active position id at an index.
@@ -582,14 +595,14 @@ contract NativeBookHook is
     /// @param index Zero-based index into the maker's active position ids for the pool.
     /// @return positionId Active position id at `index`.
     function makerPositionAt(PoolId poolId, address maker, uint256 index) external view returns (bytes32) {
-        return _makerPositions[_makerKey(poolId, maker)][index];
+        return _book.makerAt(poolId, maker, index);
     }
 
     /// @notice Number of active position ids tracked for a pool.
     /// @param poolId Pool whose active position count is being queried.
     /// @return count Number of active hook-owned position ids tracked for the pool.
     function activePositionCount(PoolId poolId) external view returns (uint256) {
-        return _activePositions[poolId].length;
+        return _book.activeCount(poolId);
     }
 
     /// @notice Return a pool's active position id at an index.
@@ -597,35 +610,19 @@ contract NativeBookHook is
     /// @param index Zero-based index into the pool's active position ids.
     /// @return positionId Active position id at `index`.
     function activePositionAt(PoolId poolId, uint256 index) external view returns (bytes32 positionId) {
-        return _activePositions[poolId][index];
+        return _book.activeAt(poolId, index);
     }
 
     /// @notice Cursor used for bounded opportunistic retirement.
     /// @param poolId Pool whose retirement cursor is being queried.
     /// @return cursor Current cursor into the pool's active position ids.
     function retireCursor(PoolId poolId) external view returns (uint256 cursor) {
-        return _retireCursor[poolId];
+        return _book.cursor(poolId);
     }
 
-    /// @notice ERC-165 advertisement for the interfaces this contract implements.
-    /// @dev Stateless implementation mirroring {BaseALFHook.supportsInterface}: advertises
-    ///      `IALFHook` (so the multiplexer's Tier-1 discovery routes here), `IHooks`, and
-    ///      `IERC165`.
-    function supportsInterface(bytes4 interfaceId) public pure returns (bool) {
-        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IHooks).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
-    }
-
-    /// @inheritdoc IALFHook
-    function maxGas() external pure override returns (uint32) {
-        return INDICATIVE_QUOTE_GAS;
-    }
-
-    /// @inheritdoc IALFHook
-    /// @dev Hook-level liveness is always reachable; pool-level swap liveness is `poolLive[poolId]`.
-    function isLive() external pure override returns (bool) {
-        return true;
-    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: IALFHook QUOTING
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IALFHook
     /// @dev Quotes the same native v4 tick-walking path used by execution, with the hook's
@@ -637,18 +634,6 @@ contract NativeBookHook is
         returns (uint256 outputAmount)
     {
         return quoter.getIndicativeQuote(INativeBookQuoterSource(address(this)), key, zeroForOne, amountSpecified);
-    }
-
-    /// @inheritdoc IHookStats
-    /// @dev Maker custody is maker/token scoped, not pool-scoped off-pool reserves.
-    function getReserves(PoolKey calldata) external pure override returns (uint256, uint256) {
-        return (0, 0);
-    }
-
-    /// @inheritdoc IHookStats
-    /// @dev NativeBook does not expose pool-scoped off-pool liquidity through IALFHook.
-    function getEffectiveLiquidity(PoolKey calldata) external pure override returns (uint256, uint256) {
-        return (0, 0);
     }
 
     /// @inheritdoc IALFHook
@@ -664,6 +649,10 @@ contract NativeBookHook is
             INativeBookQuoterSource(address(this)), key, zeroForOne, amountSpecified, sqrtPriceLimitX96
         );
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: POOL MANAGER CALLBACK
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IUnlockCallback
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
@@ -682,7 +671,8 @@ contract NativeBookHook is
             );
         } else if (action == UnlockAction.RetirePosition) {
             (, RetireCallbackData memory d) = abi.decode(data, (UnlockAction, RetireCallbackData));
-            if (!_isRetirable(d.key, positions[d.positionId])) revert PositionNotRetirable();
+            (, int24 currentTick,,) = poolManager.getSlot0(d.key.toId());
+            if (!isRetirable(_book.get(d.positionId), d.key.toId(), currentTick)) revert PositionNotRetirable();
             _removePosition(d.key, d.positionId);
         } else if (action == UnlockAction.RetirePositions) {
             (, RetirePositionsCallbackData memory d) = abi.decode(data, (UnlockAction, RetirePositionsCallbackData));
@@ -697,7 +687,15 @@ contract NativeBookHook is
         return "";
     }
 
-    /// @inheritdoc BaseHook
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        PUBLIC: HOOK PERMISSIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Required v4 hook flags:
+    ///      - beforeInitialize: block direct init (force initializePool; see OwnedALFHook)
+    ///      - beforeAddLiquidity: reject exact-bin-width external LP (ReservedBookRange)
+    ///      - beforeRemoveLiquidity: pass-through (external LP may always exit)
+    ///      - beforeSwap: liveness gate + bounded opportunistic retirement
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
@@ -717,23 +715,26 @@ contract NativeBookHook is
         });
     }
 
-    function _beforeInitialize(address, PoolKey calldata, uint160) internal pure override returns (bytes4) {
-        revert DirectInitializeBlocked();
-    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        INTERNAL: HOOK CALLBACKS
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev External LP additions must not be exactly one bin wide: that range is reserved for
+    ///      the book so third-party positions cannot masquerade as maker bins.
     function _beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata params, bytes calldata)
         internal
         view
         override
         returns (bytes4)
     {
-        PoolConfig memory config = poolConfigs[key.toId()];
+        PoolConfig storage config = _config.get(key.toId());
         if (config.binSpacingTicks > 0 && params.tickUpper - params.tickLower == config.binSpacingTicks) {
             revert ReservedBookRange();
         }
         return IHooks.beforeAddLiquidity.selector;
     }
 
+    /// @dev External LP removals are always permitted; only additions are shape-constrained.
     function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
         internal
         pure
@@ -743,117 +744,57 @@ contract NativeBookHook is
         return IHooks.beforeRemoveLiquidity.selector;
     }
 
+    /// @dev Liveness gate plus bounded opportunistic retirement of stale/crossed bins. The scan
+    ///      settles maker payouts (external token transfers), so it runs under the per-pool
+    ///      `JITLock`: entry points reject reentry via `whenJITNotInProgress` and a reentrant
+    ///      same-pool swap is rejected by {JITLock.enter}.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         PoolId poolId = key.toId();
-        if (!poolLive[poolId]) revert PoolNotLive(poolId);
-        _enterHookSettlement();
-        _retireSome(key, poolConfigs[poolId].maxRetirePerSwap);
-        _exitHookSettlement();
+        _liveness.requireLive(poolId);
+
+        jitLockFor(poolId).enter();
+        _retireSome(key, _config.get(poolId).maxRetirePerSwap);
+        jitLockFor(poolId).clear();
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        INTERNAL: LADDER LIFECYCLE
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Shared entry validation: TTL within the pool's cap and total bins within the
+    ///      pool's per-maker allowance.
     function _validateLadderInput(PoolId poolId, uint256 bidCount, uint256 askCount, uint40 ttl) internal view {
-        PoolConfig memory config = poolConfigs[poolId];
+        PoolConfig storage config = _config.get(poolId);
         if (ttl == 0 || ttl > config.maxQuoteTtl) revert InvalidQuoteTtl();
-        if (bidCount + askCount > config.maxMakerBins) revert InvalidPoolConfig();
+        if (bidCount + askCount > config.maxMakerBins) revert TooManyBins();
     }
 
-    function _validateDistinctOffsets(BinCapacity[] calldata bids, BinCapacity[] calldata asks) internal pure {
-        uint256 seenBids = 0;
-        for (uint256 i; i < bids.length;) {
-            int8 offset = bids[i].offset;
-            if (offset < -32 || offset >= 0) revert InvalidBinOffset();
-            uint256 bit = 1 << uint8(uint8(-offset) - 1);
-            if (seenBids & bit != 0) revert DuplicateBinOffset();
-            seenBids |= bit;
-            unchecked {
-                ++i;
-            }
-        }
-
-        uint256 seenAsks = 0;
-        for (uint256 i; i < asks.length;) {
-            int8 offset = asks[i].offset;
-            if (offset <= 0 || offset > 32) revert InvalidBinOffset();
-            uint256 bit = 1 << uint8(uint8(offset) - 1);
-            if (seenAsks & bit != 0) revert DuplicateBinOffset();
-            seenAsks |= bit;
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    function _hashReplaceLadder(
-        PoolKey calldata key,
-        address maker,
-        BinCapacity[] calldata bids,
-        BinCapacity[] calldata asks,
-        uint40 ttl,
-        int24 expectedRefTick,
-        uint24 maxTickDeviation,
-        uint256 nonce,
-        uint256 deadline
-    ) internal view returns (bytes32) {
-        return _hashTypedDataV4(
-            keccak256(
-                abi.encode(
-                    REPLACE_LADDER_TYPEHASH,
-                    maker,
-                    key.toId(),
-                    _hashBinCapacities(bids),
-                    _hashBinCapacities(asks),
-                    ttl,
-                    expectedRefTick,
-                    maxTickDeviation,
-                    nonce,
-                    deadline
-                )
-            )
-        );
-    }
-
-    function _hashBinCapacities(BinCapacity[] calldata bins) internal pure returns (bytes32) {
-        bytes32[] memory hashes = new bytes32[](bins.length);
-        for (uint256 i; i < bins.length;) {
-            hashes[i] = keccak256(abi.encode(BIN_CAPACITY_TYPEHASH, bins[i].offset, bins[i].amount));
-            unchecked {
-                ++i;
-            }
-        }
-        return keccak256(abi.encodePacked(hashes));
-    }
-
-    function _hashCancelLadder(PoolKey calldata key, address maker, uint256 nonce, uint256 deadline)
-        internal
-        view
-        returns (bytes32)
-    {
-        return _hashTypedDataV4(keccak256(abi.encode(CANCEL_LADDER_TYPEHASH, maker, key.toId(), nonce, deadline)));
-    }
-
+    /// @dev Whole-ladder replacement inside the unlock: remove every active bin (crediting
+    ///      proceeds to the maker), re-anchor on the current reference tick under the maker's
+    ///      slippage bound, then post the new bids and asks from maker inventory.
     function _replaceLadder(ReplaceCallbackData memory d) internal {
         PoolId poolId = d.key.toId();
-        if (!poolLive[poolId]) revert PoolNotLive(poolId);
+        _liveness.requireLive(poolId);
         _removeMakerPositions(d.key, d.maker, type(uint256).max);
 
-        PoolConfig memory config = poolConfigs[poolId];
-        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(poolId);
-        int24 refTick = _referenceTick(currentTick, config.binSpacingTicks);
-        _validateRefTick(refTick, d.expectedRefTick, d.maxTickDeviation);
+        PoolConfig storage config = _config.get(poolId);
+        (, int24 currentTick,,) = poolManager.getSlot0(poolId);
+        int24 refTick = BinMath.referenceTick(currentTick, config.binSpacingTicks);
+        BinMath.requireRefTickWithin(refTick, d.expectedRefTick, d.maxTickDeviation);
 
         for (uint256 i; i < d.bids.length;) {
-            _postBin(d.key, d.maker, config, refTick, sqrtPriceX96, Side.Bid, d.bids[i], d.expiry);
+            _postBin(d.key, d.maker, config, refTick, Side.Bid, d.bids[i], d.expiry);
             unchecked {
                 ++i;
             }
         }
         for (uint256 i; i < d.asks.length;) {
-            _postBin(d.key, d.maker, config, refTick, sqrtPriceX96, Side.Ask, d.asks[i], d.expiry);
+            _postBin(d.key, d.maker, config, refTick, Side.Ask, d.asks[i], d.expiry);
             unchecked {
                 ++i;
             }
@@ -864,77 +805,71 @@ contract NativeBookHook is
         );
     }
 
-    function _validateRefTick(int24 actualRefTick, int24 expectedRefTick, uint24 maxTickDeviation) internal pure {
-        int256 delta = int256(actualRefTick) - int256(expectedRefTick);
-        uint256 deviation = delta >= 0 ? uint256(delta) : uint256(-delta);
-        if (deviation > maxTickDeviation) {
-            revert RefTickSlippage(expectedRefTick, actualRefTick, maxTickDeviation);
-        }
-    }
-
+    /// @dev Post one bin: project the offset onto its tick range, size single-sided liquidity,
+    ///      mint the hook-owned v4 position (debiting maker inventory on settlement), and record
+    ///      it in the registry. Zero-amount entries are skipped.
     function _postBin(
         PoolKey memory key,
         address maker,
         PoolConfig memory config,
         int24 refTick,
-        uint160,
         Side side,
         BinCapacity memory bin,
         uint40 expiry
     ) internal {
         if (bin.amount == 0) return;
-        if (!_validOffset(side, bin.offset, config.binsPerSide)) revert InvalidBinOffset();
+        if (!validOffset(side, bin.offset, config.binsPerSide)) revert InvalidBinOffset();
 
-        int24 tickLower = refTick + int24(bin.offset) * config.binSpacingTicks;
-        int24 tickUpper = tickLower + config.binSpacingTicks;
+        (int24 tickLower, int24 tickUpper) = BinMath.binRange(refTick, bin.offset, config.binSpacingTicks);
         if (tickLower < TickMath.minUsableTick(key.tickSpacing) || tickUpper > TickMath.maxUsableTick(key.tickSpacing))
         {
             revert InvalidBinOffset();
         }
-        uint160 sqrtLower = TickMath.getSqrtPriceAtTick(tickLower);
-        uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(tickUpper);
-        uint128 liquidity = side == Side.Bid
-            ? LiquidityAmounts.getLiquidityForAmount1(sqrtLower, sqrtUpper, bin.amount)
-            : LiquidityAmounts.getLiquidityForAmount0(sqrtLower, sqrtUpper, bin.amount);
+        uint128 liquidity = BinMath.binLiquidity(side, tickLower, tickUpper, bin.amount);
         if (liquidity < config.minBinLiquidity) revert InvalidBinLiquidity();
 
-        bytes32 positionId = _positionId(key.toId(), maker, side, tickLower);
-        bytes32 salt = _positionSalt(positionId);
+        PoolId poolId = key.toId();
+        bytes32 id = derivePositionId(poolId, maker, side, tickLower);
 
         (BalanceDelta delta,) = poolManager.modifyLiquidity(
             key,
             ModifyLiquidityParams({
-                tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: int256(uint256(liquidity)), salt: salt
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: int256(uint256(liquidity)),
+                salt: positionSalt(id)
             }),
             ""
         );
         _resolveDelta(key, delta, maker);
 
-        positions[positionId] = PositionInfo({
-            maker: maker,
-            poolId: key.toId(),
-            side: side,
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            liquidity: liquidity,
-            expiry: expiry,
-            active: true
-        });
-        _trackPosition(positionId, key.toId(), maker);
-
-        emit BinPosted(
-            key.toId(), maker, positionId, side, tickLower, tickUpper, bin.offset, bin.amount, liquidity, expiry
+        _book.record(
+            id,
+            PositionInfo({
+                maker: maker,
+                poolId: poolId,
+                side: side,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidity: liquidity,
+                expiry: expiry,
+                active: true
+            })
         );
+
+        emit BinPosted(poolId, maker, id, side, tickLower, tickUpper, bin.offset, bin.amount, liquidity, expiry);
     }
 
+    /// @dev Remove up to `maxRemovals` of the maker's active bins, crediting proceeds to the
+    ///      maker's inventory. Pops from the back of the maker index so removal stays O(1).
     function _removeMakerPositions(PoolKey memory key, address maker, uint256 maxRemovals)
         internal
         returns (uint256 removed, uint256 amount0, uint256 amount1)
     {
-        bytes32 makerKey = _makerKey(key.toId(), maker);
-        while (_makerPositions[makerKey].length != 0 && removed < maxRemovals) {
-            bytes32 positionId = _makerPositions[makerKey][_makerPositions[makerKey].length - 1];
-            (uint256 removedAmount0, uint256 removedAmount1, bool didRemove) = _removePosition(key, positionId);
+        PoolId poolId = key.toId();
+        while (_book.makerCount(poolId, maker) != 0 && removed < maxRemovals) {
+            bytes32 id = _book.makerAt(poolId, maker, _book.makerCount(poolId, maker) - 1);
+            (uint256 removedAmount0, uint256 removedAmount1, bool didRemove) = _removePosition(key, id);
             amount0 += removedAmount0;
             amount1 += removedAmount1;
             if (!didRemove) break;
@@ -944,11 +879,13 @@ contract NativeBookHook is
         }
     }
 
-    function _removePosition(PoolKey memory key, bytes32 positionId)
+    /// @dev Burn a position's v4 liquidity, credit proceeds to its maker, and delete it from
+    ///      the registry. A no-op for inactive ids.
+    function _removePosition(PoolKey memory key, bytes32 id)
         internal
         returns (uint256 amount0, uint256 amount1, bool removed)
     {
-        PositionInfo memory p = positions[positionId];
+        PositionInfo memory p = _book.get(id);
         if (!p.active) return (0, 0, false);
 
         (BalanceDelta delta,) = poolManager.modifyLiquidity(
@@ -957,26 +894,29 @@ contract NativeBookHook is
                 tickLower: p.tickLower,
                 tickUpper: p.tickUpper,
                 liquidityDelta: -int256(uint256(p.liquidity)),
-                salt: _positionSalt(positionId)
+                salt: positionSalt(id)
             }),
             ""
         );
         (amount0, amount1) = _resolveDelta(key, delta, p.maker);
 
-        delete positions[positionId];
-        _untrackPosition(positionId, p.poolId, p.maker);
-        emit BinRetired(p.poolId, p.maker, positionId, p.side, p.tickLower, p.tickUpper, p.liquidity, amount0, amount1);
+        _book.remove(id);
+        emit BinRetired(p.poolId, p.maker, id, p.side, p.tickLower, p.tickUpper, p.liquidity, amount0, amount1);
         removed = true;
     }
 
+    /// @dev Retire every retirable id in `positionIds`, up to `maxRetire`. Non-retirable ids
+    ///      are skipped, not reverted, so keeper batches tolerate stale candidate lists.
     function _retirePositions(PoolKey memory key, bytes32[] memory positionIds, uint256 maxRetire)
         internal
         returns (uint256 retired)
     {
+        PoolId poolId = key.toId();
+        (, int24 currentTick,,) = poolManager.getSlot0(poolId);
         for (uint256 i; i < positionIds.length && retired < maxRetire;) {
-            bytes32 positionId = positionIds[i];
-            if (_isRetirable(key, positions[positionId])) {
-                _removePosition(key, positionId);
+            bytes32 id = positionIds[i];
+            if (isRetirable(_book.get(id), poolId, currentTick)) {
+                _removePosition(key, id);
                 unchecked {
                     ++retired;
                 }
@@ -987,59 +927,68 @@ contract NativeBookHook is
         }
     }
 
-    function _claimFees(PoolKey memory key, bytes32 positionId, address caller) internal {
-        PositionInfo memory p = positions[positionId];
+    /// @dev Poke a position's fee growth with a zero liquidity delta and credit the accrued
+    ///      fees to its maker.
+    function _claimFees(PoolKey memory key, bytes32 id, address caller) internal {
+        PositionInfo memory p = _book.get(id);
         if (!p.active || PoolId.unwrap(p.poolId) != PoolId.unwrap(key.toId())) revert InvalidPosition();
 
         (BalanceDelta delta,) = poolManager.modifyLiquidity(
             key,
             ModifyLiquidityParams({
-                tickLower: p.tickLower, tickUpper: p.tickUpper, liquidityDelta: 0, salt: _positionSalt(positionId)
+                tickLower: p.tickLower, tickUpper: p.tickUpper, liquidityDelta: 0, salt: positionSalt(id)
             }),
             ""
         );
         (uint256 amount0, uint256 amount1) = _resolveDelta(key, delta, p.maker);
-        emit FeesClaimed(p.poolId, p.maker, positionId, caller, amount0, amount1);
+        emit FeesClaimed(p.poolId, p.maker, id, caller, amount0, amount1);
     }
 
+    /// @dev Bounded opportunistic retirement: scan up to `maxRemovals` active ids from the
+    ///      pool's cursor, retiring any that are expired or crossed. The cursor persists across
+    ///      swaps so the scan makes progress even when each swap only inspects a slice of the
+    ///      book. Mirrored virtually by `NativeBookQuoter._quoteRetirementAdjustments`; keep the
+    ///      two scans in lockstep.
     function _retireSome(PoolKey calldata key, uint8 maxRemovals) internal {
         if (maxRemovals == 0) return;
         PoolId poolId = key.toId();
-        bytes32[] storage ids = _activePositions[poolId];
-        if (ids.length == 0) return;
+        uint256 length = _book.activeCount(poolId);
+        if (length == 0) return;
 
+        (, int24 currentTick,,) = poolManager.getSlot0(poolId);
         uint256 checked = 0;
         uint256 removed = 0;
-        uint256 cursor = _retireCursor[poolId] % ids.length;
-        while (ids.length != 0 && checked < maxRemovals && removed < maxRemovals) {
-            if (cursor >= ids.length) cursor = 0;
-            bytes32 positionId = ids[cursor];
+        uint256 cursor = _book.cursor(poolId) % length;
+        while (_book.activeCount(poolId) != 0 && checked < maxRemovals && removed < maxRemovals) {
+            uint256 activeLength = _book.activeCount(poolId);
+            if (cursor >= activeLength) cursor = 0;
+            bytes32 id = _book.activeAt(poolId, cursor);
             unchecked {
                 ++checked;
             }
-            if (_isRetirable(key, positions[positionId])) {
-                _removePosition(key, positionId);
+            if (isRetirable(_book.get(id), poolId, currentTick)) {
+                _removePosition(key, id);
                 unchecked {
                     ++removed;
                 }
-                if (cursor >= ids.length) cursor = 0;
+                if (cursor >= _book.activeCount(poolId)) cursor = 0;
             } else {
                 unchecked {
                     ++cursor;
                 }
             }
         }
-        _retireCursor[poolId] = ids.length == 0 ? 0 : cursor % ids.length;
+        uint256 remaining = _book.activeCount(poolId);
+        _book.storeCursor(poolId, remaining == 0 ? 0 : cursor % remaining);
     }
 
-    function _isRetirable(PoolKey memory key, PositionInfo memory p) internal view returns (bool) {
-        if (!p.active || PoolId.unwrap(p.poolId) != PoolId.unwrap(key.toId())) return false;
-        if (block.timestamp >= p.expiry) return true;
-        (, int24 currentTick,,) = poolManager.getSlot0(p.poolId);
-        if (p.side == Side.Ask) return currentTick >= p.tickUpper;
-        return currentTick < p.tickLower;
-    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        INTERNAL: SETTLEMENT
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Resolve a `modifyLiquidity` delta against the maker's inventory: negative legs are
+    ///      settled to the PoolManager from hook-held ERC-20 (debiting the maker), positive legs
+    ///      are taken from the PoolManager and credited to the maker.
     function _resolveDelta(PoolKey memory key, BalanceDelta delta, address maker)
         internal
         returns (uint256 credit0, uint256 credit1)
@@ -1054,20 +1003,8 @@ contract NativeBookHook is
         else if (amount1 > 0) credit1 = _takeAndCredit(key.currency1, maker, uint256(uint128(amount1)));
     }
 
-    function _enterHookSettlement() internal {
-        _HOOK_SETTLEMENT_SLOT.asBoolean().tstore(true);
-    }
-
-    function _exitHookSettlement() internal {
-        _HOOK_SETTLEMENT_SLOT.asBoolean().tstore(false);
-    }
-
-    function _hookSettlementEntered() internal view returns (bool) {
-        return _HOOK_SETTLEMENT_SLOT.asBoolean().tload();
-    }
-
     function _debitAndSettle(Currency currency, address maker, uint256 amount) internal {
-        _debitInventory(maker, currency, amount);
+        _makerInventory.debit(maker, currency, amount);
         _settle(currency, address(this), amount);
     }
 
@@ -1075,87 +1012,21 @@ contract NativeBookHook is
         uint256 balanceBefore = currency.balanceOfSelf();
         _take(currency, address(this), amount);
         credited = currency.balanceOfSelf() - balanceBefore;
-        _inventory[maker][Currency.unwrap(currency)] += credited;
+        _makerInventory.credit(maker, currency, credited);
     }
 
-    function _debitInventory(address maker, Currency currency, uint256 amount) internal {
-        address token = Currency.unwrap(currency);
-        uint256 available = _inventory[maker][token];
-        if (available < amount) revert InsufficientInventory(maker, token, available, amount);
-        unchecked {
-            _inventory[maker][token] = available - amount;
-        }
-    }
+    function _depositFor(address maker, Currency currency, uint256 amount) internal returns (uint256 credited) {
+        if (maker == address(0)) revert InvalidMaker();
+        if (currency.isAddressZero()) revert InvalidNativeCurrency();
+        if (amount == 0) revert ZeroAmount();
 
-    function _validateConfig(PoolKey calldata key, PoolConfig calldata config) internal pure {
-        if (
-            config.binSpacingTicks <= 0 || config.binSpacingTicks % key.tickSpacing != 0
-                || config.binsPerSide < MIN_BINS_PER_SIDE || config.binsPerSide > MAX_BINS_PER_SIDE
-                || config.maxMakerBins == 0 || config.maxMakerBins > MAX_MAKER_BINS
-                || config.maxRetirePerSwap > MAX_RETIRE_PER_SWAP || config.maxQuoteTtl == 0
-                || config.minBinLiquidity == 0
-        ) {
-            revert InvalidPoolConfig();
-        }
-    }
+        IERC20 token = IERC20(Currency.unwrap(currency));
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amount);
+        credited = token.balanceOf(address(this)) - balanceBefore;
+        if (credited == 0) revert ZeroAmount();
 
-    function _validOffset(Side side, int8 offset, uint8 binsPerSide) internal pure returns (bool) {
-        if (side == Side.Bid) return offset < 0 && offset >= -int8(binsPerSide);
-        return offset > 0 && offset <= int8(binsPerSide);
-    }
-
-    function _referenceTick(int24 currentTick, int24 binSpacing) internal pure returns (int24 refTick) {
-        int24 compressed = currentTick / binSpacing;
-        if (currentTick < 0 && currentTick % binSpacing != 0) compressed--;
-        refTick = compressed * binSpacing;
-    }
-
-    function _positionId(PoolId poolId, address maker, Side side, int24 tickLower) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, maker, side, tickLower));
-    }
-
-    function _positionSalt(bytes32 positionId) internal pure returns (bytes32) {
-        return keccak256(abi.encode(_SALT_NAMESPACE, positionId));
-    }
-
-    function _makerKey(PoolId poolId, address maker) internal pure returns (bytes32) {
-        return keccak256(abi.encode(poolId, maker));
-    }
-
-    function _trackPosition(bytes32 positionId, PoolId poolId, address maker) internal {
-        if (_makerPositionIndex[positionId] != 0 || _activePositionIndex[positionId] != 0) {
-            revert DuplicatePosition();
-        }
-        bytes32 makerKey = _makerKey(poolId, maker);
-        _makerPositionIndex[positionId] = _makerPositions[makerKey].length + 1;
-        _makerPositions[makerKey].push(positionId);
-        _activePositionIndex[positionId] = _activePositions[poolId].length + 1;
-        _activePositions[poolId].push(positionId);
-    }
-
-    function _untrackPosition(bytes32 positionId, PoolId poolId, address maker) internal {
-        bytes32 makerKey = _makerKey(poolId, maker);
-        _removeTracked(_makerPositions[makerKey], _makerPositionIndex, positionId);
-        _removeTracked(_activePositions[poolId], _activePositionIndex, positionId);
-    }
-
-    function _removeTracked(bytes32[] storage ids, mapping(bytes32 => uint256) storage indexOf, bytes32 id) internal {
-        uint256 indexPlusOne = indexOf[id];
-        if (indexPlusOne == 0) return;
-        uint256 index = indexPlusOne - 1;
-        uint256 lastIndex = ids.length - 1;
-        if (index != lastIndex) {
-            bytes32 last = ids[lastIndex];
-            ids[index] = last;
-            indexOf[last] = indexPlusOne;
-        }
-        ids.pop();
-        delete indexOf[id];
-    }
-
-    /// @inheritdoc DeltaResolver
-    function _pay(Currency token, address payer, uint256 amount) internal override {
-        if (payer != address(this)) revert InvalidPayer();
-        token.transfer(address(poolManager), amount);
+        _makerInventory.credit(maker, currency, credited);
+        emit InventoryDeposited(maker, Currency.unwrap(currency), msg.sender, amount, credited);
     }
 }

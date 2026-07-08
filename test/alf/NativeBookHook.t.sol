@@ -20,6 +20,13 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {NativeBookHook} from "../../src/alf/NativeBookHook.sol";
 import {IALFHook} from "../../src/alf/interfaces/IALFHook.sol";
+import {OwnedALFHook} from "../../src/alf/base/OwnedALFHook.sol";
+import {BinMath} from "../../src/alf/libraries/BinMath.sol";
+import {BookConfig, PoolConfig, InvalidPoolConfig} from "../../src/alf/types/BookConfig.sol";
+import {InsufficientInventory} from "../../src/alf/types/MakerInventory.sol";
+import {PositionInfo, Side} from "../../src/alf/types/BookPositions.sol";
+import {BinCapacity, InvalidBinOffset, DuplicateBinOffset} from "../../src/alf/types/Ladder.sol";
+import {PoolNotLive, PoolLivenessUpdated} from "../../src/alf/types/Liveness.sol";
 
 contract NativeBookHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -43,7 +50,6 @@ contract NativeBookHookTest is Test, Deployers {
     int24 constant TICK_SPACING = 10;
     int24 constant BIN_SPACING = 60;
 
-    event PoolLivenessUpdated(PoolId indexed poolId, address indexed updater, bool oldLive, bool newLive);
     event InventoryDeposited(
         address indexed maker,
         address indexed currency,
@@ -80,7 +86,7 @@ contract NativeBookHookTest is Test, Deployers {
         PoolId indexed poolId,
         address indexed maker,
         bytes32 indexed positionId,
-        NativeBookHook.Side side,
+        Side side,
         int24 tickLower,
         int24 tickUpper,
         int8 offset,
@@ -115,7 +121,7 @@ contract NativeBookHookTest is Test, Deployers {
                 | Hooks.BEFORE_SWAP_FLAG
         );
         hook = NativeBookHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | flags)));
-        deployCodeTo("NativeBookHook", abi.encode(manager, owner), address(hook));
+        deployCodeTo("NativeBookHook", abi.encode(manager, uint32(5_000_000), owner), address(hook));
 
         testPoolKey = PoolKey({
             currency0: currency0,
@@ -138,7 +144,7 @@ contract NativeBookHookTest is Test, Deployers {
         IALFHook alfHook = IALFHook(address(hook));
 
         assertTrue(alfHook.isLive());
-        assertEq(alfHook.maxGas(), hook.INDICATIVE_QUOTE_GAS());
+        assertEq(alfHook.maxGas(), uint32(5_000_000));
         assertGt(alfHook.getIndicativeQuote(testPoolKey, true, -1 ether, ""), 0);
 
         (uint256 reserves0, uint256 reserves1) = alfHook.getReserves(testPoolKey);
@@ -179,9 +185,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_getIndicativeQuote_accountsForSwapTimeRetirement() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -198,10 +204,10 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadder_postsCanonicalBidAndAskBins() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -210,49 +216,33 @@ contract NativeBookHookTest is Test, Deployers {
 
         bytes32 bidId = hook.makerPositionAt(testPoolId, maker, 0);
         bytes32 askId = hook.makerPositionAt(testPoolId, maker, 1);
-        (
-            ,
-            PoolId bidPoolId,
-            NativeBookHook.Side bidSide,
-            int24 bidLower,
-            int24 bidUpper,
-            uint128 bidLiquidity,,
-            bool bidActive
-        ) = hook.positions(bidId);
-        (
-            ,
-            PoolId askPoolId,
-            NativeBookHook.Side askSide,
-            int24 askLower,
-            int24 askUpper,
-            uint128 askLiquidity,,
-            bool askActive
-        ) = hook.positions(askId);
+        PositionInfo memory bid = hook.positions(bidId);
+        PositionInfo memory ask = hook.positions(askId);
 
-        assertEq(PoolId.unwrap(bidPoolId), PoolId.unwrap(testPoolId));
-        assertEq(PoolId.unwrap(askPoolId), PoolId.unwrap(testPoolId));
-        assertEq(uint8(bidSide), uint8(NativeBookHook.Side.Bid));
-        assertEq(uint8(askSide), uint8(NativeBookHook.Side.Ask));
-        assertEq(bidLower, -BIN_SPACING);
-        assertEq(bidUpper, 0);
-        assertEq(askLower, BIN_SPACING);
-        assertEq(askUpper, 2 * BIN_SPACING);
-        assertGt(bidLiquidity, 0);
-        assertGt(askLiquidity, 0);
-        assertTrue(bidActive);
-        assertTrue(askActive);
+        assertEq(PoolId.unwrap(bid.poolId), PoolId.unwrap(testPoolId));
+        assertEq(PoolId.unwrap(ask.poolId), PoolId.unwrap(testPoolId));
+        assertEq(uint8(bid.side), uint8(Side.Bid));
+        assertEq(uint8(ask.side), uint8(Side.Ask));
+        assertEq(bid.tickLower, -BIN_SPACING);
+        assertEq(bid.tickUpper, 0);
+        assertEq(ask.tickLower, BIN_SPACING);
+        assertEq(ask.tickUpper, 2 * BIN_SPACING);
+        assertGt(bid.liquidity, 0);
+        assertGt(ask.liquidity, 0);
+        assertTrue(bid.active);
+        assertTrue(ask.active);
     }
 
     function test_replaceLadder_replacesPreviousBins() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.startPrank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -2, amount: 75 ether});
-        asks = new NativeBookHook.BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -2, amount: 75 ether});
+        asks = new BinCapacity[](0);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
         vm.stopPrank();
 
@@ -264,14 +254,14 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadder_sameBinDoesNotDuplicatePosition() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.startPrank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
         bytes32 firstId = hook.makerPositionAt(testPoolId, maker, 0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 75 ether});
+        bids[0] = BinCapacity({offset: -1, amount: 75 ether});
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
         vm.stopPrank();
 
@@ -287,13 +277,13 @@ contract NativeBookHookTest is Test, Deployers {
         uint256 askCount = bound(askCountRaw, 0, 4);
         uint40 ttl = uint40(bound(ttlRaw, 1, 1 days));
 
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](bidCount);
+        BinCapacity[] memory bids = new BinCapacity[](bidCount);
         for (uint256 i; i < bidCount; ++i) {
-            bids[i] = NativeBookHook.BinCapacity({offset: -int8(uint8(i + 1)), amount: 100 ether});
+            bids[i] = BinCapacity({offset: -int8(uint8(i + 1)), amount: 100 ether});
         }
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](askCount);
+        BinCapacity[] memory asks = new BinCapacity[](askCount);
         for (uint256 i; i < askCount; ++i) {
-            asks[i] = NativeBookHook.BinCapacity({offset: int8(uint8(i + 1)), amount: 100 ether});
+            asks[i] = BinCapacity({offset: int8(uint8(i + 1)), amount: 100 ether});
         }
 
         vm.prank(maker);
@@ -315,9 +305,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_multipleMakersCanQuoteSameCanonicalBin() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -367,46 +357,44 @@ contract NativeBookHookTest is Test, Deployers {
 
     function test_replaceLadder_revertsWhenCustodiedInventoryIsInsufficient() public {
         address emptyMaker = makeAddr("emptyMaker");
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                NativeBookHook.InsufficientInventory.selector, emptyMaker, Currency.unwrap(currency1), 0, 100 ether
-            )
+            abi.encodeWithSelector(InsufficientInventory.selector, emptyMaker, Currency.unwrap(currency1), 0, 100 ether)
         );
         vm.prank(emptyMaker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
 
     function test_replaceLadder_revertsForDuplicateBidOffset() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](2);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -1, amount: 50 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](2);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -1, amount: 50 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
-        vm.expectRevert(NativeBookHook.DuplicateBinOffset.selector);
+        vm.expectRevert(DuplicateBinOffset.selector);
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
 
     function test_replaceLadder_revertsForDuplicateAskOffset() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](2);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
-        asks[1] = NativeBookHook.BinCapacity({offset: 1, amount: 50 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](2);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
+        asks[1] = BinCapacity({offset: 1, amount: 50 ether});
 
-        vm.expectRevert(NativeBookHook.DuplicateBinOffset.selector);
+        vm.expectRevert(DuplicateBinOffset.selector);
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
 
     function test_replaceLadderWithSig_allowsRelayerToPostMakerLadder() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -418,9 +406,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_emitsRelayerAndNonceContext() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint40 ttl = 1 hours;
         uint40 expiry = uint40(block.timestamp) + ttl;
         uint256 deadline = block.timestamp + 2 hours;
@@ -434,15 +422,15 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_replacesExistingLadder() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
         assertEq(hook.makerPositionCount(testPoolId, maker), 1);
 
-        bids[0] = NativeBookHook.BinCapacity({offset: -2, amount: 75 ether});
+        bids[0] = BinCapacity({offset: -2, amount: 75 ether});
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -457,9 +445,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_revertsOnReplay() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -473,9 +461,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_revertsWhenExpired() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint256 deadline = 1 days;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -487,9 +475,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_revertsForWrongSigner() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(maker2Pk, maker, bids, asks, 1 hours, deadline);
 
@@ -500,21 +488,21 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadderWithSig_revertsWhenRefTickMovesOutsideBound() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, 60, 0, deadline);
 
-        vm.expectRevert(abi.encodeWithSelector(NativeBookHook.RefTickSlippage.selector, 60, 0, 0));
+        vm.expectRevert(abi.encodeWithSelector(BinMath.RefTickSlippage.selector, 60, 0, 0));
         vm.prank(relayer);
         hook.replaceLadderWithSig(testPoolKey, maker, bids, asks, 1 hours, 60, 0, deadline, signature);
     }
 
     function test_replaceLadderWithSig_revertsWhenExpiryWouldExceedDeadline() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint40 ttl = 1 hours;
         uint256 deadline = block.timestamp + ttl;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, ttl, deadline);
@@ -526,9 +514,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_directReplaceInvalidatesOlderSignedReplace() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory staleSignature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -542,9 +530,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_expiredBinRetiresOnGenericSwapWithoutHookData() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -559,9 +547,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_expiredBinCanBeRetiredByKeeper() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -575,9 +563,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_retirePosition_revertsBeforeExpiryWhenNotCrossed() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -588,11 +576,11 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_retirePositions_retiresBoundedExpiredBatchAndSkipsFreshIds() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](3);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -2, amount: 100 ether});
-        bids[2] = NativeBookHook.BinCapacity({offset: -3, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](3);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -2, amount: 100 ether});
+        bids[2] = BinCapacity({offset: -3, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -614,10 +602,10 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_retirePositions_emitsBatchSummary() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](2);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -2, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](2);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -2, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -659,23 +647,21 @@ contract NativeBookHookTest is Test, Deployers {
         vm.prank(owner);
         hook.setPoolLive(testPoolKey, false);
 
-        _expectHookWrappedError(
-            IHooks.beforeSwap.selector, abi.encodeWithSelector(NativeBookHook.PoolNotLive.selector, testPoolId)
-        );
+        _expectHookWrappedError(IHooks.beforeSwap.selector, abi.encodeWithSelector(PoolNotLive.selector, testPoolId));
         swap(testPoolKey, true, 1 ether, "");
     }
 
     function test_setPoolLive_emitsOldAndNewValues() public {
         vm.expectEmit(true, true, false, true, address(hook));
-        emit PoolLivenessUpdated(testPoolId, owner, true, false);
+        emit PoolLivenessUpdated(testPoolId, false);
         vm.prank(owner);
         hook.setPoolLive(testPoolKey, false);
     }
 
     function test_crossedAskCanBeRetiredAfterGenericSwap() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -692,9 +678,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_claimFeesCollectsAccruedFeesWithoutRemovingPosition() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -710,9 +696,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_claimFees_emitsCallerAndClaimedAmounts() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -759,13 +745,13 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadder_emitsPositionIdOnBinPosted() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bytes32 positionId = keccak256(abi.encode(testPoolId, maker, NativeBookHook.Side.Bid, -BIN_SPACING));
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bytes32 positionId = keccak256(abi.encode(testPoolId, maker, Side.Bid, -BIN_SPACING));
 
         vm.expectEmit(true, true, true, false, address(hook));
-        emit BinPosted(testPoolId, maker, positionId, NativeBookHook.Side.Bid, 0, 0, 0, 0, 0, 0);
+        emit BinPosted(testPoolId, maker, positionId, Side.Bid, 0, 0, 0, 0, 0, 0);
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
@@ -822,10 +808,10 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_cancelLadder_removesAllMakerBins() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.startPrank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -837,10 +823,10 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_cancelLadderWithSig_allowsRelayerToCancelMakerLadder() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -858,9 +844,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_cancelLadderWithSig_emitsRelayerAndNonceContext() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -876,9 +862,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_cancelLadderWithSig_revertsOnReplay() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -896,9 +882,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_directCancelInvalidatesOlderSignedCancel() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -940,10 +926,10 @@ contract NativeBookHookTest is Test, Deployers {
         uint256 token0Before = hook.inventoryBalance(maker, currency0);
         uint256 token1Before = hook.inventoryBalance(maker, currency1);
 
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.startPrank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -957,31 +943,31 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_initializePool_validatesConfig() public {
-        NativeBookHook.PoolConfig memory config = _defaultConfig();
+        PoolConfig memory config = _defaultConfig();
         config.binSpacingTicks = 55;
 
-        vm.expectRevert(NativeBookHook.InvalidPoolConfig.selector);
+        vm.expectRevert(InvalidPoolConfig.selector);
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.getSqrtPriceAtTick(0), config);
     }
 
     function test_initializePool_revertsForZeroMinBinLiquidity() public {
-        NativeBookHook.PoolConfig memory config = _defaultConfig();
+        PoolConfig memory config = _defaultConfig();
         config.minBinLiquidity = 0;
 
-        vm.expectRevert(NativeBookHook.InvalidPoolConfig.selector);
+        vm.expectRevert(InvalidPoolConfig.selector);
         vm.prank(owner);
         hook.initializePool(testPoolKey, TickMath.getSqrtPriceAtTick(0), config);
     }
 
     function test_directPoolManagerInitializeIsBlocked() public {
-        _expectHookWrappedError(IHooks.beforeInitialize.selector, NativeBookHook.DirectInitializeBlocked.selector);
+        _expectHookWrappedError(IHooks.beforeInitialize.selector, OwnedALFHook.DirectInitializeBlocked.selector);
         manager.initialize(testPoolKey, TickMath.getSqrtPriceAtTick(0));
     }
 
     function test_replaceLadder_revertsForTooLongTtl() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.expectRevert(NativeBookHook.InvalidQuoteTtl.selector);
         vm.prank(maker);
@@ -989,31 +975,31 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_replaceLadder_revertsForTooManyBins() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](9);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](9);
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
-        vm.expectRevert(NativeBookHook.InvalidPoolConfig.selector);
+        vm.expectRevert(NativeBookHook.TooManyBins.selector);
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
 
     function test_replaceLadder_revertsForWrongSideOffset() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: 1, amount: 100 ether});
 
-        vm.expectRevert(NativeBookHook.InvalidBinOffset.selector);
+        vm.expectRevert(InvalidBinOffset.selector);
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
     }
 
     function test_gas_replaceLadder_twoSided() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](2);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -2, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](2);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
-        asks[1] = NativeBookHook.BinCapacity({offset: 2, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](2);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -2, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](2);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
+        asks[1] = BinCapacity({offset: 2, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -1021,12 +1007,12 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_gas_replaceLadderWithSig_twoSided() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](2);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -2, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](2);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
-        asks[1] = NativeBookHook.BinCapacity({offset: 2, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](2);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -2, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](2);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
+        asks[1] = BinCapacity({offset: 2, amount: 100 ether});
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory signature = _signReplaceLadder(makerPk, maker, bids, asks, 1 hours, deadline);
 
@@ -1043,9 +1029,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_gas_swapRetireExpired() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](1);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](1);
+        BinCapacity[] memory asks = new BinCapacity[](0);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -1056,11 +1042,11 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_gas_retirePositions_expiredBatch() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](3);
-        bids[0] = NativeBookHook.BinCapacity({offset: -1, amount: 100 ether});
-        bids[1] = NativeBookHook.BinCapacity({offset: -2, amount: 100 ether});
-        bids[2] = NativeBookHook.BinCapacity({offset: -3, amount: 100 ether});
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](0);
+        BinCapacity[] memory bids = new BinCapacity[](3);
+        bids[0] = BinCapacity({offset: -1, amount: 100 ether});
+        bids[1] = BinCapacity({offset: -2, amount: 100 ether});
+        bids[2] = BinCapacity({offset: -3, amount: 100 ether});
+        BinCapacity[] memory asks = new BinCapacity[](0);
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1, 0, 0);
@@ -1075,9 +1061,9 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     function test_gas_claimFees_crossedAsk() public {
-        NativeBookHook.BinCapacity[] memory bids = new NativeBookHook.BinCapacity[](0);
-        NativeBookHook.BinCapacity[] memory asks = new NativeBookHook.BinCapacity[](1);
-        asks[0] = NativeBookHook.BinCapacity({offset: 1, amount: 100 ether});
+        BinCapacity[] memory bids = new BinCapacity[](0);
+        BinCapacity[] memory asks = new BinCapacity[](1);
+        asks[0] = BinCapacity({offset: 1, amount: 100 ether});
 
         vm.prank(maker);
         hook.replaceLadder(testPoolKey, bids, asks, 1 hours, 0, 0);
@@ -1103,8 +1089,8 @@ contract NativeBookHookTest is Test, Deployers {
         assertApproxEqAbs(quoted, actual, 1);
     }
 
-    function _defaultConfig() internal pure returns (NativeBookHook.PoolConfig memory) {
-        return NativeBookHook.PoolConfig({
+    function _defaultConfig() internal pure returns (PoolConfig memory) {
+        return PoolConfig({
             binSpacingTicks: BIN_SPACING,
             binsPerSide: 4,
             maxMakerBins: 8,
@@ -1142,8 +1128,8 @@ contract NativeBookHookTest is Test, Deployers {
     function _signReplaceLadder(
         uint256 privateKey,
         address maker_,
-        NativeBookHook.BinCapacity[] memory bids,
-        NativeBookHook.BinCapacity[] memory asks,
+        BinCapacity[] memory bids,
+        BinCapacity[] memory asks,
         uint40 ttl,
         uint256 deadline
     ) internal view returns (bytes memory) {
@@ -1153,8 +1139,8 @@ contract NativeBookHookTest is Test, Deployers {
     function _signReplaceLadder(
         uint256 privateKey,
         address maker_,
-        NativeBookHook.BinCapacity[] memory bids,
-        NativeBookHook.BinCapacity[] memory asks,
+        BinCapacity[] memory bids,
+        BinCapacity[] memory asks,
         uint40 ttl,
         int24 expectedRefTick,
         uint24 maxTickDeviation,
@@ -1195,7 +1181,7 @@ contract NativeBookHookTest is Test, Deployers {
         returns (
             address maker_,
             PoolId poolId,
-            NativeBookHook.Side side,
+            Side side,
             int24 tickLower,
             int24 tickUpper,
             uint128 liquidity,
@@ -1204,7 +1190,9 @@ contract NativeBookHookTest is Test, Deployers {
             bool dummy
         )
     {
-        (maker_, poolId, side, tickLower, tickUpper, liquidity, expiry, active) = hook.positions(positionId);
+        PositionInfo memory p = hook.positions(positionId);
+        (maker_, poolId, side, tickLower, tickUpper, liquidity, expiry, active) =
+        (p.maker, p.poolId, p.side, p.tickLower, p.tickUpper, p.liquidity, p.expiry, p.active);
         dummy = false;
     }
 }

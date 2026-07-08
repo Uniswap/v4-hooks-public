@@ -7,89 +7,17 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SwapSimulator} from "./libraries/SwapSimulator.sol";
-
-/// @title INativeBookQuoterSource
-/// @author Uniswap Labs
-/// @notice Minimal read interface used by {NativeBookQuoter} to inspect a NativeBook hook.
-/// @custom:security-contact security@uniswap.org
-interface INativeBookQuoterSource {
-    /// @notice Side of a native-book maker position.
-    enum Side {
-        Bid,
-        Ask
-    }
-
-    /// @notice Return whether a pool is currently live for swaps.
-    /// @param poolId Pool being queried.
-    /// @return live True if the pool is live.
-    function poolLive(PoolId poolId) external view returns (bool);
-
-    /// @notice Return canonical native-book configuration for a pool.
-    /// @param poolId Pool being queried.
-    /// @return binSpacingTicks Width of each book bin in ticks.
-    /// @return binsPerSide Number of canonical bins available on each side.
-    /// @return maxMakerBins Maximum active bins per maker.
-    /// @return maxRetirePerSwap Maximum stale/crossed bins inspected and retired per swap.
-    /// @return maxQuoteTtl Maximum quote lifetime in seconds.
-    /// @return minBinLiquidity Minimum native v4 liquidity for a newly posted bin.
-    function poolConfigs(PoolId poolId)
-        external
-        view
-        returns (
-            int24 binSpacingTicks,
-            uint8 binsPerSide,
-            uint8 maxMakerBins,
-            uint8 maxRetirePerSwap,
-            uint40 maxQuoteTtl,
-            uint128 minBinLiquidity
-        );
-
-    /// @notice Return a pool's active position id at an index.
-    /// @param poolId Pool being queried.
-    /// @param index Zero-based active position index.
-    /// @return positionId Active position id at `index`.
-    function activePositionAt(PoolId poolId, uint256 index) external view returns (bytes32);
-
-    /// @notice Return the number of active position ids tracked for a pool.
-    /// @param poolId Pool being queried.
-    /// @return count Number of active position ids.
-    function activePositionCount(PoolId poolId) external view returns (uint256);
-
-    /// @notice Return the pool's bounded retirement cursor.
-    /// @param poolId Pool being queried.
-    /// @return cursor Current cursor into the pool's active position ids.
-    function retireCursor(PoolId poolId) external view returns (uint256);
-
-    /// @notice Return metadata for a hook-owned maker position.
-    /// @param positionId Position id being queried.
-    /// @return maker Maker that owns the position.
-    /// @return poolId Pool the position belongs to.
-    /// @return side Bid or ask side.
-    /// @return tickLower Lower tick of the native v4 position.
-    /// @return tickUpper Upper tick of the native v4 position.
-    /// @return liquidity Native v4 liquidity currently deployed.
-    /// @return expiry Unix timestamp when the quote becomes retirable.
-    /// @return active True if the position currently owns native v4 liquidity.
-    function positions(bytes32 positionId)
-        external
-        view
-        returns (
-            address maker,
-            PoolId poolId,
-            Side side,
-            int24 tickLower,
-            int24 tickUpper,
-            uint128 liquidity,
-            uint40 expiry,
-            bool active
-        );
-}
+import {INativeBookQuoterSource} from "./interfaces/INativeBookQuoterSource.sol";
+import {PositionInfo, isRetirable} from "./types/BookPositions.sol";
 
 /// @title NativeBookQuoter
+/// @author Uniswap Labs
 /// @notice View-only ALF quote helper for NativeBookHook.
 /// @dev Kept out of the hook runtime so full native v4 tick-walking quotes do not push the
 ///      hook over EIP-170. Quotes mirror NativeBookHook's bounded pre-swap retirement by
-///      applying equivalent virtual liquidity removals before simulation.
+///      applying equivalent virtual liquidity removals before simulation; retirability is
+///      decided by the same `isRetirable` predicate execution uses, so the quote-side scan
+///      cannot drift from the swap-side scan.
 /// @custom:security-contact security@uniswap.org
 contract NativeBookQuoter {
     using PoolIdLibrary for PoolKey;
@@ -152,7 +80,7 @@ contract NativeBookQuoter {
         uint160 sqrtPriceLimitX96
     ) internal view returns (uint256 amountIn, uint256 amountOut) {
         PoolId poolId = key.toId();
-        if (!source.poolLive(poolId)) return (0, 0);
+        if (!source.livePools(poolId)) return (0, 0);
 
         (
             int128 activeLiquidityDelta,
@@ -177,6 +105,10 @@ contract NativeBookQuoter {
         );
     }
 
+    /// @dev Replays the hook's bounded `_retireSome` scan virtually: walks the pool's active
+    ///      position index from the stored cursor, marks retirable bins as removed (mirroring
+    ///      the index's swap-remove semantics through the override list), and accumulates the
+    ///      equivalent active-liquidity and tick-level adjustments for the simulator.
     function _quoteRetirementAdjustments(INativeBookQuoterSource source, PoolKey calldata key)
         internal
         view
@@ -187,7 +119,7 @@ contract NativeBookQuoter {
         )
     {
         PoolId poolId = key.toId();
-        (,,, uint8 maxRemovals,,) = source.poolConfigs(poolId);
+        uint8 maxRemovals = source.poolConfigs(poolId).maxRetirePerSwap;
         uint256 length = source.activePositionCount(poolId);
         tickAdjustments = new SwapSimulator.TickAdjustment[](uint256(maxRemovals) * 2);
         if (maxRemovals == 0 || length == 0) return (0, tickAdjustments, 0);
@@ -208,26 +140,17 @@ contract NativeBookQuoter {
                 ++checked;
             }
 
-            (
-                ,
-                PoolId positionPoolId,
-                INativeBookQuoterSource.Side side,
-                int24 tickLower,
-                int24 tickUpper,
-                uint128 liquidity,
-                uint40 expiry,
-                bool active
-            ) = source.positions(positionId);
-            if (_isRetirableAtTick(poolId, positionPoolId, side, tickLower, tickUpper, expiry, active, currentTick)) {
-                int128 liquidityDelta = int128(liquidity);
-                if (currentTick >= tickLower && currentTick < tickUpper) {
+            PositionInfo memory p = source.positions(positionId);
+            if (isRetirable(p, poolId, currentTick)) {
+                int128 liquidityDelta = int128(p.liquidity);
+                if (currentTick >= p.tickLower && currentTick < p.tickUpper) {
                     activeLiquidityDelta -= liquidityDelta;
                 }
                 tickAdjustmentCount = _accumulateQuoteAdjustment(
-                    tickAdjustments, tickAdjustmentCount, tickLower, -liquidityDelta, liquidity
+                    tickAdjustments, tickAdjustmentCount, p.tickLower, -liquidityDelta, p.liquidity
                 );
                 tickAdjustmentCount = _accumulateQuoteAdjustment(
-                    tickAdjustments, tickAdjustmentCount, tickUpper, liquidityDelta, liquidity
+                    tickAdjustments, tickAdjustmentCount, p.tickUpper, liquidityDelta, p.liquidity
                 );
 
                 unchecked {
@@ -295,21 +218,5 @@ contract NativeBookQuoter {
             tick: tick, liquidityNetDelta: liquidityNetDelta, liquidityGrossRemoved: liquidityGrossRemoved
         });
         return tickAdjustmentCount + 1;
-    }
-
-    function _isRetirableAtTick(
-        PoolId expectedPoolId,
-        PoolId positionPoolId,
-        INativeBookQuoterSource.Side side,
-        int24 tickLower,
-        int24 tickUpper,
-        uint40 expiry,
-        bool active,
-        int24 currentTick
-    ) internal view returns (bool) {
-        if (!active || PoolId.unwrap(positionPoolId) != PoolId.unwrap(expectedPoolId)) return false;
-        if (block.timestamp >= expiry) return true;
-        if (side == INativeBookQuoterSource.Side.Ask) return currentTick >= tickUpper;
-        return currentTick < tickLower;
     }
 }
