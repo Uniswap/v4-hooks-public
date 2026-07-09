@@ -69,9 +69,12 @@ import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/Signa
 ///
 ///      User-facing entry points carry the OZ `nonReentrant` transient guard plus
 ///      `whenJITNotInProgress`. `_beforeSwap` (no fresh entry point, so ineligible for the OZ
-///      guard) wraps its bounded retirement scan in the per-pool `JITLock`: maker payouts
-///      during retirement are external token transfers, and the lock stops a token callback
-///      from reentering the LP/inventory entry points or the same pool's swap path mid-scan.
+///      guard) wraps its bounded retirement scan in the per-pool `JITLock`: the scan settles
+///      each retired bin against the PoolManager via `_take`/`_settle` on the pool currencies, so
+///      a callback-capable (e.g. ERC-777) currency could reenter, and the lock stops such a token
+///      callback from reentering the LP/inventory entry points or the same pool's swap path
+///      mid-scan. Maker value never leaves during the scan: it is credited to the internal
+///      `MakerInventory` ledger, and the only transfer to an arbitrary address is `withdraw`.
 /// @custom:security-contact security@uniswap.org
 contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonces, IUnlockCallback {
     using CurrencyLibrary for Currency;
@@ -745,9 +748,9 @@ contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonce
     }
 
     /// @dev Liveness gate plus bounded opportunistic retirement of stale/crossed bins. The scan
-    ///      settles maker payouts (external token transfers), so it runs under the per-pool
-    ///      `JITLock`: entry points reject reentry via `whenJITNotInProgress` and a reentrant
-    ///      same-pool swap is rejected by {JITLock.enter}.
+    ///      settles each retired bin against the PoolManager via `_take`/`_settle` on the pool
+    ///      currencies, so it runs under the per-pool `JITLock`: entry points reject reentry via
+    ///      `whenJITNotInProgress` and a reentrant same-pool swap is rejected by {JITLock.enter}.
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         internal
         override
@@ -944,11 +947,13 @@ contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonce
         emit FeesClaimed(p.poolId, p.maker, id, caller, amount0, amount1);
     }
 
-    /// @dev Bounded opportunistic retirement: scan up to `maxRemovals` active ids from the
-    ///      pool's cursor, retiring any that are expired or crossed. The cursor persists across
-    ///      swaps so the scan makes progress even when each swap only inspects a slice of the
-    ///      book. Mirrored virtually by `NativeBookQuoter._quoteRetirementAdjustments`; keep the
-    ///      two scans in lockstep.
+    /// @dev Bounded opportunistic retirement: scan active ids from the pool's cursor, retiring any
+    ///      that are expired or crossed. The scan inspects at most `min(maxRemovals, activeCount)`
+    ///      ids — one full pass — since re-inspecting a position within the same call is wasted
+    ///      work (its retirability cannot change mid-call). The cursor persists across swaps so the
+    ///      scan makes progress even when each swap only inspects a slice of the book. Mirrored
+    ///      virtually by `NativeBookQuoter._quoteRetirementAdjustments`; keep the two scans in
+    ///      lockstep.
     function _retireSome(PoolKey calldata key, uint8 maxRemovals) internal {
         if (maxRemovals == 0) return;
         PoolId poolId = key.toId();
@@ -956,10 +961,13 @@ contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonce
         if (length == 0) return;
 
         (, int24 currentTick,,) = poolManager.getSlot0(poolId);
+        // Cap inspections at one full pass: the smaller of the operator's per-swap budget
+        // (`maxRemovals`) and the active count at entry (`length`). This bounds removals by the same
+        // budget (each inspection retires at most one id) without wrapping to re-check the book.
+        uint256 budget = maxRemovals < length ? maxRemovals : length;
         uint256 checked = 0;
-        uint256 removed = 0;
         uint256 cursor = _book.cursor(poolId) % length;
-        while (_book.activeCount(poolId) != 0 && checked < maxRemovals && removed < maxRemovals) {
+        while (_book.activeCount(poolId) != 0 && checked < budget) {
             uint256 activeLength = _book.activeCount(poolId);
             if (cursor >= activeLength) cursor = 0;
             bytes32 id = _book.activeAt(poolId, cursor);
@@ -968,9 +976,6 @@ contract NativeBookHook is OwnedALFHook, ReentrancyGuardTransient, EIP712, Nonce
             }
             if (isRetirable(_book.get(id), poolId, currentTick)) {
                 _removePosition(key, id);
-                unchecked {
-                    ++removed;
-                }
                 if (cursor >= _book.activeCount(poolId)) cursor = 0;
             } else {
                 unchecked {

@@ -1,8 +1,8 @@
 {
   "NativeBookHook_claimFees_crossedAsk": "115061",
-  "NativeBookHook_replaceLadderWithSig_twoSided": "1207399",
-  "NativeBookHook_replaceLadder_twoSided": "1194233",
+  "NativeBookHook_replaceLadderWithSig_twoSided": "1207397",
+  "NativeBookHook_replaceLadder_twoSided": "1194231",
   "NativeBookHook_retirePositions_expiredBatch": "272824",
-  "NativeBookHook_swap_noRetire": "155493",
-  "NativeBookHook_swap_retireExpired": "221476"
+  "NativeBookHook_swap_noRetire": "155487",
+  "NativeBookHook_swap_retireExpired": "221431"
 }
