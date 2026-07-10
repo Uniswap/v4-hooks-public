@@ -1078,161 +1078,200 @@ contract NativeBookHookTest is Test, Deployers {
     //        COMPLEX SCENARIOS: multi-maker attribution, TTL, retirement
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Two independent makers run different two-sided ladders while orders cross the book in
-    ///         both directions. Proves (a) per-position attribution, (b) that fill proceeds are only
-    ///         credited to the OWNING maker and only on retirement, and (c) that both retirement
-    ///         paths — keeper batches and the opportunistic `beforeSwap` scan — work end to end.
-    /// @dev The backbone check is {_assertCustodyConservation}: the hook's ERC-20 balance of each
-    ///      currency must always equal the sum of the two makers' inventory balances. Posting a bin
-    ///      debits the maker and settles the same amount to the PoolManager; retiring takes it back
-    ///      and credits the same maker. Any misattribution — crediting the wrong maker, double
-    ///      counting, or losing dust — breaks this equality, so it is asserted at every checkpoint.
+    /// @notice Five independent makers run a mix of single-sided and two-sided ladders with variably
+    ///         sized bins, some sharing canonical bins and others on disjoint offsets, while orders
+    ///         cross the whole book in both directions. Proves per-position attribution (fills credit
+    ///         only the OWNING maker, and only on retirement) and that both retirement paths (keeper
+    ///         batches and the bounded opportunistic `beforeSwap` scan) work across many makers.
+    /// @dev Backbone: {_assertCustody} requires the hook's ERC-20 balance of each currency to equal
+    ///      the sum of ALL makers' inventory balances at every checkpoint. Posting debits a maker and
+    ///      settles the same amount to the PoolManager; retiring takes it back and credits the same
+    ///      maker. Any misattribution across the five makers (wrong maker, double count, lost dust)
+    ///      breaks this equality.
     function test_scenario_multiMakerBidirectionalAttributionAndRetirement() public {
-        uint40 ttlLong = 1 hours;
+        address[] memory makers = _fiveMakers();
+        address m1 = makers[0]; // two-sided (posted by signature)
+        address m2 = makers[1]; // ask-only (posted by signature)
+        address m3 = makers[2]; // bid-only
+        address m4 = makers[3]; // two-sided
+        address m5 = makers[4]; // ask-only
+        uint40 ttl = 1 hours;
 
-        // ---- Phase 0: two makers, different ladders; A direct, B relayed via EIP-712 signature ----
-        vm.prank(maker);
+        // ---- Phase 0: mixed ladders. Overlaps: ask1{m1,m2}, ask2{m1,m4,m5}, ask4{m4,m5},
+        //      bid-1{m1,m3}, bid-2{m1,m4}. Disjoint: ask3{m2}, bid-3{m3}, bid-4{m4}. ----
+        _postSig(
+            m1,
+            makerPk,
+            _bins2(_cap(-1, 80 ether), _cap(-2, 120 ether)),
+            _bins2(_cap(1, 80 ether), _cap(2, 120 ether)),
+            ttl
+        );
+        _postSig(m2, maker2Pk, _bins0(), _bins2(_cap(1, 200 ether), _cap(3, 60 ether)), ttl);
+        vm.prank(m3);
+        hook.replaceLadder(testPoolKey, _bins2(_cap(-1, 150 ether), _cap(-3, 90 ether)), _bins0(), ttl, 0, 0);
+        vm.prank(m4);
         hook.replaceLadder(
             testPoolKey,
-            _bins2(_cap(-1, 100 ether), _cap(-2, 100 ether)),
-            _bins2(_cap(1, 100 ether), _cap(2, 100 ether)),
+            _bins2(_cap(-2, 100 ether), _cap(-4, 40 ether)),
+            _bins2(_cap(2, 100 ether), _cap(4, 40 ether)),
+            ttl,
+            0,
+            0
+        );
+        vm.prank(m5);
+        hook.replaceLadder(testPoolKey, _bins0(), _bins2(_cap(2, 70 ether), _cap(4, 110 ether)), ttl, 0, 0);
+
+        assertEq(hook.activePositionCount(testPoolId), 14, "14 positions across five makers");
+        _assertOwnedBy(m1, 4);
+        _assertOwnedBy(m2, 2);
+        _assertOwnedBy(m3, 2);
+        _assertOwnedBy(m4, 4);
+        _assertOwnedBy(m5, 2);
+        _assertCustody(makers);
+
+        // ---- Phase 1: a large one-for-zero order crosses the entire ask side (8 ask positions) ----
+        _swapToTick(false, 6 * BIN_SPACING); // above the farthest ask bin (offset 4 -> [240, 300])
+        (, int24 tickUp,,) = manager.getSlot0(testPoolId);
+        assertGe(tickUp, 5 * BIN_SPACING, "crossed through the whole ask ladder");
+        _assertCustody(makers);
+        assertEq(hook.activePositionCount(testPoolId), 14, "fills are locked in crossed positions, not retired");
+
+        // Retire ONLY m2's crossed asks: m2 is credited; every other maker is left untouched.
+        uint256[] memory pre0 = _snap(makers, currency0);
+        uint256[] memory pre1 = _snap(makers, currency1);
+        assertEq(_retireCrossed(m2), 2, "m2's two asks were crossed and retired");
+        assertGt(hook.inventoryBalance(m2, currency1), pre1[1], "m2 credited token1 from its own fills");
+        for (uint256 i; i < makers.length; ++i) {
+            if (makers[i] == m2) continue;
+            assertEq(hook.inventoryBalance(makers[i], currency0), pre0[i], "other maker token0 untouched");
+            assertEq(hook.inventoryBalance(makers[i], currency1), pre1[i], "other maker token1 untouched");
+        }
+        _assertCustody(makers);
+
+        // Retire the remaining crossed asks (m1, m4, m5); only the bid side is left.
+        _retireCrossed(m1);
+        _retireCrossed(m4);
+        _retireCrossed(m5);
+        assertEq(hook.activePositionCount(testPoolId), 6, "only the 6 bid positions remain");
+        _assertCustody(makers);
+
+        // ---- Phase 2: reverse direction crosses the entire bid side; opportunistic retirement ----
+        _swapToTick(true, -5 * BIN_SPACING); // below the farthest bid bin (offset -4 -> [-240, -180])
+        (, int24 tickDown,,) = manager.getSlot0(testPoolId);
+        assertLt(tickDown, -4 * BIN_SPACING, "crossed through the whole bid ladder");
+
+        uint256 activeBefore = hook.activePositionCount(testPoolId); // 6 crossed bids
+        uint256 token0Before = _sumInv(makers, currency0);
+        swap(testPoolKey, false, -1 ether, ""); // tiny trigger; beforeSwap scans the pre-swap tick
+        assertEq(
+            activeBefore - hook.activePositionCount(testPoolId),
+            4,
+            "opportunistic retirement bounded by maxRetirePerSwap"
+        );
+        assertGt(_sumInv(makers, currency0), token0Before, "retired bids paid out in token0");
+        _assertCustody(makers);
+
+        // ---- Phase 3: cancel every remaining ladder; custody stays attributed and makers net fees ----
+        for (uint256 i; i < makers.length; ++i) {
+            vm.prank(makers[i]);
+            hook.cancelLadder(testPoolKey);
+        }
+        assertEq(hook.activePositionCount(testPoolId), 0, "book emptied");
+        _assertCustody(makers);
+        // Five makers deposited 5,000,000 total; crossing their bins on both sides earned LP fees.
+        assertGt(_custody(currency0) + _custody(currency1), 5_000_000 ether, "makers net-earned LP fees over the flow");
+    }
+
+    /// @notice Five makers post the mixed book with different per-ladder TTLs (some short, some long)
+    ///         and overlapping/disjoint bins. Proves per-ladder expiry (short-TTL makers retire while
+    ///         long-TTL makers stay live), that a canonical bin quoted by several makers is a set of
+    ///         distinct per-maker positions, and that keeper batches and the opportunistic scan both
+    ///         honor retirability.
+    function test_scenario_perLadderTtlAndSharedBinAttribution() public {
+        address[] memory makers = _fiveMakers();
+        address m1 = makers[0];
+        address m2 = makers[1];
+        address m3 = makers[2];
+        address m4 = makers[3];
+        address m5 = makers[4];
+        uint40 ttlLong = 1 hours;
+        uint40 ttlShort = 30;
+
+        // Same mixed book as the bidirectional scenario, but TTLs differ per ladder:
+        //   long : m1 (two-sided), m4 (two-sided)
+        //   short: m2 (ask-only), m3 (bid-only), m5 (ask-only)
+        _postSig(
+            m1,
+            makerPk,
+            _bins2(_cap(-1, 80 ether), _cap(-2, 120 ether)),
+            _bins2(_cap(1, 80 ether), _cap(2, 120 ether)),
+            ttlLong
+        );
+        _postSig(m2, maker2Pk, _bins0(), _bins2(_cap(1, 200 ether), _cap(3, 60 ether)), ttlShort);
+        vm.prank(m3);
+        hook.replaceLadder(testPoolKey, _bins2(_cap(-1, 150 ether), _cap(-3, 90 ether)), _bins0(), ttlShort, 0, 0);
+        vm.prank(m4);
+        hook.replaceLadder(
+            testPoolKey,
+            _bins2(_cap(-2, 100 ether), _cap(-4, 40 ether)),
+            _bins2(_cap(2, 100 ether), _cap(4, 40 ether)),
             ttlLong,
             0,
             0
         );
-        {
-            BinCapacity[] memory bBids = _bins2(_cap(-1, 150 ether), _cap(-2, 120 ether));
-            BinCapacity[] memory bAsks = _bins2(_cap(1, 150 ether), _cap(2, 120 ether));
-            uint256 deadline = block.timestamp + 1 hours;
-            bytes memory sig = _signReplaceLadder(maker2Pk, maker2, bBids, bAsks, ttlLong, deadline);
-            vm.prank(relayer);
-            hook.replaceLadderWithSig(testPoolKey, maker2, bBids, bAsks, ttlLong, 0, 0, deadline, sig);
-        }
+        vm.prank(m5);
+        hook.replaceLadder(testPoolKey, _bins0(), _bins2(_cap(2, 70 ether), _cap(4, 110 ether)), ttlShort, 0, 0);
 
-        assertEq(hook.activePositionCount(testPoolId), 8, "8 bins across two makers");
-        _assertOwnedBy(maker, 4);
-        _assertOwnedBy(maker2, 4);
-        _assertCustodyConservation();
+        assertEq(hook.activePositionCount(testPoolId), 14, "14 positions across five makers");
+        _assertOwnedBy(m1, 4);
+        _assertOwnedBy(m2, 2);
+        _assertOwnedBy(m3, 2);
+        _assertOwnedBy(m4, 4);
+        _assertOwnedBy(m5, 2);
+        _assertCustody(makers);
 
-        // ---- Phase 1: a large one-for-zero order crosses the ask side ----
-        uint256 invA1 = hook.inventoryBalance(maker, currency1);
-        uint256 invB1 = hook.inventoryBalance(maker2, currency1);
+        // The ask at offset 2 is quoted by three makers as three distinct positions.
+        bytes32 a2m1 = _pid(m1, Side.Ask, 2 * BIN_SPACING);
+        bytes32 a2m4 = _pid(m4, Side.Ask, 2 * BIN_SPACING);
+        bytes32 a2m5 = _pid(m5, Side.Ask, 2 * BIN_SPACING);
+        assertTrue(a2m1 != a2m4 && a2m4 != a2m5 && a2m1 != a2m5, "shared canonical bin -> distinct ids");
+        assertEq(hook.positions(a2m1).maker, m1);
+        assertEq(hook.positions(a2m4).maker, m4);
+        assertEq(hook.positions(a2m5).maker, m5);
 
-        _swapToTick(false, 4 * BIN_SPACING); // price up through both makers' offset-1 and -2 asks
-        (, int24 tickUp,,) = manager.getSlot0(testPoolId);
-        assertGe(tickUp, 2 * BIN_SPACING, "crossed the ask side");
-        assertGt(_crossedOrExpiredIds(maker).length, 0, "A has crossed asks");
-        assertGt(_crossedOrExpiredIds(maker2).length, 0, "B has crossed asks");
-
-        // Fill proceeds sit inside the still-active crossed positions; nothing is credited yet.
-        assertEq(hook.inventoryBalance(maker, currency1), invA1, "A not credited pre-retirement");
-        assertEq(hook.inventoryBalance(maker2, currency1), invB1, "B not credited pre-retirement");
-        assertEq(hook.activePositionCount(testPoolId), 8, "nothing retired yet");
-        _assertCustodyConservation();
-
-        // Retire ONLY maker A's crossed asks: A is credited token1, B is left untouched.
-        bytes32[] memory aCrossed = _crossedOrExpiredIds(maker);
-        uint256 bUntouched = hook.inventoryBalance(maker2, currency1);
-        hook.retirePositions(testPoolKey, aCrossed, aCrossed.length);
-        assertGt(hook.inventoryBalance(maker, currency1), invA1, "A credited from its own filled asks");
-        assertEq(hook.inventoryBalance(maker2, currency1), bUntouched, "B untouched by A's retirement");
-        _assertCustodyConservation();
-
-        // Now retire maker B's crossed asks: B is credited.
-        bytes32[] memory bCrossed = _crossedOrExpiredIds(maker2);
-        uint256 bBefore = hook.inventoryBalance(maker2, currency1);
-        hook.retirePositions(testPoolKey, bCrossed, bCrossed.length);
-        assertGt(hook.inventoryBalance(maker2, currency1), bBefore, "B credited from its own filled asks");
-        _assertCustodyConservation();
-
-        // ---- Phase 2: reverse direction crosses the bid side; opportunistic retirement ----
-        _swapToTick(true, -3 * BIN_SPACING); // price down through both makers' offset-1 and -2 bids
-        (, int24 tickDown,,) = manager.getSlot0(testPoolId);
-        assertLt(tickDown, -2 * BIN_SPACING, "crossed the bid side");
-
-        // A follow-up swap's beforeSwap scan retires the crossed bids opportunistically (bounded by
-        // maxRetirePerSwap), crediting each bin's owning maker in token0.
-        uint256 activeBefore = hook.activePositionCount(testPoolId);
-        uint256 token0Before = hook.inventoryBalance(maker, currency0) + hook.inventoryBalance(maker2, currency0);
-        swap(testPoolKey, false, -1 ether, ""); // tiny trigger; the scan evaluates the pre-swap tick
-        uint256 swept = activeBefore - hook.activePositionCount(testPoolId);
-        assertGt(swept, 0, "beforeSwap opportunistically retired crossed bids");
-        assertLe(swept, 4, "bounded by maxRetirePerSwap");
-        assertGt(
-            hook.inventoryBalance(maker, currency0) + hook.inventoryBalance(maker2, currency0),
-            token0Before,
-            "crossed bids paid out in token0"
-        );
-        _assertCustodyConservation();
-
-        // ---- Phase 3: cancel both ladders; custody stays fully attributed and makers net fees ----
-        vm.prank(maker);
-        hook.cancelLadder(testPoolKey);
-        vm.prank(maker2);
-        hook.cancelLadder(testPoolKey);
-        assertEq(hook.activePositionCount(testPoolId), 0, "book emptied");
-        assertEq(hook.makerPositionCount(testPoolId, maker), 0);
-        assertEq(hook.makerPositionCount(testPoolId, maker2), 0);
-        _assertCustodyConservation();
-
-        // Makers deposited 2,000,000 total (1M each currency); crossing their bins earned LP fees on
-        // top, so total attributed custody strictly exceeds the deposits.
-        assertGt(_custody(currency0) + _custody(currency1), 2_000_000 ether, "makers net-earned LP fees over the flow");
-    }
-
-    /// @notice Two makers quote the SAME canonical bins with different TTLs. Proves per-ladder expiry
-    ///         (a short-TTL maker's bins retire while a long-TTL maker's stay live), that shared
-    ///         canonical bins are distinct per-maker positions, and that both keeper batches and the
-    ///         opportunistic `beforeSwap` scan honor retirability.
-    function test_scenario_perLadderTtlAndSharedBinAttribution() public {
-        uint40 ttlLong = 1 hours;
-        uint40 ttlShort = 30;
-
-        // Both makers post the identical canonical bins (offsets +-1), with different TTLs.
-        vm.prank(maker);
-        hook.replaceLadder(testPoolKey, _bins1(_cap(-1, 100 ether)), _bins1(_cap(1, 100 ether)), ttlLong, 0, 0);
-        vm.prank(maker2);
-        hook.replaceLadder(testPoolKey, _bins1(_cap(-1, 150 ether)), _bins1(_cap(1, 150 ether)), ttlShort, 0, 0);
-
-        // Shared canonical bins resolve to distinct per-maker position ids.
-        assertEq(hook.activePositionCount(testPoolId), 4);
-        _assertOwnedBy(maker, 2);
-        _assertOwnedBy(maker2, 2);
-        assertNotEq(hook.makerPositionAt(testPoolId, maker, 0), hook.makerPositionAt(testPoolId, maker2, 0));
-        _assertCustodyConservation();
-
-        uint256 makerB0 = hook.inventoryBalance(maker2, currency0);
-        uint256 makerB1 = hook.inventoryBalance(maker2, currency1);
-
-        // Warp past B's TTL but within A's: only B's bins are expired/retirable.
+        // Warp past the short TTL but within the long one: only m2/m3/m5 bins are retirable.
         vm.warp(block.timestamp + ttlShort + 1);
 
-        // A keeper single-retire on A's still-fresh, uncrossed bin reverts.
-        bytes32 freshId = hook.makerPositionAt(testPoolId, maker, 0);
+        // A single-retire on a still-fresh long-TTL bin reverts.
+        bytes32 freshId = hook.makerPositionAt(testPoolId, m1, 0);
         vm.expectRevert(NativeBookHook.PositionNotRetirable.selector);
         hook.retirePosition(testPoolKey, freshId);
 
-        // A batch over ALL active ids retires only B's expired bins and skips A's fresh ones.
+        // A keeper batch over ALL ids retires only the six expired bins and skips the eight fresh ones.
         bytes32[] memory all = _allActiveIds();
-        uint256 retired = hook.retirePositions(testPoolKey, all, all.length);
-        assertEq(retired, 2, "only B's two expired bins retired");
-        assertEq(hook.makerPositionCount(testPoolId, maker2), 0, "B expired out entirely");
-        assertEq(hook.makerPositionCount(testPoolId, maker), 2, "A's fresh ladder is untouched");
-        _assertOwnedBy(maker, 2);
+        assertEq(hook.retirePositions(testPoolKey, all, all.length), 6, "only the short-TTL makers' bins retired");
+        assertEq(hook.makerPositionCount(testPoolId, m2), 0, "m2 expired out");
+        assertEq(hook.makerPositionCount(testPoolId, m3), 0, "m3 expired out");
+        assertEq(hook.makerPositionCount(testPoolId, m5), 0, "m5 expired out");
+        assertEq(hook.makerPositionCount(testPoolId, m1), 4, "m1 (long TTL) untouched");
+        assertEq(hook.makerPositionCount(testPoolId, m4), 4, "m4 (long TTL) untouched");
+        _assertCustody(makers);
 
-        // B was never crossed, so expiry retirement returns its full un-filled inventory.
-        assertGt(hook.inventoryBalance(maker2, currency0) + hook.inventoryBalance(maker2, currency1), makerB0 + makerB1);
-        assertApproxEqAbs(hook.inventoryBalance(maker2, currency0), 500_000 ether, 0.01 ether, "B currency0 returned");
-        assertApproxEqAbs(hook.inventoryBalance(maker2, currency1), 500_000 ether, 0.01 ether, "B currency1 returned");
-        _assertCustodyConservation();
+        // The expired makers were never crossed, so they are refunded their full un-filled inventory.
+        assertApproxEqAbs(hook.inventoryBalance(m2, currency0), 500_000 ether, 0.01 ether, "m2 currency0 returned");
+        assertApproxEqAbs(hook.inventoryBalance(m3, currency1), 500_000 ether, 0.01 ether, "m3 currency1 returned");
+        assertApproxEqAbs(hook.inventoryBalance(m5, currency0), 500_000 ether, 0.01 ether, "m5 currency0 returned");
 
-        // Opportunistic path: warp past A's TTL; a generic swap sweeps A's now-expired bins in
-        // beforeSwap (2 <= maxRetirePerSwap), leaving the book empty and fully attributed.
+        // Warp past the long TTL; two swaps opportunistically sweep m1/m4's eight now-expired bins,
+        // each sweep bounded to maxRetirePerSwap.
         vm.warp(block.timestamp + ttlLong + 1);
-        assertEq(hook.activePositionCount(testPoolId), 2);
+        uint256 beforeSweep = hook.activePositionCount(testPoolId);
+        assertEq(beforeSweep, 8, "only the two long-TTL ladders remain");
         swap(testPoolKey, true, -1 ether, "");
-        assertEq(hook.activePositionCount(testPoolId), 0, "A's expired bins swept opportunistically");
-        _assertCustodyConservation();
+        assertLe(beforeSweep - hook.activePositionCount(testPoolId), 4, "first sweep bounded by maxRetirePerSwap");
+        swap(testPoolKey, true, -1 ether, "");
+        assertEq(hook.activePositionCount(testPoolId), 0, "all expired bins swept over two swaps");
+        _assertCustody(makers);
     }
 
     // ─────────────────────────── scenario helpers ───────────────────────────
@@ -1242,9 +1281,8 @@ contract NativeBookHookTest is Test, Deployers {
         return BinCapacity({offset: offset, amount: amount});
     }
 
-    function _bins1(BinCapacity memory a) internal pure returns (BinCapacity[] memory arr) {
-        arr = new BinCapacity[](1);
-        arr[0] = a;
+    function _bins0() internal pure returns (BinCapacity[] memory arr) {
+        arr = new BinCapacity[](0);
     }
 
     function _bins2(BinCapacity memory a, BinCapacity memory b) internal pure returns (BinCapacity[] memory arr) {
@@ -1259,18 +1297,71 @@ contract NativeBookHookTest is Test, Deployers {
     }
 
     /// @dev Every token the hook custodies must be attributed to exactly one maker's inventory (the
-    ///      rest is locked in live positions and lives outside both sides of this equality).
-    function _assertCustodyConservation() internal view {
-        assertEq(
-            _custody(currency0),
-            hook.inventoryBalance(maker, currency0) + hook.inventoryBalance(maker2, currency0),
-            "token0 custody != sum(maker inventory)"
-        );
-        assertEq(
-            _custody(currency1),
-            hook.inventoryBalance(maker, currency1) + hook.inventoryBalance(maker2, currency1),
-            "token1 custody != sum(maker inventory)"
-        );
+    ///      rest is locked in live positions, outside both sides of this equality). Summed over all
+    ///      `makers`, so it catches value credited to the wrong maker anywhere in the set.
+    function _assertCustody(address[] memory makers) internal view {
+        uint256 inv0;
+        uint256 inv1;
+        for (uint256 i; i < makers.length; ++i) {
+            inv0 += hook.inventoryBalance(makers[i], currency0);
+            inv1 += hook.inventoryBalance(makers[i], currency1);
+        }
+        assertEq(_custody(currency0), inv0, "token0 custody != sum(maker inventory)");
+        assertEq(_custody(currency1), inv1, "token1 custody != sum(maker inventory)");
+    }
+
+    /// @dev The scenario maker set: `maker` and `maker2` (funded in setUp, and the only two with
+    ///      signing keys) plus three fresh makers funded here.
+    function _fiveMakers() internal returns (address[] memory makers) {
+        address m3 = makeAddr("maker3");
+        address m4 = makeAddr("maker4");
+        address m5 = makeAddr("maker5");
+        _fundAndApproveMaker(m3);
+        _fundAndApproveMaker(m4);
+        _fundAndApproveMaker(m5);
+        makers = new address[](5);
+        makers[0] = maker;
+        makers[1] = maker2;
+        makers[2] = m3;
+        makers[3] = m4;
+        makers[4] = m5;
+    }
+
+    /// @dev Post `who`'s ladder through the relayer with an EIP-712 signature (`pk` is `who`'s key).
+    function _postSig(address who, uint256 pk, BinCapacity[] memory bids, BinCapacity[] memory asks, uint40 ttl)
+        internal
+    {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signReplaceLadder(pk, who, bids, asks, ttl, deadline);
+        vm.prank(relayer);
+        hook.replaceLadderWithSig(testPoolKey, who, bids, asks, ttl, 0, 0, deadline, sig);
+    }
+
+    /// @dev Keeper-retire every currently-retirable position of `who`; returns how many were retired.
+    function _retireCrossed(address who) internal returns (uint256 n) {
+        bytes32[] memory ids = _crossedOrExpiredIds(who);
+        n = ids.length;
+        if (n > 0) hook.retirePositions(testPoolKey, ids, n);
+    }
+
+    /// @dev Sum of every maker's inventory in `c`.
+    function _sumInv(address[] memory makers, Currency c) internal view returns (uint256 total) {
+        for (uint256 i; i < makers.length; ++i) {
+            total += hook.inventoryBalance(makers[i], c);
+        }
+    }
+
+    /// @dev Snapshot every maker's inventory in `c`, index-aligned with `makers`.
+    function _snap(address[] memory makers, Currency c) internal view returns (uint256[] memory s) {
+        s = new uint256[](makers.length);
+        for (uint256 i; i < makers.length; ++i) {
+            s[i] = hook.inventoryBalance(makers[i], c);
+        }
+    }
+
+    /// @dev The deterministic position id for `who`'s bin, matching `BookPositions.positionId`.
+    function _pid(address who, Side side, int24 tickLower) internal view returns (bytes32) {
+        return keccak256(abi.encode(testPoolId, who, side, tickLower));
     }
 
     /// @dev Assert `who` owns exactly `expectedCount` active positions and each is attributed to it.
