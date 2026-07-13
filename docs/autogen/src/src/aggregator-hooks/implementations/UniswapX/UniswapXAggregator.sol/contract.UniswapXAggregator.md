@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0e2a638cfe0c29f77da09c6febd9c4124618114b/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/46ab71e7645df3d64344767b0e4a437258051bb5/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
@@ -90,6 +90,17 @@ bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e
 ```
 
 
+### MAX_INT128
+Upper bound for order amounts. The V4 swap delta is formed via `int128(uint128(amount))` in the
+base `_processAmounts`, so any amount above `int128.max` would silently sign-flip/truncate the
+delta. Both the order input and (summed) output are validated against this before being used.
+
+
+```solidity
+uint256 private constant MAX_INT128 = uint256(uint128(type(int128).max))
+```
+
+
 ## Functions
 ### constructor
 
@@ -97,6 +108,13 @@ bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e
 ```solidity
 constructor(IPoolManager _manager, IReactor _reactor, address _weth)
     BaseHookDataAggregator(_manager, "UniswapXAggregator v1.0");
+```
+
+### protocolFeeFlags
+
+
+```solidity
+function protocolFeeFlags() external pure override returns (uint256);
 ```
 
 ### _rawQuoteWithHookData
@@ -286,6 +304,18 @@ error OrderOutputMismatch();
 
 ```solidity
 error OrderAmountMismatch();
+```
+
+### OrderInputOverflow
+
+```solidity
+error OrderInputOverflow();
+```
+
+### OrderOutputOverflow
+
+```solidity
+error OrderOutputOverflow();
 ```
 
 ### NativeTransferFailed

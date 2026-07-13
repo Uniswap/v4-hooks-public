@@ -1,5 +1,5 @@
 # BaseHookDataAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0e2a638cfe0c29f77da09c6febd9c4124618114b/src/aggregator-hooks/BaseHookDataAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/46ab71e7645df3d64344767b0e4a437258051bb5/src/aggregator-hooks/BaseHookDataAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,9 +12,9 @@ Variant of {BaseAggregatorHook} for aggregator hooks whose swap behaviour depend
 `_conductSwap`, so implementations read it straight from calldata — no storage stash, and no change to
 the routing `quote` interface.
 
-This contract deliberately re-implements `_beforeSwap` / `_internalSettle` from {BaseAggregatorHook} so it
-can thread `hookData` through to `_conductSwap`. The delta/protocol-fee accounting below is a verbatim
-mirror of `BaseAggregatorHook._beforeSwap`; if that logic ever changes, update it here too.
+This contract only overrides settlement so it can thread `hookData` through to a hookData-aware
+`_conductSwap`; the shared delta/protocol-fee accounting is reused from `BaseAggregatorHook._innerBeforeSwap`,
+so there is no duplicated logic to keep in sync with the base.
 Hooks that do not need `hookData` should continue to extend {BaseAggregatorHook} directly so they remain
 completely unaffected by this variant.
 
@@ -30,7 +30,8 @@ constructor(IPoolManager _manager, string memory _aggregatorHookVersion)
 
 ### _beforeSwap
 
-Mirrors `BaseAggregatorHook._beforeSwap` exactly, except it forwards `hookData` to `_conductSwap`.
+Settles via the hookData-aware `_conductSwap`, then delegates the delta/protocol-fee accounting to
+the shared `BaseAggregatorHook._innerBeforeSwap`.
 
 
 ```solidity

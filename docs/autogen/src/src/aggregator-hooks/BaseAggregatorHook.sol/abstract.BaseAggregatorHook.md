@@ -1,5 +1,5 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/56fe7f485c8d67008228c24d14664f55752c8c93/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/46ab71e7645df3d64344767b0e4a437258051bb5/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
 [IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -129,7 +129,7 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 Returns the hook's self-reported behavioral flags.
 
 Return 0 to indicate no self-classification (falls through to defaultFee).
-Flags are OR'd constants from HookFeeFlags — see that library for the vocabulary.
+The bitfield is opaque to the policy; see the governance guide for active conventions.
 
 
 ```solidity
@@ -222,6 +222,32 @@ function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata p
     override
     returns (bytes4, BeforeSwapDelta, uint24);
 ```
+
+### _innerBeforeSwap
+
+Shared `beforeSwap` tail: turns the settled amounts into the BeforeSwapDelta and applies the
+protocol fee. Called by every `_beforeSwap` variant so this accounting lives in exactly one place.
+
+
+```solidity
+function _innerBeforeSwap(
+    address sender,
+    PoolKey calldata key,
+    SwapParams calldata params,
+    uint256 amountIn,
+    uint256 amountOut
+) internal returns (bytes4, BeforeSwapDelta, uint24);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`sender`|`address`|The address that initiated the swap|
+|`key`|`PoolKey`|The pool key|
+|`params`|`SwapParams`|The swap parameters|
+|`amountIn`|`uint256`|The swapper's input amount resolved by settlement (the `takeCurrency` amount)|
+|`amountOut`|`uint256`|The swapper's output amount resolved by settlement (the `settleCurrency` amount)|
+
 
 ### _processAmounts
 
