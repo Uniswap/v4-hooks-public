@@ -23,7 +23,7 @@ import {Inventory} from "../types/Inventory.sol";
 ///
 ///         For each currency, after the cycle's operations complete:
 ///           - negative delta (hook owes the PoolManager): settle from the hook's raw balance
-///             (sync, transfer, settle; or `settle{value}` for native ETH) and debit the bucket's
+///             (sync, transfer, settle; or sync + `settle{value}` for native ETH) and debit the bucket's
 ///             raw ledger.
 ///           - positive delta (PoolManager owes the hook): the swapper has not settled yet, so
 ///             mint ERC-6909 claims rather than calling `take`, and record them on the bucket.
@@ -59,6 +59,10 @@ library SettlementLib {
         if (delta < 0) {
             uint256 owed = uint256(-delta);
             if (currency.isAddressZero()) {
+                // Reset the synced currency to native before settling value, so a different
+                // currency left synced-but-unsettled earlier in this unlock cannot misattribute
+                // the settled amount. Mirrors the unconditional sync in v4-periphery DeltaResolver.
+                poolManager.sync(currency);
                 poolManager.settle{value: owed}();
             } else {
                 poolManager.sync(currency);
