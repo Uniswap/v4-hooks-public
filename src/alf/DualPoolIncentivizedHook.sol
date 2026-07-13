@@ -184,6 +184,6 @@ contract DualPoolIncentivizedHook is DualPoolHook {
     /// @return The claimable reward amount.
     function earned(PoolKey calldata key, address user) external view returns (uint256) {
         VaultId id = _vaultIdFor(key.toId());
-        return _rewards.earned(id, user, _shares.balanceOf(id, user), _shares.totalSupply(id), _getBlockNumberish());
+        return _rewards.earned(id, user, _shares.totalSupply(id), _shares.balanceOf(id, user), _getBlockNumberish());
     }
 }

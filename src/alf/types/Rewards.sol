@@ -233,16 +233,16 @@ function checkpoint(
 /// @param self        Capability storage.
 /// @param id          The vault to read.
 /// @param user        The account to value.
-/// @param userShares  `user`'s current share balance.
 /// @param totalSupply The current total share supply.
+/// @param userShares  `user`'s current share balance.
 /// @param nowBlock    The consumer's current block (from `_getBlockNumberish()`).
 /// @return The claimable reward amount (reward token's native decimals).
 function earned(
     Rewards storage self,
     VaultId id,
     address user,
-    uint256 userShares,
     uint256 totalSupply,
+    uint256 userShares,
     uint256 nowBlock
 ) view returns (uint256) {
     Reward storage r = self._inner[id];
