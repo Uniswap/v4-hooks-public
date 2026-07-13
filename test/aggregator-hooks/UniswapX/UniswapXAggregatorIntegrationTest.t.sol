@@ -344,5 +344,70 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outEnd, "decay end");
     }
 
+    /// @dev Exact-in quote must reject when the V4 swap input is less than the order's output (the
+    ///      all-or-nothing fill could not be covered).
+    function test_quoteWithHookData_exactIn_insufficientInput_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+
+        ExclusiveDutchOrder memory order =
+            _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), outAmt, outAmt, 0);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // swap input 50 < order output 99 -> reject
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.quoteWithHookData(zeroForOne, -int256(50 ether), key.toId(), hookData);
+
+        // sanity: an input equal to the order output is accepted
+        assertEq(hook.quoteWithHookData(zeroForOne, -int256(outAmt), key.toId(), hookData), inAmt, "exact input ok");
+    }
+
+    /// @dev Exact-out quote must reject when the requested output exceeds what the order supplies.
+    function test_quoteWithHookData_exactOut_requestExceedsOrderInput_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+
+        ExclusiveDutchOrder memory order =
+            _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), outAmt, outAmt, 0);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // request 150 of the order input (tokenA) but the order only supplies 100 -> reject
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.quoteWithHookData(zeroForOne, int256(150 ether), key.toId(), hookData);
+    }
+
+    /// @dev Amounts above int128.max would silently sign-flip when narrowed to form the V4 delta; the quote
+    ///      must reject them (mirroring the execution-time guard in `_conductSwap`).
+    function test_quoteWithHookData_outputOverflow_reverts() public {
+        uint256 inAmt = 1 ether;
+        uint256 hugeOut = uint256(uint128(type(int128).max)) + 1; // just over int128.max
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+
+        ExclusiveDutchOrder memory order =
+            _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), hugeOut, hugeOut, 0);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // exact-out returns the (overflowing) order output -> reject before it can be used as a delta
+        vm.expectRevert(UniswapXAggregator.OrderOutputOverflow.selector);
+        hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData);
+    }
+
     receive() external payable {}
 }

@@ -151,5 +151,5 @@ abstract contract BaseHookDataAggregator is BaseAggregatorHook {
         } else {
             amountUnspecified += feeAmount;
         }
-    } 
+    }
 }

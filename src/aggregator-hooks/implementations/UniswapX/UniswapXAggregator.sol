@@ -60,6 +60,11 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     bytes32 private constant RESOLVED_INPUT_SLOT = 0x2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4b;
     bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a5d;
 
+    /// @dev Upper bound for order amounts. The V4 swap delta is formed via `int128(uint128(amount))` in the
+    ///      base `_processAmounts`, so any amount above `int128.max` would silently sign-flip/truncate the
+    ///      delta. Both the order input and (summed) output are validated against this before being used.
+    uint256 private constant MAX_INT128 = uint256(uint128(type(int128).max));
+
     error Reentrancy();
     error ProhibitedEntry();
     error UnauthorizedCaller();
@@ -69,6 +74,8 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     error OrderInputMismatch();
     error OrderOutputMismatch();
     error OrderAmountMismatch();
+    error OrderInputOverflow();
+    error OrderOutputOverflow();
     error NativeTransferFailed();
     error TVLNotSupported();
 
@@ -78,6 +85,10 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         reactor = _reactor;
         weth = _weth;
         orderQuoter = new OrderQuoter();
+    }
+
+    function protocolFeeFlags() external pure override returns (uint256) {
+        return 0;
     }
 
     /// @inheritdoc BaseHookDataAggregator
@@ -96,11 +107,28 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
 
         ResolvedOrder memory resolved = orderQuoter.quote(order.order, order.sig);
 
-        // Sum the order's outputs (the fill requires all outputs share one token = the V4 swapper's input currency).
+        // Sum the order's outputs. The fill requires all outputs share one token (the V4 swapper's input
+        // currency), so enforce that same-token invariant here too — otherwise a quote could return a
+        // meaningless sum across differing tokens that `reactorCallback` would later reject at fill time.
+        if (resolved.outputs.length == 0) revert NoOrderOutputs();
+        address outputToken = resolved.outputs[0].token;
         uint256 orderOutput;
         for (uint256 i = 0; i < resolved.outputs.length; i++) {
+            if (resolved.outputs[i].token != outputToken) revert InconsistentOrderOutputs();
             orderOutput += resolved.outputs[i].amount;
         }
+
+        // Mirror the execution-time `int128` narrowing (see MAX_INT128) so a quote never returns an amount
+        // that `_conductSwap` would later reject as overflowing.
+        if (orderOutput > MAX_INT128) revert OrderOutputOverflow();
+        if (resolved.input.amount > MAX_INT128) revert OrderInputOverflow();
+
+        // Exact-in: the V4 swap input is `-amountSpecified` (in the order's output token); reject if it is
+        // less than the order's output, since the all-or-nothing fill could not be covered.
+        if (amountSpecified < 0 && amountSpecified > -int256(orderOutput)) revert OrderAmountMismatch();
+        // Exact-out: the V4 swapper requests `amountSpecified` of the order's input token; reject if it
+        // exceeds what the order supplies.
+        if (amountSpecified > 0 && amountSpecified > int256(resolved.input.amount)) revert OrderAmountMismatch();
 
         // The hook fills atomically: the V4 swapper provides the order's OUTPUT and receives its INPUT.
         // exact-in  (amountSpecified < 0): swapper specified the input it provides (order output) -> receives order input
@@ -218,6 +246,11 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         // amountTake   = order output amount (taken from the PoolManager in the callback)
         amountSettle = _getTransientResolved(RESOLVED_INPUT_SLOT);
         amountTake = _getTransientResolved(RESOLVED_OUTPUT_SLOT);
+
+        // Guard the true narrowing site: both amounts are cast to int128 when the base forms the swap delta.
+        // Above int128.max the cast silently sign-flips/truncates, so reject here before that happens.
+        if (amountTake > MAX_INT128) revert OrderOutputOverflow();
+        if (amountSettle > MAX_INT128) revert OrderInputOverflow();
 
         // If the V4 swapper's output is native ETH but the order paid us WETH, unwrap so the base can settle ETH.
         if (settleCurrency.isAddressZero()) {
