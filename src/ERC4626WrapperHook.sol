@@ -9,21 +9,17 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BaseTokenWrapperHook} from "./base/BaseTokenWrapperHook.sol";
 
 /// @title ERC-4626 Wrapper Hook
-/// @notice Hook for wrapping/unwrapping an ERC-4626 vault's asset into its shares in Uniswap V4 pools
-/// @dev The vault's share token is the wrapper currency; vault.asset() is the underlying. The
-/// @dev share/asset rate is dynamic and read live from the vault, exactly analogous to the
-/// @dev stETH <-> wstETH exchange rate handled by WstETHHook.
-/// @dev Safely handles rebasing / fee-on-transfer underlyings by measuring actual balances.
+/// @notice Hook for wrapping/unwrapping generic ERC-4626 vault assets into their shares in Uniswap V4 pools
+/// @dev The vault's share token is the wrapper currency, and vault.asset() is the underlying. 
+/// @dev Any dynamic rate between shares and assets are read from the vault.
 contract ERC4626WrapperHook is BaseTokenWrapperHook {
     using SafeTransferLib for ERC20;
 
-    /// @notice The ERC-4626 vault. Its share token is the wrapper currency and its asset is the underlying.
     IERC4626 public immutable vault;
 
     /// @notice Creates a new ERC-4626 wrapper hook
     /// @param _manager The Uniswap V4 pool manager
-    /// @param _vault The ERC-4626 vault whose asset <-> shares this hook wraps/unwraps
-    /// @dev Initializes with the vault's shares as the wrapper token and vault.asset() as the underlying token
+    /// @param _vault The ERC-4626 vault whose asset this hook wraps/unwraps
     constructor(IPoolManager _manager, IERC4626 _vault)
         BaseTokenWrapperHook(
             _manager,
@@ -45,10 +41,10 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     {
         // pull the underlying asset out of the PoolManager
         _take(underlyingCurrency, address(this), underlyingAmount);
-        // a rebasing / fee-on-transfer underlying can deliver less than requested;
-        // wrap exactly what we actually received
+        // a rebasing / fee-on-transfer underlying can transfer less than requested,
+        // so we wrap the actual amount received
         actualUnderlyingAmount = ERC20(Currency.unwrap(underlyingCurrency)).balanceOf(address(this));
-        // deposit into the vault; shares are minted to this hook
+        // deposit into the vault so shares are minted to this hook
         wrappedAmount = vault.deposit(actualUnderlyingAmount, address(this));
         // pay the minted shares back to the PoolManager
         _settle(wrapperCurrency, address(this), wrappedAmount);
@@ -62,12 +58,12 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     {
         // pull the wrapper (vault shares) out of the PoolManager
         _take(wrapperCurrency, address(this), wrappedAmount);
-        actualWrappedAmount = wrappedAmount; // shares are non-rebasing: exact
-        // redeem shares for the underlying asset, received by this hook
+        actualWrappedAmount = wrappedAmount; // shares do not rebase
+        // redeem shares for the underlying asset to this hook
         uint256 redeemed = vault.redeem(wrappedAmount, address(this), address(this));
 
-        // settle the underlying to the PoolManager, measuring the credited amount to
-        // absorb any rebasing transfer rounding (mirrors WstETHHook)
+        // settle the underlying to the PoolManager, checkpointing balances
+        // to catch any rounding errors
         ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
         uint256 poolManagerBalanceBefore = underlying.balanceOf(address(poolManager));
         _settle(underlyingCurrency, address(this), redeemed);
@@ -80,7 +76,6 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     /// @notice Calculates how much underlying is needed to mint a specific amount of shares
     /// @param wrappedAmount Desired amount of vault shares
     /// @return Amount of underlying asset required
-    /// @dev Dormant while exact-output is disabled; provided for completeness and future use
     function _getWrapInputRequired(uint256 wrappedAmount) internal view override returns (uint256) {
         return vault.previewMint(wrappedAmount);
     }
@@ -94,9 +89,9 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     }
 
     /// @inheritdoc BaseTokenWrapperHook
-    /// @dev Exact-output is unsafe under the base's _deposit-only path: ERC-4626 deposit() rounds
-    /// @dev shares down, and a rebasing underlying can round the take/settle, either of which can
-    /// @dev leave the hook a wei short of the exact requested output and break settlement.
+    /// @dev Exact-output is disabled because the hook cannot mint an exact number of shares, and
+    /// @dev the PoolManager reverts unless every delta is settled. Using `deposit` does not
+    /// @dev guarantee the exact requested shares are received.
     function _supportsExactOutput() internal pure override returns (bool) {
         return false;
     }
