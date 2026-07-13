@@ -472,7 +472,7 @@ contract StableSwapFuzz is Test {
         ctx.amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
         poolKey = _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
         ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
-        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         ctx.expectedFeeAmount = (ctx.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 

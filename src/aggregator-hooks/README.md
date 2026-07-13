@@ -34,6 +34,7 @@ First-byte ID table:
 | 03  | Uniswap V3         |
 | A1  | Slipstream         |
 | 93  | Pancakeswap V3     |
+| 95  | LitePSM            |
 | 02  | Uniswap V2         |
 | DC  | UniswapX (Dutch)   |
 
@@ -99,6 +100,25 @@ Singleton hook routes swaps through **Uniswap V2–compatible** pairs (`getReser
 #### Defined interfaces
 
 Minimal interfaces live under `implementations/UniswapV2/interfaces/` (`IUniswapV2Pair`, `IUniswapV2Factory`) for the subset of the canonical V2 ABI the hook uses.
+
+### MakerDAO LitePSM
+
+Singleton hook routes swaps through **MakerDAO's LitePSM** (or `LitePSMWrapper`), which maintains a 1:1 peg between a gem token (e.g., USDC) and USDS. Because the PSM offers zero-slippage, fixed-fee conversion, no external factory lookup is needed — the hook addresses the PSM directly.
+
+| Pool Type   | Implementation      | Routing                                                                                       |
+| ----------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| **LitePSM** | `LitePSMAggregator` | Singleton; gem ↔ USDS via `sellGem` / `buyGem`. One pool per gem/USDS pair enforced at init. |
+
+#### Key Details
+
+- **Gem token**: resolved dynamically from `litePSM.gem()` at construction — not hardcoded to USDC
+- **Decimal conversion**: `to18ConversionFactor` cached from `litePSM.to18ConversionFactor()` (e.g., `1e12` for 6-decimal gems)
+- **Fees**: `tin` (gem→USDS) and `tout` (USDS→gem) are read fresh each call; governance can change them
+- **Canonical pair**: only one V4 pool per gem/USDS pair is allowed; duplicate registration reverts with `PairAlreadyHasCanonicalPool`
+
+#### Defined interfaces
+
+A minimal `ILitePSM` interface lives under `implementations/LitePSM/interfaces/` covering `sellGem`, `buyGem`, `tin`, `tout`, `to18ConversionFactor`, `gem`, and `pocket`.
 
 ### Uniswap V3 / Slipstream
 

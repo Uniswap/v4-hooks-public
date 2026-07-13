@@ -351,7 +351,7 @@ contract FluidDexLiteERC20Fuzz is Test {
         uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(zeroForOne, -int256(params.amountIn), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
@@ -368,7 +368,7 @@ contract FluidDexLiteERC20Fuzz is Test {
         params.amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         if (params.amountOut == 0) params.amountOut = 1 ether;
         params.expectedIn = deployment.hook.quote(zeroForOne, int256(params.amountOut), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed) * 10;
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 

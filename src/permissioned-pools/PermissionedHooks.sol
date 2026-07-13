@@ -12,6 +12,9 @@ import {
 import {IMsgSender} from "@uniswap/v4-periphery/src/interfaces/IMsgSender.sol";
 import {Hooks, IHooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {BaseHook} from "../base/BaseHook.sol";
@@ -24,11 +27,35 @@ import {
 /// @notice Enforces per-currency allowlist on pools containing permissioned tokens.
 /// @dev Trusts wrapper-reported `msgSender()`; wrappers must be registered in adapter `allowedWrappers`.
 contract PermissionedHooks is IHooks, BaseHook {
+    using StateLibrary for IPoolManager;
+
     IPermissionsAdapterFactory public immutable PERMISSIONS_ADAPTER_FACTORY;
+
+    /// @notice Emitted after a swap through a permissioned pool. Mirrors `IV4Router.Swap` so that
+    /// indexers can track swaps on permissioned pools with the same schema as the standard router.
+    /// @param id The pool the swap occurred on
+    /// @param sender The originator of the swap
+    /// @param amount0 The signed change in currency0 balance from the pool's perspective
+    /// @param amount1 The signed change in currency1 balance from the pool's perspective
+    /// @param sqrtPriceX96 The pool's sqrt price after the swap
+    /// @param liquidity The pool's active liquidity after the swap
+    /// @param tick The pool's tick after the swap
+    /// @param fee The pool's swap fee at the time of the swap
+    event Swap(
+        PoolId indexed id,
+        address indexed sender,
+        int128 amount0,
+        int128 amount1,
+        uint160 sqrtPriceX96,
+        uint128 liquidity,
+        int24 tick,
+        uint24 fee
+    );
 
     error Unauthorized();
     error SwappingDisabled();
     error NoVerifiedAdapter();
+    error UnverifiedAdapter();
 
     constructor(IPoolManager manager, IPermissionsAdapterFactory permissionsAdapterFactory) BaseHook(manager) {
         PERMISSIONS_ADAPTER_FACTORY = permissionsAdapterFactory;
@@ -38,16 +65,27 @@ contract PermissionedHooks is IHooks, BaseHook {
     function getHookPermissions() public pure override returns (Hooks.Permissions memory permissions) {
         permissions.beforeInitialize = true;
         permissions.beforeSwap = true;
+        permissions.afterSwap = true;
         permissions.beforeAddLiquidity = true;
     }
 
-    /// @dev Requires at least one pool currency to be a verified permissions adapter
+    /// @dev Requires at least one pool currency to be a verified permissions adapter, and disallows
+    /// any pool currency that is an unverified permissions adapter.
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal view override returns (bytes4) {
-        bool currency0Verified =
-            PERMISSIONS_ADAPTER_FACTORY.verifiedPermissionsAdapterOf(Currency.unwrap(key.currency0)) != address(0);
-        bool currency1Verified =
-            PERMISSIONS_ADAPTER_FACTORY.verifiedPermissionsAdapterOf(Currency.unwrap(key.currency1)) != address(0);
-        if (!currency0Verified && !currency1Verified) revert NoVerifiedAdapter();
+        address currency0 = Currency.unwrap(key.currency0);
+        address currency1 = Currency.unwrap(key.currency1);
+
+        bool currency0IsAdapter = PERMISSIONS_ADAPTER_FACTORY.permissionsAdapterOf(currency0) != address(0);
+        bool currency1IsAdapter = PERMISSIONS_ADAPTER_FACTORY.permissionsAdapterOf(currency1) != address(0);
+
+        if (!currency0IsAdapter && !currency1IsAdapter) revert NoVerifiedAdapter();
+        if (currency0IsAdapter && PERMISSIONS_ADAPTER_FACTORY.verifiedPermissionsAdapterOf(currency0) == address(0)) {
+            revert UnverifiedAdapter();
+        }
+        if (currency1IsAdapter && PERMISSIONS_ADAPTER_FACTORY.verifiedPermissionsAdapterOf(currency1) == address(0)) {
+            revert UnverifiedAdapter();
+        }
+
         return IHooks.beforeInitialize.selector;
     }
 
@@ -61,6 +99,21 @@ contract PermissionedHooks is IHooks, BaseHook {
         selector = IHooks.beforeSwap.selector;
         _verifyAllowlist(IMsgSender(sender), key, selector);
         return (selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+    }
+
+    /// @dev Emits a Swap event so indexers can track activity on permissioned pools.
+    function _afterSwap(address sender, PoolKey calldata key, SwapParams calldata, BalanceDelta delta, bytes calldata)
+        internal
+        override
+        returns (bytes4, int128)
+    {
+        PoolId id = key.toId();
+        (uint160 sqrtPriceX96, int24 tick,, uint24 fee) = poolManager.getSlot0(id);
+        uint128 liquidity = poolManager.getLiquidity(id);
+        emit Swap(
+            id, IMsgSender(sender).msgSender(), delta.amount0(), delta.amount1(), sqrtPriceX96, liquidity, tick, fee
+        );
+        return (IHooks.afterSwap.selector, 0);
     }
 
     /// @dev Does not need to verify msg.sender address directly, as verifying the allowlist is sufficient due to the fact that any valid senders are allowed wrappers

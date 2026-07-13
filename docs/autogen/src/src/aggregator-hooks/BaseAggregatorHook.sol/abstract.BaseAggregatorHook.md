@@ -31,7 +31,7 @@ Initializes the hook with required dependencies
 
 
 ```solidity
-constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(10);
+constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(25);
 ```
 **Parameters**
 
