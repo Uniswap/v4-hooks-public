@@ -15,9 +15,9 @@ import {BaseAggregatorHook} from "./BaseAggregatorHook.sol";
 ///         `hookData` (e.g. an encoded order, intent, or signature). It forwards `hookData` into a hookData-aware
 ///         `_conductSwap`, so implementations read it straight from calldata — no storage stash, and no change to
 ///         the routing `quote` interface.
-/// @dev This contract deliberately re-implements `_beforeSwap` / `_internalSettle` from {BaseAggregatorHook} so it
-///      can thread `hookData` through to `_conductSwap`. The delta/protocol-fee accounting below is a verbatim
-///      mirror of `BaseAggregatorHook._beforeSwap`; if that logic ever changes, update it here too.
+/// @dev This contract only overrides settlement so it can thread `hookData` through to a hookData-aware
+///      `_conductSwap`; the shared delta/protocol-fee accounting is reused from `BaseAggregatorHook._innerBeforeSwap`,
+///      so there is no duplicated logic to keep in sync with the base.
 ///      Hooks that do not need `hookData` should continue to extend {BaseAggregatorHook} directly so they remain
 ///      completely unaffected by this variant.
 abstract contract BaseHookDataAggregator is BaseAggregatorHook {
@@ -33,38 +33,15 @@ abstract contract BaseHookDataAggregator is BaseAggregatorHook {
     {}
 
     /// @inheritdoc BaseAggregatorHook
-    /// @dev Mirrors `BaseAggregatorHook._beforeSwap` exactly, except it forwards `hookData` to `_conductSwap`.
+    /// @dev Settles via the hookData-aware `_conductSwap`, then delegates the delta/protocol-fee accounting to
+    ///      the shared `BaseAggregatorHook._innerBeforeSwap`.
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettleWithHookData(key, params, hookData);
-        int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
-        int128 specified = int128(-params.amountSpecified); // cancel core
-
-        uint24 protocolFee = _getProtocolFee(poolManager, params.zeroForOne, key.toId());
-        unspecifiedDelta += _applyWithProtocolFee(poolManager, key, params, unspecifiedDelta, protocolFee);
-
-        if (params.amountSpecified >= 0) {
-            // For exactOut, in cases where the implementation's amountOut may be off.
-            // NOTE: it would be up to the router to handle this
-            specified = -int128(uint128(amountOut));
-        }
-
-        int256 amount0;
-        int256 amount1;
-        if (params.zeroForOne == params.amountSpecified < 0) {
-            amount0 = specified;
-            amount1 = unspecifiedDelta;
-        } else {
-            amount0 = unspecifiedDelta;
-            amount1 = specified;
-        }
-
-        emit HookSwap(key.toId(), sender, amount0, amount1, protocolFee);
-
-        return (IHooks.beforeSwap.selector, toBeforeSwapDelta(specified, unspecifiedDelta), 0);
+        return _innerBeforeSwap(sender, key, params, amountIn, amountOut);
     }
 
     /// @dev Mirror of `BaseAggregatorHook._internalSettle` that forwards `hookData` to `_conductSwap`.
