@@ -113,7 +113,7 @@ contract MockPoolVault is PoolVault {
     }
 
     function effectiveBalance(PoolId poolId, Currency currency) external view returns (uint256) {
-        return _inventory.effectiveBalance(_bucket(poolId, currency));
+        return _inventory.effectiveBalance(_partition(poolId, currency));
     }
 }
 
@@ -792,10 +792,10 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     /// @dev `CrossPoolShareLeak` fires when a vault redemption consumes more shares than the
-    ///      bucket owns. Real vaults cannot normally do this; mock the vault's `withdraw`
+    ///      partition owns. Real vaults cannot normally do this; mock the vault's `withdraw`
     ///      return to simulate a corrupted/adversarial share consumption.
     function test_withdrawFromVault_revertsOnCrossPoolShareLeak() public {
-        _bootstrap(alice, 1000e18); // bucket owns 1000e18 vault0 shares (1:1)
+        _bootstrap(alice, 1000e18); // partition owns 1000e18 vault0 shares (1:1)
 
         uint256 poolShares = vault.getVaultShares(poolIdA, poolKeyA.currency0);
         vm.mockCall(

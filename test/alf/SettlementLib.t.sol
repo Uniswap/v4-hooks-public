@@ -55,24 +55,24 @@ contract SettlementLibHarness is IUnlockCallback {
 
     // ───────────────────────── Inventory seeding (test setup only) ─────────────────────────
 
-    /// @dev Seed the bucket's raw ERC-20 ledger so the negative-delta path's `debitERC20` has
-    ///      something to debit. This is the only writer of `state[bucket].erc20` available to the
+    /// @dev Seed the partition's raw ERC-20 ledger so the negative-delta path's `debitERC20` has
+    ///      something to debit. This is the only writer of `state[partition].erc20` available to the
     ///      test without running a full LP deposit; it mirrors the post-condition of a deposit or a
-    ///      claim redemption that leaves raw ERC-20 attributed to the bucket.
-    function seedBucketERC20(bytes32 bucket, uint256 amount) external {
-        _inv.recordRawForTest(bucket, amount);
+    ///      claim redemption that leaves raw ERC-20 attributed to the partition.
+    function seedPartitionERC20(bytes32 partition, uint256 amount) external {
+        _inv.recordRawForTest(partition, amount);
     }
 
-    function bucketERC20(bytes32 bucket) external view returns (uint256) {
-        return _inv.erc20Of(bucket);
+    function partitionERC20(bytes32 partition) external view returns (uint256) {
+        return _inv.erc20Of(partition);
     }
 
-    function bucketClaims(bytes32 bucket) external view returns (uint256) {
-        return _inv.claimsOf(bucket);
+    function partitionClaims(bytes32 partition) external view returns (uint256) {
+        return _inv.claimsOf(partition);
     }
 
-    function vaultSharesOf(bytes32 bucket) external view returns (uint256) {
-        return _inv.sharesOf(bucket);
+    function vaultSharesOf(bytes32 partition) external view returns (uint256) {
+        return _inv.sharesOf(partition);
     }
 
     // ─────────────────────────────── Drive resolveCurrency ───────────────────────────────
@@ -80,14 +80,14 @@ contract SettlementLibHarness is IUnlockCallback {
     /// @dev Entry point: open an unlock, manufacture the requested delta, and resolve it. The
     ///      heavy lifting happens in {unlockCallback} because every delta-touching primitive
     ///      (`take`, `settle`, `mint`) is `onlyWhenUnlocked`.
-    function run(Action action, bytes32 bucket, Currency currency, uint256 amount) external {
-        _poolManager.unlock(abi.encode(action, bucket, currency, amount));
+    function run(Action action, bytes32 partition, Currency currency, uint256 amount) external {
+        _poolManager.unlock(abi.encode(action, partition, currency, amount));
     }
 
     /// @inheritdoc IUnlockCallback
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         require(msg.sender == address(_poolManager), "only PM");
-        (Action action, bytes32 bucket, Currency currency, uint256 amount) =
+        (Action action, bytes32 partition, Currency currency, uint256 amount) =
             abi.decode(data, (Action, bytes32, Currency, uint256));
 
         if (action == Action.DEBIT_ERC20 || action == Action.DEBIT_NATIVE) {
@@ -108,7 +108,7 @@ contract SettlementLibHarness is IUnlockCallback {
         }
         // Action.NONE: manufacture nothing; the resolve below must be a clean no-op.
 
-        SettlementLib.resolveCurrency(_inv, _poolManager, bucket, currency);
+        SettlementLib.resolveCurrency(_inv, _poolManager, partition, currency);
 
         // Snapshot the post-resolve delta. For a correct resolve this is always 0; the unlock
         // would revert with CurrencyNotSettled otherwise, so a non-zero read here can only surface
@@ -119,12 +119,12 @@ contract SettlementLibHarness is IUnlockCallback {
 }
 
 /// @dev `Inventory` exposes no public raw-ERC-20 writer (only `debitERC20`, which subtracts). The
-///      negative-delta branch needs the bucket pre-funded, so this library adds an internal
-///      test-only credit that writes `state[bucket].erc20` directly. It lives in a separate library
+///      negative-delta branch needs the partition pre-funded, so this library adds an internal
+///      test-only credit that writes `state[partition].erc20` directly. It lives in a separate library
 ///      (not the harness) so it can attach to `Inventory storage` via `using ... for`.
 library InventoryTestLib {
-    function recordRawForTest(Inventory storage self, bytes32 bucket, uint256 amount) internal {
-        self.state[bucket].erc20 = uint128(amount);
+    function recordRawForTest(Inventory storage self, bytes32 partition, uint256 amount) internal {
+        self.state[partition].erc20 = uint128(amount);
     }
 }
 
@@ -146,7 +146,7 @@ contract SettlementLibTest is Test, Deployers {
     Currency internal erc20Currency;
     Currency internal nativeCurrency;
 
-    bytes32 internal constant BUCKET = keccak256("bucket");
+    bytes32 internal constant PARTITION = keccak256("partition");
 
     function setUp() public {
         // Real PoolManager (+ routers) from the canonical v4 test deployer.
@@ -160,30 +160,30 @@ contract SettlementLibTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  Negative delta, ERC-20: settle to PM + debit bucket
+    //  Negative delta, ERC-20: settle to PM + debit partition
     // ══════════════════════════════════════════════════════════
 
     /// @notice A negative ERC-20 delta settles the owed amount to the PoolManager (sync, transfer,
-    ///         settle) and debits the bucket's raw ERC-20 ledger by the same amount.
+    ///         settle) and debits the partition's raw ERC-20 ledger by the same amount.
     function test_resolveCurrency_negativeDelta_erc20_settlesAndDebits() public {
         uint256 owed = 100e18;
 
         // Give the PoolManager real reserves so the harness's `take` can transfer tokens out;
         // the harness then settles those same tokens straight back, netting the cycle to zero.
         token.mint(address(manager), owed);
-        // The bucket must already track `owed` of raw ERC-20 for `debitERC20` to succeed (the
+        // The partition must already track `owed` of raw ERC-20 for `debitERC20` to succeed (the
         // ledger field is independent of the harness's actual token balance).
-        harness.seedBucketERC20(BUCKET, owed);
+        harness.seedPartitionERC20(PARTITION, owed);
 
         uint256 pmBalBefore = token.balanceOf(address(manager));
         uint256 harnessBalBefore = token.balanceOf(address(harness));
 
-        harness.run(SettlementLibHarness.Action.DEBIT_ERC20, BUCKET, erc20Currency, owed);
+        harness.run(SettlementLibHarness.Action.DEBIT_ERC20, PARTITION, erc20Currency, owed);
 
-        // Bucket ERC-20 ledger debited to zero.
-        assertEq(harness.bucketERC20(BUCKET), 0, "bucket raw ERC-20 debited by owed");
+        // Partition ERC-20 ledger debited to zero.
+        assertEq(harness.partitionERC20(PARTITION), 0, "partition raw ERC-20 debited by owed");
         // Claims untouched on the negative branch.
-        assertEq(harness.bucketClaims(BUCKET), 0, "no claims on negative branch");
+        assertEq(harness.partitionClaims(PARTITION), 0, "no claims on negative branch");
         // Conservation: the harness received `owed` via take and settled it straight back, so its
         // net token balance is unchanged across the cycle.
         assertEq(token.balanceOf(address(harness)), harnessBalBefore, "harness net token movement zero");
@@ -200,7 +200,7 @@ contract SettlementLibTest is Test, Deployers {
 
     /// @notice A negative NATIVE delta resolves through `settle{value: owed}()` — the
     ///         `currency.isAddressZero()` leg DualPoolHook can never reach because it rejects
-    ///         native pools. The bucket's raw ledger is debited identically to the ERC-20 leg.
+    ///         native pools. The partition's raw ledger is debited identically to the ERC-20 leg.
     function test_resolveCurrency_negativeDelta_native_settlesWithValue() public {
         uint256 owed = 3 ether;
 
@@ -209,15 +209,15 @@ contract SettlementLibTest is Test, Deployers {
         // manufacture both sides.)
         vm.deal(address(manager), owed);
         vm.deal(address(harness), owed);
-        harness.seedBucketERC20(BUCKET, owed);
+        harness.seedPartitionERC20(PARTITION, owed);
 
         uint256 harnessEthBefore = address(harness).balance;
         uint256 pmEthBefore = address(manager).balance;
 
-        harness.run(SettlementLibHarness.Action.DEBIT_NATIVE, BUCKET, nativeCurrency, owed);
+        harness.run(SettlementLibHarness.Action.DEBIT_NATIVE, PARTITION, nativeCurrency, owed);
 
-        assertEq(harness.bucketERC20(BUCKET), 0, "bucket raw ledger debited by owed (native)");
-        assertEq(harness.bucketClaims(BUCKET), 0, "no claims on negative native branch");
+        assertEq(harness.partitionERC20(PARTITION), 0, "partition raw ledger debited by owed (native)");
+        assertEq(harness.partitionClaims(PARTITION), 0, "no claims on negative native branch");
         // The harness received `owed` via take and paid `owed` via settle{value}; its balance is
         // conserved across the cycle, proving the value-bearing settle executed.
         assertEq(address(harness).balance, harnessEthBefore, "harness ETH conserved across take+settle");
@@ -225,28 +225,28 @@ contract SettlementLibTest is Test, Deployers {
         assertEq(harness.deltaAfterResolve(), 0, "native delta resolved to zero");
     }
 
-    /// @notice The native branch reverts on a short bucket exactly like the ERC-20 branch: the
+    /// @notice The native branch reverts on a short partition exactly like the ERC-20 branch: the
     ///         `settle{value}` succeeds against the PM but `debitERC20` reverts
-    ///         `InsufficientPoolBalance` because the bucket ledger does not cover `owed`. Locks in
-    ///         that the native leg shares the same per-bucket solvency check.
-    function test_resolveCurrency_negativeDelta_native_revertsWhenBucketShort() public {
+    ///         `InsufficientPoolBalance` because the partition ledger does not cover `owed`. Locks in
+    ///         that the native leg shares the same per-partition solvency check.
+    function test_resolveCurrency_negativeDelta_native_revertsWhenPartitionShort() public {
         uint256 owed = 2 ether;
 
         vm.deal(address(manager), owed);
         vm.deal(address(harness), owed);
-        // Bucket only tracks `owed - 1` -> debitERC20 must revert.
-        harness.seedBucketERC20(BUCKET, owed - 1);
+        // Partition only tracks `owed - 1` -> debitERC20 must revert.
+        harness.seedPartitionERC20(PARTITION, owed - 1);
 
         vm.expectRevert(InsufficientPoolBalance.selector);
-        harness.run(SettlementLibHarness.Action.DEBIT_NATIVE, BUCKET, nativeCurrency, owed);
+        harness.run(SettlementLibHarness.Action.DEBIT_NATIVE, PARTITION, nativeCurrency, owed);
     }
 
     // ══════════════════════════════════════════════════════════
-    //  Positive delta: mint ERC-6909 claims + record on bucket
+    //  Positive delta: mint ERC-6909 claims + record on partition
     // ══════════════════════════════════════════════════════════
 
     /// @notice A positive delta mints ERC-6909 claims to the harness (not `take`, since the
-    ///         swapper's input is unsettled) and records them on the bucket.
+    ///         swapper's input is unsettled) and records them on the partition.
     function test_resolveCurrency_positiveDelta_mintsClaimsAndRecords() public {
         uint256 credit = 250e18;
 
@@ -254,18 +254,18 @@ contract SettlementLibTest is Test, Deployers {
         // and settles, leaving the PM owing it back.
         token.mint(address(harness), credit);
 
-        uint256 claimsBefore = harness.bucketClaims(BUCKET);
+        uint256 claimsBefore = harness.partitionClaims(PARTITION);
         uint256 pmClaimBalBefore = manager.balanceOf(address(harness), erc20Currency.toId());
 
-        harness.run(SettlementLibHarness.Action.CREDIT, BUCKET, erc20Currency, credit);
+        harness.run(SettlementLibHarness.Action.CREDIT, PARTITION, erc20Currency, credit);
 
         // ERC-6909 claims minted to the harness on the PoolManager.
         uint256 pmClaimBalAfter = manager.balanceOf(address(harness), erc20Currency.toId());
         assertEq(pmClaimBalAfter - pmClaimBalBefore, credit, "PM minted `credit` ERC-6909 claims to harness");
-        // Bucket claim ledger recorded the mint.
-        assertEq(harness.bucketClaims(BUCKET) - claimsBefore, credit, "bucket claims recorded");
+        // Partition claim ledger recorded the mint.
+        assertEq(harness.partitionClaims(PARTITION) - claimsBefore, credit, "partition claims recorded");
         // No raw ERC-20 attributed; the positive branch never touches the raw ledger.
-        assertEq(harness.bucketERC20(BUCKET), 0, "raw ledger untouched on positive branch");
+        assertEq(harness.partitionERC20(PARTITION), 0, "raw ledger untouched on positive branch");
         assertEq(harness.deltaAfterResolve(), 0, "positive delta resolved to zero (mint offsets it)");
     }
 
@@ -273,24 +273,24 @@ contract SettlementLibTest is Test, Deployers {
     //  Zero delta: no-op
     // ══════════════════════════════════════════════════════════
 
-    /// @notice `delta == 0` is a no-op: no settle, no mint, no bucket mutation. Seed the bucket
+    /// @notice `delta == 0` is a no-op: no settle, no mint, no partition mutation. Seed the partition
     ///         with raw + claims and assert both survive untouched.
     function test_resolveCurrency_zeroDelta_isNoOp() public {
         uint256 seededRaw = 42e18;
-        harness.seedBucketERC20(BUCKET, seededRaw);
+        harness.seedPartitionERC20(PARTITION, seededRaw);
 
-        uint256 rawBefore = harness.bucketERC20(BUCKET);
-        uint256 claimsBefore = harness.bucketClaims(BUCKET);
-        uint256 sharesBefore = harness.vaultSharesOf(BUCKET);
+        uint256 rawBefore = harness.partitionERC20(PARTITION);
+        uint256 claimsBefore = harness.partitionClaims(PARTITION);
+        uint256 sharesBefore = harness.vaultSharesOf(PARTITION);
         uint256 pmClaimBalBefore = manager.balanceOf(address(harness), erc20Currency.toId());
         uint256 harnessBalBefore = token.balanceOf(address(harness));
 
         // No delta manufactured; resolveCurrency reads delta == 0 and must touch nothing.
-        harness.run(SettlementLibHarness.Action.NONE, BUCKET, erc20Currency, 0);
+        harness.run(SettlementLibHarness.Action.NONE, PARTITION, erc20Currency, 0);
 
-        assertEq(harness.bucketERC20(BUCKET), rawBefore, "raw ledger unchanged");
-        assertEq(harness.bucketClaims(BUCKET), claimsBefore, "claims unchanged");
-        assertEq(harness.vaultSharesOf(BUCKET), sharesBefore, "vault shares unchanged");
+        assertEq(harness.partitionERC20(PARTITION), rawBefore, "raw ledger unchanged");
+        assertEq(harness.partitionClaims(PARTITION), claimsBefore, "claims unchanged");
+        assertEq(harness.vaultSharesOf(PARTITION), sharesBefore, "vault shares unchanged");
         assertEq(
             manager.balanceOf(address(harness), erc20Currency.toId()),
             pmClaimBalBefore,
@@ -301,17 +301,17 @@ contract SettlementLibTest is Test, Deployers {
     }
 
     /// @notice The same zero-delta no-op holds for the native currency: nothing settles, no value
-    ///         leaves the harness, and the bucket is untouched.
+    ///         leaves the harness, and the partition is untouched.
     function test_resolveCurrency_zeroDelta_native_isNoOp() public {
         vm.deal(address(harness), 1 ether);
-        harness.seedBucketERC20(BUCKET, 7 ether);
+        harness.seedPartitionERC20(PARTITION, 7 ether);
 
-        uint256 rawBefore = harness.bucketERC20(BUCKET);
+        uint256 rawBefore = harness.partitionERC20(PARTITION);
         uint256 harnessEthBefore = address(harness).balance;
 
-        harness.run(SettlementLibHarness.Action.NONE, BUCKET, nativeCurrency, 0);
+        harness.run(SettlementLibHarness.Action.NONE, PARTITION, nativeCurrency, 0);
 
-        assertEq(harness.bucketERC20(BUCKET), rawBefore, "native zero-delta leaves bucket untouched");
+        assertEq(harness.partitionERC20(PARTITION), rawBefore, "native zero-delta leaves partition untouched");
         assertEq(address(harness).balance, harnessEthBefore, "no ETH moved on native zero delta");
         assertEq(harness.deltaAfterResolve(), 0, "native zero delta stays zero");
     }

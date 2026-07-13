@@ -887,14 +887,14 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
 
     /// @dev Resolve the hook's net delta for both currencies after the JIT cycle via the single
     ///      `SettlementLib` authority. Negative delta (hook owes PM): settle from the pool's raw
-    ///      ERC-20 and debit its inventory bucket. Positive delta (PM owes hook): mint ERC-6909
+    ///      ERC-20 and debit its inventory partition. Positive delta (PM owes hook): mint ERC-6909
     ///      claims (cannot `take` because the swapper hasn't settled yet), recorded on the
-    ///      bucket and redeemed in the next `_deployJIT`.
-    /// @param poolId The pool to resolve deltas for (used for inventory-bucket derivation).
+    ///      partition and redeemed in the next `_deployJIT`.
+    /// @param poolId The pool to resolve deltas for (used for inventory-partition derivation).
     /// @param key    The pool key (for currency references).
     function _resolveNetDelta(PoolId poolId, PoolKey calldata key) internal {
-        SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency0), key.currency0);
-        SettlementLib.resolveCurrency(_inventory, poolManager, _bucket(poolId, key.currency1), key.currency1);
+        SettlementLib.resolveCurrency(_inventory, poolManager, _partition(poolId, key.currency0), key.currency0);
+        SettlementLib.resolveCurrency(_inventory, poolManager, _partition(poolId, key.currency1), key.currency1);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

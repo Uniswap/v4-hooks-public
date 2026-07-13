@@ -27,7 +27,7 @@ library InventoryLib {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @dev A vault redemption returned more shares than the bucket owns. Defensive; should
+    /// @dev A vault redemption returned more shares than the partition owns. Defensive; should
     ///      never trigger if `vaultShares` accounting is consistent.
     error CrossPoolShareLeak();
     /// @dev `vault.deposit` returned zero shares for a non-zero asset deposit. Reverting fail-fast
@@ -40,19 +40,19 @@ library InventoryLib {
 
     // ─────────────────────────────────────── Vault operations ──────────────────────────────────────
 
-    /// @notice Deposit `amount` of `currency` (already held by the consumer) into `bucket`'s
+    /// @notice Deposit `amount` of `currency` (already held by the consumer) into `partition`'s
     ///         vault, or credit raw ERC-20 if no vault is bound.
     /// @dev LP-path semantics: a vault rejection bubbles up to the caller (no try/catch). Reverts
     ///      {ZeroSharesMinted} if a non-zero deposit mints no shares.
     /// @param self     Capability storage.
-    /// @param bucket   The accounting partition to credit.
+    /// @param partition   The accounting partition to credit.
     /// @param currency The underlying asset being deposited.
     /// @param amount   The asset amount to deposit (token's native decimals).
-    function depositToVault(Inventory storage self, bytes32 bucket, Currency currency, uint256 amount) internal {
+    function depositToVault(Inventory storage self, bytes32 partition, Currency currency, uint256 amount) internal {
         if (amount == 0) return;
-        IERC4626 vault = self.vault[bucket];
+        IERC4626 vault = self.vault[partition];
         if (address(vault) == address(0)) {
-            CurrencyState storage s = self.state[bucket];
+            CurrencyState storage s = self.state[partition];
             s.erc20 = (uint256(s.erc20) + amount).toUint128();
             return;
         }
@@ -61,80 +61,80 @@ library InventoryLib {
         uint256 sharesActual = vault.deposit(amount, address(this));
 
         if (sharesActual == 0) revert ZeroSharesMinted();
-        self.vaultShares[bucket] += sharesActual;
+        self.vaultShares[partition] += sharesActual;
     }
 
-    /// @notice Best-effort deposit of the bucket's tracked raw ERC-20 into its vault.
+    /// @notice Best-effort deposit of the partition's tracked raw ERC-20 into its vault.
     /// @dev No-ops (no vault / zero raw) return `ok = true`. The vault-deposit failure is caught; a
     ///      successful-but-zero-share deposit still reverts {ZeroSharesMinted}. When `ok` is false
     ///      and `amount > 0` the consumer SHOULD emit its own deposit-skipped event with `reason`.
     /// @param self   Capability storage.
-    /// @param bucket The accounting partition whose raw balance to sweep.
+    /// @param partition The accounting partition whose raw balance to sweep.
     /// @return amount The raw amount the deposit attempted (token's native decimals).
     /// @return ok     True if the deposit succeeded or was a no-op; false if the vault reverted.
     /// @return reason The raw revert data from `vault.deposit` when `ok` is false; empty otherwise.
-    function tryDepositAll(Inventory storage self, bytes32 bucket)
+    function tryDepositAll(Inventory storage self, bytes32 partition)
         internal
         returns (uint256 amount, bool ok, bytes memory reason)
     {
-        IERC4626 vault = self.vault[bucket];
+        IERC4626 vault = self.vault[partition];
         if (address(vault) == address(0)) return (0, true, "");
-        CurrencyState storage s = self.state[bucket];
+        CurrencyState storage s = self.state[partition];
         amount = s.erc20;
         if (amount == 0) return (0, true, "");
 
         try vault.deposit(amount, address(this)) returns (uint256 sharesActual) {
             if (sharesActual == 0) revert ZeroSharesMinted();
             s.erc20 = 0;
-            self.vaultShares[bucket] += sharesActual;
+            self.vaultShares[partition] += sharesActual;
             ok = true;
         } catch (bytes memory r) {
             reason = r;
         }
     }
 
-    /// @notice Withdraw `amount` of the bucket's vaulted assets back to raw ERC-20, optimistically.
+    /// @notice Withdraw `amount` of the partition's vaulted assets back to raw ERC-20, optimistically.
     /// @dev No-op if no vault is bound. A vault revert bubbles up to the caller.
-    ///      {CrossPoolShareLeak} guards against a vault consuming more shares than the bucket owns.
+    ///      {CrossPoolShareLeak} guards against a vault consuming more shares than the partition owns.
     /// @param self   Capability storage.
-    /// @param bucket The accounting partition to withdraw for.
+    /// @param partition The accounting partition to withdraw for.
     /// @param amount The asset amount to pull from the vault (token's native decimals).
-    function withdrawFromVault(Inventory storage self, bytes32 bucket, uint256 amount) internal {
+    function withdrawFromVault(Inventory storage self, bytes32 partition, uint256 amount) internal {
         if (amount == 0) return;
-        IERC4626 vault = self.vault[bucket];
+        IERC4626 vault = self.vault[partition];
         if (address(vault) == address(0)) return;
 
         uint256 sharesUsed = vault.withdraw(amount, address(this), address(this));
-        uint256 poolShares = self.vaultShares[bucket];
+        uint256 poolShares = self.vaultShares[partition];
         if (sharesUsed > poolShares) revert CrossPoolShareLeak();
-        self.vaultShares[bucket] = poolShares - sharesUsed;
-        CurrencyState storage s = self.state[bucket];
+        self.vaultShares[partition] = poolShares - sharesUsed;
+        CurrencyState storage s = self.state[partition];
         s.erc20 = (uint256(s.erc20) + amount).toUint128();
     }
 
-    /// @notice Best-effort full redemption of the bucket's vault position back to raw ERC-20.
+    /// @notice Best-effort full redemption of the partition's vault position back to raw ERC-20.
     /// @dev `shares == 0` means nothing to drain (the consumer emits no event); otherwise `ok` true
     ///      ⇒ consumer emits drained(shares, assets), false ⇒ consumer emits
-    ///      drain-skipped(shares, reason). Redeems exactly the bucket's own shares, preserving
-    ///      cross-bucket isolation.
+    ///      drain-skipped(shares, reason). Redeems exactly the partition's own shares, preserving
+    ///      cross-partition isolation.
     /// @param self   Capability storage.
-    /// @param bucket The accounting partition to drain.
+    /// @param partition The accounting partition to drain.
     /// @return shares The vault shares the drain operated on (`0` if nothing to drain).
     /// @return assets The asset amount received and credited to raw ERC-20 on success.
     /// @return ok     True if the redeem succeeded; false if the vault reverted.
     /// @return reason The raw revert data from `vault.redeem` when `ok` is false; empty otherwise.
-    function tryDrain(Inventory storage self, bytes32 bucket)
+    function tryDrain(Inventory storage self, bytes32 partition)
         internal
         returns (uint256 shares, uint256 assets, bool ok, bytes memory reason)
     {
-        IERC4626 vault = self.vault[bucket];
+        IERC4626 vault = self.vault[partition];
         if (address(vault) == address(0)) return (0, 0, false, "");
-        shares = self.vaultShares[bucket];
+        shares = self.vaultShares[partition];
         if (shares == 0) return (0, 0, false, "");
 
         try vault.redeem(shares, address(this), address(this)) returns (uint256 a) {
-            self.vaultShares[bucket] = 0;
-            CurrencyState storage s = self.state[bucket];
+            self.vaultShares[partition] = 0;
+            CurrencyState storage s = self.state[partition];
             s.erc20 = (uint256(s.erc20) + a).toUint128();
             assets = a;
             ok = true;
@@ -143,27 +143,27 @@ library InventoryLib {
         }
     }
 
-    /// @notice Ensure the bucket's raw ERC-20 holds at least `amount`, withdrawing the shortfall
+    /// @notice Ensure the partition's raw ERC-20 holds at least `amount`, withdrawing the shortfall
     ///         from the vault, then debit it.
-    /// @dev For a non-vaulted bucket with insufficient raw, the `bal - amount` subtraction panics
+    /// @dev For a non-vaulted partition with insufficient raw, the `bal - amount` subtraction panics
     ///      on underflow (no sentinel). {CrossPoolShareLeak} guards the vaulted path.
-    /// @dev On the vaulted-shortfall path the bucket is set to `0` rather than computed: it
+    /// @dev On the vaulted-shortfall path the partition is set to `0` rather than computed: it
     ///      withdraws exactly `shortfall = amount - bal`, so after crediting the withdrawal and
-    ///      debiting `amount` the bucket nets to zero (`bal + shortfall == amount`). Do not
+    ///      debiting `amount` the partition nets to zero (`bal + shortfall == amount`). Do not
     ///      "fix" this into an arithmetic expression; the literal zero is the correct result.
     /// @param self   Capability storage.
-    /// @param bucket The accounting partition to debit.
+    /// @param partition The accounting partition to debit.
     /// @param amount The asset amount to make available and debit (token's native decimals).
-    function ensureERC20(Inventory storage self, bytes32 bucket, uint256 amount) internal {
+    function ensureERC20(Inventory storage self, bytes32 partition, uint256 amount) internal {
         if (amount == 0) return;
-        CurrencyState storage s = self.state[bucket];
+        CurrencyState storage s = self.state[partition];
         uint256 bal = s.erc20;
         if (bal >= amount) {
             s.erc20 = uint128(bal - amount);
             return;
         }
 
-        IERC4626 vault = self.vault[bucket];
+        IERC4626 vault = self.vault[partition];
         if (address(vault) == address(0)) {
             s.erc20 = uint128(bal - amount);
             return;
@@ -171,26 +171,26 @@ library InventoryLib {
 
         uint256 shortfall = amount - bal;
         uint256 sharesUsed = vault.withdraw(shortfall, address(this), address(this));
-        uint256 poolShares = self.vaultShares[bucket];
+        uint256 poolShares = self.vaultShares[partition];
         if (sharesUsed > poolShares) revert CrossPoolShareLeak();
-        self.vaultShares[bucket] = poolShares - sharesUsed;
+        self.vaultShares[partition] = poolShares - sharesUsed;
         s.erc20 = 0;
     }
 
-    /// @notice Redeem the bucket's ERC-6909 claims to raw ERC-20 via `pm` (only inside an unlock).
+    /// @notice Redeem the partition's ERC-6909 claims to raw ERC-20 via `pm` (only inside an unlock).
     /// @dev Caps the physical `take` at the PoolManager's current balance, since claims minted by
-    ///      an earlier same-bucket swap in the same unsettled tx are not yet backed, and retains
+    ///      an earlier same-partition swap in the same unsettled tx are not yet backed, and retains
     ///      any unbacked remainder as claims.
     /// @param self     Capability storage.
-    /// @param bucket   The accounting partition whose claims to redeem.
+    /// @param partition   The accounting partition whose claims to redeem.
     /// @param currency The underlying asset of the claims.
     /// @param pm       The v4 PoolManager to burn the ERC-6909 claims on and `take` from.
-    /// @return erc20Bal The bucket's raw ERC-20 balance after redemption (token's native decimals).
-    function redeemClaims(Inventory storage self, bytes32 bucket, Currency currency, IPoolManager pm)
+    /// @return erc20Bal The partition's raw ERC-20 balance after redemption (token's native decimals).
+    function redeemClaims(Inventory storage self, bytes32 partition, Currency currency, IPoolManager pm)
         internal
         returns (uint256 erc20Bal)
     {
-        CurrencyState memory snapshot = self.state[bucket];
+        CurrencyState memory snapshot = self.state[partition];
         uint256 claimBal = snapshot.claims;
         erc20Bal = snapshot.erc20;
         if (claimBal > 0) {
@@ -201,7 +201,7 @@ library InventoryLib {
                 pm.take(currency, address(this), takeAmount);
                 erc20Bal += takeAmount;
             }
-            self.state[bucket] =
+            self.state[partition] =
                 CurrencyState({erc20: erc20Bal.toUint128(), claims: (claimBal - takeAmount).toUint128()});
         }
     }

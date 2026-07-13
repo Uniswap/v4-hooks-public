@@ -133,11 +133,11 @@ abstract contract PoolVault is BlockNumberish {
 
     /// @dev Rehypothecation + claim state (vault bindings, vault shares, raw ERC-20, and
     ///      ERC-6909 claims) composed as a type-driven `Inventory` storage field, keyed per
-    ///      `(pool, currency)` by `_bucket`. Behavior is attached via the file-level free
+    ///      `(pool, currency)` by `_partition`. Behavior is attached via the file-level free
     ///      functions on `Inventory` (accessors, balances, claim accounting) plus the
     ///      `InventoryLib` library (token-custody ops), so the wrappers below call
     ///      `_inventory.method(...)` directly. PoolVault is
-    ///      the V4 binding: it owns the bucket derivation, re-exposes the `vaults` getter, and
+    ///      the V4 binding: it owns the partition derivation, re-exposes the `vaults` getter, and
     ///      delegates every asset/claim operation through thin `(PoolId, Currency)` wrappers
     ///      (`_vaultOf`, `_setVault`, `_depositToVault`, `_redeemPoolClaims`, ...) so subclasses
     ///      and the test harness keep their existing call surface. Aggregate views
@@ -312,7 +312,7 @@ abstract contract PoolVault is BlockNumberish {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //                  INVENTORY BUCKET / VAULT ACCESSORS
+    //                  INVENTORY PARTITION / VAULT ACCESSORS
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice The ERC-4626 vault configured for `(poolId, currency)`, or `address(0)` if the
@@ -325,46 +325,46 @@ abstract contract PoolVault is BlockNumberish {
     }
 
     /// @dev Accounting partition for `(poolId, currency)` in the `InventoryLib` capability, and
-    ///      the canonical bucket derivation subclasses pass to `SettlementLib`. Distinct per pool
+    ///      the canonical partition derivation subclasses pass to `SettlementLib`. Distinct per pool
     ///      so a hook serving multiple pools that share a currency keeps each pool's reserves
     ///      isolated. Hashes in the 0x00-0x40 scratch region, equivalent to
     ///      `keccak256(abi.encode(poolId, currency))` but without the free-memory allocation,
-    ///      so the hot path's repeated bucket derivations cost no more than the prior nested
+    ///      so the hot path's repeated partition derivations cost no more than the prior nested
     ///      `mapping[poolId][currency]` lookups.
-    /// @param poolId   The pool the bucket belongs to.
+    /// @param poolId   The pool the partition belongs to.
     /// @param currency The currency side (currency0 or currency1).
-    /// @return bucket The opaque `InventoryLib` accounting partition for `(poolId, currency)`.
-    function _bucket(PoolId poolId, Currency currency) internal pure returns (bytes32 bucket) {
+    /// @return partition The opaque `InventoryLib` accounting partition for `(poolId, currency)`.
+    function _partition(PoolId poolId, Currency currency) internal pure returns (bytes32 partition) {
         assembly ("memory-safe") {
             mstore(0x00, poolId)
             mstore(0x20, currency)
-            bucket := keccak256(0x00, 0x40)
+            partition := keccak256(0x00, 0x40)
         }
     }
 
     /// @dev Vault bound to `(poolId, currency)`.
     function _vaultOf(PoolId poolId, Currency currency) internal view returns (IERC4626) {
-        return _inventory.vaultOf(_bucket(poolId, currency));
+        return _inventory.vaultOf(_partition(poolId, currency));
     }
 
     /// @dev Bind `vault` to `(poolId, currency)`. Caller validates the asset match.
     function _setVault(PoolId poolId, Currency currency, IERC4626 vault) internal {
-        _inventory.setVault(_bucket(poolId, currency), vault);
+        _inventory.setVault(_partition(poolId, currency), vault);
     }
 
     /// @dev ERC-4626 shares owned by `(poolId, currency)`.
     function _vaultSharesOf(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.sharesOf(_bucket(poolId, currency));
+        return _inventory.sharesOf(_partition(poolId, currency));
     }
 
     /// @dev ERC-6909 claims attributed to `(poolId, currency)`.
     function _claimsOf(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.claimsOf(_bucket(poolId, currency));
+        return _inventory.claimsOf(_partition(poolId, currency));
     }
 
     /// @dev Raw ERC-20 attributed to `(poolId, currency)`.
     function _erc20Of(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.erc20Of(_bucket(poolId, currency));
+        return _inventory.erc20Of(_partition(poolId, currency));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -522,8 +522,8 @@ abstract contract PoolVault is BlockNumberish {
         returns (uint256 amount0, uint256 amount1)
     {
         PoolId poolId = PoolId.wrap(VaultId.unwrap(vaultId));
-        uint256 bal0 = _inventory.assetBalance(_bucket(poolId, Currency.wrap(asset0)));
-        uint256 bal1 = _inventory.assetBalance(_bucket(poolId, Currency.wrap(asset1)));
+        uint256 bal0 = _inventory.assetBalance(_partition(poolId, Currency.wrap(asset0)));
+        uint256 bal1 = _inventory.assetBalance(_partition(poolId, Currency.wrap(asset1)));
         return _shares.convertToAmounts(vaultId, bal0, bal1, _decimalsOffset(vaultId), shares, roundUp);
     }
 
@@ -555,8 +555,8 @@ abstract contract PoolVault is BlockNumberish {
     ///      inflates these balances and dilutes new depositors; bounded by the vault-trust model.
     function _totalAssets(PoolKey memory key) internal view returns (uint256 amount0, uint256 amount1) {
         PoolId poolId = key.toId();
-        amount0 = _inventory.assetBalance(_bucket(poolId, key.currency0));
-        amount1 = _inventory.assetBalance(_bucket(poolId, key.currency1));
+        amount0 = _inventory.assetBalance(_partition(poolId, key.currency0));
+        amount1 = _inventory.assetBalance(_partition(poolId, key.currency1));
     }
 
     /// @dev Pool-level effective (immediately-withdrawable) assets across both currencies.
@@ -575,8 +575,8 @@ abstract contract PoolVault is BlockNumberish {
         view
         returns (uint256 amount0, uint256 amount1)
     {
-        amount0 = _inventory.effectiveBalance(_bucket(poolId, currency0));
-        amount1 = _inventory.effectiveBalance(_bucket(poolId, currency1));
+        amount0 = _inventory.effectiveBalance(_partition(poolId, currency0));
+        amount1 = _inventory.effectiveBalance(_partition(poolId, currency1));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -727,7 +727,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      is legitimately a few wei below `want` on honest vaults, and that dust rounds in
     ///      the pool's favour (a deposit→withdraw round-trip never profits the depositor).
     function _depositToVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        _inventory.depositToVault(_bucket(poolId, currency), currency, amount);
+        _inventory.depositToVault(_partition(poolId, currency), currency, amount);
     }
 
     /// @dev Deposit all of the pool's tracked ERC-20 balance for both currencies into vaults.
@@ -752,7 +752,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      and continues. LPs forgo vault yield on the un-deposited amount until the next
     ///      cycle retries, but trading remains live.
     function _depositAllToVault(PoolId poolId, Currency currency) internal {
-        (uint256 amount, bool ok, bytes memory reason) = _inventory.tryDepositAll(_bucket(poolId, currency));
+        (uint256 amount, bool ok, bytes memory reason) = _inventory.tryDepositAll(_partition(poolId, currency));
         if (!ok) emit VaultDepositSkipped(poolId, currency, amount, reason);
     }
 
@@ -763,7 +763,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      `CrossPoolShareLeak` defensive check stays to catch a vault that consumes more
     ///      shares than the pool owns.
     function _withdrawFromVault(PoolId poolId, Currency currency, uint256 amount) internal {
-        _inventory.withdrawFromVault(_bucket(poolId, currency), amount);
+        _inventory.withdrawFromVault(_partition(poolId, currency), amount);
     }
 
     /// @dev Best-effort full withdrawal of the pool's vault position for `currency` back into
@@ -779,7 +779,8 @@ abstract contract PoolVault is BlockNumberish {
     /// @param poolId   The pool whose vault position to drain.
     /// @param currency The currency to withdraw from the vault.
     function _drainVaultBestEffort(PoolId poolId, Currency currency) internal {
-        (uint256 shares, uint256 assets, bool ok, bytes memory reason) = _inventory.tryDrain(_bucket(poolId, currency));
+        (uint256 shares, uint256 assets, bool ok, bytes memory reason) =
+            _inventory.tryDrain(_partition(poolId, currency));
         if (shares == 0) return;
         if (ok) emit VaultDrained(poolId, currency, shares, assets);
         else emit VaultDrainSkipped(poolId, currency, shares, reason);
@@ -796,7 +797,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      when the pool has no configured vault and insufficient ERC-20; there is no
     ///      separate sentinel revert.
     function _ensureERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        _inventory.ensureERC20(_bucket(poolId, currency), amount);
+        _inventory.ensureERC20(_partition(poolId, currency), amount);
     }
 
     /// @dev Set max approval for a vault using OZ `forceApprove` (zeros out first for
@@ -867,7 +868,7 @@ abstract contract PoolVault is BlockNumberish {
     ///      common path (claims fully backed) is unchanged: `available >= claimBal`, so the full
     ///      balance is redeemed exactly as before.
     function _redeemPoolClaims(PoolId poolId, Currency currency) internal returns (uint256 erc20Bal) {
-        return _inventory.redeemClaims(_bucket(poolId, currency), currency, _poolManager());
+        return _inventory.redeemClaims(_partition(poolId, currency), currency, _poolManager());
     }
 
     /// @dev The portion of a pool's recorded claims that the PoolManager cannot physically
@@ -879,20 +880,20 @@ abstract contract PoolVault is BlockNumberish {
     ///      Returns 0 in the common case (claims fully backed), so steady-state sizing is
     ///      unaffected.
     function _unbackedClaims(PoolId poolId, Currency currency) internal view returns (uint256) {
-        return _inventory.unbackedClaims(_bucket(poolId, currency), currency, _poolManager());
+        return _inventory.unbackedClaims(_partition(poolId, currency), currency, _poolManager());
     }
 
     /// @dev Record newly minted ERC-6909 claims for a pool. Called after `poolManager.mint()`
     ///      in the JIT delta resolution.
     function _recordClaims(PoolId poolId, Currency currency, uint256 amount) internal {
-        _inventory.recordClaims(_bucket(poolId, currency), amount);
+        _inventory.recordClaims(_partition(poolId, currency), amount);
     }
 
     /// @dev Debit `amount` from the pool's tracked ERC-20 balance after a PM settlement.
     ///      The actual `_settle` call is the subclass's responsibility; this function only
     ///      updates the per-pool counter.
     function _debitPoolERC20(PoolId poolId, Currency currency, uint256 amount) internal {
-        _inventory.debitERC20(_bucket(poolId, currency), amount);
+        _inventory.debitERC20(_partition(poolId, currency), amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
