@@ -245,6 +245,18 @@ library InventoryLib {
         }
     }
 
+    /// @notice Force `currency`'s allowance to `vault` back to max, regardless of the current
+    ///         value. The manual, owner-driven counterpart to bind-time {approveVault} and
+    ///         just-in-time {ensureVaultAllowance}.
+    /// @dev `forceApprove` zeroes-then-sets internally, so a single call covers USDT-style tokens
+    ///      that reject a non-zero-to-non-zero `approve`. No-op for `address(0)` vault.
+    /// @param currency The underlying asset to re-approve.
+    /// @param vault    The ERC-4626 vault to grant allowance to.
+    function refreshVaultApproval(Currency currency, address vault) internal {
+        if (vault == address(0)) return;
+        IERC20(Currency.unwrap(currency)).forceApprove(vault, type(uint256).max);
+    }
+
     /// @notice Reject ERC-4626 vaults that apply entry or exit fees.
     /// @dev Leverages the EIP-4626 rule that `convertTo*` MUST NOT factor fees while `preview*`
     ///      MUST. No-op for an unset vault. Catches honest fee disclosures only (see PoolVault

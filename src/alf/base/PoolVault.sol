@@ -818,6 +818,13 @@ abstract contract PoolVault is BlockNumberish {
         InventoryLib.revokeVaultApproval(currency, vault);
     }
 
+    /// @dev Force `currency`'s vault allowance back to max regardless of its current value: the
+    ///      owner-driven recovery counterpart to `_approveVault`, used after an emergency revoke or
+    ///      to re-arm a USDT-style token whose allowance drifted. No-op for `address(0)`.
+    function _refreshVaultApproval(Currency currency, address vault) internal {
+        InventoryLib.refreshVaultApproval(currency, vault);
+    }
+
     /// @dev Reject ERC-4626 vaults that apply entry or exit fees. Called once per vault at
     ///      pool initialization; no-ops for `address(0)` (non-vaulted currency).
     ///

@@ -18,8 +18,6 @@ import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {OwnedALFHook} from "./base/OwnedALFHook.sol";
 import {PoolVault} from "./base/PoolVault.sol";
@@ -100,7 +98,6 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     using TransientStateLibrary for IPoolManager;
     using LPFeeLibrary for uint24;
     using SafeCast for uint256;
-    using SafeERC20 for IERC20;
 
     /// @notice Salt for the hook's LP positions in the PoolManager, distinguishing them
     ///         from positions created by other hooks or LPs on the same pool.
@@ -508,9 +505,7 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     /// @param key      The pool whose vault allowance should be refreshed.
     /// @param currency Which side (currency0 or currency1) to refresh.
     function refreshVaultApproval(PoolKey calldata key, Currency currency) external onlyOwner whenJITNotInProgress {
-        IERC4626 vault = _vaultOf(key.toId(), currency);
-        if (address(vault) == address(0)) return;
-        IERC20(Currency.unwrap(currency)).forceApprove(address(vault), type(uint256).max);
+        _refreshVaultApproval(currency, address(_vaultOf(key.toId(), currency)));
     }
 
     /// @notice Emergency incident-response lever for a suspect vault: in one atomic action,
