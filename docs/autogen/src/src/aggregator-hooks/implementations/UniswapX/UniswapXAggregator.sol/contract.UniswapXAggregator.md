@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/46ab71e7645df3d64344767b0e4a437258051bb5/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/27ae0091c47d240780bf562b64bd8e9428214ba6/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
@@ -28,8 +28,8 @@ Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoT
 because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
 via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
 
-Protocol fees must remain 0 for pools using this hook. A non-zero protocol fee would skim the
-unspecified currency, but an exact order fill leaves no surplus to cover it, causing settlement to fail.
+This hook opts out of protocol-fee classification: `protocolFeeFlags` returns 0, so pools using it
+are not subject to a protocol fee.
 
 
 ## State Variables
@@ -57,15 +57,6 @@ Lens used to resolve an order (Dutch decay applied) into its current input/outpu
 
 ```solidity
 OrderQuoter public immutable orderQuoter
-```
-
-
-### registered
-Tracks which V4 pools have been registered with this hook
-
-
-```solidity
-mapping(PoolId => bool) public registered
 ```
 
 

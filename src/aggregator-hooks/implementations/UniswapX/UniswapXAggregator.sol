@@ -36,8 +36,8 @@ import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 /// @dev    Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert
 ///         because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
 ///         via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
-/// @dev    Protocol fees must remain 0 for pools using this hook. A non-zero protocol fee would skim the
-///         unspecified currency, but an exact order fill leaves no surplus to cover it, causing settlement to fail.
+/// @dev    This hook opts out of protocol-fee classification: `protocolFeeFlags` returns 0, so pools using it
+///         are not subject to a protocol fee.
 contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
@@ -48,9 +48,6 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     address public immutable weth;
     /// @notice Lens used to resolve an order (Dutch decay applied) into its current input/output amounts
     OrderQuoter public immutable orderQuoter;
-
-    /// @notice Tracks which V4 pools have been registered with this hook
-    mapping(PoolId => bool) public registered;
 
     // Unique, fixed transient-storage slots (EIP-1153). Transient storage is per-contract; these are chosen
     // distinct from any low slots used elsewhere in the inheritance chain.
@@ -199,8 +196,6 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     }
 
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        registered[key.toId()] = true;
-
         // The Reactor pulls the order's output token from this hook via transferFrom, so it must be approved.
         // Approve each non-native currency, plus WETH whenever a side is native (a native V4 currency may map
         // to a WETH order output).
