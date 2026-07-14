@@ -18,8 +18,6 @@ import {MockUniV3Pool} from "./mocks/MockUniV3Pool.sol";
 import {MockUniV3Factory} from "./mocks/MockUniV3Factory.sol";
 import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
 import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";
-// solhint-disable-next-line no-unused-import
-import {V4Quoter} from "@uniswap/v4-periphery/src/lens/V4Quoter.sol";
 
 contract UniswapV3AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;

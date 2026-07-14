@@ -49,13 +49,15 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     /// @notice Lens used to resolve an order (Dutch decay applied) into its current input/output amounts
     OrderQuoter public immutable orderQuoter;
 
-    // Unique, fixed transient-storage slots (EIP-1153). Transient storage is per-contract; these are chosen
-    // distinct from any low slots used elsewhere in the inheritance chain.
-    // The inflight (reentrancy / authorized-callback) flag.
-    bytes32 private constant INFLIGHT_SLOT = 0x9d6f6b3c2a1e4f8b0c5d7e9a3b1f2c4d6e8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c;
+    // Unique, fixed transient-storage slots (EIP-1153), derived from namespaced labels so they are reproducible
+    // and collision-resistant (matching the `FluidDexT1`/`UniswapV3` aggregator convention).
+    // The inflight (reentrancy / authorized-callback) flag. bytes32(uint256(keccak256("UniswapXAggregator.transient.inflight")) - 1)
+    bytes32 private constant INFLIGHT_SLOT = 0x1176e989128e5c0647e83e232d1bddeb5fda2c2633b1403aa0480ddc5744db90;
     // Scratch slots written by `reactorCallback` and read back in `_conductSwap`.
-    bytes32 private constant RESOLVED_INPUT_SLOT = 0x2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4b;
-    bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a5d;
+    // bytes32(uint256(keccak256("UniswapXAggregator.transient.resolvedInput")) - 1)
+    bytes32 private constant RESOLVED_INPUT_SLOT = 0xb118917dbd5ff3662ea80ab603cec995cb9a6b1dc1ad61eda6f03b34bbbfb660;
+    // bytes32(uint256(keccak256("UniswapXAggregator.transient.resolvedOutput")) - 1)
+    bytes32 private constant RESOLVED_OUTPUT_SLOT = 0xc5b5e49dc52e02802787e6d9f0f9a1f57867b6b3c54b85bf17b6914c521972d2;
 
     /// @dev Upper bound for order amounts. The V4 swap delta is formed via `int128(uint128(amount))` in the
     ///      base `_processAmounts`, so any amount above `int128.max` would silently sign-flip/truncate the
