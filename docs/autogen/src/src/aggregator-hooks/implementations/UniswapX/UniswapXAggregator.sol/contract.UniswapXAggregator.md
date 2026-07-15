@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/27ae0091c47d240780bf562b64bd8e9428214ba6/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/bd043ac47a039fcd5d5e2677644eea715b7fce1f/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
@@ -63,21 +63,21 @@ OrderQuoter public immutable orderQuoter
 ### INFLIGHT_SLOT
 
 ```solidity
-bytes32 private constant INFLIGHT_SLOT = 0x9d6f6b3c2a1e4f8b0c5d7e9a3b1f2c4d6e8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c
+bytes32 private constant INFLIGHT_SLOT = 0x1176e989128e5c0647e83e232d1bddeb5fda2c2633b1403aa0480ddc5744db90
 ```
 
 
 ### RESOLVED_INPUT_SLOT
 
 ```solidity
-bytes32 private constant RESOLVED_INPUT_SLOT = 0x2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4a6c8e0a2c4e6f8a0c2e4f6a8c0e2f4b
+bytes32 private constant RESOLVED_INPUT_SLOT = 0xb118917dbd5ff3662ea80ab603cec995cb9a6b1dc1ad61eda6f03b34bbbfb660
 ```
 
 
 ### RESOLVED_OUTPUT_SLOT
 
 ```solidity
-bytes32 private constant RESOLVED_OUTPUT_SLOT = 0x3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a5d
+bytes32 private constant RESOLVED_OUTPUT_SLOT = 0xc5b5e49dc52e02802787e6d9f0f9a1f57867b6b3c54b85bf17b6914c521972d2
 ```
 
 
