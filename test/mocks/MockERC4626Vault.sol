@@ -17,6 +17,8 @@ interface IERC20Like {
 /// @dev matching the ERC-4626 rounding rules. `totalAssets()` reads the live asset balance, so a
 /// @dev rebasing asset naturally moves the share/asset exchange rate.
 contract MockERC4626Vault is ERC20 {
+    error AssetTransferFailed();
+
     /// @notice The underlying asset token
     address public immutable asset;
 
@@ -48,7 +50,7 @@ contract MockERC4626Vault is ERC20 {
         return supply == 0 ? shares : _mulDivDown(shares, totalAssets(), supply);
     }
 
-    function previewDeposit(uint256 assets) public view returns (uint256) {
+    function previewDeposit(uint256 assets) public view virtual returns (uint256) {
         return convertToShares(assets);
     }
 
@@ -66,15 +68,15 @@ contract MockERC4626Vault is ERC20 {
         return convertToAssets(shares);
     }
 
-    function deposit(uint256 assets, address receiver) public returns (uint256 shares) {
+    function deposit(uint256 assets, address receiver) public virtual returns (uint256 shares) {
         shares = previewDeposit(assets);
-        IERC20Like(asset).transferFrom(msg.sender, address(this), assets);
+        if (!IERC20Like(asset).transferFrom(msg.sender, address(this), assets)) revert AssetTransferFailed();
         _mint(receiver, shares);
     }
 
     function mint(uint256 shares, address receiver) public returns (uint256 assets) {
         assets = previewMint(shares);
-        IERC20Like(asset).transferFrom(msg.sender, address(this), assets);
+        if (!IERC20Like(asset).transferFrom(msg.sender, address(this), assets)) revert AssetTransferFailed();
         _mint(receiver, shares);
     }
 
@@ -82,14 +84,14 @@ contract MockERC4626Vault is ERC20 {
         shares = previewWithdraw(assets);
         _spendAllowanceIfNeeded(owner, shares);
         _burn(owner, shares);
-        IERC20Like(asset).transfer(receiver, assets);
+        if (!IERC20Like(asset).transfer(receiver, assets)) revert AssetTransferFailed();
     }
 
     function redeem(uint256 shares, address receiver, address owner) public returns (uint256 assets) {
         assets = previewRedeem(shares);
         _spendAllowanceIfNeeded(owner, shares);
         _burn(owner, shares);
-        IERC20Like(asset).transfer(receiver, assets);
+        if (!IERC20Like(asset).transfer(receiver, assets)) revert AssetTransferFailed();
     }
 
     function _spendAllowanceIfNeeded(address owner, uint256 shares) internal {

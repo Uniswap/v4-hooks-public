@@ -7,6 +7,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -29,6 +30,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 contract ERC4626WrapperHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
+    using SafeCast for uint256;
 
     ERC4626WrapperHook public hook;
     ERC4626RoutingHook public hookSim;
@@ -94,13 +96,13 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         underlying.mint(alice, 1_000_000 ether);
         underlying.mint(bob, 1_000_000 ether);
         underlying.mint(address(this), 1_000_000 ether);
-        vault.transfer(alice, 100_000 ether);
-        vault.transfer(bob, 100_000 ether);
+        assertTrue(vault.transfer(alice, 100_000 ether));
+        assertTrue(vault.transfer(bob, 100_000 ether));
 
         // Seed the manager with a share buffer so the routing hook (which does not override
         // _withdraw) can be quoted: its simulated unwrap takes shares the manager must already
         // hold. On a real chain the manager holds ample balances; here we seed them explicitly.
-        vault.transfer(address(manager), 500_000 ether);
+        assertTrue(vault.transfer(address(manager), 500_000 ether));
 
         vm.startPrank(alice);
         underlying.approve(address(router), type(uint256).max);
@@ -130,16 +132,10 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         router.swap(
             key,
             SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(amountIn),
-                sqrtPriceLimitX96: _limit(zeroForOne)
+                zeroForOne: zeroForOne, amountSpecified: -amountIn.toInt256(), sqrtPriceLimitX96: _limit(zeroForOne)
             }),
             ""
         );
-    }
-
-    function _managerUnderlying() internal view returns (uint256) {
-        return underlying.balanceOf(address(manager));
     }
 
     function _managerShares() internal view returns (uint256) {
@@ -167,18 +163,38 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         uint256 aliceUnderlyingBefore = underlying.balanceOf(alice);
         uint256 aliceSharesBefore = vault.balanceOf(alice);
-        uint256 managerUnderlyingBefore = _managerUnderlying();
+        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(manager));
         uint256 managerSharesBefore = _managerShares();
 
         _swapExactIn(poolKey, wrapZeroForOne, amount);
 
         // alice spent ~amount of underlying and received a positive amount of shares
-        assertApproxEqAbs(aliceUnderlyingBefore - underlying.balanceOf(alice), amount, TOL, "underlying spent");
-        assertGt(vault.balanceOf(alice) - aliceSharesBefore, 0, "no shares received");
+        uint256 underlyingSpent = aliceUnderlyingBefore - underlying.balanceOf(alice);
+        uint256 sharesReceived = vault.balanceOf(alice) - aliceSharesBefore;
+        assertApproxEqAbs(underlyingSpent, amount, TOL, "underlying spent");
+        assertGt(sharesReceived, 0, "no shares received");
 
-        // pool solvency: shares are exact, and the manager is never left short of underlying
+        // Settlement must not consume pre-existing manager balances or retain vault shares in the hook.
         assertEq(_managerShares(), managerSharesBefore, "manager shares not conserved");
-        assertGe(_managerUnderlying(), managerUnderlyingBefore, "manager underlying drained");
+        assertGe(underlying.sharesOf(address(manager)), managerUnderlyingSharesBefore, "manager underlying drained");
+        assertEq(vault.balanceOf(address(hook)), 0, "hook retains shares");
+        assertLe(underlying.sharesOf(address(hook)), TOL, "hook retains excess underlying");
+    }
+
+    function test_wrap_exactInput_losesPrecisionOnTransfer() public {
+        underlying.setMultiplier(3e18);
+        uint256 amount = 1 ether + 1;
+
+        uint256 aliceUnderlyingBefore = underlying.balanceOf(alice);
+        uint256 aliceSharesBefore = vault.balanceOf(alice);
+
+        _swapExactIn(poolKey, wrapZeroForOne, amount);
+
+        uint256 underlyingSpent = aliceUnderlyingBefore - underlying.balanceOf(alice);
+        assertLt(underlyingSpent, amount, "fixture did not round the transfer down");
+        assertGt(vault.balanceOf(alice) - aliceSharesBefore, 0, "no shares received");
+        assertEq(vault.balanceOf(address(hook)), 0, "hook retains shares");
+        assertLe(underlying.sharesOf(address(hook)), TOL, "hook retains excess underlying");
     }
 
     function testFuzz_unwrap_exactInput(uint256 shares, uint256 rawMultiplier) public {
@@ -187,7 +203,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         uint256 aliceUnderlyingBefore = underlying.balanceOf(alice);
         uint256 aliceSharesBefore = vault.balanceOf(alice);
-        uint256 managerUnderlyingBefore = _managerUnderlying();
+        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(manager));
         uint256 managerSharesBefore = _managerShares();
 
         uint256 expectedOut = vault.previewRedeem(shares);
@@ -199,7 +215,9 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         assertApproxEqAbs(underlying.balanceOf(alice) - aliceUnderlyingBefore, expectedOut, TOL, "underlying received");
 
         assertEq(_managerShares(), managerSharesBefore, "manager shares not conserved");
-        assertGe(_managerUnderlying(), managerUnderlyingBefore, "manager underlying drained");
+        assertGe(underlying.sharesOf(address(manager)), managerUnderlyingSharesBefore, "manager underlying drained");
+        assertEq(vault.balanceOf(address(hook)), 0, "hook retains shares");
+        assertLe(underlying.sharesOf(address(hook)), TOL, "hook retains excess underlying");
     }
 
     /// @notice Wrapping then unwrapping at a fixed rate must never return more than was put in
@@ -220,6 +238,8 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         assertLe(underlyingBack, amount, "round-trip created value");
         assertApproxEqAbs(underlyingBack, amount, TOL, "round-trip lost too much");
+        assertEq(vault.balanceOf(alice), aliceSharesBefore, "round-trip changed share balance");
+        assertEq(vault.balanceOf(address(hook)), 0, "hook retains shares");
     }
 
     // ---------------------------------------------------------------------
@@ -232,10 +252,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         (uint256 quotedOut,) = quoter.quoteExactInputSingle(
             IV4Quoter.QuoteExactSingleParams({
-                poolKey: poolKeySim,
-                zeroForOne: wrapZeroForOne,
-                exactAmount: uint128(amount),
-                hookData: ""
+                poolKey: poolKeySim, zeroForOne: wrapZeroForOne, exactAmount: amount.toUint128(), hookData: ""
             })
         );
 
@@ -252,10 +269,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         (uint256 quotedOut,) = quoter.quoteExactInputSingle(
             IV4Quoter.QuoteExactSingleParams({
-                poolKey: poolKeySim,
-                zeroForOne: !wrapZeroForOne,
-                exactAmount: uint128(shares),
-                hookData: ""
+                poolKey: poolKeySim, zeroForOne: !wrapZeroForOne, exactAmount: shares.toUint128(), hookData: ""
             })
         );
 
@@ -285,7 +299,9 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         vm.prank(alice);
         router.swap(
             key,
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(amount), sqrtPriceLimitX96: _limit(zeroForOne)}),
+            SwapParams({
+                zeroForOne: zeroForOne, amountSpecified: -amount.toInt256(), sqrtPriceLimitX96: _limit(zeroForOne)
+            }),
             ""
         );
 
@@ -325,7 +341,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         // is settled into the manager before the hook takes it. So no unrelated liquidity here
         // (its 18-decimal liquidityDelta would not scale to low-decimal tokens).
         u.mint(alice, 1_000_000 * unit);
-        v.transfer(alice, 100_000 * unit);
+        assertTrue(v.transfer(alice, 100_000 * unit));
         vm.startPrank(alice);
         u.approve(address(router), type(uint256).max);
         v.approve(address(router), type(uint256).max);
@@ -349,7 +365,9 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         );
         router.swap(
             poolKey,
-            SwapParams({zeroForOne: wrapZeroForOne, amountSpecified: 1 ether, sqrtPriceLimitX96: _limit(wrapZeroForOne)}),
+            SwapParams({
+                zeroForOne: wrapZeroForOne, amountSpecified: 1 ether, sqrtPriceLimitX96: _limit(wrapZeroForOne)
+            }),
             ""
         );
     }
@@ -368,9 +386,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         router.swap(
             poolKey,
             SwapParams({
-                zeroForOne: !wrapZeroForOne,
-                amountSpecified: 1 ether,
-                sqrtPriceLimitX96: _limit(!wrapZeroForOne)
+                zeroForOne: !wrapZeroForOne, amountSpecified: 1 ether, sqrtPriceLimitX96: _limit(!wrapZeroForOne)
             }),
             ""
         );
