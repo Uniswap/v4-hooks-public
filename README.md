@@ -126,6 +126,7 @@ test/
 ----mocks/
 ----shared/
 ----ERC4626WrapperHook.t.sol
+----ERC4626WrapperHook.fork.t.sol
 ----ERC4626WrapperHookInvariant.t.sol
 ----WETHHook.t.sol
 ----WstETHHook.t.sol

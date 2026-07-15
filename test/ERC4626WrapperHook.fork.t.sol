@@ -50,13 +50,15 @@ contract ERC4626WrapperHookForkTest is Test, Deployers {
 
     address internal lp = makeAddr("lp");
     address internal trader = makeAddr("trader");
-    bool internal forked;
     bool internal wrapZeroForOne;
 
     function setUp() public {
-        string memory rpcUrl = vm.envOr("FORK_RPC_URL_1", string(""));
-        if (bytes(rpcUrl).length == 0) {
-            revert("FORK_RPC_URL_1 is not set");
+        string memory rpcUrl;
+        try vm.envString("FORK_RPC_URL_1") returns (string memory r) {
+            rpcUrl = r;
+        } catch {
+            vm.skip(true);
+            return;
         }
 
         vm.createSelectFork(rpcUrl, MAINNET_FORK_BLOCK);
@@ -104,15 +106,9 @@ contract ERC4626WrapperHookForkTest is Test, Deployers {
             hooks: IHooks(address(0))
         });
         manager.initialize(marketPoolKey, MARKET_SQRT_PRICE_X96);
-
-        forked = true;
     }
 
-    modifier onlyForked() {
-        if (forked) _;
-    }
-
-    function test_fork_deploymentsAndPoolsUseLiveSKHYxWrapper() public view onlyForked {
+    function test_fork_deploymentsAndPoolsUseLiveSKHYxWrapper() public view {
         assertEq(block.number, MAINNET_FORK_BLOCK, "unexpected fork block");
         assertGt(SKHYX.code.length, 0, "SKHYx is not deployed");
         assertGt(WRAPPED_SKHYX.code.length, 0, "wSKHYx is not deployed");
@@ -127,7 +123,7 @@ contract ERC4626WrapperHookForkTest is Test, Deployers {
         assertEq(manager.getLiquidity(wrapperPoolKey.toId()), 0, "wrapper pool should not have LP liquidity");
     }
 
-    function test_fork_e2e_wrapLPAddAndSwapThroughMarket() public onlyForked {
+    function test_fork_e2e_wrapLPAddAndSwapThroughMarket() public {
         uint256 lpAssets = 1_000 ether;
         uint256 lpUsdc = 100_000e6;
         deal(SKHYX, lp, lpAssets);
