@@ -344,9 +344,9 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outEnd, "decay end");
     }
 
-    /// @dev Exact-in quote must reject when the V4 swap input is less than the order's output (the
-    ///      all-or-nothing fill could not be covered).
-    function test_quoteWithHookData_exactIn_insufficientInput_reverts() public {
+    /// @dev Exact-in quote must reject whenever the V4 swap input does not exactly equal the order's output —
+    ///      the all-or-nothing fill only executes at exactly the resolved amounts.
+    function test_quoteWithHookData_exactIn_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
 
@@ -364,12 +364,17 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, -int256(50 ether), key.toId(), hookData);
 
+        // swap input 150 > order output 99 -> reject too (the corresponding swap would revert)
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.quoteWithHookData(zeroForOne, -int256(150 ether), key.toId(), hookData);
+
         // sanity: an input equal to the order output is accepted
         assertEq(hook.quoteWithHookData(zeroForOne, -int256(outAmt), key.toId(), hookData), inAmt, "exact input ok");
     }
 
-    /// @dev Exact-out quote must reject when the requested output exceeds what the order supplies.
-    function test_quoteWithHookData_exactOut_requestExceedsOrderInput_reverts() public {
+    /// @dev Exact-out quote must reject whenever the requested output does not exactly equal what the order
+    ///      supplies — the all-or-nothing fill only executes at exactly the resolved amounts.
+    function test_quoteWithHookData_exactOut_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
 
@@ -386,6 +391,10 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         // request 150 of the order input (tokenA) but the order only supplies 100 -> reject
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, int256(150 ether), key.toId(), hookData);
+
+        // request 50 of the order input (tokenA), below the order's 100 -> reject too (all-or-nothing)
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.quoteWithHookData(zeroForOne, int256(50 ether), key.toId(), hookData);
     }
 
     /// @dev Amounts above int128.max would silently sign-flip when narrowed to form the V4 delta; the quote

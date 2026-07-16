@@ -161,7 +161,7 @@ function _rawQuoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId po
 ### quoteWithHookData
 
 hookData-aware analogue of {BaseAggregatorHook.quote}: resolves the order/intent in `hookData` and
-applies the protocol fee the same way the standard quote does.
+applies the protocol fee the same way the standard quote does (via the shared `_innerQuote`).
 
 
 ```solidity

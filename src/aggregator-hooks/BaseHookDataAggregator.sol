@@ -2,12 +2,11 @@
 pragma solidity ^0.8.0;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {BeforeSwapDelta, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {BaseAggregatorHook} from "./BaseAggregatorHook.sol";
 
 /// @title BaseHookDataAggregator
@@ -106,27 +105,13 @@ abstract contract BaseHookDataAggregator is BaseAggregatorHook {
         returns (uint256 amountUnspecified);
 
     /// @notice hookData-aware analogue of {BaseAggregatorHook.quote}: resolves the order/intent in `hookData` and
-    ///         applies the protocol fee the same way the standard quote does.
+    ///         applies the protocol fee the same way the standard quote does (via the shared `_innerQuote`).
     function quoteWithHookData(bool zeroToOne, int256 amountSpecified, PoolId poolId, bytes calldata hookData)
         external
         returns (uint256 amountUnspecified)
     {
-        amountUnspecified = _rawQuoteWithHookData(zeroToOne, amountSpecified, poolId, hookData);
-
-        uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
-
-        if (protocolFee == 0) return amountUnspecified;
-
-        if (tokenJar == address(0)) pollTokenJar();
-        if (tokenJar == address(0)) return amountUnspecified;
-
-        bool isExactInput = amountSpecified < 0;
-        uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
-
-        if (isExactInput) {
-            amountUnspecified -= feeAmount;
-        } else {
-            amountUnspecified += feeAmount;
-        }
+        return _innerQuote(
+            zeroToOne, amountSpecified, poolId, _rawQuoteWithHookData(zeroToOne, amountSpecified, poolId, hookData)
+        );
     }
 }

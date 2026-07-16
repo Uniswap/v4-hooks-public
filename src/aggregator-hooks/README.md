@@ -36,7 +36,7 @@ First-byte ID table:
 | 93  | Pancakeswap V3     |
 | 95  | LitePSM            |
 | 02  | Uniswap V2         |
-| DC  | UniswapX (Dutch)   |
+| 58  | UniswapX (Dutch)   |
 
 ## Supported Protocols
 
@@ -148,7 +148,8 @@ The "liquidity source" is a single **UniswapX order** (e.g. an original Dutch or
 - **No Quoter needed**: the Reactor resolves the order (applying Dutch decay) and returns the exact `ResolvedOrder` (input + outputs) inside `reactorCallback`.
 - **All-or-nothing**: original Dutch orders cannot be partially filled, so the V4 swap amount must exactly match the resolved order amount, otherwise the swap reverts (`OrderAmountMismatch`).
 - **No routing quotes**: `quote` / `pseudoTotalValueLocked` revert (`QuoteNotSupported`) because the order is only known at swap time, not when a router calls those view functions. This hook is solver-driven.
-- **Protocol fees must be 0**: an exact order fill leaves no surplus to skim, so a non-zero protocol fee on the pool would break settlement.
+- **Protocol fees**: pools using this hook opt out of protocol-fee classification (`protocolFeeFlags()` returns 0), so no protocol fee applies in practice. The shared `beforeSwap`/settlement accounting (and `quoteWithHookData`) would still charge one correctly if a fee were ever configured — opting out of classification is a policy choice, not a settlement limitation.
+- **Reactor fee controller**: if UniswapX protocol fees are injected as an extra order output in the same token as the order's other outputs, the hook's output-summing handles them and the V4 swapper pays them (quotes agree, since the `OrderQuoter` resolves through the reactor). A fee output in any other token makes every fill through this hook revert with `InconsistentOrderOutputs`.
 - **ETH/WETH**: native ETH on the V4 pool side is bridged to/from WETH on the order side (order inputs are always ERC20 because Permit2 cannot transfer native ETH; order outputs may be native ETH or WETH). WETH address is fixed at construction.
 
 #### Defined interfaces

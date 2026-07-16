@@ -18,6 +18,7 @@ import {UniswapXAggregator} from "../../../src/aggregator-hooks/implementations/
 import {IReactor} from "@uniswapx/interfaces/IReactor.sol";
 import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
 import {MockUniswapXReactor} from "./mocks/MockUniswapXReactor.sol";
+import {MockMaliciousUniswapXReactor} from "./mocks/MockMaliciousUniswapXReactor.sol";
 import {BaseHookDataAggregator} from "../../../src/aggregator-hooks/BaseHookDataAggregator.sol";
 
 contract UniswapXAggregatorUnitTest is Test {
@@ -51,31 +52,38 @@ contract UniswapXAggregatorUnitTest is Test {
         reactor = new MockUniswapXReactor();
         weth = new WETH();
 
-        hook = _deployHook();
+        hook = _deployHook(address(reactor));
 
         tokenA = new MockERC20("TokenA", "TKA", 18);
         tokenB = new MockERC20("TokenB", "TKB", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
     }
 
-    function _deployHook() internal returns (UniswapXAggregator) {
+    function _deployHook(address reactorAddr) internal returns (UniswapXAggregator) {
         uint160 flags = uint160(
             Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
                 | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
         );
-        bytes memory constructorArgs = abi.encode(poolManager, IReactor(address(reactor)), address(weth));
+        bytes memory constructorArgs = abi.encode(poolManager, IReactor(reactorAddr), address(weth));
         (, bytes32 salt) = HookMiner.find(address(this), flags, type(UniswapXAggregator).creationCode, constructorArgs);
-        return new UniswapXAggregator{salt: salt}(poolManager, IReactor(address(reactor)), address(weth));
+        return new UniswapXAggregator{salt: salt}(poolManager, IReactor(reactorAddr), address(weth));
     }
 
     function _initPool(Currency c0, Currency c1) internal returns (PoolKey memory key) {
+        return _initPoolWithHook(c0, c1, hook);
+    }
+
+    function _initPoolWithHook(Currency c0, Currency c1, UniswapXAggregator hook_)
+        internal
+        returns (PoolKey memory key)
+    {
         (Currency currency0, Currency currency1) = Currency.unwrap(c0) < Currency.unwrap(c1) ? (c0, c1) : (c1, c0);
         key = PoolKey({
             currency0: currency0,
             currency1: currency1,
             fee: FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(hook))
+            hooks: IHooks(address(hook_))
         });
         poolManager.initialize(key, SQRT_PRICE_1_1);
     }
@@ -411,6 +419,121 @@ contract UniswapXAggregatorUnitTest is Test {
         assertEq(address(hook).balance, 0, "hook holds no ETH");
     }
 
+    function test_fillOrder_wethPool_orderOutputsNativeEth_unwrapsWeth() public {
+        uint256 inAmt = 100e6; // maker gives USDC
+        uint256 outAmt = 1 ether; // maker wants native ETH
+
+        // The pool holds WETH as an ordinary ERC20 currency (not native), so the hook must unwrap the
+        // taken WETH via IWETH9.withdraw before forwarding native ETH to the reactor.
+        PoolKey memory key = _initPool(Currency.wrap(address(weth)), Currency.wrap(address(usdc)));
+
+        usdc.mint(maker, inAmt);
+        vm.prank(maker);
+        usdc.approve(address(reactor), type(uint256).max);
+
+        // PoolManager WETH float so the hook can take WETH before alice settles
+        vm.deal(address(this), 100 ether);
+        weth.deposit{value: 100 ether}();
+        weth.transfer(address(poolManager), 100 ether);
+
+        // alice provides WETH (as an ERC20)
+        vm.deal(alice, outAmt);
+        vm.prank(alice);
+        weth.deposit{value: outAmt}();
+        vm.prank(alice);
+        weth.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(weth));
+        bytes memory hookData = _order(address(usdc), inAmt, address(0), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(usdc.balanceOf(maker), 0, "maker spent usdc");
+        assertEq(maker.balance, outAmt, "maker received native ETH");
+        assertEq(weth.balanceOf(alice), 0, "alice spent WETH");
+        assertEq(usdc.balanceOf(alice), inAmt, "alice received usdc");
+        assertEq(weth.balanceOf(address(hook)), 0, "hook holds no WETH");
+        assertEq(address(hook).balance, 0, "hook holds no ETH");
+    }
+
+    // ─────────────────────────── order/pool mismatches ───────────────────────────
+
+    function test_fillOrder_orderInputMismatch_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        // Pool over (tokenB, usdc) but the order's input token is tokenA: the settle currency (usdc)
+        // cannot deliver the order input -> reactorCallback must reject with OrderInputMismatch.
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenB)), Currency.wrap(address(usdc)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+    }
+
+    function test_fillOrder_orderOutputMismatch_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        // Pool over (tokenA, usdc) but the order's output token is tokenB: the take currency (usdc)
+        // does not match the order output -> reactorCallback must reject with OrderOutputMismatch.
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(usdc)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        usdc.mint(address(poolManager), 1000e6);
+        usdc.mint(alice, 99e6);
+        vm.prank(alice);
+        usdc.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(usdc));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(99e6),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+    }
+
     // ─────────────────────────── access control / quoting ───────────────────────────
 
     function test_reactorCallback_unauthorized_reverts() public {
@@ -429,6 +552,106 @@ contract UniswapXAggregatorUnitTest is Test {
         PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
         vm.expectRevert(UniswapXAggregator.TVLNotSupported.selector);
         hook.pseudoTotalValueLocked(key.toId());
+    }
+
+    /// @dev A reactor that re-enters `PoolManager.swap` mid-fill must hit the hook's `Reentrancy` guard
+    ///      in `_conductSwap` (the inflight flag is set for the whole `executeWithCallback`).
+    function test_conductSwap_reentrancy_reverts() public {
+        MockMaliciousUniswapXReactor malReactor = new MockMaliciousUniswapXReactor();
+        UniswapXAggregator malHook = _deployHook(address(malReactor));
+
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPoolWithHook(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)), malHook);
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(malReactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+        SwapParams memory params = SwapParams({
+            zeroForOne: _zeroForOne(key, takeCurrency),
+            amountSpecified: -int256(outAmt),
+            sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+        });
+
+        // Arm the reactor to re-enter the same swap mid-fill; the inner swap must revert with Reentrancy
+        // (recorded by the reactor), while the outer fill still completes.
+        malReactor.setReenterSwap(poolManager, key, params, hookData);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key, params, SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData
+        );
+
+        assertTrue(
+            _containsSelector(malReactor.lastRevertData(), UniswapXAggregator.Reentrancy.selector),
+            "inner swap reverted with Reentrancy"
+        );
+        assertEq(tokenB.balanceOf(maker), outAmt, "outer fill completed");
+    }
+
+    /// @dev While the hook is inflight, `reactorCallback` from any address other than the configured
+    ///      reactor must revert with `UnauthorizedCaller`.
+    function test_reactorCallback_wrongCallerWhileInflight_reverts() public {
+        MockMaliciousUniswapXReactor malReactor = new MockMaliciousUniswapXReactor();
+        UniswapXAggregator malHook = _deployHook(address(malReactor));
+
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+
+        PoolKey memory key = _initPoolWithHook(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)), malHook);
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(malReactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        // Arm the reactor to have a foreign address call reactorCallback mid-fill: inflight is set, but the
+        // caller is not the reactor, so the hook must revert with UnauthorizedCaller (recorded by the prober).
+        malReactor.setForeignCallback();
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertTrue(
+            _containsSelector(malReactor.prober().lastRevertData(), UniswapXAggregator.UnauthorizedCaller.selector),
+            "foreign callback reverted with UnauthorizedCaller"
+        );
+        assertEq(tokenB.balanceOf(maker), outAmt, "outer fill completed");
+    }
+
+    /// @dev Returns true if `data` contains the 4-byte selector `sel` (hook reverts bubble up wrapped by
+    ///      the PoolManager, so the selector may be embedded rather than at offset 0).
+    function _containsSelector(bytes memory data, bytes4 sel) internal pure returns (bool) {
+        if (data.length < 4) return false;
+        for (uint256 i = 0; i + 4 <= data.length; i++) {
+            if (data[i] == sel[0] && data[i + 1] == sel[1] && data[i + 2] == sel[2] && data[i + 3] == sel[3]) {
+                return true;
+            }
+        }
+        return false;
     }
 
     receive() external payable {}

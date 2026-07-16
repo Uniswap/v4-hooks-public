@@ -107,6 +107,33 @@ function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external r
 |`amountUnspecified`|`uint256`|amount of unspecified side (always positive to adhere to practices by other quote functions)|
 
 
+### _innerQuote
+
+Shared quote tail: applies the protocol fee to a raw quote. Called by every quote variant so
+this fee adjustment lives in exactly one place.
+
+
+```solidity
+function _innerQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId, uint256 amountUnspecified)
+    internal
+    returns (uint256);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`zeroToOne`|`bool`|Whether the swap is from token0 to token1|
+|`amountSpecified`|`int256`|The amount specified (negative for exact-in, positive for exact-out)|
+|`poolId`|`PoolId`|The pool ID|
+|`amountUnspecified`|`uint256`|The raw unspecified amount before protocol fee adjustment|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`uint256`|The unspecified amount after protocol fee adjustment|
+
+
 ### getHookPermissions
 
 Returns a struct of permissions to signal which hook functions are to be implemented

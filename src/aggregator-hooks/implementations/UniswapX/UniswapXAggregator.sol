@@ -3,13 +3,11 @@ pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {BaseHookDataAggregator} from "../../BaseHookDataAggregator.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
@@ -39,7 +37,6 @@ import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 /// @dev    This hook opts out of protocol-fee classification: `protocolFeeFlags` returns 0, so pools using it
 ///         are not subject to a protocol fee.
 contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
-    using StateLibrary for IPoolManager;
     using SafeERC20 for IERC20;
 
     /// @notice The UniswapX reactor this hook fills orders against
@@ -67,6 +64,7 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     error Reentrancy();
     error ProhibitedEntry();
     error UnauthorizedCaller();
+    error UnexpectedOrderCount();
     error NoOrderData();
     error NoOrderOutputs();
     error InconsistentOrderOutputs();
@@ -92,10 +90,11 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
 
     /// @inheritdoc BaseHookDataAggregator
     /// @dev Resolves the order in `hookData` (Dutch decay applied) via the OrderQuoter and returns the amount on
-    ///      the side opposite `amountSpecified`. The order fully determines both amounts, so `zeroToOne`/`poolId`
-    ///      are unused. NOTE: like UniswapX's OrderQuoter this is NOT a view — it calls the reactor (pulling the
-    ///      maker's input via Permit2 before rolling back), so it requires a funded, approved, validly-signed order
-    ///      and cannot be `staticcall`-ed.
+    ///      the side opposite `amountSpecified`. WARNING: the order fully determines both amounts, so `zeroToOne`
+    ///      and `poolId` are ignored — quoting the wrong pool or direction still returns an answer; callers must
+    ///      pass the pool/direction they intend to swap. NOTE: like UniswapX's OrderQuoter this is NOT a view —
+    ///      it calls the reactor (pulling the maker's input via Permit2 before rolling back), so it requires a
+    ///      funded, approved, validly-signed order and cannot be `staticcall`-ed.
     function _rawQuoteWithHookData(bool, int256 amountSpecified, PoolId, bytes calldata hookData)
         internal
         override
@@ -122,12 +121,15 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         if (orderOutput > MAX_INT128) revert OrderOutputOverflow();
         if (resolved.input.amount > MAX_INT128) revert OrderInputOverflow();
 
-        // Exact-in: the V4 swap input is `-amountSpecified` (in the order's output token); reject if it is
-        // less than the order's output, since the all-or-nothing fill could not be covered.
-        if (amountSpecified < 0 && amountSpecified > -int256(orderOutput)) revert OrderAmountMismatch();
-        // Exact-out: the V4 swapper requests `amountSpecified` of the order's input token; reject if it
-        // exceeds what the order supplies.
-        if (amountSpecified > 0 && amountSpecified > int256(resolved.input.amount)) revert OrderAmountMismatch();
+        // The fill is strictly all-or-nothing (`_conductSwap` enforces equality), so a quote is only
+        // executable at exactly the resolved amounts — enforce the same equality here so a successful
+        // quote implies the corresponding swap amount matches.
+        // Exact-in: the V4 swap input is `-amountSpecified` (in the order's output token); it must equal
+        // the order's output.
+        if (amountSpecified < 0 && amountSpecified != -int256(orderOutput)) revert OrderAmountMismatch();
+        // Exact-out: the V4 swapper requests `amountSpecified` of the order's input token; it must equal
+        // what the order supplies.
+        if (amountSpecified > 0 && amountSpecified != int256(resolved.input.amount)) revert OrderAmountMismatch();
 
         // The hook fills atomically: the V4 swapper provides the order's OUTPUT and receives its INPUT.
         // exact-in  (amountSpecified < 0): swapper specified the input it provides (order output) -> receives order input
@@ -141,6 +143,9 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     function reactorCallback(ResolvedOrder[] memory resolvedOrders, bytes memory callbackData) external override {
         if (!_getTransientInflight()) revert ProhibitedEntry();
         if (msg.sender != address(reactor)) revert UnauthorizedCaller();
+        // `executeWithCallback` always resolves exactly one order; enforce it so a nonstandard reactor
+        // cannot slip extra orders past the single-order accounting below.
+        if (resolvedOrders.length != 1) revert UnexpectedOrderCount();
 
         (Currency settleCurrency, Currency takeCurrency) = abi.decode(callbackData, (Currency, Currency));
 
@@ -197,10 +202,16 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         return _isEthClass(unwrapped) && _isEthClass(orderToken);
     }
 
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+    function _beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96)
+        internal
+        override
+        returns (bytes4)
+    {
         // The Reactor pulls the order's output token from this hook via transferFrom, so it must be approved.
         // Approve each non-native currency, plus WETH whenever a side is native (a native V4 currency may map
         // to a WETH order output).
+        // Although initialization is permissionless, unlimited approvals are safe: the reactor is immutable
+        // and trusted, and the hook holds no resting balances between transactions.
         if (!key.currency0.isAddressZero()) {
             IERC20(Currency.unwrap(key.currency0)).forceApprove(address(reactor), type(uint256).max);
         }
@@ -211,9 +222,7 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
             IERC20(weth).forceApprove(address(reactor), type(uint256).max);
         }
 
-        emit AggregatorPoolRegistered(key.toId());
-        pollTokenJar();
-        return IHooks.beforeInitialize.selector;
+        return super._beforeInitialize(sender, key, sqrtPriceX96);
     }
 
     /// @inheritdoc BaseHookDataAggregator
@@ -243,6 +252,10 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         // amountTake   = order output amount (taken from the PoolManager in the callback)
         amountSettle = _getTransientResolved(RESOLVED_INPUT_SLOT);
         amountTake = _getTransientResolved(RESOLVED_OUTPUT_SLOT);
+
+        // Clear the scratch slots so no stale values survive for later swaps in the same transaction.
+        _setTransientResolved(RESOLVED_INPUT_SLOT, 0);
+        _setTransientResolved(RESOLVED_OUTPUT_SLOT, 0);
 
         // Guard the true narrowing site: both amounts are cast to int128 when the base forms the swap delta.
         // Above int128.max the cast silently sign-flips/truncates, so reject here before that happens.

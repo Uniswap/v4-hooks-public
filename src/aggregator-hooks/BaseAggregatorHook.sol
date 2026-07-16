@@ -53,8 +53,20 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external returns (uint256 amountUnspecified) {
-        amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
+        return _innerQuote(zeroToOne, amountSpecified, poolId, _rawQuote(zeroToOne, amountSpecified, poolId));
+    }
 
+    /// @notice Shared quote tail: applies the protocol fee to a raw quote. Called by every quote variant so
+    ///         this fee adjustment lives in exactly one place.
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @param amountUnspecified The raw unspecified amount before protocol fee adjustment
+    /// @return The unspecified amount after protocol fee adjustment
+    function _innerQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId, uint256 amountUnspecified)
+        internal
+        returns (uint256)
+    {
         uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
 
         if (protocolFee == 0) return amountUnspecified;
@@ -65,11 +77,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
         bool isExactInput = amountSpecified < 0;
         uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
 
-        if (isExactInput) {
-            amountUnspecified -= feeAmount;
-        } else {
-            amountUnspecified += feeAmount;
-        }
+        return isExactInput ? amountUnspecified - feeAmount : amountUnspecified + feeAmount;
     }
 
     /// @inheritdoc BaseHook

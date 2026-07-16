@@ -113,10 +113,11 @@ function protocolFeeFlags() external pure override returns (uint256);
 Returns the raw quote for a swap whose behaviour depends on `hookData`, without protocol fees.
 
 Resolves the order in `hookData` (Dutch decay applied) via the OrderQuoter and returns the amount on
-the side opposite `amountSpecified`. The order fully determines both amounts, so `zeroToOne`/`poolId`
-are unused. NOTE: like UniswapX's OrderQuoter this is NOT a view — it calls the reactor (pulling the
-maker's input via Permit2 before rolling back), so it requires a funded, approved, validly-signed order
-and cannot be `staticcall`-ed.
+the side opposite `amountSpecified`. WARNING: the order fully determines both amounts, so `zeroToOne`
+and `poolId` are ignored — quoting the wrong pool or direction still returns an answer; callers must
+pass the pool/direction they intend to swap. NOTE: like UniswapX's OrderQuoter this is NOT a view —
+it calls the reactor (pulling the maker's input via Permit2 before rolling back), so it requires a
+funded, approved, validly-signed order and cannot be `staticcall`-ed.
 
 
 ```solidity
@@ -176,7 +177,10 @@ function _matches(Currency currency, address orderToken) internal view returns (
 
 
 ```solidity
-function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4);
+function _beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96)
+    internal
+    override
+    returns (bytes4);
 ```
 
 ### _conductSwap
@@ -259,6 +263,12 @@ error ProhibitedEntry();
 
 ```solidity
 error UnauthorizedCaller();
+```
+
+### UnexpectedOrderCount
+
+```solidity
+error UnexpectedOrderCount();
 ```
 
 ### NoOrderData
