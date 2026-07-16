@@ -16,6 +16,7 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {UniswapXAggregator} from "../../../src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol";
+import {IALFHook, MissingHookData, MalformedHookData} from "../../../src/aggregator-hooks/interfaces/IALFHook.sol";
 import {IReactor as IBriefcaseReactor} from "@uniswapx/interfaces/IReactor.sol";
 
 // Real UniswapX contracts (brought in as the lib/uniswapx submodule). Uses the ExclusiveDutchOrderReactor —
@@ -416,6 +417,213 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         // exact-out returns the (overflowing) order output -> reject before it can be used as a delta
         vm.expectRevert(UniswapXAggregator.OrderOutputOverflow.selector);
         hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData);
+    }
+
+    // ─────────────────────────── IALFHook (URC-4) ───────────────────────────
+
+    /// @dev Build a sorted PoolKey without initializing it (getIndicativeQuote needs no initialized pool).
+    function _sortedKey(Currency c0, Currency c1) internal view returns (PoolKey memory key) {
+        (Currency currency0, Currency currency1) = Currency.unwrap(c0) < Currency.unwrap(c1) ? (c0, c1) : (c1, c0);
+        key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+    }
+
+    /// @dev Standard order fixture: maker gives 100 tokenA, wants 99 tokenB; maker funded and Permit2-approved.
+    function _fundedOrderAB(uint256 inAmt, uint256 outAmt) internal returns (ExclusiveDutchOrder memory order) {
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(permit2), type(uint256).max);
+        order = _buildOrder(address(tokenA), inAmt, inAmt, address(tokenB), outAmt, outAmt, 0);
+    }
+
+    function test_getIndicativeQuote_exactIn_returnsOrderInput() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+
+        // Exact-in: alice provides tokenB (the order output), so the take side is tokenB.
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), _hookData(order)), inAmt, "exact-in quote");
+    }
+
+    function test_getIndicativeQuote_exactOut_returnsOrderOutput() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, int256(inAmt), _hookData(order)), outAmt, "exact-out quote");
+    }
+
+    /// @dev A native-currency pool quoting an order that pays WETH: the ETH/WETH equivalence used by the fill
+    ///      path must also let the pool/direction validation pass.
+    function test_getIndicativeQuote_nativePool_wethOutputOrder() public {
+        uint256 inAmt = 100e6; // maker gives USDC
+        uint256 outAmt = 1 ether; // maker wants WETH; alice would provide native ETH
+        PoolKey memory key = _initPool(NATIVE, Currency.wrap(address(usdc)));
+
+        usdc.mint(maker, inAmt);
+        vm.prank(maker);
+        usdc.approve(address(permit2), type(uint256).max);
+        ExclusiveDutchOrder memory order = _buildOrder(address(usdc), inAmt, inAmt, address(weth), outAmt, outAmt, 0);
+
+        bool zeroForOne = _zeroForOne(key, NATIVE);
+        assertEq(
+            hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), _hookData(order)), inAmt, "native/WETH quote"
+        );
+    }
+
+    function test_getIndicativeQuote_zeroAmount_returnsZero() public {
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(100 ether, 99 ether);
+        assertEq(hook.getIndicativeQuote(key, true, 0, _hookData(order)), 0, "zero amount");
+    }
+
+    function test_getIndicativeQuote_emptyHookData_revertsMissingHookData() public {
+        PoolKey memory key = _sortedKey(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        vm.expectRevert(MissingHookData.selector);
+        hook.getIndicativeQuote(key, true, -int256(1 ether), "");
+    }
+
+    function test_getIndicativeQuote_undecodableHookData_revertsMalformedHookData() public {
+        PoolKey memory key = _sortedKey(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        vm.expectRevert(MalformedHookData.selector);
+        hook.getIndicativeQuote(key, true, -int256(1 ether), hex"deadbeef");
+    }
+
+    function test_getIndicativeQuote_amountMismatch_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // 50 != the order's 99 output -> caller-fixable input error, must revert (not return 0)
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.getIndicativeQuote(key, zeroForOne, -int256(50 ether), _hookData(order));
+    }
+
+    function test_getIndicativeQuote_wrongDirection_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+
+        // Flip the direction: the settle side no longer corresponds to the order's input token.
+        bool wrongDirection = !_zeroForOne(key, Currency.wrap(address(tokenB)));
+        vm.expectRevert(UniswapXAggregator.OrderInputMismatch.selector);
+        hook.getIndicativeQuote(key, wrongDirection, -int256(outAmt), _hookData(order));
+    }
+
+    function test_getIndicativeQuote_wrongPool_reverts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+
+        // Pool over (tokenA, usdc): pick the direction whose settle side matches the order input (tokenA),
+        // so the take side (usdc) mismatches the order's output token (tokenB).
+        PoolKey memory key = _sortedKey(Currency.wrap(address(tokenA)), Currency.wrap(address(usdc)));
+        bool zeroForOne = !_zeroForOne(key, Currency.wrap(address(tokenA)));
+        vm.expectRevert(UniswapXAggregator.OrderOutputMismatch.selector);
+        hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), _hookData(order));
+    }
+
+    function test_getIndicativeQuote_expiredOrder_returnsZero() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // Past the order deadline the resolution reverts: an order-state failure no input change can fix.
+        vm.warp(order.info.deadline + 1);
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), hookData), 0, "expired order");
+    }
+
+    function test_getIndicativeQuote_invalidSignature_returnsZero() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // Corrupt the signature: resolution fails signature validation -> 0.
+        bytes memory sig = _sign(order);
+        sig[10] = sig[10] ^ 0xff;
+        bytes memory hookData = abi.encode(SignedOrder({order: abi.encode(order), sig: sig}));
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), hookData), 0, "invalid signature");
+    }
+
+    function test_getIndicativeQuote_filledOrder_returnsZero() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // Fill the order through the hook.
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(outAmt),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        // The nonce is consumed: resolution reverts -> 0.
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), hookData), 0, "filled order");
+    }
+
+    /// @dev The measured quote-path gas must stay under the declared URC-4 `maxGas` budget.
+    function test_getIndicativeQuote_gasWithinDeclaredMaxGas() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        uint256 gasBefore = gasleft();
+        uint256 quoted = hook.getIndicativeQuote(key, zeroForOne, -int256(outAmt), hookData);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("getIndicativeQuote gas", gasUsed);
+        assertEq(quoted, inAmt, "quote sanity");
+        assertLe(gasUsed, hook.maxGas(), "quote exceeded declared maxGas");
+    }
+
+    function test_isLive_returnsTrue() public view {
+        assertTrue(hook.isLive(), "hook is live");
+    }
+
+    function test_swapToPrice_returnsZeroZero() public view {
+        PoolKey memory key = _sortedKey(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        (uint256 amountIn, uint256 amountOut) = hook.swapToPrice(key, true, -int256(1 ether), 0, "");
+        assertEq(amountIn, 0, "amountIn");
+        assertEq(amountOut, 0, "amountOut");
+    }
+
+    function test_supportsInterface_alfHookAndErc165() public view {
+        assertTrue(hook.supportsInterface(type(IALFHook).interfaceId), "IALFHook");
+        assertTrue(hook.supportsInterface(0x01ffc9a7), "ERC-165");
+        assertFalse(hook.supportsInterface(0xffffffff), "0xffffffff must be false");
     }
 
     receive() external payable {}

@@ -170,7 +170,9 @@ contract BaseAggregatorHookUnitTest is Test {
         token1.mint(address(hook), amountOut);
 
         vm.expectEmit(true, true, false, true, address(hook));
-        emit IAggregatorHook.HookSwap(poolId, address(swapRouter), int256(amountIn), -int256(amountOut), 0);
+        emit IAggregatorHook.HookSwap(
+            poolId, address(swapRouter), int128(uint128(amountIn)), -int128(uint128(amountOut)), 0
+        );
 
         vm.prank(alice);
         swapRouter.swap(
@@ -188,13 +190,24 @@ contract BaseAggregatorHookUnitTest is Test {
         token0.mint(address(hook), amountIn);
 
         vm.expectEmit(true, true, false, true, address(hook));
-        emit IAggregatorHook.HookSwap(poolId, address(swapRouter), -int256(amountOut), int256(amountIn), 0);
+        emit IAggregatorHook.HookSwap(
+            poolId, address(swapRouter), -int128(uint128(amountOut)), int128(uint128(amountIn)), 0
+        );
         vm.prank(alice);
         swapRouter.swap(
             poolKey,
             SwapParams({zeroForOne: false, amountSpecified: int256(amountOut), sqrtPriceLimitX96: MAX_PRICE}),
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
+        );
+    }
+
+    /// @dev The HookSwap event must exactly match URC-2's canonical signature (int128 amounts).
+    function test_hookSwapEvent_matchesCanonicalUrc2Signature() public pure {
+        assertEq(
+            IAggregatorHook.HookSwap.selector,
+            keccak256("HookSwap(bytes32,address,int128,int128,uint24)"),
+            "HookSwap signature drifted from URC-2"
         );
     }
 
