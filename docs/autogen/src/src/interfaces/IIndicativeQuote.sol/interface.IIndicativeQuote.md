@@ -1,5 +1,5 @@
 # IIndicativeQuote
-[Git Source](https://github.com/uniswap/v4-hooks-internal/blob/851eb97475fb7ed14074e41059d3e945423bb6be/src/interfaces/IIndicativeQuote.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/882a41db61bb1ee83e19be7bd7e4f7cdc3d94ba1/src/interfaces/IIndicativeQuote.sol)
 
 **Inherits:**
 IERC165
