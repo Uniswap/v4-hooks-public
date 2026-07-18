@@ -22,10 +22,9 @@ import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
 
 /// @dev Token with no `decimals()` implementation at all: any call to it reverts, so
-///      `PoolVault._tokenDecimals` must fall back to the assumed 18.
-contract NoDecimalsToken {
-    // deliberately empty: no functions, no fallback
-}
+///      `PoolVault._tokenDecimals` must fall back to the assumed 18. Deliberately
+///      empty: no functions, no fallback.
+contract NoDecimalsToken {}
 
 /// @notice Branch-coverage suite for `DualPoolHook` guard reverts and degenerate JIT-cycle
 ///         states that the main suite's happy paths never reach: wrong-hook init, the

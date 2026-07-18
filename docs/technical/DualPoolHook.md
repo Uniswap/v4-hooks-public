@@ -41,13 +41,13 @@ Ownership uses OpenZeppelin `Ownable2Step` (transferable via two-step handoff), 
 
 The hook declares these v4 permissions:
 
-| Permission | Purpose |
-| --- | --- |
-| `beforeInitialize` | Blocks direct PoolManager initialization so callers must use `initializePool`. |
-| `beforeAddLiquidity` | Blocks external LP positions; only the hook can add positions during JIT deployment. |
-| `beforeRemoveLiquidity` | Blocks external LP removals; only the hook can remove its JIT positions. |
-| `beforeSwap` | Deploys JIT liquidity (no fee override returned). |
-| `afterSwap` | Removes JIT liquidity, settles deltas, and re-vaults assets. |
+| Permission              | Purpose                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `beforeInitialize`      | Blocks direct PoolManager initialization so callers must use `initializePool`.       |
+| `beforeAddLiquidity`    | Blocks external LP positions; only the hook can add positions during JIT deployment. |
+| `beforeRemoveLiquidity` | Blocks external LP removals; only the hook can remove its JIT positions.             |
+| `beforeSwap`            | Deploys JIT liquidity (no fee override returned).                                    |
+| `afterSwap`             | Removes JIT liquidity, settles deltas, and re-vaults assets.                         |
 
 All return-delta flags are false. DualPool does not use `BeforeSwapDelta` or `afterSwap` return deltas to synthesize execution. It lets the normal v4 swap math execute against temporarily deployed LP liquidity while v4 applies `key.fee` natively.
 
@@ -118,11 +118,11 @@ struct LiquidityBucket {
 
 Buckets may overlap, be asymmetric, or be non-contiguous. Weights must sum to 10,000 bps. A typical stable-pair shape might be:
 
-| Bucket | Tick Range | Weight |
-| --- | --- | --- |
-| Tight | `[-10, 10]` | 75% |
-| Medium | `[-30, 30]` | 15% |
-| Wide | `[-60, 60]` | 10% |
+| Bucket | Tick Range  | Weight |
+| ------ | ----------- | ------ |
+| Tight  | `[-10, 10]` | 75%    |
+| Medium | `[-30, 30]` | 15%    |
+| Wide   | `[-60, 60]` | 10%    |
 
 That is the conservative "most liquidity at the peg, some depth around it" shape. DualPool can express more interesting structures because buckets do not need to be symmetric, nested, or contiguous. A few useful examples:
 
@@ -130,12 +130,12 @@ That is the conservative "most liquidity at the peg, some depth around it" shape
 
 For highly correlated assets with reliable arbitrage and low expected drift, a maker can concentrate most deployable liquidity very close to the current price and keep only a small escape band for larger trades.
 
-| Bucket | Tick Range | Weight |
-| --- | --- | --- |
-| Micro | `[-1, 1]` | 45% |
-| Tight | `[-5, 5]` | 35% |
-| Buffer | `[-20, 20]` | 15% |
-| Tail | `[-100, 100]` | 5% |
+| Bucket | Tick Range    | Weight |
+| ------ | ------------- | ------ |
+| Micro  | `[-1, 1]`     | 45%    |
+| Tight  | `[-5, 5]`     | 35%    |
+| Buffer | `[-20, 20]`   | 15%    |
+| Tail   | `[-100, 100]` | 5%     |
 
 This is the most capital-efficient shape for small swaps near the peg, but it is also the most sensitive to price drift. Once the swap moves through the micro and tight bands, marginal liquidity falls quickly.
 
@@ -143,12 +143,12 @@ This is the most capital-efficient shape for small swaps near the peg, but it is
 
 For pairs that usually trade near the peg but occasionally see large one-directional flow, a maker can keep a tight center while reserving meaningful one-sided depth away from the current tick.
 
-| Bucket | Tick Range | Weight |
-| --- | --- | --- |
-| Center | `[-5, 5]` | 50% |
-| Inner | `[-25, 25]` | 20% |
-| Lower Tail | `[-250, -50]` | 15% |
-| Upper Tail | `[50, 250]` | 15% |
+| Bucket     | Tick Range    | Weight |
+| ---------- | ------------- | ------ |
+| Center     | `[-5, 5]`     | 50%    |
+| Inner      | `[-25, 25]`   | 20%    |
+| Lower Tail | `[-250, -50]` | 15%    |
+| Upper Tail | `[50, 250]`   | 15%    |
 
 The tail buckets are out of range at tick 0, so they are mostly one-sided when deployed. They do not improve tiny swaps much, but they give large swaps something to trade into after crossing the center. This can be more capital-efficient than a single wide range because the hook does not dilute all liquidity evenly across unused middle ticks.
 
@@ -156,12 +156,12 @@ The tail buckets are out of range at tick 0, so they are mostly one-sided when d
 
 If the maker is long one asset and wants the pool to naturally rebalance through flow, the distribution can overweight the side that sells that asset as price moves. For example, when current tick is near 0 and the pool is token0-heavy:
 
-| Bucket | Tick Range | Weight |
-| --- | --- | --- |
-| Tight Center | `[-10, 10]` | 35% |
-| Upper Sell Wall | `[10, 80]` | 40% |
-| Wide Support | `[-80, 80]` | 20% |
-| Lower Tail | `[-200, -80]` | 5% |
+| Bucket          | Tick Range    | Weight |
+| --------------- | ------------- | ------ |
+| Tight Center    | `[-10, 10]`   | 35%    |
+| Upper Sell Wall | `[10, 80]`    | 40%    |
+| Wide Support    | `[-80, 80]`   | 20%    |
+| Lower Tail      | `[-200, -80]` | 5%     |
 
 The upper bucket is token0-heavy while price is below it. If buy pressure pushes price upward, that bucket becomes active and converts token0 into token1. The mirror image can be used when the maker is token1-heavy.
 
@@ -169,12 +169,12 @@ The upper bucket is token0-heavy while price is below it. If buy pressure pushes
 
 For stablecoin or wrapper markets where one side of the peg is more important to defend, buckets can be laddered on the vulnerable side while keeping a smaller symmetric center.
 
-| Bucket | Tick Range | Weight |
-| --- | --- | --- |
-| Center | `[-8, 8]` | 30% |
-| First Defense | `[-40, -8]` | 25% |
-| Second Defense | `[-120, -40]` | 25% |
-| Recovery Band | `[8, 80]` | 20% |
+| Bucket         | Tick Range    | Weight |
+| -------------- | ------------- | ------ |
+| Center         | `[-8, 8]`     | 30%    |
+| First Defense  | `[-40, -8]`   | 25%    |
+| Second Defense | `[-120, -40]` | 25%    |
+| Recovery Band  | `[8, 80]`     | 20%    |
 
 This shape is intentionally asymmetric. It offers progressively deeper support as price moves below the peg, while still leaving some liquidity available if the market mean-reverts upward. It is useful when the maker has an explicit inventory mandate rather than purely maximizing fee density at the current price.
 
@@ -182,11 +182,11 @@ This shape is intentionally asymmetric. It offers progressively deeper support a
 
 The owner can replace the distribution with `setDistribution`, so a keeper can rotate between bucket shapes by volatility regime:
 
-| Regime | Example Shape | Rationale |
-| --- | --- | --- |
-| Calm | 80% inside `[-5, 5]`, 20% inside `[-30, 30]` | Maximize near-peg capital efficiency. |
-| Choppy | 50% inside `[-15, 15]`, 30% inside `[-60, 60]`, 20% tails | Keep center depth while reducing churn from frequent boundary crossing. |
-| Stressed | 25% center, 50% wide `[-250, 250]`, 25% directional tail | Prioritize fill reliability and inventory control over tight quoting. |
+| Regime   | Example Shape                                             | Rationale                                                               |
+| -------- | --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Calm     | 80% inside `[-5, 5]`, 20% inside `[-30, 30]`              | Maximize near-peg capital efficiency.                                   |
+| Choppy   | 50% inside `[-15, 15]`, 30% inside `[-60, 60]`, 20% tails | Keep center depth while reducing churn from frequent boundary crossing. |
+| Stressed | 25% center, 50% wide `[-250, 250]`, 25% directional tail  | Prioritize fill reliability and inventory control over tight quoting.   |
 
 Because `setDistribution` is blocked during an active JIT cycle, rotations happen cleanly between swaps. Operators should still treat distribution updates as pricing-sensitive configuration changes.
 
@@ -401,18 +401,18 @@ This is a compact quote, not a full virtual tick-walking simulator over all buck
 
 The owner is set at deployment and transferable via `Ownable2Step`. Loss or compromise of the owner key is recoverable only if a pending transfer was already initiated.
 
-| Function | Access |
-| --- | --- |
-| `initializePool` | Owner |
-| `bootstrap` | Owner |
-| `addLiquidity` | Owner, or anyone if external deposits are enabled |
-| `removeLiquidity` | Share holder |
-| `setDistribution` | Owner |
-| `refreshVaultApproval` | Owner |
-| `setExternalDeposits` | Owner |
-| `setPoolLive` | Owner |
-| `setActiveTick` | Always reverts |
-| `unlockCallback` | PoolManager only |
+| Function               | Access                                            |
+| ---------------------- | ------------------------------------------------- |
+| `initializePool`       | Owner                                             |
+| `bootstrap`            | Owner                                             |
+| `addLiquidity`         | Owner, or anyone if external deposits are enabled |
+| `removeLiquidity`      | Share holder                                      |
+| `setDistribution`      | Owner                                             |
+| `refreshVaultApproval` | Owner                                             |
+| `setExternalDeposits`  | Owner                                             |
+| `setPoolLive`          | Owner                                             |
+| `setActiveTick`        | Always reverts                                    |
+| `unlockCallback`       | PoolManager only                                  |
 
 Direct v4 LP adds/removes are blocked by hook callbacks. Only the hook itself can modify liquidity, and only as part of the JIT lifecycle.
 
@@ -435,7 +435,7 @@ The global counter closes cross-pool reentry. For example, if a malicious vault 
 - **Vault trust:** ERC4626 vaults receive standing max allowance. Use immutable or well-governed vaults whose risk profile is acceptable. Curated/gated vaults (Morpho VaultV2-style) require trusting the curator not to deny the hook withdrawal access.
 - **Feeless vaults:** Entry/exit fee vaults are rejected at init. Non-conformant vaults break JIT economics and LP share fairness.
 - **Vault liquidity:** Execution and quotes use `previewRedeem`-sized balances; LP shares still represent total economic assets via `convertToAssets`. A constrained vault can reduce immediately swappable liquidity without reducing LP economic claims.
-- **Token compatibility:** Fee-on-transfer and rebasing tokens are unsupported. Inbound LP transfers use `SafeERC20` and measure the actual receipt; a shortfall (`received < want`) reverts `TransferReceiptShortfall` on both `bootstrap` and `addLiquidity`, so a fee-charging token cannot seed a pool. This is a deposit-time check only — it cannot catch a token that begins charging a fee or rebases down *after* deposit, so operators must still restrict pools to non-FoT, non-rebasing tokens. Native ETH is unsupported.
+- **Token compatibility:** Fee-on-transfer and rebasing tokens are unsupported. Inbound LP transfers use `SafeERC20` and measure the actual receipt; a shortfall (`received < want`) reverts `TransferReceiptShortfall` on both `bootstrap` and `addLiquidity`, so a fee-charging token cannot seed a pool. This is a deposit-time check only — it cannot catch a token that begins charging a fee or rebases down _after_ deposit, so operators must still restrict pools to non-FoT, non-rebasing tokens. Native ETH is unsupported.
 - **Owner trust:** The owner controls liveness, distributions, external deposit permissions, and vault approval refreshes. The LP fee is not owner-updatable after pool creation.
 - **Pool isolation:** Per-pool accounting prevents ordinary cross-pool balance leakage, but a malicious vault for a shared currency can still abuse its standing allowance across that currency's hook-wide token balance.
 

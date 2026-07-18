@@ -35,12 +35,12 @@ The result is a design where:
 
 There are four layers in this system:
 
-| Layer | Component | Responsibility |
-| --- | --- | --- |
-| 0 | Shared Base Contracts | Standard interface (`IALFHook`), abstract base (`BaseALFHook`), spread-quoter scaffolding (`SpreadQuoterBase`), share-math base (`PoolVault`), tick-walking simulator (`SwapSimulator`), auction protocol-fee base (`ALFProtocolFees`). No standalone deployments — these are libraries and abstract contracts inherited by quoter and auction hooks. |
-| 1a | Quoter Hooks | Individual v4 hooks per market maker. Full hook lifecycle, custom pricing, independent deployment. Each hook exposes its own metadata via `IALFHook`. |
-| 1b | Auction Hook | Stateless onchain auction. Receives a targeted quoter set via `hookData`, queries indicative quotes, executes a greedy split fill across candidates (or a router-supplied pre-planned split), and applies the v4 protocol fee on the unspecified side. |
-| 2 | Router | Primary dispatch. EV-based quoter selection, reputation model, quote fidelity tracking, fallback management. |
+| Layer | Component             | Responsibility                                                                                                                                                                                                                                                                                                                                        |
+| ----- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Shared Base Contracts | Standard interface (`IALFHook`), abstract base (`BaseALFHook`), spread-quoter scaffolding (`SpreadQuoterBase`), share-math base (`PoolVault`), tick-walking simulator (`SwapSimulator`), auction protocol-fee base (`ALFProtocolFees`). No standalone deployments — these are libraries and abstract contracts inherited by quoter and auction hooks. |
+| 1a    | Quoter Hooks          | Individual v4 hooks per market maker. Full hook lifecycle, custom pricing, independent deployment. Each hook exposes its own metadata via `IALFHook`.                                                                                                                                                                                                 |
+| 1b    | Auction Hook          | Stateless onchain auction. Receives a targeted quoter set via `hookData`, queries indicative quotes, executes a greedy split fill across candidates (or a router-supplied pre-planned split), and applies the v4 protocol fee on the unspecified side.                                                                                                |
+| 2     | Router                | Primary dispatch. EV-based quoter selection, reputation model, quote fidelity tracking, fallback management.                                                                                                                                                                                                                                          |
 
 Information flows downward: the router queries quoter hooks directly (via `IALFHook`) and routes to the best pool. Quoter hooks are entirely self-contained — they consult no shared registry contract. The auction hook is a transparent intermediary; quoters see the same `beforeSwap` invocation regardless of whether the swap was initiated by the router directly or through the auction hook.
 
@@ -90,9 +90,9 @@ Each market maker deploys its own v4 hook controlling a pool for the pair it quo
 
 **Update Modes**
 
-| Mode | Pricing Inputs | State Updates | Best For |
-| --- | --- | --- | --- |
-| Storage-based | Hook reads coefficients from its own storage | Maker writes via standalone transactions (keeper, oracle, manual, block builder) | Major pairs on cheap-gas chains where per-block updates are affordable, or curves robust to staleness |
+| Mode           | Pricing Inputs                                               | State Updates                                                                    | Best For                                                                                                      |
+| -------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Storage-based  | Hook reads coefficients from its own storage                 | Maker writes via standalone transactions (keeper, oracle, manual, block builder) | Major pairs on cheap-gas chains where per-block updates are affordable, or curves robust to staleness         |
 | hookData-based | Caller submits signed parameters via `hookData` at swap time | Written to storage on first swap per block; subsequent swaps reuse cached params | Mainnet (expensive updates), lower-volume pairs, long-tail tokens, makers needing sub-block pricing freshness |
 
 `SpreadQuoterBase` supports both modes simultaneously: it reads owner-committed pricing from storage and overlays signed curve updates from `hookData` on top. The router tracks quoter behavior patterns (update frequency, parameter staleness) as part of its reputation model.
@@ -146,11 +146,11 @@ The auction hook's virtual pool has zero liquidity — all execution happens via
 - Tolerance enforcement (`strictTolerancePips`) lets the router cap how far the executed price can drift from the baseline inside the auction transaction, providing an onchain backstop on top of the router's offchain reputation model. The baseline is the best pre-execution indicative, but each candidate's contribution is first bounded by its declared `getEffectiveLiquidity` (see `_baselineContribution`): a tier-1 indicative can be a constant-liquidity upper bound that overstates output for large swaps, and without the bound it would set an unreachable threshold and trip the check on a fair fill. The bound only reaches quoters that expose reserves (IALFHook); tier-2 simulator quotes are already exact and tier-3/4 opaque quoters cannot be bounded, which is why strict tolerance is a backstop over trusted targets and not a substitute for a router-side minimum-output / maximum-input check.
 - Some metrics to weigh when deciding to use the auction hook vs direct routing:
 
-    | **Property** | **Direct Routing** | **Auction Hook** |
-    | --- | --- | --- |
-    | Trust model | trusts the router to fairly route all trades | provides an on-chain fairness guarantee |
-    | Gas cost | one pool query per quoter | multi-pool overhead + execution |
-    | Flexibility | full flexibility, router controls flow entirely | constrained to auction rules, additional overhead |
+  | **Property** | **Direct Routing**                              | **Auction Hook**                                  |
+  | ------------ | ----------------------------------------------- | ------------------------------------------------- |
+  | Trust model  | trusts the router to fairly route all trades    | provides an on-chain fairness guarantee           |
+  | Gas cost     | one pool query per quoter                       | multi-pool overhead + execution                   |
+  | Flexibility  | full flexibility, router controls flow entirely | constrained to auction rules, additional overhead |
 
 ## **Layer 2: Router (primary dispatch)**
 
@@ -174,13 +174,13 @@ The gap between indicative quotes and binding execution is the primary vulnerabi
 
 **Tracked metrics per quoter:**
 
-| Metric | Definition | Impact |
-| --- | --- | --- |
-| Quote fidelity | Distribution of (actual − indicated) / indicated over a rolling window | Router discounts future indicatives by the observed fidelity gap |
-| Win rate | How often the quoter's indicative is best, by pair/direction/size | Quoters that only win narrow contexts aren't called outside them |
-| Fill rate | How often swaps routed to this quoter execute without reverting | Low fill rate → wasted gas → deprioritized |
-| Revert tracking | Frequency and context of `beforeSwap` reverts after winning | Severe negative signal; persistent reverters are excluded |
-| Gas accuracy | Observed gas vs. declared maxGas | Underdeclaring gas penalized in EV calculation |
+| Metric          | Definition                                                             | Impact                                                           |
+| --------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Quote fidelity  | Distribution of (actual − indicated) / indicated over a rolling window | Router discounts future indicatives by the observed fidelity gap |
+| Win rate        | How often the quoter's indicative is best, by pair/direction/size      | Quoters that only win narrow contexts aren't called outside them |
+| Fill rate       | How often swaps routed to this quoter execute without reverting        | Low fill rate → wasted gas → deprioritized                       |
+| Revert tracking | Frequency and context of `beforeSwap` reverts after winning            | Severe negative signal; persistent reverters are excluded        |
+| Gas accuracy    | Observed gas vs. declared maxGas                                       | Underdeclaring gas penalized in EV calculation                   |
 
 **Fidelity-adjusted routing:**
 
@@ -198,12 +198,12 @@ The router routes to the quoter with the highest adjusted output, subject to an 
 
 - Discovery: The router maintains its own internal registry of known ALF hooks, populated through onchain event monitoring (pool creation events), manual registration endpoints, and partner integrations. For each known hook, the router queries `IALFHook` methods directly (`isLive()`, `maxGas()`, `getIndicativeQuote()`).
 - Router maintains a model per quoter, keyed by `(quoterId, pair, direction, sizeRange)` which provides visibility on a per-quoter basis into things like
-    1. EV vs vanilla routes
-    2. Variance of observed vs expected improvement
-    3. Variance of observed vs expected gas costs
-    4. Historical fill rates (how often the quoter fades vs fills)
-    5. Staleness of parameters (proxy for probability of successful execution)
-    6. On Base gas is cheap enough that the additional overhead of many hops is less important and the router can chain more quoters together, whereas on mainnet the router would probably optimize more for shorter routes.
+  1. EV vs vanilla routes
+  2. Variance of observed vs expected improvement
+  3. Variance of observed vs expected gas costs
+  4. Historical fill rates (how often the quoter fades vs fills)
+  5. Staleness of parameters (proxy for probability of successful execution)
+  6. On Base gas is cheap enough that the additional overhead of many hops is less important and the router can chain more quoters together, whereas on mainnet the router would probably optimize more for shorter routes.
 - Vanilla pools are the baseline against which the ALF route(s) are compared. Flow goes wherever the best EV exists, same as today.
 - Off-chain routing gives lots of advantages over the pure on-chain auction hook for obvious reasons. We could have the router model over time how quoters perform and make more intelligent decisions based on observed outcomes. For example, quoters who consistently quote above baseline get queried less; quoters with high variance are queried more; size-dependent routing trends; volatility regimes; basically anything we find to be beneficial to routing outcomes.
 

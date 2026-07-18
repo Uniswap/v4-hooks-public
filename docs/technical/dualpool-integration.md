@@ -6,7 +6,7 @@ source liquidity from `DualPoolHook` pools.
 **Source of truth:** [src/alf/DualPoolHook.sol](../../src/alf/DualPoolHook.sol),
 [src/alf/base/DualPoolBase.sol](../../src/alf/base/DualPoolBase.sol), and
 [src/alf/interfaces/IALFHook.sol](../../src/alf/interfaces/IALFHook.sol). This guide
-is the integration-facing companion to the internal *DualPool Deep Dive* and the
+is the integration-facing companion to the internal _DualPool Deep Dive_ and the
 [ALF design doc](./alf-design.md). Where this guide and older prose disagree, the
 contract wins.
 
@@ -25,7 +25,7 @@ contract wins.
    Universal Router v4 actions). No special calldata. `hookData` is ignored.
 4. **Handle the two failure modes you care about:** a paused pool reverts
    `PoolNotLive(poolId)` on execution and returns `0` from the quote views; and
-   *effective* liquidity can be below *total* reserves when the operator's vault is
+   _effective_ liquidity can be below _total_ reserves when the operator's vault is
    throttled. Size fills against effective liquidity.
 
 If your stack already trades vanilla v4 hooked pools, the execution path is unchanged.
@@ -39,15 +39,15 @@ A DualPool pool is a standard Uniswap v4 pool whose `hooks` address is a deploye
 `DualPoolHook`. Operationally it differs from a normal pool in three ways that matter
 to a router:
 
-| Property | Normal v4 pool | DualPool pool |
-|---|---|---|
-| Persistent liquidity | Sits in the pool 24/7 | **~0 between swaps.** Liquidity is deployed just-in-time inside `beforeSwap` and removed in `afterSwap` ([DualPoolHook.sol:658-687](../../src/alf/DualPoolHook.sol#L658-L687)) |
-| Where inventory lives | In the PoolManager | In ERC-4626 vaults (rehypothecated) + ERC-6909 claims + tracked ERC-20, owned by the hook |
-| Fee | `PoolKey.fee`, possibly dynamic | `PoolKey.fee`, **static and immutable**, never dynamic |
+| Property              | Normal v4 pool                  | DualPool pool                                                                                                                                                                  |
+| --------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Persistent liquidity  | Sits in the pool 24/7           | **~0 between swaps.** Liquidity is deployed just-in-time inside `beforeSwap` and removed in `afterSwap` ([DualPoolHook.sol:658-687](../../src/alf/DualPoolHook.sol#L658-L687)) |
+| Where inventory lives | In the PoolManager              | In ERC-4626 vaults (rehypothecated) + ERC-6909 claims + tracked ERC-20, owned by the hook                                                                                      |
+| Fee                   | `PoolKey.fee`, possibly dynamic | `PoolKey.fee`, **static and immutable**, never dynamic                                                                                                                         |
 
 Because liquidity is JIT, **on-chain pool depth is not a routing signal.** Capacity is
 discovered through the hook's `IALFHook` views, which report what the hook can actually
-withdraw from its vaults and deploy *right now*.
+withdraw from its vaults and deploy _right now_.
 
 Each swap, atomically:
 `beforeSwap` redeems claims → withdraws only the shortfall from vaults → deploys
@@ -88,14 +88,14 @@ non-zero values.
 All five methods are `view` and intended to be called via `staticcall`. Full interface:
 [IALFHook.sol](../../src/alf/interfaces/IALFHook.sol).
 
-| Method | Returns | Use it for |
-|---|---|---|
-| `getIndicativeQuote(key, zeroForOne, amountSpecified, hookData)` | `outputAmount` | Single-number indicative for ranking / EV models |
-| `swapToPrice(key, zeroForOne, amountSpecified, sqrtPriceLimitX96, hookData)` | `(amountIn, amountOut)` | Price-bounded fill simulation for **split planning** |
-| `getReserves(key)` | `(token0, token1)` | True TVL under management (economic) |
-| `getEffectiveLiquidity(key)` | `(token0, token1)` | **Immediately swappable** liquidity (size fills against this) |
-| `isLive()` | `bool` | Hook-level liveness — see the caveat below |
-| `maxGas()` | `uint32` | Cap your `staticcall` gas to this value |
+| Method                                                                       | Returns                 | Use it for                                                    |
+| ---------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------- |
+| `getIndicativeQuote(key, zeroForOne, amountSpecified, hookData)`             | `outputAmount`          | Single-number indicative for ranking / EV models              |
+| `swapToPrice(key, zeroForOne, amountSpecified, sqrtPriceLimitX96, hookData)` | `(amountIn, amountOut)` | Price-bounded fill simulation for **split planning**          |
+| `getReserves(key)`                                                           | `(token0, token1)`      | True TVL under management (economic)                          |
+| `getEffectiveLiquidity(key)`                                                 | `(token0, token1)`      | **Immediately swappable** liquidity (size fills against this) |
+| `isLive()`                                                                   | `bool`                  | Hook-level liveness — see the caveat below                    |
+| `maxGas()`                                                                   | `uint32`                | Cap your `staticcall` gas to this value                       |
 
 ### 4.1 Sign & return conventions
 
@@ -155,7 +155,7 @@ already reflects LP fee + protocol fee. You do not need to re-apply either.
 
 ---
 
-## 6. Reserves vs. effective liquidity — size against *effective*
+## 6. Reserves vs. effective liquidity — size against _effective_
 
 This is the one accounting subtlety that affects fill sizing.
 
@@ -247,13 +247,13 @@ See [MultiplexerTypes.sol](../../src/alf/types/MultiplexerTypes.sol) for the enc
 
 ## 9. Failure modes & how to handle them
 
-| Situation | What you observe | Handling |
-|---|---|---|
-| **Pool paused** (`setPoolLive(false)`) or not yet bootstrapped | `getIndicativeQuote`/`swapToPrice` return `0`; direct `swap` reverts `PoolNotLive(poolId)` | Skip on a `0` quote. For direct routing, read `DualPoolHook.livePools(poolId)` to pre-filter. The multiplexer handles it via try/catch. |
-| **Vault throttled** (paused/capped/high-utilization) | `getEffectiveLiquidity < getReserves`; large fills under-fill or the cycle reverts on vault withdraw | Size against `getEffectiveLiquidity` / `swapToPrice`, not `getReserves`. |
-| **Quote vs. execution divergence** on large or boundary-crossing swaps | Realized output differs from `getIndicativeQuote` | See §10 — use `swapToPrice` for tighter planning; track divergence as a reputation signal. |
-| **Native ETH** | Pool would never have been created with native currency | Use WETH-style pools only. |
-| **`isLive()` always true** | Hook-level liveness is not per-pool | `isLive()` reports the *hook* is reachable, not that a given pool is live. Use the per-pool `livePools(poolId)` read or the `0`-quote signal for pool-level liveness. ([DualPoolBase.sol:88-94](../../src/alf/base/DualPoolBase.sol#L88-L94)) |
+| Situation                                                              | What you observe                                                                                     | Handling                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pool paused** (`setPoolLive(false)`) or not yet bootstrapped         | `getIndicativeQuote`/`swapToPrice` return `0`; direct `swap` reverts `PoolNotLive(poolId)`           | Skip on a `0` quote. For direct routing, read `DualPoolHook.livePools(poolId)` to pre-filter. The multiplexer handles it via try/catch.                                                                                                       |
+| **Vault throttled** (paused/capped/high-utilization)                   | `getEffectiveLiquidity < getReserves`; large fills under-fill or the cycle reverts on vault withdraw | Size against `getEffectiveLiquidity` / `swapToPrice`, not `getReserves`.                                                                                                                                                                      |
+| **Quote vs. execution divergence** on large or boundary-crossing swaps | Realized output differs from `getIndicativeQuote`                                                    | See §10 — use `swapToPrice` for tighter planning; track divergence as a reputation signal.                                                                                                                                                    |
+| **Native ETH**                                                         | Pool would never have been created with native currency                                              | Use WETH-style pools only.                                                                                                                                                                                                                    |
+| **`isLive()` always true**                                             | Hook-level liveness is not per-pool                                                                  | `isLive()` reports the _hook_ is reachable, not that a given pool is live. Use the per-pool `livePools(poolId)` read or the `0`-quote signal for pool-level liveness. ([DualPoolBase.sol:88-94](../../src/alf/base/DualPoolBase.sol#L88-L94)) |
 
 > **Liveness gating note (differs from older prose):** in the current implementation a
 > pool becomes live only when the **owner calls `bootstrap`**
