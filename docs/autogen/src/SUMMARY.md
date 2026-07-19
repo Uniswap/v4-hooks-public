@@ -71,6 +71,7 @@
     - [BaseHook](src/base/BaseHook.sol/abstract.BaseHook.md)
     - [BaseTokenWrapperHook](src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
   - [❱ interfaces](src/interfaces/README.md)
+    - [IIndicativeQuote](src/interfaces/IIndicativeQuote.sol/interface.IIndicativeQuote.md)
     - [IWstETH](src/interfaces/IWstETH.sol/interface.IWstETH.md)
     - [IStETH](src/interfaces/IWstETH.sol/interface.IStETH.md)
   - [❱ permissioned-pools](src/permissioned-pools/README.md)

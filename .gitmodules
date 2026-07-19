@@ -38,3 +38,9 @@
 [submodule "lib/pancake-v3-contracts"]
 	path = lib/pancake-v3-contracts
 	url = https://github.com/pancakeswap/pancake-v3-contracts.git
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
+[submodule "lib/blocknumberish"]
+	path = lib/blocknumberish
+	url = https://github.com/Uniswap/blocknumberish
