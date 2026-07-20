@@ -25,6 +25,8 @@ contract ERC4626RoutingHook is ERC4626WrapperHook {
         returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount)
     {
         // Apply the vault's deposit rounding without moving tokens.
+        // Fee-on-transfer underlying assets are not supported, so the full amount is assumed
+        // to reach the vault.
         actualUnderlyingAmount = underlyingAmount;
         wrappedAmount = vault.previewDeposit(underlyingAmount);
     }

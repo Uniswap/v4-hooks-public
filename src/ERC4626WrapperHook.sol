@@ -12,6 +12,9 @@ import {BaseTokenWrapperHook} from "./base/BaseTokenWrapperHook.sol";
 /// @notice Hook for wrapping/unwrapping generic ERC-4626 vault assets into their shares in Uniswap V4 pools
 /// @dev The vault share token is the wrapper currency, and vault.asset() is the underlying currency.
 ///      The vault determines the exchange rate between them.
+/// @dev Fee-on-transfer underlying assets are NOT supported. A transfer fee on any leg
+///      (swapper -> PoolManager -> hook -> vault) breaks the accounting and swaps may revert
+///      or return incorrect amounts.
 contract ERC4626WrapperHook is BaseTokenWrapperHook {
     using SafeTransferLib for ERC20;
 
@@ -39,11 +42,15 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         override
         returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount)
     {
-        // Rebasing and fee-on-transfer assets may deliver less than the amount taken.
+        // Rebasing assets may deliver less than the amount taken.
         _take(underlyingCurrency, address(this), underlyingAmount);
         actualUnderlyingAmount = ERC20(Currency.unwrap(underlyingCurrency)).balanceOf(address(this));
-        wrappedAmount = vault.deposit(actualUnderlyingAmount, address(this));
-        _settle(wrapperCurrency, address(this), wrappedAmount);
+
+        // Mint shares directly to the pool manager to avoid an extra transfer,
+        // and let settle measure the shares that were actually minted.
+        poolManager.sync(wrapperCurrency);
+        vault.deposit(actualUnderlyingAmount, address(poolManager));
+        wrappedAmount = poolManager.settle();
     }
 
     /// @inheritdoc BaseTokenWrapperHook
@@ -54,15 +61,14 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     {
         _take(wrapperCurrency, address(this), wrappedAmount);
         actualWrappedAmount = wrappedAmount; // shares do not rebase
-        uint256 redeemed = vault.redeem(wrappedAmount, address(this), address(this));
+        vault.redeem(wrappedAmount, address(this), address(this));
 
-        // Measure the manager's balance delta because rebasing assets can round transfers down.
+        // Rebasing assets can round transfers down, so settle the balance that actually
+        // arrived and let settle measure the amount the pool manager received.
         ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
-        uint256 poolManagerBalanceBefore = underlying.balanceOf(address(poolManager));
-        _settle(underlyingCurrency, address(this), redeemed);
-        uint256 poolManagerBalanceAfter = underlying.balanceOf(address(poolManager));
-
-        underlyingAmount = poolManagerBalanceAfter - poolManagerBalanceBefore;
+        poolManager.sync(underlyingCurrency);
+        underlying.safeTransfer(address(poolManager), underlying.balanceOf(address(this)));
+        underlyingAmount = poolManager.settle();
     }
 
     /// @inheritdoc BaseTokenWrapperHook
