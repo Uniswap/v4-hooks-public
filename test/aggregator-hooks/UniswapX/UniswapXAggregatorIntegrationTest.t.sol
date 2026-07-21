@@ -344,8 +344,8 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outEnd, "decay end");
     }
 
-    /// @dev Exact-in quote must reject whenever the V4 swap input does not exactly equal the order's output —
-    ///      the all-or-nothing fill only executes at exactly the resolved amounts.
+    /// @dev Exact-in quote must reject only when the V4 swap input cannot cover the order's required output;
+    ///      over-providing input is allowed (the surplus goes to the token jar).
     function test_quoteWithHookData_exactIn_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
@@ -360,20 +360,21 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         bytes memory hookData = _hookData(order);
         bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
 
-        // swap input 50 < order output 99 -> reject
+        // swap input 50 < order output 99 -> reject (cannot cover the order)
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, -int256(50 ether), key.toId(), hookData);
 
-        // swap input 150 > order output 99 -> reject too (the corresponding swap would revert)
-        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
-        hook.quoteWithHookData(zeroForOne, -int256(150 ether), key.toId(), hookData);
+        // swap input 150 > order output 99 -> accepted; the swapper still receives the order's input
+        assertEq(
+            hook.quoteWithHookData(zeroForOne, -int256(150 ether), key.toId(), hookData), inAmt, "surplus input ok"
+        );
 
         // sanity: an input equal to the order output is accepted
         assertEq(hook.quoteWithHookData(zeroForOne, -int256(outAmt), key.toId(), hookData), inAmt, "exact input ok");
     }
 
-    /// @dev Exact-out quote must reject whenever the requested output does not exactly equal what the order
-    ///      supplies — the all-or-nothing fill only executes at exactly the resolved amounts.
+    /// @dev Exact-out quote must reject only when the order supplies less than the requested output;
+    ///      under-requesting is allowed (the order's surplus input goes to the token jar).
     function test_quoteWithHookData_exactOut_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
@@ -392,9 +393,9 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, int256(150 ether), key.toId(), hookData);
 
-        // request 50 of the order input (tokenA), below the order's 100 -> reject too (all-or-nothing)
-        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
-        hook.quoteWithHookData(zeroForOne, int256(50 ether), key.toId(), hookData);
+        // request 50 of the order input (tokenA), below the order's 100 -> accepted; the swapper still
+        // pays the order's full output (the order fills whole)
+        assertEq(hook.quoteWithHookData(zeroForOne, int256(50 ether), key.toId(), hookData), outAmt, "under-request ok");
     }
 
     /// @dev Amounts above int128.max would silently sign-flip when narrowed to form the V4 delta; the quote

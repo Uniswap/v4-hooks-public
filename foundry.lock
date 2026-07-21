@@ -23,6 +23,9 @@
       "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
     }
   },
+  "lib/pancake-v3-contracts": {
+    "rev": "5cc479f0c5a98966c74d94700057b8c3ca629afd"
+  },
   "lib/protocol-fees": {
     "branch": {
       "name": "v4-adapter",
@@ -34,6 +37,9 @@
   },
   "lib/solady": {
     "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
+  "lib/uniswapx": {
+    "rev": "3f5019cf206bc2b37a47c7653f039914f93ad60d"
   },
   "lib/v2-core": {
     "tag": {
