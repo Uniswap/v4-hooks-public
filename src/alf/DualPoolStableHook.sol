@@ -31,14 +31,17 @@ import {
     activeLiquidity
 } from "./types/Distribution.sol";
 import {ActiveLiquidity, activeLiquidityFor} from "./types/ActiveLiquidity.sol";
+import {DecayingFee, FeeConfig, FeeState, toPips} from "./types/DecayingFee.sol";
 import {DepositGate} from "./types/DepositGate.sol";
 import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol";
 
-/// @title DualPoolHook
+/// @title DualPoolStableHook
 /// @author Uniswap Labs
-/// @notice JIT quoter with ERC4626 vault rehypothecation and multi-range liquidity
-///         distribution. Pricing is fully static: pool fees are set at deploy time via
-///         `PoolKey.fee` and never change.
+/// @notice JIT quoter with ERC4626 vault rehypothecation, multi-range liquidity distribution,
+///         and a peg-anchored dynamic fee. A ground-up sibling of `DualPoolHook` (which is
+///         static-fee by design and frozen as an audited artifact): the JIT/vault/share machinery
+///         is identical, and the pool's LP fee is the composed `DecayingFee` capability instead
+///         of `PoolKey.fee`.
 ///
 ///         Assets are deployed across multiple tick ranges ("buckets") during each JIT cycle,
 ///         with owner-configured weights that control capital concentration. Token allocation
@@ -51,13 +54,14 @@ import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol"
 ///         ## JIT Lifecycle
 ///
 ///           beforeSwap:
-///             1. Set the JIT lock (blocks reentrant addLiquidity/removeLiquidity/setDistribution)
-///             2. Compute per-bucket liquidity from current assets and weights
-///             3. Compute exact token amounts needed via SqrtPriceMath
-///             4. Redeem claims, withdraw only the shortfall from vaults
-///             5. Deploy each bucket as a concentrated LP position
+///             1. Compute and checkpoint the dynamic fee (first swap of the block)
+///             2. Set the JIT lock (blocks reentrant addLiquidity/removeLiquidity/setDistribution)
+///             3. Compute per-bucket liquidity from current assets and weights
+///             4. Compute exact token amounts needed via SqrtPriceMath
+///             5. Redeem claims, withdraw only the shortfall from vaults
+///             6. Deploy each bucket as a concentrated LP position
 ///
-///           [pool executes swap against the deployed LP with fee override]
+///           [pool executes swap against the deployed LP with the returned fee override]
 ///
 ///           afterSwap:
 ///             1. Remove all bucket positions
@@ -68,10 +72,15 @@ import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol"
 ///
 ///         ## Pricing
 ///
-///         The pool's LP fee is read from `PoolKey.fee` and charged natively by v4 on every
-///         swap. The fee is fixed at pool-creation time and cannot be changed afterwards. The
-///         owner has only a per-pool liveness flag (`setPoolLive`) for emergency pause; the
-///         hook intentionally ignores hookData on swaps.
+///         Pools MUST be created with `LPFeeLibrary.DYNAMIC_FEE_FLAG`; the hook returns a
+///         per-swap fee override from the `DecayingFee` engine (see {DecayingFee} for the full
+///         model: an optimal range around an owner-configured reference price, consistent
+///         pre-impact prices inside it, per-block exponential decay outside it, and zero fee on
+///         flow moving the price away from the reference). The fee is checkpointed once per
+///         block, so same-block swaps (including a multiplexer's split fills) are
+///         price-consistent. The owner updates parameters via `updateFeeConfig` and has a
+///         per-pool liveness flag (`setPoolLive`) for emergency pause; the hook intentionally
+///         ignores hookData on swaps.
 ///
 ///         ## Share Accounting
 ///
@@ -89,9 +98,10 @@ import {JITLock, jitLockFor, requireJITNotInProgress} from "./types/JITLock.sol"
 ///         are not eligible for that guard (no fresh entry point), so they manage the `JITLock`
 ///         transient slots and the LP entries reject calls (via `whenJITNotInProgress`) while a
 ///         cycle is in flight. This blocks an owner-configured ERC4626 vault from re-entering LP
-///         entry points mid-JIT.
+///         entry points mid-JIT. The fee checkpoint completes before the JIT lock is taken and
+///         before any external call, so it adds no reentrancy surface.
 /// @custom:security-contact security@uniswap.org
-contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnlockCallback {
+contract DualPoolStableHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -110,6 +120,8 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     /// @notice Configuration for initializing a new pool. Passed to `initializePool`.
     /// @param sqrtPriceX96         Initial sqrt price (Q64.96) for the v4 pool.
     /// @param distribution         Liquidity distribution buckets (weights must sum to 10_000).
+    /// @param feeConfig            Dynamic fee parameters for the `DecayingFee` engine
+    ///                             (validated by the capability; updatable via `updateFeeConfig`).
     /// @param allowExternalDeposits Whether non-owner addresses may call `addLiquidity`.
     /// @param vault0               ERC4626 vault for currency0 (address(0) to hold as ERC-20).
     /// @param vault1               ERC4626 vault for currency1 (address(0) to hold as ERC-20).
@@ -119,6 +131,7 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     struct PoolConfig {
         uint160 sqrtPriceX96;
         LiquidityBucket[] distribution;
+        FeeConfig feeConfig;
         bool allowExternalDeposits;
         IERC4626 vault0;
         IERC4626 vault1;
@@ -139,6 +152,13 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     ///      `Distribution`. Set at initialization via `initializePool`, updatable via
     ///      `setDistribution`, and read by the JIT cycle through `_distribution.get(poolId)`.
     Distribution internal _distribution;
+
+    /// @dev Per-pool dynamic fee engine, as a type-driven `DecayingFee`. Configured at
+    ///      initialization via `initializePool`, updatable via `updateFeeConfig`, checkpointed by
+    ///      `_beforeSwap` (`commitFee`), and read without writes by the quote paths
+    ///      (`previewFee`). Re-exposed through the `feeConfig` / `feeState` / `currentFee`
+    ///      getters.
+    DecayingFee internal _decayingFee;
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              EVENTS
@@ -204,12 +224,13 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     ///      behalf of our own `poolManager.unlock` call) may invoke it.
     error UnauthorizedCallback();
 
-    /// @dev `key.fee` carries the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). DualPool is
-    ///      designed around a static fee fixed at pool creation; dynamic-fee pools would
-    ///      require the hook to maintain its own fee state and route every swap through a
-    ///      fee-update callback, which the contract is explicitly not built for. Use a
-    ///      concrete `uint24` fee value below `MAX_LP_FEE` instead.
-    error DynamicFeeNotSupported();
+    /// @dev `key.fee` does not carry the `LPFeeLibrary.DYNAMIC_FEE_FLAG` (0x800000). The pool's
+    ///      fee is governed entirely by the `DecayingFee` engine via a per-swap override, which
+    ///      v4 only honors on dynamic-fee pools; a static-fee pool would silently charge
+    ///      `key.fee` and ignore the engine. The inverse of `DualPoolHook`'s
+    ///      `DynamicFeeNotSupported` gate.
+    /// @param fee The static fee that was supplied instead.
+    error MustUseDynamicFee(uint24 fee);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //                              IMMUTABLES
@@ -253,7 +274,7 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     /// @dev Reverts {JITInProgress} if any pool served by this hook has a JIT cycle in flight.
     ///      Thin delegate over {requireJITNotInProgress}: the lock state and logic live in the
     ///      `JITLock` type, while the modifier keeps the guard visible in each entry point's
-    ///      signature and hard to omit. Inherited by {DualPoolIncentivizedHook}.
+    ///      signature and hard to omit.
     modifier whenJITNotInProgress() {
         requireJITNotInProgress();
         _;
@@ -262,8 +283,9 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     /// @dev Reverts {DeadlineExpired} if the caller-supplied `deadline` has passed. Hoisted out of
     ///      the LP entry points so the precondition stays visible in each signature.
     /// @dev Mixed-clock by design: deadlines compare against `block.timestamp` because they are
-    ///      wall-clock UX bounds, whereas the deposit lock (`minDepositBlocks`) and rewards accrual
-    ///      run on the block-based `BlockNumberish` clock as anti-MEV timing.
+    ///      wall-clock UX bounds, whereas the deposit lock (`minDepositBlocks`), rewards accrual,
+    ///      and the fee engine's decay clock run on the block-based `BlockNumberish` clock as
+    ///      anti-MEV timing.
     modifier checkDeadline(uint256 deadline) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         _;
@@ -273,9 +295,11 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     //                        EXTERNAL: POOL INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Initialize a new pool with vaults and liquidity distribution.
-    /// @dev    Calls `poolManager.initialize` internally. The pool's LP fee is taken from
-    ///         `key.fee` and is static: it cannot be changed post-deployment. The vault
+    /// @notice Initialize a new pool with vaults, liquidity distribution, and fee config.
+    /// @dev    Calls `poolManager.initialize` internally. `key.fee` MUST carry the
+    ///         `LPFeeLibrary.DYNAMIC_FEE_FLAG`: the pool's LP fee is governed by the
+    ///         `DecayingFee` engine via a per-swap override and is configured through
+    ///         `config.feeConfig` (updatable later via `updateFeeConfig`). The vault
     ///         binding is permanent (set at creation and cannot be changed), but the standing
     ///         token allowance granted to each vault is revocable in an emergency via
     ///         `emergencyRevokeVault`. The distribution can be updated later via
@@ -293,19 +317,18 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     ///         on Arbitrum and `block.number` elsewhere. A value of `0` means no lock applies
     ///         and same-block deposit-then-withdraw is allowed; for a same-block ban set `1`.
     ///         Values above `maxMinDepositBlocks` are disallowed.
-    /// @param key    The PoolKey (must reference this hook). `key.fee` is the static LP fee;
-    ///               pools with the `LPFeeLibrary.DYNAMIC_FEE_FLAG` set are rejected.
-    /// @param config Pool configuration including distribution, vaults, permissions, and
-    ///               the deposit-lock duration.
+    /// @param key    The PoolKey (must reference this hook; `key.fee` MUST carry the
+    ///               `LPFeeLibrary.DYNAMIC_FEE_FLAG`).
+    /// @param config Pool configuration including distribution, fee config, vaults,
+    ///               permissions, and the deposit-lock duration.
     /// @return tick  The initial tick assigned by the PoolManager.
     function initializePool(PoolKey calldata key, PoolConfig calldata config) external onlyOwner returns (int24 tick) {
         if (key.hooks != IHooks(address(this))) revert InvalidHookAddress();
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeNotSupported();
-        // DualPool enforces a static fee that is fixed at pool creation. Reject dynamic-fee
-        // pools at init so the contract-level invariant ("pricing is fully static, set at
-        // deploy time via PoolKey.fee") is enforced at the boundary instead of merely
-        // documented. See contract-level NatSpec.
-        if (key.fee.isDynamicFee()) revert DynamicFeeNotSupported();
+        // The fee override returned from `_beforeSwap` is only honored by v4 on dynamic-fee
+        // pools, so the contract-level invariant ("pricing is the DecayingFee engine") is
+        // enforced at the boundary instead of merely documented. See contract-level NatSpec.
+        if (!key.fee.isDynamicFee()) revert MustUseDynamicFee(key.fee);
 
         // Vaults are immutable per (pool, currency) post-init. Verify the configured ERC-4626
         // vault wraps the same underlying as the currency before storing; a mismatch would
@@ -345,6 +368,10 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         _approveVault(key.currency1, address(config.vault1));
 
         _distribution.set(poolId, config.distribution, key.tickSpacing);
+
+        // Validates the fee parameters and initializes the fee state (zeroed cached price, so
+        // the pool's first swap reads a fresh slot0 price).
+        _decayingFee.setConfig(poolId, config.feeConfig, _getBlockNumberish());
 
         tick = poolManager.initialize(key, config.sqrtPriceX96);
         // Pool starts not live: liveness is gated on `bootstrap` so the post-init,
@@ -505,6 +532,19 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         emit DistributionUpdated(key.toId());
     }
 
+    /// @notice Replace the dynamic fee parameters for a pool.
+    /// @dev    Validated by the `DecayingFee` capability, which also resets the pool's fee
+    ///         state atomically: stale cached prices or decaying fees computed under the old
+    ///         parameters must not leak into the new schedule, so the next swap reads a fresh
+    ///         slot0 price. Emits the capability's {FeeConfigUpdated}.
+    ///         Reverts during an active JIT cycle for the same reason `setDistribution` does:
+    ///         mutating pricing state while positions are deployed is a lifecycle hazard.
+    /// @param key    The pool to update.
+    /// @param config The new fee config.
+    function updateFeeConfig(PoolKey calldata key, FeeConfig calldata config) external onlyOwner whenJITNotInProgress {
+        _decayingFee.setConfig(key.toId(), config, _getBlockNumberish());
+    }
+
     /// @notice Refresh the max-approval the hook grants to a pool's ERC-4626 vault.
     /// @dev    Recovery path for vaults whose allowance is unexpectedly consumed or reset.
     ///         `forceApprove` internally zeroes-then-sets for USDT-style tokens whose
@@ -580,13 +620,18 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
 
     /// @notice Enable or disable pool liveness for emergency pause/resume.
     /// @dev    When toggled to false, `_beforeSwap` reverts with {PoolNotLive}, pausing the
-    ///         pool for swaps. The static fee (`key.fee`) is unaffected; re-enabling
-    ///         immediately restores trading at the original rate.
+    ///         pool for swaps. The fee engine's config and state are unaffected; re-enabling
+    ///         immediately restores trading under the configured fee schedule (the decay clock
+    ///         keeps running while paused, since it is block-based).
     /// @param key  The pool to toggle.
     /// @param live True to make swaps execute against JIT liquidity, false to pause the pool.
     function setPoolLive(PoolKey calldata key, bool live) external onlyOwner whenJITNotInProgress {
         _liveness.setLive(key.toId(), live);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //                        EXTERNAL: VIEWS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Total reserves managed by this hook for the given pool.
     /// @dev    Includes ERC-20, ERC-6909 claims, and ERC4626 vault balances.
@@ -612,7 +657,9 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
 
     /// @notice Indicative quote against hypothetical DualPool JIT liquidity.
     /// @dev    Uses current active distribution-bucket liquidity for a compact view quote.
-    ///         Ignores hookData; pricing is the static `key.fee`.
+    ///         Ignores hookData; the fee is the `DecayingFee` engine's previewed fee for the
+    ///         current block (exactly what `_beforeSwap` will charge), composed with the
+    ///         directional protocol fee.
     ///
     ///         The estimate is a single constant-liquidity `computeSwapStep` (see
     ///         `_simulateIndicative`): it extrapolates the in-range bucket depth toward the
@@ -674,14 +721,43 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         return _distribution.get(poolId);
     }
 
+    /// @notice Returns the fee engine parameters for a pool.
+    /// @param poolId The pool to query.
+    /// @return The pool's fee config.
+    function feeConfig(PoolId poolId) external view returns (FeeConfig memory) {
+        return _decayingFee.getConfig(poolId);
+    }
+
+    /// @notice Returns the fee engine's per-block state snapshot for a pool.
+    /// @param poolId The pool to query.
+    /// @return The pool's fee state.
+    function feeState(PoolId poolId) external view returns (FeeState memory) {
+        return _decayingFee.getState(poolId);
+    }
+
+    /// @notice The LP fee (in pips) the next swap on this pool would be charged, per direction.
+    /// @dev    Thin wrapper over the fee engine's `previewFee` so routers and keepers can read
+    ///         the live fee without simulating a swap. Excludes the v4 protocol fee (the quote
+    ///         paths compose it via `FeeLib.effectiveSwapFee`). View-only and staticcall-safe.
+    /// @param key        The pool to query.
+    /// @param zeroForOne The swap direction.
+    /// @return The LP fee override in pips that `_beforeSwap` would return for this swap.
+    function currentFee(PoolKey calldata key, bool zeroForOne) external view returns (uint24) {
+        PoolId poolId = key.toId();
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        (uint256 lpFeeE12,,) = _decayingFee.previewFee(poolId, sqrtPriceX96, zeroForOne, _getBlockNumberish());
+        return toPips(lpFeeE12);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //                        PUBLIC: HOOK PERMISSIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Required v4 hook flags:
+    /// @dev Required v4 hook flags (identical to `DualPoolHook`: the dynamic fee override needs
+    ///      only `beforeSwap` permission plus a dynamic-fee pool, not an address flag):
     ///      - beforeInitialize: block direct init (force initializePool)
     ///      - beforeAddLiquidity / beforeRemoveLiquidity: restrict to hook-only LP
-    ///      - beforeSwap: JIT deployment + fee override
+    ///      - beforeSwap: fee checkpoint + JIT deployment + fee override
     ///      - afterSwap: JIT teardown + delta resolution
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
@@ -728,8 +804,15 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         revert LiquidityNotAllowed();
     }
 
-    /// @dev JIT entry point. Deploys multi-range JIT liquidity under the JIT lock. v4 charges
-    ///      the static `key.fee` on the in-flight swap natively; no override is returned.
+    /// @dev JIT entry point. Checkpoints the dynamic fee, then deploys multi-range JIT liquidity
+    ///      under the JIT lock, and returns the fee override v4 charges on the in-flight swap.
+    ///
+    ///      The fee is computed before the JIT deployment: `modifyLiquidity` does not move
+    ///      `slot0.sqrtPriceX96`, so the ordering is economically equivalent, and computing
+    ///      first settles the fee prior to any external vault interaction inside `_deployJIT`
+    ///      (the checkpoint write completes before the JIT lock is even taken, adding no
+    ///      reentrancy surface). `_deployJIT` keeps its own slot0 read, identical to
+    ///      `DualPoolHook`; the second read is a warm staticcall.
     ///
     ///      Reverts when the pool is paused (`!live`). Routers and aggregators see an explicit
     ///      failure instead of the swap running against zero deployed liquidity; the
@@ -741,7 +824,7 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     ///      lifecycle: the inner cycle's `clear` would zero the per-pool slot while the outer
     ///      cycle is still in flight, so the outer `_afterSwap` would short-circuit and leave
     ///      the outer's deployed positions orphaned. {JITLock.enter} rejects it up-front.
-    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -749,9 +832,16 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         PoolId poolId = key.toId();
         _liveness.requireLive(poolId);
 
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        uint256 lpFeeE12 = _decayingFee.commitFee(poolId, sqrtPriceX96, params.zeroForOne, _getBlockNumberish());
+
         jitLockFor(poolId).enter();
         _deployJIT(poolId, key);
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        return (
+            IHooks.beforeSwap.selector,
+            BeforeSwapDeltaLibrary.ZERO_DELTA,
+            toPips(lpFeeE12) | LPFeeLibrary.OVERRIDE_FEE_FLAG
+        );
     }
 
     /// @dev JIT teardown. Removes all bucket positions, resolves the hook's net delta for both
@@ -920,7 +1010,6 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
         PoolId poolId = key.toId();
 
         if (!_liveness.isLive(poolId)) return (0, 0);
-        uint24 feePips = key.fee;
 
         // Use vault-cap-aware balances for indicative quotes. Execution caps vault
         // withdrawals at `_effectiveAssets`, so quoting against the uncapped `_totalAssets`
@@ -932,11 +1021,16 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
 
         uint160 sqrtPriceX96;
         int24 currentTick;
+        uint24 feePips;
         {
             uint24 protocolFee;
             (sqrtPriceX96, currentTick, protocolFee,) = poolManager.getSlot0(poolId);
             if (sqrtPriceX96 == 0) return (0, 0);
-            feePips = FeeLib.effectiveSwapFee(feePips, protocolFee, zeroForOne);
+            // Preview (never commit) the dynamic fee so the quote charges exactly what
+            // `_beforeSwap` will: the E12-to-pips truncation happens before protocol-fee
+            // composition, matching execution (v4 charges the truncated uint24 override).
+            (uint256 lpFeeE12,,) = _decayingFee.previewFee(poolId, sqrtPriceX96, zeroForOne, _getBlockNumberish());
+            feePips = FeeLib.effectiveSwapFee(toPips(lpFeeE12), protocolFee, zeroForOne);
         }
 
         uint128 liquidity = activeLiquidity(_distribution.get(poolId), sqrtPriceX96, currentTick, bal0, bal1);

@@ -11,12 +11,13 @@ import {Inventory, CurrencyState} from "../types/Inventory.sol";
 
 /// @title InventoryLib
 /// @author Uniswap Labs
-/// @notice The token-custody half of the `Inventory` capability: the operations that move tokens
-///         and therefore need the consuming contract's execution context. Internal library
-///         functions inline into the consumer, so `address(this)` (the token custodian), vault
-///         `deposit`/`withdraw`/`redeem`, PoolManager `take`/`burn`, and allowance checks all
-///         resolve against the consumer. The pure, context-free `Inventory` operations
-///         (accessors, balance views, claim accounting) are file-level free functions in
+/// @notice The token-custody half of the `Inventory` capability: the operations that need the
+///         consuming contract's execution context, either to move tokens or to size against the
+///         consumer's vault position. Internal library functions inline into the consumer, so
+///         `address(this)` (the token custodian), vault `deposit`/`withdraw`/`redeem`,
+///         `maxWithdraw` sizing, PoolManager `take`/`burn`, and allowance checks all resolve
+///         against the consumer. The pure, context-free `Inventory` operations (accessors,
+///         balance views, claim accounting) are file-level free functions in
 ///         `types/Inventory.sol`; a consumer binds this library with `using InventoryLib for
 ///         Inventory` so both halves are invoked uniformly as `_inventory.method(...)`.
 /// @dev The vault-fee guards' errors ({VaultChargesEntryFee}/{VaultChargesExitFee}) live here so
@@ -143,6 +144,77 @@ library InventoryLib {
         }
     }
 
+    /// @notice Net realizable balance: raw + claims + the vault leg's immediately-withdrawable
+    ///         value.
+    /// @dev Used for JIT-deployment sizing and indicative quotes so a cycle never sizes against
+    ///      funds it cannot source. Lives here rather than with the other balance views in
+    ///      `types/Inventory.sol` because the vault leg reads `maxWithdraw(address(this))` (see
+    ///      {realizableVaultAssets}), and free functions cannot access `this`. Contrast
+    ///      `assetBalance` (types/Inventory.sol), which values the vault leg at the partition's
+    ///      full economic stake via `convertToAssets`.
+    /// @param self   Capability storage.
+    /// @param partition The accounting partition to value.
+    /// @return bal The immediately-realizable balance (token's native decimals).
+    function effectiveBalance(Inventory storage self, bytes32 partition) internal view returns (uint256 bal) {
+        CurrencyState storage s = self.state[partition];
+        bal = uint256(s.erc20) + uint256(s.claims);
+        IERC4626 vault = self.vault[partition];
+        if (address(vault) != address(0)) {
+            uint256 shares = self.vaultShares[partition];
+            if (shares > 0) bal += realizableVaultAssets(vault, shares);
+        }
+    }
+
+    /// @notice The immediately-withdrawable value of the consumer's `shares` in `vault`:
+    ///         `maxWithdraw` first, `previewRedeem` as the fallback.
+    /// @dev Tolerates the two known ways production vaults deviate from a textbook ERC-4626 on
+    ///      the sizing views:
+    ///
+    ///        1. Liquidity-gated previews (Spark savings vaults): `previewRedeem` reverts
+    ///           whenever the vault's idle balance cannot cover the redemption, so it cannot be
+    ///           the primary read on a hot path; it would revert sizing exactly when the vault
+    ///           has capital deployed, which is its normal operating state. `maxWithdraw` is the
+    ///           honest cap there: `min(idle liquidity, owner assets)`.
+    ///        2. Unbounded-cap sentinels (Morpho VaultV2): `maxWithdraw` returns `0` by
+    ///           construction because the vault cannot bound a single-block withdrawal across
+    ///           its internal allocations. `previewRedeem` is the honest value there.
+    ///
+    ///      A non-zero `maxWithdraw` is clamped to the partition's own gross share value
+    ///      (`convertToAssets(shares)`): `maxWithdraw` is owner-scoped, so on a vault shared by
+    ///      several partitions it counts sibling positions, and an unclamped read would let one
+    ///      partition size against another's stake. The feeless-vault gate at bind time makes
+    ///      `convertToAssets` match the honest exit value, so the clamp loses nothing.
+    ///
+    ///      A zero cap is ambiguous (VaultV2-style sentinel, or genuinely nothing idle), so it
+    ///      falls back to `previewRedeem(shares)`. There the try/catch disambiguates: success is
+    ///      the sentinel case (the preview is the honest value); a revert alongside a successful
+    ///      zero `maxWithdraw` identifies a liquidity-gated vault with nothing idle, where zero
+    ///      is the honest answer.
+    ///
+    ///      A `maxWithdraw` that itself reverts (forbidden by ERC-4626) signals a broken or
+    ///      paused vault, not a liquidity report. That falls through to a bare `previewRedeem`
+    ///      whose revert bubbles up, preserving the documented vault-outage behavior: a
+    ///      fully-paused vault fails swaps explicitly rather than silently sizing the pool to
+    ///      zero (see the PoolVault `Vault Compatibility` NatSpec).
+    /// @param vault  The ERC-4626 vault to size against.
+    /// @param shares The partition's share balance in `vault`.
+    /// @return The asset value (token's native decimals) the consumer can withdraw right now.
+    function realizableVaultAssets(IERC4626 vault, uint256 shares) internal view returns (uint256) {
+        try vault.maxWithdraw(address(this)) returns (uint256 cap) {
+            if (cap > 0) {
+                uint256 value = vault.convertToAssets(shares);
+                return value < cap ? value : cap;
+            }
+            try vault.previewRedeem(shares) returns (uint256 assets) {
+                return assets;
+            } catch {
+                return 0;
+            }
+        } catch {
+            return vault.previewRedeem(shares);
+        }
+    }
+
     /// @notice Ensure the partition's raw ERC-20 holds at least `amount`, withdrawing the shortfall
     ///         from the vault, then debit it.
     /// @dev For a non-vaulted partition with insufficient raw, the `bal - amount` subtraction panics
@@ -262,11 +334,20 @@ library InventoryLib {
     ///      MUST. No-op for an unset vault. Catches honest fee disclosures only (see PoolVault
     ///      `Vault Compatibility` for the adversarial-vault socialization that remains). Reverts
     ///      {VaultChargesEntryFee} / {VaultChargesExitFee} on divergence.
+    ///
+    ///      The exit-side probe tolerates a reverting `previewRedeem`: liquidity-gated vaults
+    ///      (Spark savings vaults) revert it whenever idle liquidity cannot cover the amount,
+    ///      which is a liquidity report, not a fee disclosure. Skipping the comparison keeps
+    ///      pool initialization from bricking against such a vault in a low-idle state; the
+    ///      entry-side check still runs, and a vault that hides a fee behind a reverting
+    ///      preview is already covered by the vault-trust model.
     /// @param vault The ERC-4626 vault to probe.
     function requireFeelessVault(IERC4626 vault) internal view {
         if (address(vault) == address(0)) return;
         uint256 probe = 10 ** uint256(vault.decimals());
         if (vault.previewDeposit(probe) != vault.convertToShares(probe)) revert VaultChargesEntryFee();
-        if (vault.previewRedeem(probe) != vault.convertToAssets(probe)) revert VaultChargesExitFee();
+        try vault.previewRedeem(probe) returns (uint256 redeemable) {
+            if (redeemable != vault.convertToAssets(probe)) revert VaultChargesExitFee();
+        } catch {}
     }
 }

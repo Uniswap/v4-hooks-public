@@ -63,16 +63,21 @@ import {InventoryLib} from "../libraries/InventoryLib.sol";
 ///
 ///         PoolVault interacts with the configured per-currency vault solely through the
 ///         ERC-4626 interface (`deposit`, `withdraw`, `convertToAssets`, `convertToShares`,
-///         `previewRedeem`). It deliberately does NOT read `maxWithdraw` on the hot paths
-///         (`_effectiveAssets`, `_withdrawFromVault`, `_ensureERC20`): curated/gated vaults
-///         such as Morpho VaultV2 return `0` from `maxWithdraw` by construction because they
-///         cannot honestly bound a single-block withdrawal cap across their internal
-///         allocations. Effective-liquidity sizing instead uses `previewRedeem(shares)`,
-///         which on every conformant vault reflects the realizable exit value per share
-///         (net of any exit fee), and `withdraw` is called optimistically: if the vault
-///         cannot satisfy the request from its current allocation, the revert bubbles up
-///         through `_pushAsset` → swap callback → `beforeSwap`. Routers and aggregators
-///         see an explicit failure and route elsewhere.
+///         `previewRedeem`, `maxWithdraw`). Effective-liquidity sizing (`_effectiveAssets`)
+///         reads `maxWithdraw(hook)` first: it is the vault's own answer to "how much can
+///         this owner withdraw atomically right now", and it is the only sizing view that
+///         liquidity-gated vaults (Spark savings vaults) support, since their
+///         `previewRedeem` reverts whenever idle liquidity cannot cover the amount.
+///         Curated/gated vaults such as Morpho VaultV2 instead return `0` from
+///         `maxWithdraw` by construction because they cannot honestly bound a single-block
+///         withdrawal cap across their internal allocations; for those the sizing falls
+///         back to `previewRedeem(shares)`, the realizable exit value per share (net of
+///         any exit fee). See `InventoryLib.realizableVaultAssets` for the exact
+///         resolution order. On the execution paths (`_withdrawFromVault`, `_ensureERC20`)
+///         `withdraw` remains optimistic: if the vault cannot satisfy the request from its
+///         current allocation, the revert bubbles up through `_pushAsset` → swap callback
+///         → `beforeSwap`. Routers and aggregators see an explicit failure and route
+///         elsewhere.
 ///
 ///         For curated/gated vaults (Morpho VaultV2 and similar), the curator gate is an
 ///         accepted trust assumption: operators MUST select vaults whose curators they
@@ -550,8 +555,9 @@ abstract contract PoolVault is BlockNumberish {
     ///      economic balance (`Inventory.assetBalance`: raw + claims + `convertToAssets(shares)`).
     ///      LP share math reads this so claims are priced over the pool's true economic stake,
     ///      including capital temporarily behind a vault pause or an unrealized exit fee. Contrast
-    ///      `_effectiveAssets`, which values the vault leg via `previewRedeem` for what is
-    ///      realizable right now. The trade-off is that a vault overstating `convertToAssets`
+    ///      `_effectiveAssets`, which values the vault leg at what is realizable right now
+    ///      (`maxWithdraw` first, `previewRedeem` fallback). The trade-off is that a vault
+    ///      overstating `convertToAssets`
     ///      inflates these balances and dilutes new depositors; bounded by the vault-trust model.
     function _totalAssets(PoolKey memory key) internal view returns (uint256 amount0, uint256 amount1) {
         PoolId poolId = key.toId();
@@ -565,11 +571,12 @@ abstract contract PoolVault is BlockNumberish {
     }
 
     /// @dev Pool-level effective assets when the caller already has the PoolId cached. Values each
-    ///      leg at its realizable balance (`Inventory.effectiveBalance`: raw + claims +
-    ///      `previewRedeem(shares)`), i.e. what the vault would deliver right now after any exit
-    ///      fee. JIT-deployment sizing and indicative quotes read this so a cycle never sizes
-    ///      against funds it cannot source. Contrast `_totalAssets`, which uses `convertToAssets`
-    ///      for the pool's full economic stake.
+    ///      leg at its realizable balance (`InventoryLib.effectiveBalance`: raw + claims + the
+    ///      vault's immediately-withdrawable value, `maxWithdraw` first with a `previewRedeem`
+    ///      fallback), i.e. what the vault would deliver right now. JIT-deployment sizing and
+    ///      indicative quotes read this so a cycle never sizes against funds it cannot source.
+    ///      Contrast `_totalAssets`, which uses `convertToAssets` for the pool's full economic
+    ///      stake.
     function _effectiveAssets(PoolId poolId, Currency currency0, Currency currency1)
         internal
         view
@@ -836,6 +843,11 @@ abstract contract PoolVault is BlockNumberish {
     ///        - `previewRedeem(probe)  == convertToAssets(probe)` (both round down)
     ///      Any divergence is an honest report of a fee. The probe is `10**vault.decimals()`
     ///      so any per-mille-or-larger fee shows up well above rounding noise.
+    ///
+    ///      A reverting `previewRedeem` probe is tolerated (the exit-side comparison is
+    ///      skipped): liquidity-gated vaults (Spark savings vaults) revert it when idle
+    ///      liquidity cannot cover the probe amount, which is a liquidity report, not a fee
+    ///      disclosure. See `InventoryLib.requireFeelessVault`.
     ///
     ///      Note that this guard only catches honest fee disclosures. An adversarial vault
     ///      could lie at the preview level and charge fees only on actual deposit/withdraw;
