@@ -48,10 +48,11 @@ struct CurrencyState {
 ///         directly, as `_inventory.assetBalance(partition)`. The pure, context-free operations
 ///         (accessors, balance views, claim accounting) live here as file-level free functions
 ///         bound `using { ... } for Inventory global`. The operations
-///         that move tokens, and so need the consumer's execution context (`address(this)` for
-///         vault `deposit`/`withdraw`/`redeem`, PoolManager `take`/`burn`, allowance checks), live
-///         in `InventoryLib`, a library whose internal functions inline into the consumer so
-///         `this` resolves correctly. Both are invoked uniformly as `_inventory.method(...)`.
+///         that need the consumer's execution context (`address(this)` for vault
+///         `deposit`/`withdraw`/`redeem`, `maxWithdraw` sizing in `effectiveBalance`, PoolManager
+///         `take`/`burn`, allowance checks) live in `InventoryLib`, a library whose internal
+///         functions inline into the consumer so `this` resolves correctly. Both are invoked
+///         uniformly as `_inventory.method(...)`.
 ///
 ///         ## Partition key
 ///
@@ -62,9 +63,13 @@ struct CurrencyState {
 ///
 ///         ## Compatibility
 ///
-///         Vault interaction is via the ERC-4626 interface only and deliberately avoids
-///         `maxWithdraw` on hot paths (curated/gated vaults like Morpho VaultV2 can return `0`);
-///         {effectiveBalance} sizes via `previewRedeem`. Fee-on-entry/exit vaults are rejected by
+///         Vault interaction is via the ERC-4626 interface only. Effective-liquidity sizing
+///         (`InventoryLib.effectiveBalance`) reads `maxWithdraw` first, the vault's own answer
+///         to "how much can this owner withdraw atomically right now", and falls back to
+///         `previewRedeem` for vaults that return a `0` sentinel from `maxWithdraw`
+///         (curated/gated vaults like Morpho VaultV2). Liquidity-gated vaults whose
+///         `previewRedeem` reverts when idle liquidity cannot cover the amount (Spark savings
+///         vaults) are sized by `maxWithdraw` alone. Fee-on-entry/exit vaults are rejected by
 ///         `InventoryLib.requireFeelessVault`; fee-on-transfer / rebasing underlyings are not
 ///         supported.
 /// @param vault       The ERC-4626 vault bound to a partition (`address(0)` = hold as raw ERC-20).
@@ -85,7 +90,6 @@ using {
     erc20Of,
     claimsOf,
     assetBalance,
-    effectiveBalance,
     unbackedClaims,
     recordClaims,
     debitERC20
@@ -139,7 +143,9 @@ function claimsOf(Inventory storage self, bytes32 partition) view returns (uint2
 /// @notice Gross managed balance: raw + claims + `convertToAssets(shares)`.
 /// @dev The vault leg is the true per-share economic value, ignoring exit fees or temporary
 ///      throttles. Used by LP share math so claims are over true economic stake. Contrast
-///      {effectiveBalance}, which sizes the vault leg via `previewRedeem`.
+///      `InventoryLib.effectiveBalance`, which sizes the vault leg at its immediately-withdrawable
+///      value (it lives in `InventoryLib` because that sizing reads `maxWithdraw(address(this))`,
+///      and free functions cannot access `this`).
 /// @param self   Capability storage.
 /// @param partition The accounting partition to value.
 /// @return bal The gross managed balance (token's native decimals).
@@ -150,23 +156,6 @@ function assetBalance(Inventory storage self, bytes32 partition) view returns (u
     if (address(vault) != address(0)) {
         uint256 shares = self.vaultShares[partition];
         if (shares > 0) bal += vault.convertToAssets(shares);
-    }
-}
-
-/// @notice Net realizable balance: raw + claims + `previewRedeem(shares)`.
-/// @dev The vault leg is what the vault would deliver right now (post exit fee). Used for
-///      JIT-deployment sizing and indicative quotes so the cycle never sizes against funds it
-///      cannot source. Contrast {assetBalance}, which uses `convertToAssets`.
-/// @param self   Capability storage.
-/// @param partition The accounting partition to value.
-/// @return bal The immediately-realizable balance (token's native decimals).
-function effectiveBalance(Inventory storage self, bytes32 partition) view returns (uint256 bal) {
-    CurrencyState storage s = self.state[partition];
-    bal = uint256(s.erc20) + uint256(s.claims);
-    IERC4626 vault = self.vault[partition];
-    if (address(vault) != address(0)) {
-        uint256 shares = self.vaultShares[partition];
-        if (shares > 0) bal += vault.previewRedeem(shares);
     }
 }
 

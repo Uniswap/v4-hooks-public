@@ -4,7 +4,7 @@ auto_detect_solc = true
 optimizer_runs = 44444444
 via_ir = false
 ffi = true
-fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read-write", path = "docs/" }, { access = "read", path = "test/stable/data/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }, { access = "read", path = "test/aggregator-hooks/UniswapV3/precompile/" }, { access = "read", path = "test/aggregator-hooks/PancakeSwapV3/precompile/" }, { access = "read", path = "test/aggregator-hooks/UniswapV2/precompile/" }]
+fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { access = "read", path = "foundry-out/" }, { access = "read-write", path = "docs/" }, { access = "read", path = "test/stable/data/" }, { access = "read", path = "test/alf/data/" }, { access = "read", path = "test/aggregator-hooks/StableSwapNG/precompiled/" }, { access = "read", path = "test/aggregator-hooks/StableSwap/precompiled/" }, { access = "read", path = "test/aggregator-hooks/UniswapV3/precompile/" }, { access = "read", path = "test/aggregator-hooks/PancakeSwapV3/precompile/" }, { access = "read", path = "test/aggregator-hooks/UniswapV2/precompile/" }]
 evm_version = "cancun"
 gas_limit = "3000000000"
 bytecode_hash = "none"
@@ -12,8 +12,9 @@ bytecode_hash = "none"
 # through a second compiler profile in the same invocation suffixes shared
 # artifacts (PoolManager.json becomes PoolManager.default.json), which breaks
 # tests that deployCode by artifact path. Skip alf here; the alf profile
-# below builds and tests it in a dedicated CI job.
-skip = ["src/alf/**", "test/alf/**"]
+# below builds and tests it in a dedicated CI job. The DualPool deploy
+# scripts import src/alf, so they ride in the alf profile for the same reason.
+skip = ["src/alf/**", "test/alf/**", "script/DeployDualPool*.s.sol"]
 
 [profile.debug]
 via_ir = false

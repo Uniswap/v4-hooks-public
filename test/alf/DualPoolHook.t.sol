@@ -36,6 +36,7 @@ import {ALFHookData} from "../../src/alf/interfaces/IALFHook.sol";
 import {PoolNotLive} from "../../src/alf/types/Liveness.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
+import {MockSparkVault} from "./mocks/MockSparkVault.sol";
 
 /// @title DualPoolHookTest
 /// @notice End-to-end tests for DualPoolHook covering pool lifecycle, JIT execution,
@@ -837,6 +838,70 @@ contract DualPoolHookTest is Test, Deployers {
         assertEq(hook.userShares(mvId, owner), 0, "shares burned");
         assertEq(amount0, expectedAmount0, "currency0 payout matches preview");
         assertEq(amount1, expectedAmount1, "currency1 payout matches preview");
+    }
+
+    /// @dev Regression for the Spark integration report (July 2026): a liquidity-gated vault
+    ///      (SparkVault) reverts `previewRedeem` whenever the pool's position value exceeds
+    ///      the vault's idle liquidity, which is the vault's normal state once capital is
+    ///      deployed. previewRedeem-primary sizing therefore reverted every swap in
+    ///      `beforeSwap` (`_deployJIT` -> `_effectiveAssets`), regardless of swap size. The
+    ///      required flow is `swap amount < vault idle liquidity < pool position value`; with
+    ///      `maxWithdraw`-first sizing the JIT cycle sizes to the idle-capped figure and the
+    ///      swap clears.
+    function test_swap_succeedsWhenSparkVaultIdleBelowPositionValue() public {
+        MockSparkVault spark0 = new MockSparkVault(ERC20(address(token0)));
+        MockSparkVault spark1 = new MockSparkVault(ERC20(address(token1)));
+
+        LiquidityBucket[] memory dist = new LiquidityBucket[](1);
+        dist[0] = LiquidityBucket({tickLower: -60, tickUpper: 60, weightBps: 10_000});
+        PoolKey memory sparkKey = PoolKey({
+            currency0: currency0, currency1: currency1, fee: FEE_PIPS, tickSpacing: 60, hooks: IHooks(address(hook))
+        });
+
+        vm.prank(owner);
+        hook.initializePool(
+            sparkKey,
+            DualPoolHook.PoolConfig({
+                sqrtPriceX96: TickMath.getSqrtPriceAtTick(0),
+                distribution: dist,
+                allowExternalDeposits: true,
+                vault0: IERC4626(address(spark0)),
+                vault1: IERC4626(address(spark1)),
+                minDepositBlocks: 0
+            })
+        );
+
+        // Pool position value: 1000 per side, all vaulted after bootstrap.
+        uint256 bootstrapAmount = 1_000e18;
+        token0.mint(owner, bootstrapAmount);
+        token1.mint(owner, bootstrapAmount);
+        vm.startPrank(owner);
+        token0.approve(address(hook), bootstrapAmount);
+        token1.approve(address(hook), bootstrapAmount);
+        hook.bootstrap(sparkKey, bootstrapAmount, bootstrapAmount);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        // The vaults deploy 600 of their 1000 idle: swap (100) < idle (400) < position (1000).
+        address allocator = makeAddr("sparkAllocator");
+        spark0.allocate(allocator, 600e18);
+        spark1.allocate(allocator, 600e18);
+
+        // Fixture reproduces the reported state: previewRedeem on the pool's position reverts.
+        uint256 position0 = spark0.balanceOf(address(hook));
+        vm.expectRevert("SparkVault/insufficient-liquidity");
+        spark0.previewRedeem(position0);
+
+        // The integrator view reports the idle-capped figure instead of reverting (and instead
+        // of the inflated previewRedeem value a fully liquid vault would report).
+        (uint256 eff0, uint256 eff1) = hook.getEffectiveLiquidity(sparkKey);
+        assertEq(eff0, 400e18, "token0 effective liquidity capped at idle");
+        assertEq(eff1, 400e18, "token1 effective liquidity capped at idle");
+
+        // The swap clears: the JIT cycle sizes to idle and withdraws within the vault's gate.
+        uint256 out1Before = token1.balanceOf(address(this));
+        swap(sparkKey, true, -100e18, "");
+        assertGt(token1.balanceOf(address(this)) - out1Before, 0, "swap executed and delivered output");
     }
 
     /// @dev `unlockCallback` is `external` and decodes its argument into an LP withdraw.
@@ -2228,11 +2293,12 @@ contract DualPoolHookTest is Test, Deployers {
         assertGt(actualInput, actualOutput, "input should exceed output (fees + spread)");
     }
 
-    /// @dev `getEffectiveLiquidity` sizes vault contribution via `previewRedeem`; `getReserves`
-    ///      reports the gross `convertToAssets` value. When the vault charges an exit fee, the
-    ///      two views diverge -- `getEffectiveLiquidity` drops, `getReserves` does not. Routers
-    ///      and the JIT cycle MUST plan against the smaller number to avoid mid-swap reverts.
-    function test_effectiveLiquidity_reflectsPreviewRedeem() public {
+    /// @dev `getEffectiveLiquidity` sizes vault contribution via `maxWithdraw(hook)` (clamped to
+    ///      the pool's share value); `getReserves` reports the gross `convertToAssets` value.
+    ///      When the vault caps atomic withdrawals below the pool's stake, the two views
+    ///      diverge -- `getEffectiveLiquidity` drops, `getReserves` does not. Routers and the
+    ///      JIT cycle MUST plan against the smaller number to avoid mid-swap reverts.
+    function test_effectiveLiquidity_reflectsMaxWithdrawCap() public {
         _depositAsOperator(10_000e18);
 
         // With healthy vault: effective == reserves.
@@ -2241,20 +2307,20 @@ contract DualPoolHookTest is Test, Deployers {
         assertEq(e0, r0, "healthy vault: effective0 == reserves0");
         assertEq(e1, r1, "healthy vault: effective1 == reserves1");
 
-        // Mock the live vault0's previewRedeem to return half of the pool's vault shares,
-        // simulating a vault that just applied an exit fee. Reserves stay put (LP economic
-        // stake is unchanged); effective drops.
+        // Mock the live vault0's maxWithdraw to report half the pool's stake as atomically
+        // withdrawable, simulating a vault with most capital deployed. Reserves stay put (LP
+        // economic stake is unchanged); effective drops to the cap.
         uint256 vaultShares = vault0.balanceOf(address(hook));
         vm.mockCall(
             address(vault0),
-            abi.encodeWithSelector(IERC4626.previewRedeem.selector, vaultShares),
+            abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(hook)),
             abi.encode(vaultShares / 2)
         );
 
         (uint256 r0_after,) = hook.getReserves(testPoolKey);
         (uint256 e0_after,) = hook.getEffectiveLiquidity(testPoolKey);
-        assertEq(r0_after, r0, "reserves unaffected by previewRedeem mock");
-        assertLt(e0_after, r0, "effective drops to the previewRedeem-sized value");
+        assertEq(r0_after, r0, "reserves unaffected by maxWithdraw mock");
+        assertLt(e0_after, r0, "effective drops to the maxWithdraw-capped value");
     }
 
     /// @dev `addLiquidity` reverts when actual amount exceeds `maxAmount{0,1}` bound.

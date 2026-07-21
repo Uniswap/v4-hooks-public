@@ -11,6 +11,7 @@ import {Inventory, InsufficientPoolBalance} from "../../src/alf/types/Inventory.
 import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
+import {MockSparkVault} from "./mocks/MockSparkVault.sol";
 
 /// @notice Harness holding a real `Inventory` storage value and exposing both halves of the
 ///         capability as external calls. The context-free free functions (accessors, balance
@@ -406,6 +407,103 @@ contract InventoryTest is Test {
     }
 
     // ══════════════════════════════════════════════════════════
+    //  effectiveBalance: liquidity-gated vaults (SparkVault)
+    // ══════════════════════════════════════════════════════════
+
+    /// @dev The partner-reported scenario: position value exceeds the vault's idle liquidity
+    ///      (the vault's normal state once capital is deployed). SparkVault's `previewRedeem`
+    ///      reverts in that state, so a previewRedeem-primary sizing bricked every read.
+    ///      `maxWithdraw`-primary sizing reports the idle-capped figure instead.
+    function test_effectiveBalance_sparkVault_capsAtIdleLiquidity() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+        _bindVault(IERC4626(address(spark)));
+        _fundHarness(1_000e18);
+        h.depositToVault(partition, currency, 1_000e18);
+
+        // Deploy 600 out of the vault: totalAssets stays 1000, idle drops to 400.
+        spark.allocate(makeAddr("sparkAllocator"), 600e18);
+
+        // previewRedeem on the full position reverts; effectiveBalance must not.
+        uint256 fullPosition = spark.balanceOf(address(h));
+        vm.expectRevert("SparkVault/insufficient-liquidity");
+        spark.previewRedeem(fullPosition);
+
+        assertEq(h.effectiveBalance(partition), 400e18, "vault leg capped at idle liquidity");
+        assertEq(h.assetBalance(partition), 1_000e18, "gross economic stake unaffected");
+    }
+
+    /// @dev With zero idle liquidity both `maxWithdraw` (returns 0) and `previewRedeem`
+    ///      (reverts) are exhausted; the vault leg is honestly zero and raw + claims remain.
+    function test_effectiveBalance_sparkVault_zeroIdle_returnsRawPlusClaims() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+        _bindVault(IERC4626(address(spark)));
+        _fundHarness(1_000e18);
+        h.depositToVault(partition, currency, 1_000e18);
+        h.recordClaims(partition, 25e18);
+
+        spark.allocate(makeAddr("sparkAllocator"), 1_000e18);
+
+        assertEq(h.effectiveBalance(partition), 25e18, "zero idle -> claims only, no revert");
+    }
+
+    /// @dev `maxWithdraw` is owner-scoped: on a vault shared by two partitions it counts both
+    ///      positions, so a non-zero cap must be clamped to each partition's own share value.
+    function test_effectiveBalance_sharedVault_clampsToPartitionValue() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+        bytes32 partitionB = h.partitionOf(bytes32(uint256(0xBEEF)), currency);
+        _bindVault(IERC4626(address(spark)));
+        h.setVault(partitionB, IERC4626(address(spark)));
+
+        _fundHarness(1_000e18);
+        h.depositToVault(partition, currency, 600e18);
+        h.depositToVault(partitionB, currency, 400e18);
+
+        // Fully liquid: maxWithdraw(harness) reports the combined 1000, but each partition
+        // must see only its own stake.
+        assertEq(h.effectiveBalance(partition), 600e18, "partition A clamped to own value");
+        assertEq(h.effectiveBalance(partitionB), 400e18, "partition B clamped to own value");
+
+        // Partially deployed: idle 300 binds both partitions below their stake.
+        spark.allocate(makeAddr("sparkAllocator"), 700e18);
+        assertEq(h.effectiveBalance(partition), 300e18, "partition A capped at idle");
+        assertEq(h.effectiveBalance(partitionB), 300e18, "partition B capped at idle");
+    }
+
+    /// @dev A vault whose `maxWithdraw` itself reverts (non-conformant; ERC-4626 forbids it)
+    ///      degrades to the `previewRedeem` fallback instead of bricking the read.
+    function test_effectiveBalance_maxWithdrawReverts_fallsBackToPreviewRedeem() public {
+        _bindVault(IERC4626(address(vault)));
+        _fundHarness(1_000e18);
+        h.depositToVault(partition, currency, 1_000e18);
+
+        vm.mockCallRevert(
+            address(vault), abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(h)), "unsupported"
+        );
+
+        assertEq(h.effectiveBalance(partition), 1_000e18, "falls back to previewRedeem");
+    }
+
+    /// @dev Execution-path sanity for the sizing change: a withdrawal sized within the reported
+    ///      effective balance clears SparkVault's idle-liquidity gate; one sized above it still
+    ///      bubbles the vault's own revert (the optimistic-withdraw contract is unchanged).
+    function test_withdrawFromVault_sparkVault_honorsIdleCap() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+        _bindVault(IERC4626(address(spark)));
+        _fundHarness(1_000e18);
+        h.depositToVault(partition, currency, 1_000e18);
+        spark.allocate(makeAddr("sparkAllocator"), 600e18);
+
+        uint256 effective = h.effectiveBalance(partition);
+        assertEq(effective, 400e18, "sized to idle");
+
+        h.withdrawFromVault(partition, effective);
+        assertEq(h.erc20Of(partition), 400e18, "withdrawal within idle succeeds");
+
+        vm.expectRevert("SparkVault/insufficient-liquidity");
+        h.withdrawFromVault(partition, 1);
+    }
+
+    // ══════════════════════════════════════════════════════════
     //  InventoryLib.tryDepositAll
     // ══════════════════════════════════════════════════════════
 
@@ -552,6 +650,31 @@ contract InventoryTest is Test {
         vv2.setExitFeeBps(100); // previewRedeem < convertToAssets, entry side clean
         vm.expectRevert(InventoryLib.VaultChargesExitFee.selector);
         h.requireFeelessVault(IERC4626(address(vv2)));
+    }
+
+    /// @dev A liquidity-gated `previewRedeem` (SparkVault with idle below the probe amount)
+    ///      reverts as a liquidity report, not a fee disclosure. The exit-side probe is skipped
+    ///      instead of bricking pool initialization.
+    function test_requireFeelessVault_skipsExitProbe_whenPreviewRedeemReverts() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+
+        // Fresh vault: zero idle, so previewRedeem(probe) reverts.
+        uint256 probe = 10 ** uint256(spark.decimals());
+        vm.expectRevert("SparkVault/insufficient-liquidity");
+        spark.previewRedeem(probe);
+
+        h.requireFeelessVault(IERC4626(address(spark)));
+    }
+
+    /// @dev With idle liquidity covering the probe, SparkVault's previews run and pass the
+    ///      feeless comparison normally.
+    function test_requireFeelessVault_passesForLiquidSparkVault() public {
+        MockSparkVault spark = new MockSparkVault(ERC20(address(token)));
+        _bindVault(IERC4626(address(spark)));
+        _fundHarness(5e18);
+        h.depositToVault(partition, currency, 5e18);
+
+        h.requireFeelessVault(IERC4626(address(spark)));
     }
 
     // ══════════════════════════════════════════════════════════

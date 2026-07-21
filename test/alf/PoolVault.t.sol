@@ -25,6 +25,7 @@ import {InventoryLib} from "../../src/alf/libraries/InventoryLib.sol";
 import {InsufficientPoolBalance} from "../../src/alf/types/Inventory.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 import {MockMorphoVaultV2} from "./mocks/MockMorphoVaultV2.sol";
+import {MockSparkVault} from "./mocks/MockSparkVault.sol";
 
 /// @dev Concrete test harness that exposes PoolVault's internal functions as external calls.
 contract MockPoolVault is PoolVault {
@@ -598,28 +599,47 @@ contract PoolVaultTest is Test, Deployers {
     }
 
     // ══════════════════════════════════════════════════════════
-    //  Per-pool previewRedeem sizing
+    //  Per-pool effective sizing (maxWithdraw primary, previewRedeem fallback)
     // ══════════════════════════════════════════════════════════
 
-    /// @dev `effectiveBalance` reports the per-pool `previewRedeem(shares)` value. Two pools
-    ///      sharing the same vault each see their own share-pro-rata exit value with no
-    ///      cross-pool interference -- the per-share quantity is intrinsic to the vault, so
-    ///      no per-pool capping math is needed in PoolVault.
-    function test_effectiveBalance_usesPreviewRedeemPerShare() public {
+    /// @dev `effectiveBalance` sizes the vault leg via `maxWithdraw(hook)` clamped to the pool's
+    ///      own share value. Two pools sharing the same vault each see their own stake; the
+    ///      owner-scoped `maxWithdraw` cap binds only when it drops below a pool's value.
+    function test_effectiveBalance_maxWithdrawPrimary_perPoolClamp() public {
         _bootstrap(alice, 1_000e18);
         vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
         vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
         _bootstrapPool(poolKeyB, bob, 4_000e18);
 
-        // Pool A owns 1000 vault shares; pool B owns 4000. 1:1 share/asset ratio in MockERC4626,
-        // so previewRedeem on the underlying simply tracks balance.
+        // Pool A owns 1000 vault shares; pool B owns 4000. The fully liquid MockERC4626 reports
+        // maxWithdraw(hook) = 5000 (owner-scoped, both pools combined); each pool must be
+        // clamped to its own share value.
         uint256 effA = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
         uint256 effB = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
-        assertEq(effA, 1_000e18, "pool A sees its own share-pro-rata previewRedeem");
-        assertEq(effB, 4_000e18, "pool B sees its own share-pro-rata previewRedeem");
+        assertEq(effA, 1_000e18, "pool A clamped to its own share value");
+        assertEq(effB, 4_000e18, "pool B clamped to its own share value");
 
-        // Mock the per-share `previewRedeem` to return a constrained per-pool figure (e.g.,
-        // an exit-fee-adjusted value). Each pool should reflect its share count * mock output.
+        // Constrain the owner-scoped cap below pool B's value: A stays at its own value, B is
+        // capped at what the vault says the hook can withdraw atomically.
+        vm.mockCall(
+            address(vault0), abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)), abi.encode(2_500e18)
+        );
+        assertEq(vault.effectiveBalance(poolIdA, poolKeyA.currency0), 1_000e18, "pool A below the cap");
+        assertEq(vault.effectiveBalance(poolIdB, poolKeyB.currency0), 2_500e18, "pool B capped by maxWithdraw");
+    }
+
+    /// @dev With `maxWithdraw` at the `0` sentinel, sizing falls back to the per-pool
+    ///      `previewRedeem(shares)` value (the pre-change behavior for VaultV2-style vaults).
+    ///      Each pool reflects its own share count through the mocked per-share figure.
+    function test_effectiveBalance_zeroMaxWithdraw_fallsBackToPreviewRedeemPerShare() public {
+        _bootstrap(alice, 1_000e18);
+        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(vault0)));
+        vault.setVault(poolIdB, poolKeyB.currency1, IERC4626(address(vault1)));
+        _bootstrapPool(poolKeyB, bob, 4_000e18);
+
+        vm.mockCall(
+            address(vault0), abi.encodeWithSelector(IERC4626.maxWithdraw.selector, address(vault)), abi.encode(0)
+        );
         vm.mockCall(
             address(vault0),
             abi.encodeWithSelector(IERC4626.previewRedeem.selector, uint256(1_000e18)),
@@ -631,10 +651,31 @@ contract PoolVaultTest is Test, Deployers {
             abi.encode(2_000e18)
         );
 
-        uint256 effAFee = vault.effectiveBalance(poolIdA, poolKeyA.currency0);
-        uint256 effBFee = vault.effectiveBalance(poolIdB, poolKeyB.currency0);
-        assertEq(effAFee, 500e18, "pool A reflects mocked previewRedeem");
-        assertEq(effBFee, 2_000e18, "pool B reflects mocked previewRedeem");
+        assertEq(vault.effectiveBalance(poolIdA, poolKeyA.currency0), 500e18, "pool A reflects mocked previewRedeem");
+        assertEq(vault.effectiveBalance(poolIdB, poolKeyB.currency0), 2_000e18, "pool B reflects mocked previewRedeem");
+    }
+
+    /// @dev The partner-reported SparkVault scenario: the pool's position value exceeds the
+    ///      vault's idle liquidity (capital deployed), where `previewRedeem` reverts. Sizing
+    ///      reports the idle-capped figure, and a withdrawal sized to that figure clears the
+    ///      vault's liquidity gate.
+    function test_effectiveBalance_sparkVault_idleCapped() public {
+        MockSparkVault spark0 = new MockSparkVault(ERC20(address(token0)));
+        vault.setVault(poolIdB, poolKeyB.currency0, IERC4626(address(spark0)));
+        _bootstrapPool(poolKeyB, bob, 1_000e18);
+
+        // Deploy 600 of the vault's 1000 idle: previewRedeem on the pool's full position now
+        // reverts, so a previewRedeem-primary sizing would revert every read.
+        spark0.allocate(makeAddr("sparkAllocator"), 600e18);
+        uint256 fullPosition = spark0.balanceOf(address(vault));
+        vm.expectRevert("SparkVault/insufficient-liquidity");
+        spark0.previewRedeem(fullPosition);
+
+        assertEq(vault.effectiveBalance(poolIdB, poolKeyB.currency0), 400e18, "sized to idle liquidity");
+
+        vault.withdrawFromVault(poolIdB, poolKeyB.currency0, 400e18);
+        assertEq(vault.getERC20(poolIdB, poolKeyB.currency0), 400e18, "withdrawal within idle succeeds");
+        assertEq(vault.effectiveBalance(poolIdB, poolKeyB.currency0), 400e18, "post-withdraw: raw ERC-20 leg");
     }
 
     // ══════════════════════════════════════════════════════════
