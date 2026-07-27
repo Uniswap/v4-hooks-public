@@ -53,8 +53,20 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     /// @inheritdoc IAggregatorHook
     function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external returns (uint256 amountUnspecified) {
-        amountUnspecified = _rawQuote(zeroToOne, amountSpecified, poolId);
+        return _innerQuote(zeroToOne, amountSpecified, poolId, _rawQuote(zeroToOne, amountSpecified, poolId));
+    }
 
+    /// @notice Shared quote tail: applies the protocol fee to a raw quote. Called by every quote variant so
+    ///         this fee adjustment lives in exactly one place.
+    /// @param zeroToOne Whether the swap is from token0 to token1
+    /// @param amountSpecified The amount specified (negative for exact-in, positive for exact-out)
+    /// @param poolId The pool ID
+    /// @param amountUnspecified The raw unspecified amount before protocol fee adjustment
+    /// @return The unspecified amount after protocol fee adjustment
+    function _innerQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId, uint256 amountUnspecified)
+        internal
+        returns (uint256)
+    {
         uint24 protocolFee = _getProtocolFee(poolManager, zeroToOne, poolId);
 
         if (protocolFee == 0) return amountUnspecified;
@@ -65,11 +77,7 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
         bool isExactInput = amountSpecified < 0;
         uint256 feeAmount = _calculateProtocolFeeAmount(protocolFee, isExactInput, amountUnspecified);
 
-        if (isExactInput) {
-            amountUnspecified -= feeAmount;
-        } else {
-            amountUnspecified += feeAmount;
-        }
+        return isExactInput ? amountUnspecified - feeAmount : amountUnspecified + feeAmount;
     }
 
     /// @inheritdoc BaseHook
@@ -128,10 +136,28 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
 
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
+        virtual
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         (uint256 amountIn, uint256 amountOut) = _internalSettle(key, params);
+        return _innerBeforeSwap(sender, key, params, amountIn, amountOut);
+    }
+
+    /// @notice Shared `beforeSwap` tail: turns the settled amounts into the BeforeSwapDelta and applies the
+    ///         protocol fee. Called by every `_beforeSwap` variant so this accounting lives in exactly one place.
+    /// @param sender The address that initiated the swap
+    /// @param key The pool key
+    /// @param params The swap parameters
+    /// @param amountIn The swapper's input amount resolved by settlement (the `takeCurrency` amount)
+    /// @param amountOut The swapper's output amount resolved by settlement (the `settleCurrency` amount)
+    function _innerBeforeSwap(
+        address sender,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        uint256 amountIn,
+        uint256 amountOut
+    ) internal returns (bytes4, BeforeSwapDelta, uint24) {
         int128 unspecifiedDelta = _processAmounts(amountIn, amountOut, params.amountSpecified < 0);
         int128 specified = int128(-params.amountSpecified); // cancel core
 

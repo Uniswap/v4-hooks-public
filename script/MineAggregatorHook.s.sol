@@ -19,6 +19,7 @@ import {
     PancakeSwapV3Aggregator
 } from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {UniswapV2Aggregator} from "../src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol";
+import {UniswapXAggregator} from "../src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol";
 import {LitePSMAggregator} from "../src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol";
 
 /// @notice Mines an address for an aggregator hook using AggregatorHookMiner
@@ -35,6 +36,7 @@ contract MineAggregatorHookScript is Script {
     uint8 constant ID_PANCAKE_V3 = 0x93;
     uint8 constant ID_LITEPSM = 0x95;
     uint8 constant ID_UNISWAP_V2 = 0x02;
+    uint8 constant ID_UNISWAPX = 0xDC;
 
     function run() public view {
         // Read salt offset from environment variable (default to 0)
@@ -62,6 +64,7 @@ contract MineAggregatorHookScript is Script {
         // 0x93 = PancakeSwap V3
         // 0x95 = LitePSM
         // 0x02 = Uniswap V2
+        // 0xDC = UniswapX
 
         uint8 firstByte = uint8(vm.envUint("PROTOCOL_ID"));
         bytes memory creationCode;
@@ -87,6 +90,8 @@ contract MineAggregatorHookScript is Script {
             creationCode = type(LitePSMAggregator).creationCode;
         } else if (firstByte == ID_UNISWAP_V2) {
             creationCode = type(UniswapV2Aggregator).creationCode;
+        } else if (firstByte == ID_UNISWAPX) {
+            creationCode = type(UniswapXAggregator).creationCode;
         } else {
             revert("Invalid protocol ID");
         }
