@@ -70,10 +70,9 @@ FLAG_MASK="3fff"
 FLAGS_DEC=$((16#$FLAG_SUFFIX))
 MASK_DEC=$((16#$FLAG_MASK))
 
-# Which hook to mine for. DualPoolStableHook shares the same 14 flag bits (0x2ac0) and the same
-# constructor shape (address, uint32, address, uint64), so the only thing that changes between the
-# siblings is the creation bytecode this points at:
-#   HOOK_CONTRACT=src/alf/DualPoolStableHook.sol:DualPoolStableHook ./script/mine_dualpool_salt.sh
+# Which hook to mine for. Sibling hooks sharing the same 14 flag bits (0x2ac0) and constructor
+# shape (address, uint32, address, uint64) can be mined by pointing HOOK_CONTRACT at their
+# creation bytecode instead.
 HOOK_CONTRACT="${HOOK_CONTRACT:-src/alf/DualPoolHook.sol:DualPoolHook}"
 HOOK_NAME="${HOOK_CONTRACT##*:}"
 

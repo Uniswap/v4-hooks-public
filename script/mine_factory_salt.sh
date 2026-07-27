@@ -12,11 +12,9 @@
 #
 # The init-code hash (correctness anchor) pins the CURRENT build of AllowlistedFactory AND the
 # CURRENT builds of every allowlisted hook: the factory's constructor arg is the array
-#   [keccak(DualPoolHook.creationCode),
-#    keccak(DualPoolStableHook.creationCode),
-#    keccak(DualPoolIncentivizedHook.creationCode)]
-# in EXACTLY the order DeployDualPoolFactory.s.sol encodes it. Change any of the four contracts
-# (or the array order) and the hash, and any previously-mined salt, is invalid. Keep the mined
+#   [keccak(DualPoolHook.creationCode)]
+# in EXACTLY the order DeployDualPoolFactory.s.sol encodes it. Change either contract (or the
+# array order) and the hash, and any previously-mined salt, is invalid. Keep the mined
 # salt fixed across chains: same bytecode + same salt = same factory address everywhere.
 #
 # Search / speed knobs (env), identical to mine_dualpool_salt.sh:
@@ -52,8 +50,6 @@ FACTORY_CONTRACT="src/AllowlistedFactory.sol:AllowlistedFactory"
 # contents AND order in DeployDualPoolFactory.s.sol, or the mined salt resolves elsewhere.
 ALLOWLISTED_CONTRACTS=(
   "src/alf/DualPoolHook.sol:DualPoolHook"
-  "src/alf/DualPoolStableHook.sol:DualPoolStableHook"
-  "src/alf/DualPoolIncentivizedHook.sol:DualPoolIncentivizedHook"
 )
 
 die() {

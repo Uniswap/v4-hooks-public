@@ -253,7 +253,7 @@ contract DualPoolHook is OwnedALFHook, PoolVault, ReentrancyGuardTransient, IUnl
     /// @dev Reverts {JITInProgress} if any pool served by this hook has a JIT cycle in flight.
     ///      Thin delegate over {requireJITNotInProgress}: the lock state and logic live in the
     ///      `JITLock` type, while the modifier keeps the guard visible in each entry point's
-    ///      signature and hard to omit. Inherited by {DualPoolIncentivizedHook}.
+    ///      signature and hard to omit.
     modifier whenJITNotInProgress() {
         requireJITNotInProgress();
         _;

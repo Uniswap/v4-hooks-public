@@ -19,7 +19,6 @@ import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {AllowlistedFactory} from "../../src/AllowlistedFactory.sol";
 import {IAllowlistedFactory} from "../../src/interfaces/IAllowlistedFactory.sol";
 import {DualPoolHook} from "../../src/alf/DualPoolHook.sol";
-import {DualPoolStableHook} from "../../src/alf/DualPoolStableHook.sol";
 import {LiquidityBucket} from "../../src/alf/types/Distribution.sol";
 import {MockERC4626} from "./mocks/MockERC4626.sol";
 
@@ -41,7 +40,6 @@ contract AllowlistedFactoryTest is Test, Deployers {
     AllowlistedFactory factory;
 
     bytes32 dualPoolHash;
-    bytes32 stableHash;
 
     address owner = makeAddr("owner");
 
@@ -50,11 +48,9 @@ contract AllowlistedFactoryTest is Test, Deployers {
         deployMintAndApprove2Currencies();
 
         dualPoolHash = keccak256(type(DualPoolHook).creationCode);
-        stableHash = keccak256(type(DualPoolStableHook).creationCode);
 
-        bytes32[] memory allowed = new bytes32[](2);
+        bytes32[] memory allowed = new bytes32[](1);
         allowed[0] = dualPoolHash;
-        allowed[1] = stableHash;
         factory = new AllowlistedFactory(allowed);
     }
 
@@ -78,7 +74,6 @@ contract AllowlistedFactoryTest is Test, Deployers {
 
     function test_constructor_setsAllowlist() public view {
         assertTrue(factory.isAllowedCreationCode(dualPoolHash));
-        assertTrue(factory.isAllowedCreationCode(stableHash));
         assertFalse(factory.isAllowedCreationCode(keccak256("something else")));
         assertEq(factory.allDeploymentsLength(), 0);
     }
@@ -140,18 +135,10 @@ contract AllowlistedFactoryTest is Test, Deployers {
         assertEq(hook.maxMinDepositBlocks(), MAX_MIN_DEPOSIT_BLOCKS);
     }
 
-    function test_deploy_stableVariant_registersAndReportsFactory() public {
-        (,, address hookAddr) = _mineAndDeploy(type(DualPoolStableHook).creationCode);
-
-        assertEq(factory.creationCodeHashOf(hookAddr), stableHash);
-        assertTrue(factory.isFromFactory(hookAddr));
-        assertEq(DualPoolStableHook(hookAddr).factory(), address(factory));
-        assertEq(DualPoolStableHook(hookAddr).owner(), owner);
-    }
-
     function test_deploy_multipleHooks_enumerateInOrder() public {
+        // HookMiner skips occupied addresses, so a second identical deploy mines a fresh salt.
         (,, address first) = _mineAndDeploy(type(DualPoolHook).creationCode);
-        (,, address second) = _mineAndDeploy(type(DualPoolStableHook).creationCode);
+        (,, address second) = _mineAndDeploy(type(DualPoolHook).creationCode);
 
         assertEq(factory.allDeploymentsLength(), 2);
         assertEq(factory.allDeployments(0), first);

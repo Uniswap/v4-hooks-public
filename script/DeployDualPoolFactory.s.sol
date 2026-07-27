@@ -5,13 +5,11 @@ import {Script, console2} from "forge-std/Script.sol";
 import {HookMiner} from "../src/utils/HookMiner.sol";
 import {AllowlistedFactory} from "../src/AllowlistedFactory.sol";
 import {DualPoolHook} from "../src/alf/DualPoolHook.sol";
-import {DualPoolStableHook} from "../src/alf/DualPoolStableHook.sol";
-import {DualPoolIncentivizedHook} from "../src/alf/DualPoolIncentivizedHook.sol";
 
 /// @title DeployDualPoolFactory
 /// @author Uniswap Labs
-/// @notice Deploys the DualPool hook family's canonical `AllowlistedFactory`, pinned to the CURRENT builds of
-///         `DualPoolHook`, `DualPoolStableHook`, and `DualPoolIncentivizedHook`.
+/// @notice Deploys the DualPool hook family's canonical `AllowlistedFactory`, pinned to the CURRENT
+///         build of `DualPoolHook`.
 ///         The factory is the discovery anchor for aggregators and third-party routers, so it is
 ///         deployed through the canonical CREATE2 proxy (`0x4e59…`) with a fixed salt: the same
 ///         factory bytecode and salt resolve to the same address on every chain. For a vanity
@@ -26,7 +24,7 @@ import {DualPoolIncentivizedHook} from "../src/alf/DualPoolIncentivizedHook.sol"
 ///
 ///         After deploying the factory, mine hook salts against ITS address
 ///         (`FACTORY=0x… script/mine_dualpool_salt.sh`) and deploy hooks through
-///         `DeployDualPoolHook.s.sol` / `DeployDualPoolStableHook.s.sol`.
+///         `DeployDualPoolHook.s.sol`.
 ///
 /// @dev Env:
 ///        FACTORY_SALT            (default bytes32(0)) CREATE2 salt for the factory itself, mined
@@ -49,17 +47,11 @@ contract DeployDualPoolFactory is Script {
         // Pin the allowlist to the current builds. The factory stores a set, but the array order
         // is part of the constructor-arg encoding and therefore the CREATE2 address: it MUST match
         // `script/mine_factory_salt.sh` or a mined FACTORY_SALT resolves to a different address.
-        bytes32[] memory creationCodeHashes = new bytes32[](3);
+        bytes32[] memory creationCodeHashes = new bytes32[](1);
         creationCodeHashes[0] = keccak256(type(DualPoolHook).creationCode);
-        creationCodeHashes[1] = keccak256(type(DualPoolStableHook).creationCode);
-        creationCodeHashes[2] = keccak256(type(DualPoolIncentivizedHook).creationCode);
 
         console2.log("DualPoolHook creation-code hash:");
         console2.logBytes32(creationCodeHashes[0]);
-        console2.log("DualPoolStableHook creation-code hash:");
-        console2.logBytes32(creationCodeHashes[1]);
-        console2.log("DualPoolIncentivizedHook creation-code hash:");
-        console2.logBytes32(creationCodeHashes[2]);
 
         // Re-derive the address the salt resolves to and fail before broadcasting if it does not
         // satisfy the vanity constraint (same fail-fast pattern as the hook deploy scripts).
@@ -81,8 +73,6 @@ contract DeployDualPoolFactory is Script {
 
         // Sanity: the allowlist round-trips before anyone mines salts against this factory.
         require(factory.isAllowedCreationCode(creationCodeHashes[0]), "DeployDualPoolFactory: allowlist mismatch");
-        require(factory.isAllowedCreationCode(creationCodeHashes[1]), "DeployDualPoolFactory: allowlist mismatch");
-        require(factory.isAllowedCreationCode(creationCodeHashes[2]), "DeployDualPoolFactory: allowlist mismatch");
         require(factory.allDeploymentsLength() == 0, "DeployDualPoolFactory: dirty registry");
 
         console2.log("AllowlistedFactory (DualPool family) deployed at:", address(factory));
