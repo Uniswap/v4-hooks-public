@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/bd043ac47a039fcd5d5e2677644eea715b7fce1f/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/1760682c09b9c83ece9c9ac2d65ba19a027d9e37/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback, [IALFHook](/src/aggregator-hooks/interfaces/IALFHook.sol/interface.IALFHook.md)
@@ -14,8 +14,13 @@ and invokes `reactorCallback`, during which the hook sources the order's require
 the V4 PoolManager (i.e. from the V4 swapper). The V4 swapper therefore provides the counter-side
 liquidity that fills the UniswapX order and, in return, receives the order's input token.
 
-Original Dutch orders are all-or-nothing: the V4 swap amount must exactly match the resolved order
-amounts, otherwise the swap reverts. Each swap consumes one order passed fresh via `hookData`, so a
+Original Dutch orders are all-or-nothing: the whole order fills or nothing does. The V4 swap amount
+only needs to cover the order, not match it exactly: an exact-in swap may specify more input than the
+order's resolved output requires, and an exact-out swap may request less than the order's input
+supplies — any surplus is forwarded to the protocol's token jar (or left in this hook if no jar is
+configured). The swap reverts only when the order's required output exceeds the specified input
+(exact-in) or the order supplies less than the requested output (exact-out). Each swap consumes one
+order passed fresh via `hookData`, so a
 single deployed pool is reusable across many orders for the same token pair.
 
 Stateless across pools: this hook holds no per-pool configuration (the order fully determines the
@@ -405,6 +410,16 @@ function _setTransientResolved(bytes32 slot, uint256 value) private;
 
 ```solidity
 function _getTransientResolved(bytes32 slot) private view returns (uint256 value);
+```
+
+## Events
+### SurplusCollected
+Emitted when the surplus between the V4 swap amount and the resolved order amount is
+forwarded to the token jar
+
+
+```solidity
+event SurplusCollected(address indexed tokenJar, Currency indexed currency, uint256 amount);
 ```
 
 ## Errors

@@ -19,6 +19,7 @@ import {IReactor} from "@uniswapx/interfaces/IReactor.sol";
 import {ResolvedOrder, SignedOrder} from "@uniswapx/base/ReactorStructs.sol";
 import {MockUniswapXReactor} from "./mocks/MockUniswapXReactor.sol";
 import {MockMaliciousUniswapXReactor} from "./mocks/MockMaliciousUniswapXReactor.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {BaseHookDataAggregator} from "../../../src/aggregator-hooks/BaseHookDataAggregator.sol";
 
 contract UniswapXAggregatorUnitTest is Test {
@@ -44,6 +45,7 @@ contract UniswapXAggregatorUnitTest is Test {
 
     address public maker = makeAddr("maker"); // UniswapX order swapper
     address public alice = makeAddr("alice"); // V4 swapper
+    address public tokenJar = makeAddr("tokenJar"); // receives swap-vs-order surplus
 
     function setUp() public {
         poolManager =
@@ -51,6 +53,7 @@ contract UniswapXAggregatorUnitTest is Test {
         swapRouter = new SafePoolSwapTest(poolManager);
         reactor = new MockUniswapXReactor();
         weth = new WETH();
+        poolManager.setProtocolFeeController(address(new MockV4FeeAdapter(poolManager, tokenJar)));
 
         hook = _deployHook(address(reactor));
 
@@ -203,7 +206,7 @@ contract UniswapXAggregatorUnitTest is Test {
         Currency takeCurrency = Currency.wrap(address(tokenB));
         bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
 
-        // Ask for an exact-in amount that does not equal the order's output amount → all-or-nothing revert.
+        // Ask for an exact-in amount below the order's required output → the input cannot cover the fill.
         vm.prank(alice);
         vm.expectRevert();
         swapRouter.swap(
@@ -216,6 +219,86 @@ contract UniswapXAggregatorUnitTest is Test {
             SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             hookData
         );
+    }
+
+    /// @dev Exact-in may over-provide input: the swapper pays the full specified amount, the order fills at its
+    ///      resolved amounts, and the surplus input is forwarded to the token jar.
+    function test_fillOrder_exactIn_surplusInput() public {
+        uint256 inAmt = 100 ether; // maker gives tokenA
+        uint256 outAmt = 99 ether; // maker wants tokenB
+        uint256 specified = 110 ether; // alice provides more than the order requires
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, specified);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: -int256(specified),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received the order output");
+        assertEq(tokenB.balanceOf(alice), 0, "alice paid her full specified input");
+        assertEq(tokenA.balanceOf(alice), inAmt, "alice received the order input");
+        assertEq(tokenB.balanceOf(tokenJar), specified - outAmt, "surplus input went to the token jar");
+        assertEq(tokenB.balanceOf(address(hook)), 0, "hook holds no surplus");
+        assertEq(tokenA.balanceOf(address(hook)), 0, "hook holds no order input");
+    }
+
+    /// @dev Exact-out may under-request: the swapper receives exactly the requested amount, pays the order's
+    ///      full output, and the order's surplus input is forwarded to the token jar.
+    function test_fillOrder_exactOut_underRequest() public {
+        uint256 inAmt = 100 ether; // maker gives tokenA
+        uint256 outAmt = 99 ether; // maker wants tokenB
+        uint256 requested = 90 ether; // alice requests less than the order supplies
+
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+
+        tokenA.mint(maker, inAmt);
+        vm.prank(maker);
+        tokenA.approve(address(reactor), type(uint256).max);
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+
+        Currency takeCurrency = Currency.wrap(address(tokenB));
+        bytes memory hookData = _order(address(tokenA), inAmt, address(tokenB), outAmt);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: _zeroForOne(key, takeCurrency),
+                amountSpecified: int256(requested),
+                sqrtPriceLimitX96: _zeroForOne(key, takeCurrency) ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received the order output");
+        assertEq(tokenB.balanceOf(alice), 0, "alice paid the order's full output");
+        assertEq(tokenA.balanceOf(alice), requested, "alice received exactly the requested amount");
+        assertEq(tokenA.balanceOf(tokenJar), inAmt - requested, "surplus order input went to the token jar");
+        assertEq(tokenA.balanceOf(address(hook)), 0, "hook holds no surplus");
+        assertEq(tokenB.balanceOf(address(hook)), 0, "hook holds no swapper input");
     }
 
     function test_swap_withoutOrderData_reverts() public {

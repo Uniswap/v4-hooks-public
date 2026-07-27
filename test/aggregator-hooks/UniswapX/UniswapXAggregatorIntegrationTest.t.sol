@@ -17,6 +17,7 @@ import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {UniswapXAggregator} from "../../../src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol";
 import {IALFHook, MissingHookData, MalformedHookData} from "../../../src/aggregator-hooks/interfaces/IALFHook.sol";
+import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {IReactor as IBriefcaseReactor} from "@uniswapx/interfaces/IReactor.sol";
 
 // Real UniswapX contracts (brought in as the lib/uniswapx submodule). Uses the ExclusiveDutchOrderReactor —
@@ -69,6 +70,7 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
     address public maker;
     uint256 public makerPk;
     address public alice = makeAddr("alice");
+    address public tokenJar = makeAddr("tokenJar"); // receives swap-vs-order surplus
 
     function setUp() public {
         (maker, makerPk) = makeAddrAndKey("maker");
@@ -80,6 +82,7 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         permit2 = IPermit2(deployPermit2());
         reactor = new ExclusiveDutchOrderReactor(permit2, address(this));
         weth = new WETH();
+        poolManager.setProtocolFeeController(address(new MockV4FeeAdapter(poolManager, tokenJar)));
 
         hook = _deployHook();
 
@@ -345,8 +348,8 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         assertEq(hook.quoteWithHookData(zeroForOne, int256(inAmt), key.toId(), hookData), outEnd, "decay end");
     }
 
-    /// @dev Exact-in quote must reject whenever the V4 swap input does not exactly equal the order's output —
-    ///      the all-or-nothing fill only executes at exactly the resolved amounts.
+    /// @dev Exact-in quote must reject only when the V4 swap input cannot cover the order's required output;
+    ///      over-providing input is allowed (the surplus goes to the token jar).
     function test_quoteWithHookData_exactIn_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
@@ -361,20 +364,21 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         bytes memory hookData = _hookData(order);
         bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
 
-        // swap input 50 < order output 99 -> reject
+        // swap input 50 < order output 99 -> reject (cannot cover the order)
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, -int256(50 ether), key.toId(), hookData);
 
-        // swap input 150 > order output 99 -> reject too (the corresponding swap would revert)
-        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
-        hook.quoteWithHookData(zeroForOne, -int256(150 ether), key.toId(), hookData);
+        // swap input 150 > order output 99 -> accepted; the swapper still receives the order's input
+        assertEq(
+            hook.quoteWithHookData(zeroForOne, -int256(150 ether), key.toId(), hookData), inAmt, "surplus input ok"
+        );
 
         // sanity: an input equal to the order output is accepted
         assertEq(hook.quoteWithHookData(zeroForOne, -int256(outAmt), key.toId(), hookData), inAmt, "exact input ok");
     }
 
-    /// @dev Exact-out quote must reject whenever the requested output does not exactly equal what the order
-    ///      supplies — the all-or-nothing fill only executes at exactly the resolved amounts.
+    /// @dev Exact-out quote must reject only when the order supplies less than the requested output;
+    ///      under-requesting is allowed (the order's surplus input goes to the token jar).
     function test_quoteWithHookData_exactOut_amountMismatch_reverts() public {
         uint256 inAmt = 100 ether;
         uint256 outAmt = 99 ether;
@@ -393,9 +397,9 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.quoteWithHookData(zeroForOne, int256(150 ether), key.toId(), hookData);
 
-        // request 50 of the order input (tokenA), below the order's 100 -> reject too (all-or-nothing)
-        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
-        hook.quoteWithHookData(zeroForOne, int256(50 ether), key.toId(), hookData);
+        // request 50 of the order input (tokenA), below the order's 100 -> accepted; the swapper still
+        // pays the order's full output (the order fills whole)
+        assertEq(hook.quoteWithHookData(zeroForOne, int256(50 ether), key.toId(), hookData), outAmt, "under-request ok");
     }
 
     /// @dev Amounts above int128.max would silently sign-flip when narrowed to form the V4 delta; the quote
@@ -505,9 +509,104 @@ contract UniswapXAggregatorIntegrationTest is Test, DeployPermit2 {
         ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
         bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
 
-        // 50 != the order's 99 output -> caller-fixable input error, must revert (not return 0)
+        // exact-in: input 50 cannot cover the order's 99 output -> caller-fixable input error, must
+        // revert (not return 0)
         vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
         hook.getIndicativeQuote(key, zeroForOne, -int256(50 ether), _hookData(order));
+
+        // exact-out: requesting 150 exceeds the order's 100 input -> revert too
+        vm.expectRevert(UniswapXAggregator.OrderAmountMismatch.selector);
+        hook.getIndicativeQuote(key, zeroForOne, int256(150 ether), _hookData(order));
+    }
+
+    /// @dev Covering amounts succeed and return the order's fixed opposite-side amounts (step-function
+    ///      semantics): over-providing exact-in input and under-requesting exact-out are both fine.
+    function test_getIndicativeQuote_coveringAmounts_returnFixedOrderAmounts() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        // exact-in with surplus input (150 > 99): still returns the order's fixed input amount
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(150 ether), hookData), inAmt, "surplus input");
+        // exact-out under-request (50 < 100): still returns the order's fixed output amount
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, int256(50 ether), hookData), outAmt, "under-request");
+    }
+
+    /// @dev Quote/fill parity for a covering exact-in amount: the quote succeeds, and the fill at the same
+    ///      amount executes, with the surplus input forwarded to the token jar.
+    function test_getIndicativeQuote_parityWithFill_coveringExactIn() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        uint256 specified = 120 ether; // covering: 21 more than the order's 99 output
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, -int256(specified), hookData), inAmt, "quote covers");
+
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, specified);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(specified),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received the order output");
+        assertEq(tokenA.balanceOf(alice), inAmt, "alice received the order input (as quoted)");
+        assertEq(tokenB.balanceOf(alice), 0, "alice paid the full specified input");
+        assertEq(tokenB.balanceOf(tokenJar), specified - outAmt, "surplus input went to the token jar");
+        assertEq(tokenB.balanceOf(address(hook)), 0, "hook holds no take-currency balance");
+        assertEq(tokenA.balanceOf(address(hook)), 0, "hook holds no settle-currency balance");
+    }
+
+    /// @dev Quote/fill parity for an exact-out under-request: the quote succeeds, and the fill at the same
+    ///      amount executes, with the order's surplus input forwarded to the token jar.
+    function test_getIndicativeQuote_parityWithFill_underRequestedExactOut() public {
+        uint256 inAmt = 100 ether;
+        uint256 outAmt = 99 ether;
+        uint256 requested = 80 ether; // under the order's 100 input
+        PoolKey memory key = _initPool(Currency.wrap(address(tokenA)), Currency.wrap(address(tokenB)));
+        ExclusiveDutchOrder memory order = _fundedOrderAB(inAmt, outAmt);
+        bytes memory hookData = _hookData(order);
+        bool zeroForOne = _zeroForOne(key, Currency.wrap(address(tokenB)));
+
+        assertEq(hook.getIndicativeQuote(key, zeroForOne, int256(requested), hookData), outAmt, "quote covers");
+
+        tokenB.mint(address(poolManager), 1000 ether);
+        tokenB.mint(alice, outAmt);
+        vm.prank(alice);
+        tokenB.approve(address(swapRouter), type(uint256).max);
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: int256(requested),
+                sqrtPriceLimitX96: zeroForOne ? MIN_PRICE : MAX_PRICE
+            }),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+
+        assertEq(tokenB.balanceOf(maker), outAmt, "maker received the order output");
+        assertEq(tokenA.balanceOf(alice), requested, "alice received exactly the requested amount");
+        assertEq(tokenB.balanceOf(alice), 0, "alice paid the order's full output (as quoted)");
+        assertEq(tokenA.balanceOf(tokenJar), inAmt - requested, "surplus order input went to the token jar");
+        assertEq(tokenA.balanceOf(address(hook)), 0, "hook holds no settle-currency balance");
+        assertEq(tokenB.balanceOf(address(hook)), 0, "hook holds no take-currency balance");
     }
 
     function test_getIndicativeQuote_wrongDirection_reverts() public {

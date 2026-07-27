@@ -25,8 +25,13 @@ import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 ///         and invokes `reactorCallback`, during which the hook sources the order's required output from
 ///         the V4 PoolManager (i.e. from the V4 swapper). The V4 swapper therefore provides the counter-side
 ///         liquidity that fills the UniswapX order and, in return, receives the order's input token.
-/// @dev    Original Dutch orders are all-or-nothing: the V4 swap amount must exactly match the resolved order
-///         amounts, otherwise the swap reverts. Each swap consumes one order passed fresh via `hookData`, so a
+/// @dev    Original Dutch orders are all-or-nothing: the whole order fills or nothing does. The V4 swap amount
+///         only needs to cover the order, not match it exactly: an exact-in swap may specify more input than the
+///         order's resolved output requires, and an exact-out swap may request less than the order's input
+///         supplies — any surplus is forwarded to the protocol's token jar (or left in this hook if no jar is
+///         configured). The swap reverts only when the order's required output exceeds the specified input
+///         (exact-in) or the order supplies less than the requested output (exact-out). Each swap consumes one
+///         order passed fresh via `hookData`, so a
 ///         single deployed pool is reusable across many orders for the same token pair.
 /// @dev    Stateless across pools: this hook holds no per-pool configuration (the order fully determines the
 ///         token pair and amounts at swap time), so one deployed hook instance can be the `hooks` address for
@@ -87,6 +92,10 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
     error NativeTransferFailed();
     error TVLNotSupported();
 
+    /// @notice Emitted when the surplus between the V4 swap amount and the resolved order amount is
+    ///         forwarded to the token jar
+    event SurplusCollected(address indexed tokenJar, Currency indexed currency, uint256 amount);
+
     constructor(IPoolManager _manager, IReactor _reactor, address _weth)
         BaseHookDataAggregator(_manager, "UniswapXAggregator v1.0")
     {
@@ -122,11 +131,14 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
     /// @dev Shared validation + amount selection over a resolved order, used by both quote paths.
     ///      Sums the order's outputs enforcing the same-token invariant (the fill requires all outputs share
     ///      one token — the V4 swapper's input currency), mirrors the execution-time `int128` narrowing (see
-    ///      MAX_INT128), and enforces the strict all-or-nothing amount equality that `_conductSwap` applies,
-    ///      so a successful quote implies the corresponding swap amount matches.
-    /// @return amountUnspecified The amount on the side opposite `amountSpecified`: the V4 swapper provides
-    ///         the order's OUTPUT and receives its INPUT, so exact-in returns the order input and exact-out
-    ///         returns the (summed) order output.
+    ///      MAX_INT128), and enforces the same covering bounds as the fill: the order itself fills
+    ///      all-or-nothing at its resolved amounts, but the V4 swap amount only needs to cover it — an
+    ///      exact-in swap may specify more input than the order's required output, and an exact-out swap may
+    ///      request less than the order's input supplies; any surplus is forwarded to the token jar at swap
+    ///      time. A successful quote therefore implies the corresponding swap amount is fillable.
+    /// @return amountUnspecified The fixed amount on the side opposite `amountSpecified`: the V4 swapper
+    ///         provides the order's OUTPUT and receives its INPUT, so exact-in returns the order input and
+    ///         exact-out returns the (summed) order output.
     /// @return outputToken The order's (single) output token, for pool/direction validation by callers.
     function _quoteResolvedOrder(ResolvedOrder memory resolved, int256 amountSpecified)
         internal
@@ -141,16 +153,25 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
             orderOutput += resolved.outputs[i].amount;
         }
 
+        // Mirror the execution-time `int128` narrowing (see MAX_INT128) so a quote never returns an amount
+        // that `_conductSwap` would later reject as overflowing. For exact-in the amount actually taken from
+        // the PoolManager is the swapper's full specified input, so that is what must fit in an int128.
         if (orderOutput > MAX_INT128) revert OrderOutputOverflow();
         if (resolved.input.amount > MAX_INT128) revert OrderInputOverflow();
+        if (amountSpecified < 0 && uint256(-amountSpecified) > MAX_INT128) revert OrderOutputOverflow();
 
-        // Exact-in: the V4 swap input is `-amountSpecified` (in the order's output token); it must equal
-        // the order's output.
-        if (amountSpecified < 0 && amountSpecified != -int256(orderOutput)) revert OrderAmountMismatch();
-        // Exact-out: the V4 swapper requests `amountSpecified` of the order's input token; it must equal
-        // what the order supplies.
-        if (amountSpecified > 0 && amountSpecified != int256(resolved.input.amount)) revert OrderAmountMismatch();
+        // The order itself fills all-or-nothing, but the V4 swap amount only needs to cover it (mirroring
+        // the execution-time bounds in `reactorCallback`/`_conductSwap`).
+        // Exact-in: the V4 swap input is `-amountSpecified` (in the order's output token); it must be at
+        // least the order's required output. Any surplus input is forwarded to the token jar at swap time.
+        if (amountSpecified < 0 && -amountSpecified < int256(orderOutput)) revert OrderAmountMismatch();
+        // Exact-out: the V4 swapper requests `amountSpecified` of the order's input token; the order must
+        // supply at least that much. Any surplus order input is forwarded to the token jar at swap time.
+        if (amountSpecified > 0 && amountSpecified > int256(resolved.input.amount)) revert OrderAmountMismatch();
 
+        // The hook fills atomically: the V4 swapper provides the order's OUTPUT and receives its INPUT.
+        // exact-in  (amountSpecified < 0): swapper specified the input it provides (order output) -> receives order input
+        // exact-out (amountSpecified > 0): swapper specified the output it wants (order input)   -> pays order output
         amountUnspecified = amountSpecified < 0 ? resolved.input.amount : orderOutput;
     }
 
@@ -173,14 +194,20 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
     // ─────────────────────────── IALFHook (URC-4) ───────────────────────────
 
     /// @inheritdoc IALFHook
-    /// @dev Caller-fixable input problems revert descriptively: empty `hookData` reverts `MissingHookData`,
-    ///      undecodable `hookData` reverts `MalformedHookData`, a swap amount that does not exactly match the
-    ///      resolved all-or-nothing order reverts `OrderAmountMismatch`, and a `key`/`zeroForOne` combination
-    ///      whose currencies do not correspond to the order's tokens (ETH/WETH treated as equivalent) reverts
+    /// @dev Quotes are a step function of the order's resolved amounts: any covering swap amount succeeds and
+    ///      returns the order's fixed opposite-side amount (exact-in returns the order input for any specified
+    ///      input >= the order's required output; exact-out returns the order output for any requested amount
+    ///      <= the order's input) — the surplus is forwarded to the token jar at swap time (`SurplusCollected`).
+    ///      Caller-fixable input problems revert descriptively: empty `hookData` reverts `MissingHookData`,
+    ///      undecodable `hookData` reverts `MalformedHookData`, a swap amount the order cannot serve (exact-in
+    ///      input below the order's required output, or exact-out request above what the order supplies)
+    ///      reverts `OrderAmountMismatch`, and a `key`/`zeroForOne` combination whose currencies do not
+    ///      correspond to the order's tokens (ETH/WETH treated as equivalent) reverts
     ///      `OrderInputMismatch`/`OrderOutputMismatch`. Order-state failures that no input change can fix —
     ///      expired, already filled, invalid signature, i.e. any revert bubbling out of the OrderQuoter
-    ///      resolution — return 0 instead. NOTE: like `quoteWithHookData` this is NOT a view (the OrderQuoter
-    ///      calls the reactor, pulling the maker's input via Permit2 before rolling back).
+    ///      resolution — return 0 instead. Succeeds and reverts under exactly the same conditions as the fill.
+    ///      NOTE: like `quoteWithHookData` this is NOT a view (the OrderQuoter calls the reactor, pulling the
+    ///      maker's input via Permit2 before rolling back).
     function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
         external
         returns (uint256 quoteAmount)
@@ -252,7 +279,8 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
         // cannot slip extra orders past the single-order accounting below.
         if (resolvedOrders.length != 1) revert UnexpectedOrderCount();
 
-        (Currency settleCurrency, Currency takeCurrency) = abi.decode(callbackData, (Currency, Currency));
+        (Currency settleCurrency, Currency takeCurrency, int256 amountSpecified) =
+            abi.decode(callbackData, (Currency, Currency, int256));
 
         ResolvedOrder memory resolved = resolvedOrders[0];
 
@@ -269,8 +297,31 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
             outputAmount += resolved.outputs[i].amount;
         }
 
-        // Pull the V4 swapper's input from the PoolManager into this hook (native ETH or ERC20).
+        // Amount pulled from the PoolManager: for exact-in, the swapper's full specified input (the base hook
+        // cancels the full specified amount, so the whole input must be taken to balance the delta) — it must
+        // cover the order's required output. For exact-out, exactly the order's required output (the swapper
+        // pays it in full on the unspecified side).
+        uint256 takeAmount = outputAmount;
+        if (amountSpecified < 0) {
+            takeAmount = uint256(-amountSpecified);
+            if (outputAmount > takeAmount) revert OrderAmountMismatch();
+        }
+
+        // Pull the V4 swapper's input from the PoolManager (native ETH or ERC20): the order's required output
+        // into this hook, and any exact-in surplus straight to the token jar (or into this hook if no jar is
+        // cached, rather than reverting the fill). The jar is cached at pool initialize; call `pollTokenJar`
+        // to refresh it if the fee controller's jar changes.
         poolManager.take(takeCurrency, address(this), outputAmount);
+        if (takeAmount > outputAmount) {
+            uint256 surplus = takeAmount - outputAmount;
+            address jar = tokenJar;
+            if (jar == address(0)) {
+                poolManager.take(takeCurrency, address(this), surplus);
+            } else {
+                poolManager.take(takeCurrency, jar, surplus);
+                emit SurplusCollected(jar, takeCurrency, surplus);
+            }
+        }
 
         // Convert what we hold into the order's output token so the reactor can deliver it.
         if (outputToken == address(0)) {
@@ -286,7 +337,7 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
         // Otherwise the order's output is an ordinary ERC20 equal to `takeCurrency`; the reactor pulls it via approval.
 
         _setTransientResolved(RESOLVED_INPUT_SLOT, resolved.input.amount);
-        _setTransientResolved(RESOLVED_OUTPUT_SLOT, outputAmount);
+        _setTransientResolved(RESOLVED_OUTPUT_SLOT, takeAmount);
     }
 
     /// @inheritdoc BaseAggregatorHook
@@ -349,12 +400,11 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
         // Execute the order. The reactor pulls the order swapper's input (ERC20) to this hook, calls
         // `reactorCallback` (where we source and convert the order's output from the PoolManager), then
         // transfers the order's output from this hook to the order's recipient.
-        reactor.executeWithCallback(order, abi.encode(settleCurrency, takeCurrency));
-
-        _setTransientInflight(false);
+        reactor.executeWithCallback(order, abi.encode(settleCurrency, takeCurrency, params.amountSpecified));
 
         // amountSettle = order input amount (now held by this hook, in `settleCurrency` units after any unwrap)
-        // amountTake   = order output amount (taken from the PoolManager in the callback)
+        // amountTake   = amount taken from the PoolManager in the callback (the swapper's full specified input
+        //                for exact-in; the order's required output for exact-out)
         amountSettle = _getTransientResolved(RESOLVED_INPUT_SLOT);
         amountTake = _getTransientResolved(RESOLVED_OUTPUT_SLOT);
 
@@ -373,12 +423,30 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHoo
             if (wethBalance != 0) IWETH9(weth).withdraw(wethBalance);
         }
 
-        // Enforce the all-or-nothing match: the V4 swap amount must equal the resolved order amount.
-        if (params.amountSpecified < 0) {
-            if (amountTake != uint256(-params.amountSpecified)) revert OrderAmountMismatch();
-        } else {
-            if (amountSettle != uint256(params.amountSpecified)) revert OrderAmountMismatch();
+        // The order fills all-or-nothing, but the V4 swap amount only needs to cover it. Exact-in was already
+        // enforced in `reactorCallback` (required output <= specified input, with the surplus routed to the
+        // token jar there). For exact-out, the order must supply at least the requested amount; settle exactly
+        // the request and forward the order's surplus input to the token jar (or leave it in this hook if no
+        // jar is cached, rather than reverting the fill).
+        if (params.amountSpecified > 0) {
+            uint256 requested = uint256(params.amountSpecified);
+            if (amountSettle < requested) revert OrderAmountMismatch();
+            uint256 surplus = amountSettle - requested;
+            if (surplus != 0) {
+                address jar = tokenJar;
+                if (jar != address(0)) {
+                    if (settleCurrency.isAddressZero()) {
+                        (bool ok,) = jar.call{value: surplus}("");
+                        if (!ok) revert NativeTransferFailed();
+                    } else {
+                        IERC20(Currency.unwrap(settleCurrency)).safeTransfer(jar, surplus);
+                    }
+                    emit SurplusCollected(jar, settleCurrency, surplus);
+                }
+            }
+            amountSettle = requested;
         }
+        _setTransientInflight(false);
 
         // Leave the order's input token in this hook so the base `_internalSettle` settles `settleCurrency`.
         return (amountSettle, amountTake, false);

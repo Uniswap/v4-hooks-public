@@ -41,3 +41,9 @@
 [submodule "lib/uniswapx"]
 	path = lib/uniswapx
 	url = https://github.com/Uniswap/UniswapX
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
+[submodule "lib/blocknumberish"]
+	path = lib/blocknumberish
+	url = https://github.com/Uniswap/blocknumberish
