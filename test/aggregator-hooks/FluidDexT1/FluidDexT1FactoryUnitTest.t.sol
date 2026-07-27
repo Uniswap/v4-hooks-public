@@ -115,4 +115,62 @@ contract FluidDexT1FactoryUnitTest is Test {
 
         assertEq(computed, deployed);
     }
+
+    function test_factory_registryAndDuplicateProtection() public {
+        FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
+            poolManager, mockResolver, IFluidDexResolver(address(mockResolver)), fluidLiquidity
+        );
+
+        assertEq(factory.deploymentCount(), 0);
+        assertEq(factory.hookForPool(address(mockPool)), address(0));
+
+        bytes memory args = abi.encode(
+            address(poolManager), address(mockPool), address(mockResolver), address(mockResolver), fluidLiquidity
+        );
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
+            type(FluidDexT1Aggregator).creationCode,
+            args
+        );
+
+        address hook = factory.createPool(
+            factorySalt,
+            mockPool,
+            Currency.wrap(address(token0)),
+            Currency.wrap(address(token1)),
+            FEE,
+            TICK_SPACING,
+            SQRT_PRICE_1_1
+        );
+
+        assertEq(factory.deploymentCount(), 1);
+        assertEq(factory.hookForPool(address(mockPool)), hook);
+
+        FluidDexT1AggregatorFactory.Deployment memory deployment = factory.getDeployment(0);
+        assertEq(deployment.hook, hook);
+        assertEq(deployment.fluidPool, address(mockPool));
+        assertEq(Currency.unwrap(deployment.poolKey.currency0), address(token0));
+        assertEq(Currency.unwrap(deployment.poolKey.currency1), address(token1));
+        assertEq(deployment.poolKey.fee, FEE);
+        assertEq(deployment.poolKey.tickSpacing, TICK_SPACING);
+        assertEq(address(deployment.poolKey.hooks), hook);
+
+        // A second deployment for the same Fluid pool reverts regardless of salt
+        vm.expectRevert(
+            abi.encodeWithSelector(FluidDexT1AggregatorFactory.DuplicatePool.selector, address(mockPool), hook)
+        );
+        factory.createPool(
+            bytes32(0),
+            mockPool,
+            Currency.wrap(address(token0)),
+            Currency.wrap(address(token1)),
+            FEE,
+            TICK_SPACING,
+            SQRT_PRICE_1_1
+        );
+    }
 }

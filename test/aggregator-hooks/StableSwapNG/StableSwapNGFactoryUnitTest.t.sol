@@ -117,4 +117,48 @@ contract StableSwapNGFactoryUnitTest is Test {
         vm.expectRevert(StableSwapNGAggregatorFactory.InsufficientTokens.selector);
         factory.createPool(bytes32(0), mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
     }
+
+    function test_factory_registryAndDuplicateProtection() public {
+        StableSwapNGAggregatorFactory factory =
+            new StableSwapNGAggregatorFactory(poolManager, ICurveStableSwapFactoryNG(address(mockFactory)));
+
+        assertEq(factory.deploymentCount(), 0);
+        assertEq(factory.hookForPool(address(mockPool)), address(0));
+
+        Currency[] memory tokens = new Currency[](2);
+        tokens[0] = Currency.wrap(address(token0));
+        tokens[1] = Currency.wrap(address(token1));
+
+        bytes memory args = abi.encode(address(poolManager), address(mockPool), address(mockFactory));
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
+            type(StableSwapNGAggregator).creationCode,
+            args
+        );
+
+        address hook = factory.createPool(factorySalt, mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+
+        assertEq(factory.deploymentCount(), 1);
+        assertEq(factory.hookForPool(address(mockPool)), hook);
+
+        StableSwapNGAggregatorFactory.Deployment memory deployment = factory.getDeployment(0);
+        assertEq(deployment.hook, hook);
+        assertEq(deployment.curvePool, address(mockPool));
+        assertEq(deployment.poolKeys.length, 1);
+        assertEq(Currency.unwrap(deployment.poolKeys[0].currency0), address(token0));
+        assertEq(Currency.unwrap(deployment.poolKeys[0].currency1), address(token1));
+        assertEq(deployment.poolKeys[0].fee, FEE);
+        assertEq(deployment.poolKeys[0].tickSpacing, TICK_SPACING);
+        assertEq(address(deployment.poolKeys[0].hooks), hook);
+
+        // A second deployment for the same Curve pool reverts regardless of salt
+        vm.expectRevert(
+            abi.encodeWithSelector(StableSwapNGAggregatorFactory.DuplicatePool.selector, address(mockPool), hook)
+        );
+        factory.createPool(bytes32(0), mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+    }
 }

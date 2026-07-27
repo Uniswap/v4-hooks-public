@@ -13,13 +13,28 @@ import {ICurveStableSwapFactoryNG} from "./interfaces/ICurveStableSwapFactoryNG.
 /// @notice Factory for creating StableSwapNGAggregator hooks via CREATE2 and initializing Uniswap V4 pools
 /// @dev Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 contract StableSwapNGAggregatorFactory {
+    /// @notice Full record of a hook deployment
+    struct Deployment {
+        address hook;
+        address curvePool;
+        PoolKey[] poolKeys;
+    }
+
     /// @notice The Uniswap V4 PoolManager contract
     IPoolManager public immutable poolManager;
 
     /// @notice The Curve StableSwap NG factory for checking meta pool status
     ICurveStableSwapFactoryNG public immutable curveFactory;
 
+    /// @notice All deployments, indexed by creation order
+    /// @dev The auto-generated getter omits the poolKeys array; use getDeployment for the full record
+    Deployment[] public deployments;
+
+    /// @notice The hook deployed for a given Curve pool (address(0) if none)
+    mapping(address curvePool => address hook) public hookForPool;
+
     error InsufficientTokens();
+    error DuplicatePool(address curvePool, address existingHook);
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
@@ -51,7 +66,15 @@ contract StableSwapNGAggregatorFactory {
     ) external returns (address hook) {
         if (tokens.length < 2) revert InsufficientTokens();
 
+        address existingHook = hookForPool[address(curvePool)];
+        if (existingHook != address(0)) revert DuplicatePool(address(curvePool), existingHook);
+
         hook = address(new StableSwapNGAggregator{salt: salt}(poolManager, curvePool, curveFactory));
+
+        hookForPool[address(curvePool)] = hook;
+        Deployment storage deployment = deployments.push();
+        deployment.hook = hook;
+        deployment.curvePool = address(curvePool);
 
         // Initialize one pool per token pair
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -66,9 +89,22 @@ contract StableSwapNGAggregatorFactory {
 
                 poolManager.initialize(poolKey, sqrtPriceX96);
 
+                deployment.poolKeys.push(poolKey);
+
                 emit HookDeployed(hook, address(curvePool), poolKey);
             }
         }
+    }
+
+    /// @notice Total number of hooks deployed by this factory
+    function deploymentCount() external view returns (uint256) {
+        return deployments.length;
+    }
+
+    /// @notice Returns the full deployment record (including all pool keys) for a deployment index
+    /// @param index The deployment index (in creation order)
+    function getDeployment(uint256 index) external view returns (Deployment memory) {
+        return deployments[index];
     }
 
     /// @notice Computes the CREATE2 address for a hook without deploying
