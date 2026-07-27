@@ -280,8 +280,6 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         // transfers the order's output from this hook to the order's recipient.
         reactor.executeWithCallback(order, abi.encode(settleCurrency, takeCurrency, params.amountSpecified));
 
-        _setTransientInflight(false);
-
         // amountSettle = order input amount (now held by this hook, in `settleCurrency` units after any unwrap)
         // amountTake   = amount taken from the PoolManager in the callback (the swapper's full specified input
         //                for exact-in; the order's required output for exact-out)
@@ -326,6 +324,7 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
             }
             amountSettle = requested;
         }
+        _setTransientInflight(false);
 
         // Leave the order's input token in this hook so the base `_internalSettle` settles `settleCurrency`.
         return (amountSettle, amountTake, false);
