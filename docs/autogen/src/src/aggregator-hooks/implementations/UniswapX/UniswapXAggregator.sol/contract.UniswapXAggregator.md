@@ -154,8 +154,11 @@ function _rawQuoteWithHookData(bool, int256 amountSpecified, PoolId, bytes calld
 Shared validation + amount selection over a resolved order, used by both quote paths.
 Sums the order's outputs enforcing the same-token invariant (the fill requires all outputs share
 one token — the V4 swapper's input currency), mirrors the execution-time `int128` narrowing (see
-MAX_INT128), and enforces the strict all-or-nothing amount equality that `_conductSwap` applies,
-so a successful quote implies the corresponding swap amount matches.
+MAX_INT128), and enforces the same covering bounds as the fill: the order itself fills
+all-or-nothing at its resolved amounts, but the V4 swap amount only needs to cover it — an
+exact-in swap may specify more input than the order's required output, and an exact-out swap may
+request less than the order's input supplies; any surplus is forwarded to the token jar at swap
+time. A successful quote therefore implies the corresponding swap amount is fillable.
 
 
 ```solidity
@@ -168,7 +171,7 @@ function _quoteResolvedOrder(ResolvedOrder memory resolved, int256 amountSpecifi
 
 |Name|Type|Description|
 |----|----|-----------|
-|`amountUnspecified`|`uint256`|The amount on the side opposite `amountSpecified`: the V4 swapper provides the order's OUTPUT and receives its INPUT, so exact-in returns the order input and exact-out returns the (summed) order output.|
+|`amountUnspecified`|`uint256`|The fixed amount on the side opposite `amountSpecified`: the V4 swapper provides the order's OUTPUT and receives its INPUT, so exact-in returns the order input and exact-out returns the (summed) order output.|
 |`outputToken`|`address`|The order's (single) output token, for pool/direction validation by callers.|
 
 
@@ -196,14 +199,20 @@ function _decodeOrder(bytes calldata hookData) internal view returns (SignedOrde
 
 Get a non-binding indicative quote.
 
+Quotes are a step function of the order's resolved amounts: any covering swap amount succeeds and
+returns the order's fixed opposite-side amount (exact-in returns the order input for any specified
+input >= the order's required output; exact-out returns the order output for any requested amount
+<= the order's input) — the surplus is forwarded to the token jar at swap time (`SurplusCollected`).
 Caller-fixable input problems revert descriptively: empty `hookData` reverts `MissingHookData`,
-undecodable `hookData` reverts `MalformedHookData`, a swap amount that does not exactly match the
-resolved all-or-nothing order reverts `OrderAmountMismatch`, and a `key`/`zeroForOne` combination
-whose currencies do not correspond to the order's tokens (ETH/WETH treated as equivalent) reverts
+undecodable `hookData` reverts `MalformedHookData`, a swap amount the order cannot serve (exact-in
+input below the order's required output, or exact-out request above what the order supplies)
+reverts `OrderAmountMismatch`, and a `key`/`zeroForOne` combination whose currencies do not
+correspond to the order's tokens (ETH/WETH treated as equivalent) reverts
 `OrderInputMismatch`/`OrderOutputMismatch`. Order-state failures that no input change can fix —
 expired, already filled, invalid signature, i.e. any revert bubbling out of the OrderQuoter
-resolution — return 0 instead. NOTE: like `quoteWithHookData` this is NOT a view (the OrderQuoter
-calls the reactor, pulling the maker's input via Permit2 before rolling back).
+resolution — return 0 instead. Succeeds and reverts under exactly the same conditions as the fill.
+NOTE: like `quoteWithHookData` this is NOT a view (the OrderQuoter calls the reactor, pulling the
+maker's input via Permit2 before rolling back).
 
 
 ```solidity
