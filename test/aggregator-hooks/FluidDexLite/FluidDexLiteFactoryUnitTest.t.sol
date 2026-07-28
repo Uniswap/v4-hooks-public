@@ -143,9 +143,7 @@ contract FluidDexLiteFactoryUnitTest is Test {
         assertEq(address(deployment.poolKey.hooks), hook);
 
         // A second deployment for the same dexSalt reverts regardless of salt
-        vm.expectRevert(
-            abi.encodeWithSelector(FluidDexLiteAggregatorFactory.DuplicatePool.selector, dexSalt, hook)
-        );
+        vm.expectRevert(abi.encodeWithSelector(FluidDexLiteAggregatorFactory.DuplicatePool.selector, dexSalt, hook));
         factory.createPool(
             bytes32(0),
             dexSalt,
