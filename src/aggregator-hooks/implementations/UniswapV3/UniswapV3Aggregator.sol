@@ -31,6 +31,9 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
 
     mapping(address => PoolKey) private _canonicalPoolKeyByAddress;
 
+    /// @notice PoolKeys of all pools initialized with this hook, in initialization order
+    PoolKey[] internal _initializedPools;
+
     uint160 internal constant MIN_SQRT_RATIO_ADJ = TickMath.MIN_SQRT_PRICE + 1;
     uint160 internal constant MAX_SQRT_RATIO_ADJ = TickMath.MAX_SQRT_PRICE - 1;
 
@@ -175,6 +178,17 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         if (IUniswapV3Pool(pool).tickSpacing() != key.tickSpacing) revert ExternalPoolMismatch();
     }
 
+    /// @notice Number of pools initialized with this hook
+    function initializedLength() external view returns (uint256) {
+        return _initializedPools.length;
+    }
+
+    /// @notice Returns the PoolKey of an initialized pool
+    /// @param index The pool index (in initialization order)
+    function initialized(uint256 index) external view returns (PoolKey memory) {
+        return _initializedPools[index];
+    }
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4) {
         if (key.currency0.isAddressZero() || key.currency1.isAddressZero()) revert NativeCurrencyNotSupported();
 
@@ -195,6 +209,7 @@ contract UniswapV3Aggregator is BaseAggregatorHook, IUniswapV3SwapCallback {
         _canonicalPoolKeyByAddress[poolAddr] = key;
 
         poolIdToExternalPool[key.toId()] = poolAddr;
+        _initializedPools.push(key);
 
         emit AggregatorPoolRegistered(key.toId());
         pollTokenJar();

@@ -254,6 +254,40 @@ contract UniswapV2AggregatorUnitTest is Test {
         assertEq(t1Before - token1.balanceOf(alice), expectedIn);
     }
 
+    function test_initializedRegistry() public {
+        // setUp initialized one pool
+        assertEq(hook.initializedLength(), 1);
+        PoolKey memory stored = hook.initialized(0);
+        assertEq(Currency.unwrap(stored.currency0), address(token0));
+        assertEq(Currency.unwrap(stored.currency1), address(token1));
+        assertEq(stored.fee, POOL_FEE);
+        assertEq(stored.tickSpacing, TICK_SPACING_A);
+        assertEq(address(stored.hooks), address(hook));
+
+        // A second pair registers as a second entry
+        MockERC20 tokenA = new MockERC20("Token2", "TK2", 18);
+        MockERC20 tokenB = new MockERC20("Token3", "TK3", 18);
+        if (address(tokenA) > address(tokenB)) (tokenA, tokenB) = (tokenB, tokenA);
+        factory.createPair(address(tokenA), address(tokenB));
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(tokenA)),
+            currency1: Currency.wrap(address(tokenB)),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING_A,
+            hooks: IHooks(address(hook))
+        });
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+
+        assertEq(hook.initializedLength(), 2);
+        stored = hook.initialized(1);
+        assertEq(Currency.unwrap(stored.currency0), address(tokenA));
+        assertEq(Currency.unwrap(stored.currency1), address(tokenB));
+        assertEq(stored.fee, POOL_FEE);
+        assertEq(stored.tickSpacing, TICK_SPACING_A);
+        assertEq(address(stored.hooks), address(hook));
+    }
+
     function test_secondInitialize_same_external_pair_reverts() public {
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),
