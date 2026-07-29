@@ -9,6 +9,7 @@ import {CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -31,6 +32,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using SafeCast for uint256;
+    using TransientStateLibrary for IPoolManager;
 
     ERC4626WrapperHook public hook;
     ERC4626RoutingHook public hookSim;
@@ -462,6 +464,97 @@ contract ERC4626WrapperHookTest is Test, Deployers {
             )
         );
         manager.initialize(invalidKey, initSqrtPriceX96);
+    }
+
+    // ---------------------------------------------------------------------
+    // In-flight settlement attacks
+    //
+    // The manager is unlocked for the whole of alice's swap and `sync`/`swap` are callable by
+    // anyone, so a vault that reaches third-party code mid-operation lets that code act while the
+    // hook holds alice's tokens and has a settlement pending.
+    // ---------------------------------------------------------------------
+
+    enum Attack {
+        None,
+        NestedWrap,
+        ClobberSnapshot
+    }
+
+    Attack internal attack;
+
+    uint256 internal constant ATTACK_DUST = 1;
+
+    /// @notice Called by the vault mid-deposit/mid-redeem once `setObserver` opts in. This contract
+    /// @notice plays the attacker, funded with `ATTACK_DUST` wei of intent.
+    function onVaultCallback() external {
+        if (attack == Attack.NestedWrap) {
+            // wrap a dust amount for ourselves, nested inside alice's unwrap
+            Currency underlyingCurrency = Currency.wrap(address(underlying));
+            Currency shareCurrency = Currency.wrap(address(vault));
+
+            manager.sync(underlyingCurrency);
+            underlying.transfer(address(manager), ATTACK_DUST);
+            manager.settle();
+
+            manager.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: wrapZeroForOne,
+                    amountSpecified: -ATTACK_DUST.toInt256(),
+                    sqrtPriceLimitX96: _limit(wrapZeroForOne)
+                }),
+                ""
+            );
+
+            int256 credit = manager.currencyDelta(address(this), shareCurrency);
+            if (credit > 0) manager.take(shareCurrency, address(this), uint256(credit));
+        } else if (attack == Attack.ClobberSnapshot) {
+            // resetting the synced currency is enough: settle() then measures msg.value instead
+            manager.sync(CurrencyLibrary.ADDRESS_ZERO);
+        }
+    }
+
+    /// @notice A nested swap must be credited only with the tokens it brought, never with the
+    /// @notice in-flight swap's redemption proceeds sitting on the hook.
+    function test_attack_nestedSwapCannotCaptureInFlightProceeds() public {
+        vault.setObserver(address(this));
+        attack = Attack.NestedWrap;
+
+        uint256 amountIn = 1000 ether;
+        uint256 expectedOut = vault.previewRedeem(amountIn);
+        uint256 aliceBefore = underlying.balanceOf(alice);
+        uint256 attackerSharesBefore = vault.balanceOf(address(this));
+
+        _swapExactIn(poolKey, !wrapZeroForOne, amountIn);
+
+        assertApproxEqAbs(underlying.balanceOf(alice) - aliceBefore, expectedOut, TOL, "alice was shortchanged");
+        assertLe(
+            vault.balanceOf(address(this)) - attackerSharesBefore, ATTACK_DUST, "nested swap captured alice's proceeds"
+        );
+    }
+
+    /// @notice `settle()` derives its return value from one global transient slot, so its result is
+    /// @notice not a measurement. Overwriting the snapshot must revert rather than settle zero.
+    function test_revert_attack_clobberedSettlementSnapshot() public {
+        vault.setObserver(address(this));
+        attack = Attack.ClobberSnapshot;
+
+        uint256 amountIn = 1000 ether;
+        uint256 expectedShares = vault.previewDeposit(amountIn);
+        uint256 aliceBefore = underlying.balanceOf(alice);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ERC4626WrapperHook.SettlementMismatch.selector, expectedShares, 0),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        _swapExactIn(poolKey, wrapZeroForOne, amountIn);
+
+        assertEq(underlying.balanceOf(alice), aliceBefore, "alice did not keep her funds");
     }
 
     // ---------------------------------------------------------------------
