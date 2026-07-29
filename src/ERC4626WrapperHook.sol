@@ -65,8 +65,6 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         override
         returns (uint256 actualWrappedAmount, uint256 underlyingAmount)
     {
-        ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
-
         _take(wrapperCurrency, address(this), wrappedAmount);
         actualWrappedAmount = wrappedAmount; // shares do not rebase
 
