@@ -20,6 +20,8 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
 
     IERC4626 public immutable vault;
 
+    error SettlementMismatch(uint256 measured, uint256 settled);
+
     /// @notice Creates a new ERC-4626 wrapper hook
     /// @param _manager The Uniswap V4 pool manager
     /// @param _vault The ERC-4626 vault whose asset this hook wraps/unwraps
@@ -42,15 +44,22 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         override
         returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount)
     {
-        // Rebasing assets may deliver less than the amount taken.
-        _take(underlyingCurrency, address(this), underlyingAmount);
-        actualUnderlyingAmount = ERC20(Currency.unwrap(underlyingCurrency)).balanceOf(address(this));
+        ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
+        ERC20 shares = ERC20(Currency.unwrap(wrapperCurrency));
 
-        // Mint shares directly to the pool manager to avoid an extra transfer,
-        // and let settle measure the shares that were actually minted.
+        // Rebasing assets may deliver less than the amount taken.
+        uint256 underlyingBefore = underlying.balanceOf(address(this));
+        _take(underlyingCurrency, address(this), underlyingAmount);
+        actualUnderlyingAmount = underlying.balanceOf(address(this)) - underlyingBefore;
+
+        // Mint shares directly to the pool manager to avoid an extra transfer.
+        uint256 managerSharesBefore = shares.balanceOf(address(poolManager));
         poolManager.sync(wrapperCurrency);
         vault.deposit(actualUnderlyingAmount, address(poolManager));
-        wrappedAmount = poolManager.settle();
+        wrappedAmount = shares.balanceOf(address(poolManager)) - managerSharesBefore;
+
+        uint256 settled = poolManager.settle();
+        if (settled != wrappedAmount) revert SettlementMismatch(wrappedAmount, settled);
     }
 
     /// @inheritdoc BaseTokenWrapperHook
@@ -59,16 +68,23 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         override
         returns (uint256 actualWrappedAmount, uint256 underlyingAmount)
     {
+        ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
+
         _take(wrapperCurrency, address(this), wrappedAmount);
         actualWrappedAmount = wrappedAmount; // shares do not rebase
-        vault.redeem(wrappedAmount, address(this), address(this));
 
-        // Rebasing assets can round transfers down, so settle the balance that actually
-        // arrived and let settle measure the amount the pool manager received.
-        ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
+        uint256 underlyingBefore = underlying.balanceOf(address(this));
+        vault.redeem(wrappedAmount, address(this), address(this));
+        uint256 received = underlying.balanceOf(address(this)) - underlyingBefore;
+
+        // Rebasing assets can round transfers down, so measure the amount the pool manager received.
+        uint256 managerUnderlyingBefore = underlying.balanceOf(address(poolManager));
         poolManager.sync(underlyingCurrency);
-        underlying.safeTransfer(address(poolManager), underlying.balanceOf(address(this)));
-        underlyingAmount = poolManager.settle();
+        underlying.safeTransfer(address(poolManager), received);
+        underlyingAmount = underlying.balanceOf(address(poolManager)) - managerUnderlyingBefore;
+
+        uint256 settled = poolManager.settle();
+        if (settled != underlyingAmount) revert SettlementMismatch(underlyingAmount, settled);
     }
 
     /// @inheritdoc BaseTokenWrapperHook
