@@ -13,12 +13,27 @@ import {IFluidDexLiteResolver} from "./interfaces/IFluidDexLiteResolver.sol";
 /// @notice Factory for creating FluidDexLiteAggregator hooks via CREATE2 and initializing Uniswap V4 pools
 /// @dev Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
 contract FluidDexLiteAggregatorFactory {
+    /// @notice Full record of a hook deployment
+    struct Deployment {
+        address hook;
+        bytes32 dexSalt;
+        PoolKey poolKey;
+    }
+
     /// @notice The Uniswap V4 PoolManager contract
     IPoolManager public immutable poolManager;
     /// @notice The Fluid DEX Lite contract
     IFluidDexLite public immutable fluidDexLite;
     /// @notice The Fluid DEX Lite resolver for pool state queries
     IFluidDexLiteResolver public immutable fluidDexLiteResolver;
+
+    /// @notice All deployments, indexed by creation order
+    Deployment[] public deployments;
+
+    /// @notice The hook deployed for a given Fluid DEX Lite dexSalt (address(0) if none)
+    mapping(bytes32 dexSalt => address hook) public hookForDexSalt;
+
+    error DuplicatePool(bytes32 dexSalt, address existingHook);
 
     event HookDeployed(address indexed hook, bytes32 indexed dexSalt, PoolKey poolKey);
 
@@ -46,6 +61,9 @@ contract FluidDexLiteAggregatorFactory {
         int24 tickSpacing,
         uint160 sqrtPriceX96
     ) external returns (address hook) {
+        address existingHook = hookForDexSalt[dexSalt];
+        if (existingHook != address(0)) revert DuplicatePool(dexSalt, existingHook);
+
         hook = address(new FluidDexLiteAggregator{salt: salt}(poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt));
 
         PoolKey memory poolKey = PoolKey({
@@ -54,7 +72,21 @@ contract FluidDexLiteAggregatorFactory {
 
         poolManager.initialize(poolKey, sqrtPriceX96);
 
+        hookForDexSalt[dexSalt] = hook;
+        deployments.push(Deployment({hook: hook, dexSalt: dexSalt, poolKey: poolKey}));
+
         emit HookDeployed(hook, dexSalt, poolKey);
+    }
+
+    /// @notice Total number of hooks deployed by this factory
+    function deploymentCount() external view returns (uint256) {
+        return deployments.length;
+    }
+
+    /// @notice Returns the full deployment record for a deployment index
+    /// @param index The deployment index (in creation order)
+    function getDeployment(uint256 index) external view returns (Deployment memory) {
+        return deployments[index];
     }
 
     /// @notice Computes the CREATE2 address for a hook without deploying

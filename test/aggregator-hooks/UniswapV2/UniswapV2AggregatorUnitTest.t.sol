@@ -254,6 +254,44 @@ contract UniswapV2AggregatorUnitTest is Test {
         assertEq(t1Before - token1.balanceOf(alice), expectedIn);
     }
 
+    function testFuzz_initializedRegistry(address rawTokenA, address rawTokenB) public {
+        vm.assume(rawTokenA != rawTokenB);
+        vm.assume(rawTokenA != address(0) && rawTokenB != address(0));
+        vm.assume(rawTokenA != address(token0) && rawTokenA != address(token1));
+        vm.assume(rawTokenB != address(token0) && rawTokenB != address(token1));
+
+        (address sorted0, address sorted1) = rawTokenA < rawTokenB ? (rawTokenA, rawTokenB) : (rawTokenB, rawTokenA);
+
+        // setUp initialized one pool
+        assertEq(hook.initializedLength(), 1);
+        PoolKey memory stored = hook.initialized(0);
+        assertEq(Currency.unwrap(stored.currency0), address(token0));
+        assertEq(Currency.unwrap(stored.currency1), address(token1));
+        assertEq(stored.fee, POOL_FEE);
+        assertEq(stored.tickSpacing, TICK_SPACING_A);
+        assertEq(address(stored.hooks), address(hook));
+
+        // A second pair registers as a second entry
+        factory.createPair(sorted0, sorted1);
+
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING_A,
+            hooks: IHooks(address(hook))
+        });
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+
+        assertEq(hook.initializedLength(), 2);
+        stored = hook.initialized(1);
+        assertEq(Currency.unwrap(stored.currency0), sorted0);
+        assertEq(Currency.unwrap(stored.currency1), sorted1);
+        assertEq(stored.fee, POOL_FEE);
+        assertEq(stored.tickSpacing, TICK_SPACING_A);
+        assertEq(address(stored.hooks), address(hook));
+    }
+
     function test_secondInitialize_same_external_pair_reverts() public {
         PoolKey memory key2 = PoolKey({
             currency0: Currency.wrap(address(token0)),

@@ -27,6 +27,8 @@ contract StableSwapFactoryUnitTest is Test {
     uint24 constant FEE = 3000; // 0.3% fee
     int24 constant TICK_SPACING = 60; // Default tick spacing for a 0.3% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1 price
+    /// @dev Curve's convention for native ETH (matches StableSwapAggregator)
+    address constant CURVE_NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public {
         poolManager =
@@ -111,6 +113,84 @@ contract StableSwapFactoryUnitTest is Test {
         tokens[0] = Currency.wrap(address(token0));
 
         vm.expectRevert(StableSwapAggregatorFactory.InsufficientTokens.selector);
+        factory.createPool(bytes32(0), mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+    }
+
+    function testFuzz_factory_registryAndDuplicateProtection(address rawTokenA, address rawTokenB) public {
+        vm.assume(rawTokenA != rawTokenB);
+        vm.assume(rawTokenA != address(0) && rawTokenB != address(0));
+        vm.assume(rawTokenA != CURVE_NATIVE_ETH && rawTokenB != CURVE_NATIVE_ETH);
+        assumeUnusedAddress(rawTokenA);
+        assumeUnusedAddress(rawTokenB);
+
+        // The hook forceApproves both currencies to the Curve pool on initialize, so give them ERC20 code
+        vm.etch(rawTokenA, address(token0).code);
+        vm.etch(rawTokenB, address(token0).code);
+
+        (address sorted0, address sorted1) = rawTokenA < rawTokenB ? (rawTokenA, rawTokenB) : (rawTokenB, rawTokenA);
+
+        address[] memory coins = new address[](2);
+        coins[0] = rawTokenA;
+        coins[1] = rawTokenB;
+        MockCurveStableSwap fuzzPool = new MockCurveStableSwap(coins);
+        mockMetaRegistry.setIsRegistered(address(fuzzPool), true);
+
+        StableSwapAggregatorFactory factory =
+            new StableSwapAggregatorFactory(poolManager, IMetaRegistry(address(mockMetaRegistry)));
+
+        assertEq(factory.deploymentCount(), 0);
+        assertEq(factory.hookForPool(address(fuzzPool)), address(0));
+
+        // Pass the tokens in fuzzed (possibly unsorted) order to exercise the factory's pair sorting
+        Currency[] memory tokens = new Currency[](2);
+        tokens[0] = Currency.wrap(rawTokenA);
+        tokens[1] = Currency.wrap(rawTokenB);
+
+        bytes memory args = abi.encode(address(poolManager), address(fuzzPool), address(mockMetaRegistry));
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
+            type(StableSwapAggregator).creationCode,
+            args
+        );
+
+        address hook = factory.createPool(factorySalt, fuzzPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+
+        assertEq(factory.deploymentCount(), 1);
+        assertEq(factory.hookForPool(address(fuzzPool)), hook);
+
+        StableSwapAggregatorFactory.Deployment memory deployment = factory.getDeployment(0);
+        assertEq(deployment.hook, hook);
+        assertEq(deployment.curvePool, address(fuzzPool));
+        assertEq(deployment.poolKeys.length, 1);
+        assertEq(Currency.unwrap(deployment.poolKeys[0].currency0), sorted0);
+        assertEq(Currency.unwrap(deployment.poolKeys[0].currency1), sorted1);
+        assertEq(deployment.poolKeys[0].fee, FEE);
+        assertEq(deployment.poolKeys[0].tickSpacing, TICK_SPACING);
+        assertEq(address(deployment.poolKeys[0].hooks), hook);
+
+        // A second deployment for the same Curve pool reverts regardless of salt
+        vm.expectRevert(
+            abi.encodeWithSelector(StableSwapAggregatorFactory.DuplicatePool.selector, address(fuzzPool), hook)
+        );
+        factory.createPool(bytes32(0), fuzzPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+    }
+
+    function test_factory_revertsDuplicateTokens() public {
+        StableSwapAggregatorFactory factory =
+            new StableSwapAggregatorFactory(poolManager, IMetaRegistry(address(mockMetaRegistry)));
+
+        Currency[] memory tokens = new Currency[](3);
+        tokens[0] = Currency.wrap(address(token0));
+        tokens[1] = Currency.wrap(address(token1));
+        tokens[2] = Currency.wrap(address(token0));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(StableSwapAggregatorFactory.DuplicateTokens.selector, Currency.wrap(address(token0)))
+        );
         factory.createPool(bytes32(0), mockPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
     }
 }
