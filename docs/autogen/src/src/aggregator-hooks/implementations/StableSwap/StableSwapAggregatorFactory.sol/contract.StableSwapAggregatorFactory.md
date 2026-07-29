@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ba86f4b9451d7b5fefeaa5f317dce77403609447/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/7ae47fe1bceb326a11377fb81cb118374409cc3b/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -154,6 +154,12 @@ event HookDeployed(address indexed hook, address indexed curvePool, PoolKey pool
 
 ```solidity
 error InsufficientTokens();
+```
+
+### DuplicateTokens
+
+```solidity
+error DuplicateTokens(Currency token);
 ```
 
 ### DuplicatePool

@@ -208,7 +208,14 @@ contract UniswapV3AggregatorUnitTest is Test {
         );
     }
 
-    function test_initializedRegistry() public {
+    function testFuzz_initializedRegistry(address rawTokenA, address rawTokenB) public {
+        vm.assume(rawTokenA != rawTokenB);
+        vm.assume(rawTokenA != address(0) && rawTokenB != address(0));
+        vm.assume(rawTokenA != address(token0) && rawTokenA != address(token1));
+        vm.assume(rawTokenB != address(token0) && rawTokenB != address(token1));
+
+        (address sorted0, address sorted1) = rawTokenA < rawTokenB ? (rawTokenA, rawTokenB) : (rawTokenB, rawTokenA);
+
         // setUp initialized one pool
         assertEq(hook.initializedLength(), 1);
         PoolKey memory stored = hook.initialized(0);
@@ -219,15 +226,12 @@ contract UniswapV3AggregatorUnitTest is Test {
         assertEq(address(stored.hooks), address(hook));
 
         // A second external pool registers as a second entry
-        MockERC20 tokenA = new MockERC20("Token2", "TK2", 18);
-        MockERC20 tokenB = new MockERC20("Token3", "TK3", 18);
-        if (address(tokenA) > address(tokenB)) (tokenA, tokenB) = (tokenB, tokenA);
-        MockUniV3Pool extPool2 = new MockUniV3Pool(address(tokenA), address(tokenB), POOL_FEE, TICK_SPACING_A);
-        factory.setPool(address(tokenA), address(tokenB), POOL_FEE, address(extPool2));
+        MockUniV3Pool extPool2 = new MockUniV3Pool(sorted0, sorted1, POOL_FEE, TICK_SPACING_A);
+        factory.setPool(sorted0, sorted1, POOL_FEE, address(extPool2));
 
         PoolKey memory key2 = PoolKey({
-            currency0: Currency.wrap(address(tokenA)),
-            currency1: Currency.wrap(address(tokenB)),
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING_A,
             hooks: IHooks(address(hook))
@@ -236,8 +240,8 @@ contract UniswapV3AggregatorUnitTest is Test {
 
         assertEq(hook.initializedLength(), 2);
         stored = hook.initialized(1);
-        assertEq(Currency.unwrap(stored.currency0), address(tokenA));
-        assertEq(Currency.unwrap(stored.currency1), address(tokenB));
+        assertEq(Currency.unwrap(stored.currency0), sorted0);
+        assertEq(Currency.unwrap(stored.currency1), sorted1);
         assertEq(stored.fee, POOL_FEE);
         assertEq(stored.tickSpacing, TICK_SPACING_A);
         assertEq(address(stored.hooks), address(hook));

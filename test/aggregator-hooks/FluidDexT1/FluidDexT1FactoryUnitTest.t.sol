@@ -29,6 +29,8 @@ contract FluidDexT1FactoryUnitTest is Test {
     uint24 constant FEE = 3000; // 0.3%
     int24 constant TICK_SPACING = 60; // Default tick spacing for a 0.3% fee pool
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 1:1
+    /// @dev Fluid's convention for native ETH (matches FluidDexT1Aggregator)
+    address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     address public fluidLiquidity = makeAddr("fluidLiquidity");
 
@@ -116,7 +118,16 @@ contract FluidDexT1FactoryUnitTest is Test {
         assertEq(computed, deployed);
     }
 
-    function test_factory_registryAndDuplicateProtection() public {
+    function testFuzz_factory_registryAndDuplicateProtection(address rawTokenA, address rawTokenB) public {
+        vm.assume(rawTokenA != rawTokenB);
+        vm.assume(rawTokenA != address(0) && rawTokenB != address(0));
+        vm.assume(rawTokenA != FLUID_NATIVE_CURRENCY && rawTokenB != FLUID_NATIVE_CURRENCY);
+
+        (address sorted0, address sorted1) = rawTokenA < rawTokenB ? (rawTokenA, rawTokenB) : (rawTokenB, rawTokenA);
+
+        mockResolver.setDexTokens(sorted0, sorted1);
+        mockPool.setTokens(sorted0, sorted1);
+
         FluidDexT1AggregatorFactory factory = new FluidDexT1AggregatorFactory(
             poolManager, mockResolver, IFluidDexResolver(address(mockResolver)), fluidLiquidity
         );
@@ -138,13 +149,7 @@ contract FluidDexT1FactoryUnitTest is Test {
         );
 
         address hook = factory.createPool(
-            factorySalt,
-            mockPool,
-            Currency.wrap(address(token0)),
-            Currency.wrap(address(token1)),
-            FEE,
-            TICK_SPACING,
-            SQRT_PRICE_1_1
+            factorySalt, mockPool, Currency.wrap(sorted0), Currency.wrap(sorted1), FEE, TICK_SPACING, SQRT_PRICE_1_1
         );
 
         assertEq(factory.deploymentCount(), 1);
@@ -153,8 +158,8 @@ contract FluidDexT1FactoryUnitTest is Test {
         FluidDexT1AggregatorFactory.Deployment memory deployment = factory.getDeployment(0);
         assertEq(deployment.hook, hook);
         assertEq(deployment.fluidPool, address(mockPool));
-        assertEq(Currency.unwrap(deployment.poolKey.currency0), address(token0));
-        assertEq(Currency.unwrap(deployment.poolKey.currency1), address(token1));
+        assertEq(Currency.unwrap(deployment.poolKey.currency0), sorted0);
+        assertEq(Currency.unwrap(deployment.poolKey.currency1), sorted1);
         assertEq(deployment.poolKey.fee, FEE);
         assertEq(deployment.poolKey.tickSpacing, TICK_SPACING);
         assertEq(address(deployment.poolKey.hooks), hook);
@@ -164,13 +169,7 @@ contract FluidDexT1FactoryUnitTest is Test {
             abi.encodeWithSelector(FluidDexT1AggregatorFactory.DuplicatePool.selector, address(mockPool), hook)
         );
         factory.createPool(
-            bytes32(0),
-            mockPool,
-            Currency.wrap(address(token0)),
-            Currency.wrap(address(token1)),
-            FEE,
-            TICK_SPACING,
-            SQRT_PRICE_1_1
+            bytes32(0), mockPool, Currency.wrap(sorted0), Currency.wrap(sorted1), FEE, TICK_SPACING, SQRT_PRICE_1_1
         );
     }
 }

@@ -34,6 +34,7 @@ contract StableSwapAggregatorFactory {
     mapping(address curvePool => address hook) public hookForPool;
 
     error InsufficientTokens();
+    error DuplicateTokens(Currency token);
     error DuplicatePool(address curvePool, address existingHook);
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
@@ -66,12 +67,21 @@ contract StableSwapAggregatorFactory {
     ) external returns (address hook) {
         if (tokens.length < 2) revert InsufficientTokens();
 
+        // A duplicated token would produce a pool with currency0 == currency1 in the pair loop below
+        for (uint256 i = 0; i < tokens.length; i++) {
+            for (uint256 j = i + 1; j < tokens.length; j++) {
+                if (tokens[i] == tokens[j]) revert DuplicateTokens(tokens[i]);
+            }
+        }
+
         address existingHook = hookForPool[address(curvePool)];
         if (existingHook != address(0)) revert DuplicatePool(address(curvePool), existingHook);
 
         hook = address(new StableSwapAggregator{salt: salt}(poolManager, curvePool, metaRegistry));
 
         hookForPool[address(curvePool)] = hook;
+        // Pushing a Deployment memory literal needs a memory-to-storage copy of the nested
+        // poolKeys array, which legacy codegen (via_ir = false) does not support
         Deployment storage deployment = deployments.push();
         deployment.hook = hook;
         deployment.curvePool = address(curvePool);
