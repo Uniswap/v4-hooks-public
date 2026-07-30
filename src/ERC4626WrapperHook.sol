@@ -18,6 +18,14 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
 
     IERC4626 public immutable vault;
 
+    /// @notice The contract that deployed this hook. Canonical deployments go through the
+    ///         ERC-4626 wrapper family's `AllowlistedFactory`, so aggregators and third-party
+    ///         routers can verify a hook's provenance by checking `factory()` against the known
+    ///         factory address (or asking the factory via `isFromFactory`) and can discover new
+    ///         hooks from the factory's `Deployed` events. A hook deployed outside the factory
+    ///         reports whatever address created it.
+    address public immutable factory;
+
     error SettlementMismatch(uint256 measured, uint256 settled);
 
     /// @notice Creates a new ERC-4626 wrapper hook
@@ -31,6 +39,7 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         )
     {
         vault = _vault;
+        factory = msg.sender;
         // the vault pulls the underlying asset from this hook during deposit()
         ERC20(Currency.unwrap(underlyingCurrency)).safeApprove(address(_vault), type(uint256).max);
     }
