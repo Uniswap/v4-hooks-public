@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0b5d43ff3ea9801293a5bdb00dc8685732812574/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/58a634e4518fd565ac92feb10dc56b548b28a1c8/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -33,6 +33,15 @@ mapping(PoolId => address) public poolIdToExternalPool
 
 ```solidity
 mapping(address => PoolKey) private _canonicalPoolKeyByAddress
+```
+
+
+### _initializedPools
+PoolKeys of all pools initialized with this hook, in initialization order
+
+
+```solidity
+PoolKey[] internal _initializedPools
 ```
 
 
@@ -181,6 +190,30 @@ function _resolveExternalPool(address token0, address token1, PoolKey calldata k
     virtual
     returns (address pool);
 ```
+
+### initializedLength
+
+Number of pools initialized with this hook
+
+
+```solidity
+function initializedLength() external view returns (uint256);
+```
+
+### initialized
+
+Returns the PoolKey of an initialized pool
+
+
+```solidity
+function initialized(uint256 index) external view returns (PoolKey memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The pool index (in initialization order)|
+
 
 ### _beforeInitialize
 

@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/918bff7b2cc510721b43e2750ca118588a2bfaa3/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/58a634e4518fd565ac92feb10dc56b548b28a1c8/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -45,6 +45,15 @@ mapping(PoolId => address) public poolIdToExternalPair
 
 ```solidity
 mapping(address => PoolKey) private _canonicalPoolKeyByAddress
+```
+
+
+### _initializedPools
+PoolKeys of all pools initialized with this hook, in initialization order
+
+
+```solidity
+PoolKey[] internal _initializedPools
 ```
 
 
@@ -101,6 +110,30 @@ function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 |Name|Type|Description|
 |----|----|-----------|
 |`amountUnspecified`|`uint256`|The raw unspecified amount before protocol fee adjustment|
+
+
+### initializedLength
+
+Number of pools initialized with this hook
+
+
+```solidity
+function initializedLength() external view returns (uint256);
+```
+
+### initialized
+
+Returns the PoolKey of an initialized pool
+
+
+```solidity
+function initialized(uint256 index) external view returns (PoolKey memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The pool index (in initialization order)|
 
 
 ### _beforeInitialize

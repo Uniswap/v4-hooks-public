@@ -1,5 +1,5 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ba86f4b9451d7b5fefeaa5f317dce77403609447/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 **Title:**
 FluidDexT1AggregatorFactory
@@ -43,6 +43,24 @@ The Fluid Liquidity Layer contract address
 
 ```solidity
 address public immutable fluidLiquidity
+```
+
+
+### deployments
+All deployments, indexed by creation order
+
+
+```solidity
+Deployment[] public deployments
+```
+
+
+### hookForPool
+The hook deployed for a given Fluid DEX T1 pool (address(0) if none)
+
+
+```solidity
+mapping(address fluidPool => address hook) public hookForPool
 ```
 
 
@@ -94,6 +112,30 @@ function createPool(
 |`hook`|`address`|The deployed hook address|
 
 
+### deploymentCount
+
+Total number of hooks deployed by this factory
+
+
+```solidity
+function deploymentCount() external view returns (uint256);
+```
+
+### getDeployment
+
+Returns the full deployment record for a deployment index
+
+
+```solidity
+function getDeployment(uint256 index) external view returns (Deployment memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The deployment index (in creation order)|
+
+
 ### computeAddress
 
 Computes the CREATE2 address for a hook without deploying
@@ -128,5 +170,24 @@ event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey pool
 
 ```solidity
 error HookAddressMismatch(address expected, address actual);
+```
+
+### DuplicatePool
+
+```solidity
+error DuplicatePool(address fluidPool, address existingHook);
+```
+
+## Structs
+### Deployment
+Full record of a hook deployment
+
+
+```solidity
+struct Deployment {
+    address hook;
+    address fluidPool;
+    PoolKey poolKey;
+}
 ```
 
