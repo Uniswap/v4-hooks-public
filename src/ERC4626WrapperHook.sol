@@ -9,12 +9,10 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BaseTokenWrapperHook} from "./base/BaseTokenWrapperHook.sol";
 
 /// @title ERC-4626 Wrapper Hook
-/// @notice Hook for wrapping/unwrapping generic ERC-4626 vault assets into their shares in Uniswap V4 pools
-/// @dev The vault share token is the wrapper currency, and vault.asset() is the underlying currency.
-///      The vault determines the exchange rate between them.
-/// @dev Fee-on-transfer underlying assets are NOT supported. A transfer fee on any leg
-///      (swapper -> PoolManager -> hook -> vault) breaks the accounting and swaps may revert
-///      or return incorrect amounts.
+/// @notice Hook for wrapping/unwrapping ERC-4626 vault assets/shares in Uniswap V4 pools
+/// @dev The vault share token is the wrapper currency, vault.asset() is the underlying currency,
+///      and the vault determines the exchange rate between them
+/// @dev Fee-on-transfer underlying assets are not supported
 contract ERC4626WrapperHook is BaseTokenWrapperHook {
     using SafeTransferLib for ERC20;
 
@@ -63,8 +61,8 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         actualWrappedAmount = wrappedAmount; // shares do not rebase
         vault.redeem(wrappedAmount, address(this), address(this));
 
-        // Rebasing assets can round transfers down, so settle the balance that actually
-        // arrived and let settle measure the amount the pool manager received.
+        // Rebasing assets can round transfers down, so send the full balance and let
+        // settle measure the amount the pool manager received.
         ERC20 underlying = ERC20(Currency.unwrap(underlyingCurrency));
         poolManager.sync(underlyingCurrency);
         underlying.safeTransfer(address(poolManager), underlying.balanceOf(address(this)));
@@ -88,9 +86,7 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
     }
 
     /// @inheritdoc BaseTokenWrapperHook
-    /// @dev Exact-output is disabled because the hook cannot mint an exact number of shares, and
-    /// @dev the PoolManager reverts unless every delta is settled. Using `deposit` does not
-    /// @dev guarantee the exact requested shares are received.
+    /// @dev Exact output is not supported because deposit() cannot mint an exact number of shares
     function _supportsExactOutput() internal pure override returns (bool) {
         return false;
     }

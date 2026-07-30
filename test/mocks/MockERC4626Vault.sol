@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
 
-/// @notice Minimal subset of the ERC20 surface the vault needs from its (possibly rebasing) asset
+/// @notice Minimal ERC20 interface for the vault's (possibly rebasing) asset
 interface IERC20Like {
     function balanceOf(address) external view returns (uint256);
     function transfer(address, uint256) external returns (bool);
@@ -12,10 +12,8 @@ interface IERC20Like {
 
 /// @title Mock ERC-4626 Vault
 /// @notice Minimal, standard-rounding ERC-4626 vault for testing the ERC4626WrapperHook
-/// @dev Share token is a normal (non-rebasing) ERC20. Conversions round in the vault's favor
-/// @dev (deposit shares down, redeem assets down; mint/withdraw round the required amount up),
-/// @dev matching the ERC-4626 rounding rules. `totalAssets()` reads the live asset balance, so a
-/// @dev rebasing asset naturally moves the share/asset exchange rate.
+/// @dev Conversions follow ERC-4626 rounding: deposit/redeem round down, mint/withdraw round up
+/// @dev totalAssets() reads the live asset balance, so a rebasing asset moves the exchange rate
 contract MockERC4626Vault is ERC20 {
     error AssetTransferFailed();
 

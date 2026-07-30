@@ -21,12 +21,13 @@ import {TestRouter} from "./shared/TestRouter.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 /// @title ERC4626 Wrapper Hook Handler
-/// @notice Drives randomized wrap, unwrap, and rebase actions across multiple actors.
-/// @dev Every completed action asserts its local balance changes before updating ghost accounting.
+/// @notice Drives randomized wrap, unwrap, and rebase actions across multiple actors
+/// @dev Every completed action asserts its local balance changes
 contract ERC4626WrapperHandler is Test {
     using SafeCast for uint256;
 
     TestRouter public immutable router;
+    IPoolManager public immutable poolManager;
     MockRebasingERC20 public immutable underlying;
     MockERC4626Vault public immutable vault;
     PoolKey internal key;
@@ -37,16 +38,7 @@ contract ERC4626WrapperHandler is Test {
     address[] public actors;
     address internal currentActor;
 
-    // Ghost accounting
     uint256 public ghost_wraps;
-    uint256 public ghost_unwraps;
-    uint256 public ghost_rebases;
-    uint256 public ghost_skips;
-    uint256 public ghost_underlyingSpent;
-    uint256 public ghost_underlyingReceived;
-    uint256 public ghost_sharesMinted;
-    uint256 public ghost_sharesBurned;
-    uint256 public ghost_precisionLosses;
 
     modifier useActor(uint256 actorSeed) {
         currentActor = actors[bound(actorSeed, 0, actors.length - 1)];
@@ -63,6 +55,7 @@ contract ERC4626WrapperHandler is Test {
         bool _wrapZeroForOne
     ) {
         router = _router;
+        poolManager = _router.poolManager();
         underlying = _underlying;
         vault = _vault;
         key = _key;
@@ -90,20 +83,17 @@ contract ERC4626WrapperHandler is Test {
         return zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
     }
 
-    /// @notice Wraps a bounded amount of underlying as a randomized actor.
-    /// @param amount Seed used to select the input amount.
-    /// @param actorSeed Seed used to select the actor.
+    /// @notice Wraps a bounded amount of underlying as a randomized actor
+    /// @param amount Seed used to select the input amount
+    /// @param actorSeed Seed used to select the actor
     function wrap(uint256 amount, uint256 actorSeed) external useActor(actorSeed) {
         uint256 actorUnderlyingBefore = underlying.balanceOf(currentActor);
-        if (actorUnderlyingBefore < MIN_AMOUNT) {
-            ghost_skips++;
-            return;
-        }
+        if (actorUnderlyingBefore < MIN_AMOUNT) return;
         amount = bound(amount, MIN_AMOUNT, actorUnderlyingBefore);
 
         uint256 actorSharesBefore = vault.balanceOf(currentActor);
-        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(router.poolManager()));
-        uint256 managerVaultSharesBefore = vault.balanceOf(address(router.poolManager()));
+        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(poolManager));
+        uint256 managerVaultSharesBefore = vault.balanceOf(address(poolManager));
 
         router.swap(
             key,
@@ -121,35 +111,25 @@ contract ERC4626WrapperHandler is Test {
         assertLe(underlyingSpent, amount, "wrap overspent underlying");
         assertGt(sharesMinted, 0, "wrap minted no shares");
         assertGe(
-            underlying.sharesOf(address(router.poolManager())),
-            managerUnderlyingSharesBefore,
-            "wrap drained manager underlying"
+            underlying.sharesOf(address(poolManager)), managerUnderlyingSharesBefore, "wrap drained manager underlying"
         );
-        assertEq(
-            vault.balanceOf(address(router.poolManager())), managerVaultSharesBefore, "wrap changed manager shares"
-        );
+        assertEq(vault.balanceOf(address(poolManager)), managerVaultSharesBefore, "wrap changed manager shares");
         assertEq(vault.balanceOf(address(key.hooks)), 0, "wrap left shares in hook");
 
         ghost_wraps++;
-        ghost_underlyingSpent += underlyingSpent;
-        ghost_sharesMinted += sharesMinted;
-        if (underlyingSpent < amount) ghost_precisionLosses++;
     }
 
-    /// @notice Unwraps a bounded amount of shares as a randomized actor.
-    /// @param shares Seed used to select the input amount.
-    /// @param actorSeed Seed used to select the actor.
+    /// @notice Unwraps a bounded amount of shares as a randomized actor
+    /// @param shares Seed used to select the input amount
+    /// @param actorSeed Seed used to select the actor
     function unwrap(uint256 shares, uint256 actorSeed) external useActor(actorSeed) {
         uint256 actorSharesBefore = vault.balanceOf(currentActor);
-        if (actorSharesBefore < MIN_AMOUNT) {
-            ghost_skips++;
-            return;
-        }
+        if (actorSharesBefore < MIN_AMOUNT) return;
         shares = bound(shares, MIN_AMOUNT, actorSharesBefore);
 
         uint256 actorUnderlyingBefore = underlying.balanceOf(currentActor);
-        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(router.poolManager()));
-        uint256 managerVaultSharesBefore = vault.balanceOf(address(router.poolManager()));
+        uint256 managerUnderlyingSharesBefore = underlying.sharesOf(address(poolManager));
+        uint256 managerVaultSharesBefore = vault.balanceOf(address(poolManager));
 
         router.swap(
             key,
@@ -165,35 +145,27 @@ contract ERC4626WrapperHandler is Test {
         assertEq(actorSharesBefore - vault.balanceOf(currentActor), shares, "unwrap burned incorrect shares");
         assertGt(underlyingReceived, 0, "unwrap returned no underlying");
         assertGe(
-            underlying.sharesOf(address(router.poolManager())),
+            underlying.sharesOf(address(poolManager)),
             managerUnderlyingSharesBefore,
             "unwrap drained manager underlying"
         );
-        assertEq(
-            vault.balanceOf(address(router.poolManager())), managerVaultSharesBefore, "unwrap changed manager shares"
-        );
+        assertEq(vault.balanceOf(address(poolManager)), managerVaultSharesBefore, "unwrap changed manager shares");
         assertEq(vault.balanceOf(address(key.hooks)), 0, "unwrap left shares in hook");
-
-        ghost_unwraps++;
-        ghost_underlyingReceived += underlyingReceived;
-        ghost_sharesBurned += shares;
     }
 
-    /// @notice Rebases the underlying up or down without changing raw share accounting.
-    /// @param rawMultiplier Seed used to select the new multiplier.
+    /// @notice Rebases the underlying up or down without changing raw share accounting
+    /// @param rawMultiplier Seed used to select the new multiplier
     function rebase(uint256 rawMultiplier) external {
         uint256 totalSharesBefore = underlying.totalShares();
         uint256 vaultSupplyBefore = vault.totalSupply();
         underlying.setMultiplier(bound(rawMultiplier, 0.5e18, 5e18));
         assertEq(underlying.totalShares(), totalSharesBefore, "rebase changed underlying shares");
         assertEq(vault.totalSupply(), vaultSupplyBefore, "rebase changed vault supply");
-        ghost_rebases++;
     }
 }
 
 /// @title ERC4626 Wrapper Hook Invariants
-/// @notice Exercises wrapper-hook solvency and containment across randomized swaps and rebases.
-/// @dev The rebasing token rounds transfers to raw shares, so actions also validate precision loss.
+/// @notice Invariant tests for wrapper-hook solvency under randomized swaps and rebases
 contract ERC4626WrapperHookInvariantTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;

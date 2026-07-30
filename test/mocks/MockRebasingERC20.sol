@@ -3,10 +3,8 @@ pragma solidity ^0.8.24;
 
 /// @title Mock Rebasing ERC20
 /// @notice Minimal share-based rebasing token (stETH-style) for testing wrapper hooks
-/// @dev Balances are derived from an internal share balance and a global multiplier, so a
-/// @dev `transfer(x)` moves `x` in nominal terms but a whole number of shares, reproducing the
-/// @dev 1-2 wei rounding that real rebasing tokens exhibit. `setMultiplier` simulates a rebase
-/// @dev (corporate action / staking reward) without any transfers.
+/// @dev Balances derive from internal shares and a global multiplier, so transfers round down
+/// @dev by a few wei like real rebasing tokens. setMultiplier simulates a rebase.
 contract MockRebasingERC20 {
     string public name;
     string public symbol;
@@ -70,8 +68,7 @@ contract MockRebasingERC20 {
         return true;
     }
 
-    /// @dev Moves a whole number of shares corresponding to `amount`, so the recipient may receive
-    /// up to a couple wei less than `amount` in nominal terms — the defining rebasing rounding.
+    /// @dev Moves a whole number of shares, so the recipient may receive a few wei less than `amount`
     function _transfer(address from, address to, uint256 amount) internal {
         uint256 shares = _toShares(amount);
         sharesOf[from] -= shares;

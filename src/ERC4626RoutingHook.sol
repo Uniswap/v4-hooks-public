@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {ERC4626WrapperHook, BaseTokenWrapperHook, Currency} from "./ERC4626WrapperHook.sol";
+import {ERC4626WrapperHook, BaseTokenWrapperHook} from "./ERC4626WrapperHook.sol";
 
 /// @title ERC4626RoutingHook
 /// @notice A hook that allows simulating the ERC4626WrapperHook with the v4 Quoter
@@ -24,9 +24,8 @@ contract ERC4626RoutingHook is ERC4626WrapperHook {
         override
         returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount)
     {
-        // Apply the vault's deposit rounding without moving tokens.
-        // Fee-on-transfer underlying assets are not supported, so the full amount is assumed
-        // to reach the vault.
+        // apply the vault's deposit rounding without moving tokens
+        // for rebasing assets the quote can exceed execution by a few wei of transfer rounding
         actualUnderlyingAmount = underlyingAmount;
         wrappedAmount = vault.previewDeposit(underlyingAmount);
     }
