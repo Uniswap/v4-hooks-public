@@ -10,6 +10,11 @@ interface IERC20Like {
     function transferFrom(address, address, uint256) external returns (bool);
 }
 
+/// @notice Optional observer notified while a deposit or redemption is still in flight
+interface IVaultObserver {
+    function onVaultCallback() external;
+}
+
 /// @title Mock ERC-4626 Vault
 /// @notice Minimal, standard-rounding ERC-4626 vault for testing the ERC4626WrapperHook
 /// @dev Conversions follow ERC-4626 rounding: deposit/redeem round down, mint/withdraw round up
@@ -20,10 +25,22 @@ contract MockERC4626Vault is ERC20 {
     /// @notice The underlying asset token
     address public immutable asset;
 
+    /// @notice When set, notified while a deposit or redemption is still in flight. Models a vault
+    /// @notice that reaches third-party code mid-operation: a strategy adapter freeing funds, an AMM
+    /// @notice leg in the withdrawal path, or a callback-capable asset. Unset by default, so the
+    /// @notice vault behaves as a plain ERC-4626 vault unless a test opts in.
+    address public observer;
+
+    bool private _notifying;
+
     constructor(address _asset, string memory _name, string memory _symbol, uint8 _decimals)
         ERC20(_name, _symbol, _decimals)
     {
         asset = _asset;
+    }
+
+    function setObserver(address _observer) external {
+        observer = _observer;
     }
 
     function totalAssets() public view returns (uint256) {
@@ -70,6 +87,7 @@ contract MockERC4626Vault is ERC20 {
         shares = previewDeposit(assets);
         if (!IERC20Like(asset).transferFrom(msg.sender, address(this), assets)) revert AssetTransferFailed();
         _mint(receiver, shares);
+        _notifyObserver();
     }
 
     function mint(uint256 shares, address receiver) public returns (uint256 assets) {
@@ -90,6 +108,15 @@ contract MockERC4626Vault is ERC20 {
         _spendAllowanceIfNeeded(owner, shares);
         _burn(owner, shares);
         if (!IERC20Like(asset).transfer(receiver, assets)) revert AssetTransferFailed();
+        _notifyObserver();
+    }
+
+    /// @notice Hands control to `observer`, if set, before the operation returns
+    function _notifyObserver() internal {
+        if (observer == address(0) || _notifying) return;
+        _notifying = true;
+        IVaultObserver(observer).onVaultCallback();
+        _notifying = false;
     }
 
     function _spendAllowanceIfNeeded(address owner, uint256 shares) internal {

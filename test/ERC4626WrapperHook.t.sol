@@ -6,6 +6,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -25,6 +26,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 
 contract ERC4626WrapperHookTest is Test, Deployers {
     using SafeCast for uint256;
+    using TransientStateLibrary for IPoolManager;
 
     ERC4626WrapperHook public hook;
     ERC4626RoutingHook public hookSim;
@@ -421,7 +423,50 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         manager.initialize(invalidKey, initSqrtPriceX96);
     }
 
-    /// @notice Adds liquidity to a hookless pool so the PoolManager holds real reserves of both tokens
+    /// @notice Called by the vault mid-deposit/mid-redeem once `setObserver` opts in. This contract
+    /// @notice plays the attacker, funded with `ATTACK_DUST` wei of intent.
+    function onVaultCallback() external {
+        uint256 DUST = 1; // 1 wei
+        // wrap a dust amount for ourselves, nested inside alice's unwrap
+        Currency underlyingCurrency = Currency.wrap(address(underlying));
+        Currency shareCurrency = Currency.wrap(address(vault));
+
+        manager.sync(underlyingCurrency);
+        underlying.transfer(address(manager), DUST);
+        manager.settle();
+
+        manager.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: wrapZeroForOne, amountSpecified: -DUST.toInt256(), sqrtPriceLimitX96: _limit(wrapZeroForOne)
+            }),
+            ""
+        );
+
+        int256 credit = manager.currencyDelta(address(this), shareCurrency);
+        if (credit > 0) manager.take(shareCurrency, address(this), uint256(credit));
+    }
+
+    /// @notice A nested swap must be credited only with the tokens it brought, never with the
+    /// @notice in-flight swap's redemption proceeds sitting on the hook.
+    function test_attack_nestedSwapCannotCaptureInFlightProceeds() public {
+        vault.setObserver(address(this));
+
+        uint256 amountIn = 1000 ether;
+        uint256 expectedOut = vault.previewRedeem(amountIn);
+        uint256 aliceBefore = underlying.balanceOf(alice);
+        uint256 attackerSharesBefore = vault.balanceOf(address(this));
+
+        _swapExactIn(poolKey, !wrapZeroForOne, amountIn);
+
+        assertApproxEqAbs(underlying.balanceOf(alice) - aliceBefore, expectedOut, TOL, "alice was shortchanged");
+        assertLe(vault.balanceOf(address(this)) - attackerSharesBefore, 1, "nested swap captured alice's proceeds");
+    }
+
+    // ---------------------------------------------------------------------
+    // Unrelated liquidity so the PoolManager holds real reserves of both tokens
+    // ---------------------------------------------------------------------
+
     function _addUnrelatedLiquidity() internal {
         (Currency c0, Currency c1) = _sortCurrencies(address(underlying), address(vault));
         PoolKey memory unrelatedPoolKey =
