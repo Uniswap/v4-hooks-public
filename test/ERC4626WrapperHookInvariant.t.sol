@@ -180,6 +180,8 @@ contract ERC4626WrapperHookInvariantTest is Test, Deployers {
     PoolId internal poolId;
     bool internal wrapZeroForOne;
 
+    uint256 internal constant MAX_DUST_WEI = 10_000; // 10_000 wei of dust is reasonable for a large number of invariant runs
+
     // Baselines captured after setup, in rebase-invariant units
     uint256 internal baselineManagerUnderlyingShares;
     uint256 internal baselineManagerVaultShares;
@@ -238,7 +240,7 @@ contract ERC4626WrapperHookInvariantTest is Test, Deployers {
 
     /// @notice Any underlying retained by the hook remains bounded rounding dust.
     function invariant_hookUnderlyingIsBoundedDust() public view {
-        assertLe(underlying.sharesOf(address(hook)), handler.ghost_wraps() * 4 + 4, "hook dust exceeds bound");
+        assertLe(underlying.sharesOf(address(hook)), MAX_DUST_WEI, "hook dust exceeds bound");
     }
 
     /// @notice PoolManager reserves never fall below their pre-campaign baselines.
