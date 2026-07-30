@@ -28,6 +28,8 @@ contract FluidDexLiteFactoryUnitTest is Test {
     uint24 constant FEE = 3000;
     int24 constant TICK_SPACING = 60;
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    /// @dev Fluid's convention for native ETH (matches FluidDexLiteAggregator)
+    address constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public {
         poolManager =
@@ -99,5 +101,53 @@ contract FluidDexLiteFactoryUnitTest is Test {
         );
 
         assertEq(computed, deployed);
+    }
+
+    function testFuzz_factory_registryAndDuplicateProtection(address rawTokenA, address rawTokenB) public {
+        vm.assume(rawTokenA != rawTokenB);
+        vm.assume(rawTokenA != address(0) && rawTokenB != address(0));
+        vm.assume(rawTokenA != FLUID_NATIVE_CURRENCY && rawTokenB != FLUID_NATIVE_CURRENCY);
+
+        (address sorted0, address sorted1) = rawTokenA < rawTokenB ? (rawTokenA, rawTokenB) : (rawTokenB, rawTokenA);
+
+        FluidDexLiteAggregatorFactory factory = new FluidDexLiteAggregatorFactory(poolManager, mockDex, mockResolver);
+
+        assertEq(factory.deploymentCount(), 0);
+
+        bytes32 dexSalt = bytes32(uint256(7));
+        assertEq(factory.hookForDexSalt(dexSalt), address(0));
+
+        bytes memory args = abi.encode(address(poolManager), address(mockDex), address(mockResolver), dexSalt);
+        (, bytes32 factorySalt) = HookMiner.find(
+            address(factory),
+            uint160(
+                Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
+                    | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+            ),
+            type(FluidDexLiteAggregator).creationCode,
+            args
+        );
+
+        address hook = factory.createPool(
+            factorySalt, dexSalt, Currency.wrap(sorted0), Currency.wrap(sorted1), FEE, TICK_SPACING, SQRT_PRICE_1_1
+        );
+
+        assertEq(factory.deploymentCount(), 1);
+        assertEq(factory.hookForDexSalt(dexSalt), hook);
+
+        FluidDexLiteAggregatorFactory.Deployment memory deployment = factory.getDeployment(0);
+        assertEq(deployment.hook, hook);
+        assertEq(deployment.dexSalt, dexSalt);
+        assertEq(Currency.unwrap(deployment.poolKey.currency0), sorted0);
+        assertEq(Currency.unwrap(deployment.poolKey.currency1), sorted1);
+        assertEq(deployment.poolKey.fee, FEE);
+        assertEq(deployment.poolKey.tickSpacing, TICK_SPACING);
+        assertEq(address(deployment.poolKey.hooks), hook);
+
+        // A second deployment for the same dexSalt reverts regardless of salt
+        vm.expectRevert(abi.encodeWithSelector(FluidDexLiteAggregatorFactory.DuplicatePool.selector, dexSalt, hook));
+        factory.createPool(
+            bytes32(0), dexSalt, Currency.wrap(sorted0), Currency.wrap(sorted1), FEE, TICK_SPACING, SQRT_PRICE_1_1
+        );
     }
 }

@@ -4,9 +4,6 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
@@ -17,7 +14,6 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
-import {V4Quoter} from "@uniswap/v4-periphery/src/lens/V4Quoter.sol";
 import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";
 
 import {BaseTokenWrapperHook} from "../src/base/BaseTokenWrapperHook.sol";
@@ -29,8 +25,6 @@ import {TestRouter} from "./shared/TestRouter.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 contract ERC4626WrapperHookTest is Test, Deployers {
-    using PoolIdLibrary for PoolKey;
-    using CurrencyLibrary for Currency;
     using SafeCast for uint256;
     using TransientStateLibrary for IPoolManager;
 
@@ -48,16 +42,12 @@ contract ERC4626WrapperHookTest is Test, Deployers {
     /// @notice true if the underlying (asset) is currency0, i.e. wrapping is a zeroForOne swap
     bool wrapZeroForOne;
 
-    // Tolerance for nominal token amounts. Each rebasing transfer hop moves a whole number of raw
-    // shares, so the amount delivered can fall short by up to one raw share per hop — up to
-    // `multiplier / 1e18` wei, i.e. 10 wei at the max fuzzed 10x rate. A swap crosses a few hops
-    // (swapper -> manager -> hook -> vault), so 100 wei leaves headroom without masking real
-    // accounting errors. Revisit if the fuzzed multiplier range is widened beyond 10x.
+    // Rebasing transfers round down up to `multiplier / 1e18` wei per hop; 100 wei covers
+    // every hop of a swap at the max fuzzed 10x rate
     uint256 constant TOL = 100;
 
-    // Tolerance for underlying dust retained by the hook, measured in raw underlying shares.
-    // Converting the hook's nominal balance back to shares rounds down by up to `1e18 / multiplier`
-    // raw shares per deposit — up to 10 at the min fuzzed 0.1x rate.
+    // Underlying dust retained by the hook, in raw shares: converting the hook's nominal
+    // balance to shares rounds down up to `1e18 / multiplier` raw shares per deposit
     uint256 constant HOOK_DUST_SHARES_TOL = 100;
 
     address alice = makeAddr("alice");
@@ -78,23 +68,19 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         underlying.approve(address(vault), type(uint256).max);
         vault.deposit(seed, address(this));
 
-        // Deploy the wrapper hook and the routing (simulation) twin at flag-encoded addresses
+        // Deploy the wrapper hook and the routing hook at flag-encoded addresses
         uint160 flags = uint160(
             type(uint160).max & clearAllHookPermissionsMask | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
         hook = ERC4626WrapperHook(address(flags));
-        // Hook flags live in the low bits; clear a high non-flag bit (156) to derive a second,
-        // distinct address that encodes the same permissions for the routing twin.
+        // clear a high non-flag bit (156) so the routing hook gets a distinct address with the same permissions
         hookSim = ERC4626RoutingHook(address(flags & (type(uint160).max - 2 ** 156)));
         deployCodeTo("ERC4626WrapperHook", abi.encode(manager, IERC4626(address(vault))), address(hook));
         deployCodeTo("ERC4626RoutingHook", abi.encode(manager, IERC4626(address(vault))), address(hookSim));
 
-        // Order currencies and record the wrap direction
         wrapZeroForOne = address(underlying) < address(vault);
-        (Currency currency0, Currency currency1) = wrapZeroForOne
-            ? (Currency.wrap(address(underlying)), Currency.wrap(address(vault)))
-            : (Currency.wrap(address(vault)), Currency.wrap(address(underlying)));
+        (Currency currency0, Currency currency1) = _sortCurrencies(address(underlying), address(vault));
 
         poolKey = PoolKey({currency0: currency0, currency1: currency1, fee: 0, tickSpacing: 60, hooks: IHooks(hook)});
         poolKeySim =
@@ -104,16 +90,14 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         manager.initialize(poolKey, initSqrtPriceX96);
         manager.initialize(poolKeySim, initSqrtPriceX96);
 
-        // Fund users generously; distribute vault shares from the seed deposit
+        // Fund users and distribute vault shares from the seed deposit
         underlying.mint(alice, 1_000_000 ether);
         underlying.mint(bob, 1_000_000 ether);
         underlying.mint(address(this), 1_000_000 ether);
         assertTrue(vault.transfer(alice, 100_000 ether));
         assertTrue(vault.transfer(bob, 100_000 ether));
 
-        // Seed the manager with a share buffer so the routing hook (which does not override
-        // _withdraw) can be quoted: its simulated unwrap takes shares the manager must already
-        // hold. On a real chain the manager holds ample balances; here we seed them explicitly.
+        // Seed the manager with shares so the routing hook's simulated unwrap has a balance to take
         assertTrue(vault.transfer(address(manager), 500_000 ether));
 
         vm.startPrank(alice);
@@ -124,10 +108,6 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         _addUnrelatedLiquidity();
     }
 
-    // ---------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------
-
     /// @notice Rebase the underlying to a fuzzed multiplier (1e18 == 1.0x)
     function _rebase(uint256 rawMultiplier) internal returns (uint256 multiplier) {
         multiplier = bound(rawMultiplier, 0.1e18, 10e18);
@@ -135,7 +115,11 @@ contract ERC4626WrapperHookTest is Test, Deployers {
     }
 
     function _limit(bool zeroForOne) internal pure returns (uint160) {
-        return zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        return zeroForOne ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT;
+    }
+
+    function _sortCurrencies(address a, address b) internal pure returns (Currency, Currency) {
+        return a < b ? (Currency.wrap(a), Currency.wrap(b)) : (Currency.wrap(b), Currency.wrap(a));
     }
 
     /// @notice Perform an exact-input swap on `key` as `alice`
@@ -154,20 +138,12 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         return vault.balanceOf(address(manager));
     }
 
-    // ---------------------------------------------------------------------
-    // Configuration
-    // ---------------------------------------------------------------------
-
     function test_initialization() public view {
         assertEq(address(hook.vault()), address(vault));
         assertEq(Currency.unwrap(hook.wrapperCurrency()), address(vault));
         assertEq(Currency.unwrap(hook.underlyingCurrency()), address(underlying));
         assertEq(hook.wrapZeroForOne(), wrapZeroForOne);
     }
-
-    // ---------------------------------------------------------------------
-    // Wrapping / unwrapping (exact input, fuzzed amount + exchange rate)
-    // ---------------------------------------------------------------------
 
     function testFuzz_wrap_exactInput(uint256 amount, uint256 rawMultiplier) public {
         _rebase(rawMultiplier);
@@ -255,10 +231,6 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         assertEq(vault.balanceOf(address(hook)), 0, "hook retains shares");
     }
 
-    // ---------------------------------------------------------------------
-    // Routing hook parity (unit-level, via the V4 Quoter)
-    // ---------------------------------------------------------------------
-
     function testFuzz_routing_wrapQuoteMatchesSwap(uint256 amount, uint256 rawMultiplier) public {
         _rebase(rawMultiplier);
         amount = bound(amount, 0.001 ether, 100_000 ether);
@@ -293,10 +265,6 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         assertApproxEqAbs(quotedOut, actualOut, TOL, "unwrap quote != swap");
     }
 
-    // ---------------------------------------------------------------------
-    // Non-standard decimals
-    // ---------------------------------------------------------------------
-
     function testFuzz_nonStandardDecimals(uint8 rawDecimals, uint256 amount, uint256 rawMultiplier) public {
         uint8 decimals = uint8(bound(rawDecimals, 6, 18));
 
@@ -307,7 +275,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         uint256 managerUBefore = u.balanceOf(address(manager));
         uint256 aliceSharesBefore = v.balanceOf(alice);
-        // Rebasing rounding is a fixed number of raw wei per hop regardless of decimals, so TOL applies as-is
+        // rebasing rounding is in raw wei regardless of decimals, so TOL applies as-is
         uint256 expectedShares = v.previewDeposit(amount);
 
         _swapExactIn(key, zeroForOne, amount);
@@ -336,20 +304,17 @@ contract ERC4626WrapperHookTest is Test, Deployers {
             type(uint160).max & clearAllHookPermissionsMask | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
                 | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.BEFORE_INITIALIZE_FLAG
         );
-        // Clear a different high non-flag bit (155) so this address collides with neither `hook` nor `hookSim`
+        // clear a different high non-flag bit (155) so this address collides with neither `hook` nor `hookSim`
         ERC4626WrapperHook decHook = ERC4626WrapperHook(address(flags & (type(uint160).max - 2 ** 155)));
         deployCodeTo("ERC4626WrapperHook", abi.encode(manager, IERC4626(address(v))), address(decHook));
 
         zeroForOne = address(u) < address(v);
-        (Currency c0, Currency c1) = zeroForOne
-            ? (Currency.wrap(address(u)), Currency.wrap(address(v)))
-            : (Currency.wrap(address(v)), Currency.wrap(address(u)));
+        (Currency c0, Currency c1) = _sortCurrencies(address(u), address(v));
         key = PoolKey({currency0: c0, currency1: c1, fee: 0, tickSpacing: 60, hooks: IHooks(decHook)});
         manager.initialize(key, SQRT_PRICE_1_1);
 
-        // A wrap-only exact-input swap needs no pre-seeded manager reserves: the swapper's input
-        // is settled into the manager before the hook takes it. So no unrelated liquidity here
-        // (its 18-decimal liquidityDelta would not scale to low-decimal tokens).
+        // no unrelated liquidity: an exact-input wrap needs no pre-seeded manager reserves,
+        // and its 18-decimal liquidityDelta would not scale to low-decimal tokens
         u.mint(alice, 1_000_000 * unit);
         assertTrue(v.transfer(alice, 100_000 * unit));
         vm.startPrank(alice);
@@ -357,10 +322,6 @@ contract ERC4626WrapperHookTest is Test, Deployers {
         v.approve(address(router), type(uint256).max);
         vm.stopPrank();
     }
-
-    // ---------------------------------------------------------------------
-    // Reverts / guards
-    // ---------------------------------------------------------------------
 
     function test_revert_wrap_exactOutput() public {
         vm.startPrank(alice);
@@ -432,9 +393,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
     function test_revert_invalidPoolInitialization() public {
         // Non-zero fee
-        (Currency c0, Currency c1) = wrapZeroForOne
-            ? (Currency.wrap(address(underlying)), Currency.wrap(address(vault)))
-            : (Currency.wrap(address(vault)), Currency.wrap(address(underlying)));
+        (Currency c0, Currency c1) = _sortCurrencies(address(underlying), address(vault));
         PoolKey memory invalidKey =
             PoolKey({currency0: c0, currency1: c1, fee: 3000, tickSpacing: 60, hooks: IHooks(hook)});
         vm.expectRevert(
@@ -450,9 +409,7 @@ contract ERC4626WrapperHookTest is Test, Deployers {
 
         // Wrong token pair
         MockERC20 randomToken = new MockERC20("Random", "RND", 18);
-        (Currency rc0, Currency rc1) = address(randomToken) < address(vault)
-            ? (Currency.wrap(address(randomToken)), Currency.wrap(address(vault)))
-            : (Currency.wrap(address(vault)), Currency.wrap(address(randomToken)));
+        (Currency rc0, Currency rc1) = _sortCurrencies(address(randomToken), address(vault));
         invalidKey = PoolKey({currency0: rc0, currency1: rc1, fee: 0, tickSpacing: 60, hooks: IHooks(hook)});
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -511,19 +468,13 @@ contract ERC4626WrapperHookTest is Test, Deployers {
     // ---------------------------------------------------------------------
 
     function _addUnrelatedLiquidity() internal {
-        _addUnrelatedLiquidityFor(underlying, vault, wrapZeroForOne);
-    }
-
-    function _addUnrelatedLiquidityFor(MockRebasingERC20 u, MockERC4626Vault v, bool zeroForOne) internal {
-        (Currency c0, Currency c1) = zeroForOne
-            ? (Currency.wrap(address(u)), Currency.wrap(address(v)))
-            : (Currency.wrap(address(v)), Currency.wrap(address(u)));
+        (Currency c0, Currency c1) = _sortCurrencies(address(underlying), address(vault));
         PoolKey memory unrelatedPoolKey =
             PoolKey({currency0: c0, currency1: c1, fee: 100, tickSpacing: 60, hooks: IHooks(address(0))});
         manager.initialize(unrelatedPoolKey, SQRT_PRICE_1_1);
 
-        u.approve(address(modifyLiquidityRouter), type(uint256).max);
-        v.approve(address(modifyLiquidityRouter), type(uint256).max);
+        underlying.approve(address(modifyLiquidityRouter), type(uint256).max);
+        vault.approve(address(modifyLiquidityRouter), type(uint256).max);
         modifyLiquidityRouter.modifyLiquidity(
             unrelatedPoolKey,
             ModifyLiquidityParams({tickLower: -120, tickUpper: 120, liquidityDelta: 1000e18, salt: bytes32(0)}),
