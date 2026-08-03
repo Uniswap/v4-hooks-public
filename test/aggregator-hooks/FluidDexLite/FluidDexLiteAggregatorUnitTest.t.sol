@@ -14,7 +14,7 @@ import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
-import {MockFluidDexLite} from "./mocks/MockFluidDexLite.sol";
+import {MockFluidDexLite, ReentrancyAttacker, UnauthorizedCallbackCaller} from "./mocks/MockFluidDexLite.sol";
 import {MockFluidDexLiteResolver} from "./mocks/MockFluidDexLiteResolver.sol";
 import {
     FluidDexLiteAggregator
@@ -112,18 +112,19 @@ contract FluidDexLiteAggregatorUnitTest is Test {
 
     // ========== dexCallback ==========
 
-    function test_dexCallback_revertsUnauthorizedCaller() public {
-        vm.expectRevert(FluidDexLiteAggregator.UnauthorizedCaller.selector);
+    function test_dexCallback_revertsProhibitedEntry() public {
+        // Not in inflight state: the inflight guard fires before any other check
+        vm.expectRevert(FluidDexLiteAggregator.ProhibitedEntry.selector);
         hook.dexCallback(address(token0), 100 ether, "");
     }
 
-    function test_dexCallback_takesFromPoolManager() public {
-        // Callback must come from mockDex; simulate by pranking
+    function test_dexCallback_revertsProhibitedEntry_whenCalledByPool() public {
+        // Even the real pool cannot invoke the callback outside of an active swap:
+        // the inflight guard reverts before the authorized-caller / take path is reached.
         token0.mint(address(poolManager), 100 ether);
 
-        // Need to be in unlocked context for take to work
         vm.prank(address(mockDex));
-        vm.expectRevert(IPoolManager.ManagerLocked.selector);
+        vm.expectRevert(FluidDexLiteAggregator.ProhibitedEntry.selector);
         hook.dexCallback(address(token0), 100 ether, "");
     }
 
@@ -276,6 +277,60 @@ contract FluidDexLiteAggregatorUnitTest is Test {
         // The swap will revert because the callback tries to take native currency
         // but the important part is that dexCallback receives FLUID_NATIVE_CURRENCY (0xEeee...)
         // and converts it to address(0) before calling poolManager.take()
+        vm.expectRevert();
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(100 ether), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    // ========== REENTRANCY TEST ==========
+
+    function test_swap_revertsReentrancy() public {
+        // Set up reentrancy attacker that will try to re-enter during the callback
+        ReentrancyAttacker attacker = new ReentrancyAttacker();
+
+        // Prepare the attack - try to initiate another swap during the callback
+        bytes memory attackCallData = abi.encodeWithSelector(
+            swapRouter.swap.selector,
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(10 ether), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        attacker.setAttack(address(swapRouter), attackCallData);
+
+        // Configure mock to call the attacker during the swap
+        mockDex.setReentrancyAttacker(address(attacker));
+        mockDex.setReturnSwapSingle(95 ether);
+        token1.mint(address(poolManager), 95 ether);
+
+        // The swap should complete because the attacker's re-entry attempt fails
+        // (ReentrancyAttacker expects the attack to fail and reverts if it succeeds)
+        vm.prank(alice);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({zeroForOne: true, amountSpecified: -int256(100 ether), sqrtPriceLimitX96: MIN_PRICE}),
+            SafePoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    // ========== UNAUTHORIZED CALLER TEST ==========
+
+    function test_dexCallback_revertsUnauthorizedCaller_whenInflight() public {
+        // Set up unauthorized caller that makes the callback from a non-pool address
+        UnauthorizedCallbackCaller unauthorizedCaller = new UnauthorizedCallbackCaller();
+
+        // Configure mock to have the unauthorized caller make the callback during the swap
+        mockDex.setUnauthorizedCaller(address(unauthorizedCaller));
+        mockDex.setReturnSwapSingle(95 ether);
+
+        // The swap should revert because the callback comes from an unauthorized caller,
+        // even though the swap is inflight (so the ProhibitedEntry guard passes)
+        vm.prank(alice);
         vm.expectRevert();
         swapRouter.swap(
             poolKey,
