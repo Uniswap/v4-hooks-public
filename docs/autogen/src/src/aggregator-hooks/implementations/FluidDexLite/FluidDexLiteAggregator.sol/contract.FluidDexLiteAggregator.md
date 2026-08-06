@@ -1,5 +1,5 @@
 # FluidDexLiteAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9326b4e392f3106a370d0bdbea2ef3e77cd92579/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IFluidDexLiteCallback](/src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol/interface.IFluidDexLiteCallback.md)
@@ -67,6 +67,13 @@ bytes32 private immutable salt
 
 ```solidity
 address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+```
+
+
+### INFLIGHT_SLOT
+
+```solidity
+bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e
 ```
 
 
@@ -177,6 +184,20 @@ function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams
 function _swap(FluidDexLiteSwapParams memory p, uint256 value) internal returns (uint256 amountUnspecified);
 ```
 
+### _setTransientInflight
+
+
+```solidity
+function _setTransientInflight(bool value) private;
+```
+
+### _getTransientInflight
+
+
+```solidity
+function _getTransientInflight() private view returns (bool value);
+```
+
 ### isEmpty
 
 
@@ -189,6 +210,18 @@ function isEmpty(IFluidDexLite.DexState memory dexState) private pure returns (b
 
 ```solidity
 error UnauthorizedCaller();
+```
+
+### Reentrancy
+
+```solidity
+error Reentrancy();
+```
+
+### ProhibitedEntry
+
+```solidity
+error ProhibitedEntry();
 ```
 
 ### NativeCurrencyExactOut
