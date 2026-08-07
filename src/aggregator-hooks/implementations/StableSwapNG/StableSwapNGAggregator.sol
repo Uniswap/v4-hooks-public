@@ -38,6 +38,7 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     /// @notice Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
     mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 
+    error NativeCurrencyNotSupported();
     error AmountOutExceeded();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
@@ -181,5 +182,9 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     function _getBuffer(uint256 amount) internal pure returns (uint256) {
         uint256 scaled = amount / INACCURACY_SCALE;
         return scaled > INACCURACY_BUFFER ? scaled : INACCURACY_BUFFER;
+    }
+
+    receive() external payable override {
+        revert NativeCurrencyNotSupported();
     }
 }

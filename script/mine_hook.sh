@@ -16,6 +16,11 @@ show_help() {
     echo "                       0xF2 - FluidDexV2 (not yet implemented)"
     echo "                       0xF3 - FluidDexLite"
     echo "                       0x71 - Tempo (TempoExchange)"
+    echo "                       0x03 - Uniswap V3"
+    echo "                       0xA1 - Slipstream"
+    echo "                       0x93 - PancakeSwap V3"
+    echo "                       0x95 - LitePSM"
+    echo "                       0x02 - Uniswap V2"
     echo "  max_attempts       Optional. Maximum mining attempts (default: 500)"
     echo "  deployer_address   Optional. Address that will deploy the hook."
     echo "                     Use factory address for factory deploys, wallet address for self-deploys."
@@ -74,7 +79,7 @@ for ((i=0; i<MAX_ATTEMPTS; i++)); do
     echo "Attempt $((i + 1))/$MAX_ATTEMPTS - Salt offset: $OFFSET"
     
     # Run the forge script and capture output
-    OUTPUT=$(SALT_OFFSET=$OFFSET CONSTRUCTOR_ARGS=$CONSTRUCTOR_ARGS PROTOCOL_ID=$PROTOCOL_ID DEPLOYER=$DEPLOYER_ADDRESS forge script script/MineAggregatorHook.s.sol:MineAggregatorHookScript --via-ir 2>&1)
+    OUTPUT=$(SALT_OFFSET=$OFFSET CONSTRUCTOR_ARGS=$CONSTRUCTOR_ARGS PROTOCOL_ID=$PROTOCOL_ID DEPLOYER=$DEPLOYER_ADDRESS forge script script/MineAggregatorHook.s.sol:MineAggregatorHookScript 2>&1)
     
     # Check if we found a valid salt (look for "Hook Address" in output)
     if echo "$OUTPUT" | grep -q "Hook Address:"; then

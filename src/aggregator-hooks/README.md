@@ -9,7 +9,7 @@ When adding support for a new protocol, you must follow these guidelines:
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, the implementation contract must be a singleton
 - If the protocol has a strict 1-1 mapping for a UniswapV4 Pool Key, there should not be a factory
 - Update the MineAggregatorHook script to handle mining hooks for new protocol
-- For testing requirements, see test/aggreagtor-hooks/README.md
+- For testing requirements, see test/aggregator-hooks/README.md
 
 ## ID System
 
@@ -31,6 +31,12 @@ First-byte ID table:
 | F2  | FluidDexV2         |
 | F3  | FluidDexLite       |
 | 71  | TempoExchange      |
+| 03  | Uniswap V3         |
+| A1  | Slipstream         |
+| 93  | Pancakeswap V3     |
+| 95  | LitePSM            |
+| 02  | Uniswap V2         |
+| 58  | UniswapX (Dutch)   |
 
 ## Supported Protocols
 
@@ -83,6 +89,73 @@ Tempo is a blockchain for payments with an enshrined stablecoin DEX. A singleton
 
 The interface is defined based on Tempo's [official documentation](https://docs.tempo.xyz/protocol/exchange/executing-swaps).
 
+### Uniswap V2
+
+Singleton hook routes swaps through **Uniswap V2–compatible** pairs (`getReserves`, constant-product `swap`). One deployment serves many Uniswap V4 pools; each external pair is resolved from the immutable factory via **`getPair(tokenA, tokenB)`**. On-chain reserves supply **view quotes**; `PoolKey.fee` and `PoolKey.tickSpacing` **do not** participate in routing (only the currency pair matters).
+
+| Pool Type      | Implementation        | Factory lookup                                                                                   |
+| -------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| **Uniswap V2** | `UniswapV2Aggregator` | `getPair(tokenA, tokenB)` — align `PoolKey` currencies with the pair’s `token0` / `token1` order |
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV2/interfaces/` (`IUniswapV2Pair`, `IUniswapV2Factory`) for the subset of the canonical V2 ABI the hook uses.
+
+### MakerDAO LitePSM
+
+Singleton hook routes swaps through **MakerDAO's LitePSM** (or `LitePSMWrapper`), which maintains a 1:1 peg between a gem token (e.g., USDC) and USDS. Because the PSM offers zero-slippage, fixed-fee conversion, no external factory lookup is needed — the hook addresses the PSM directly.
+
+| Pool Type   | Implementation      | Routing                                                                                       |
+| ----------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| **LitePSM** | `LitePSMAggregator` | Singleton; gem ↔ USDS via `sellGem` / `buyGem`. One pool per gem/USDS pair enforced at init. |
+
+#### Key Details
+
+- **Gem token**: resolved dynamically from `litePSM.gem()` at construction — not hardcoded to USDC
+- **Decimal conversion**: `to18ConversionFactor` cached from `litePSM.to18ConversionFactor()` (e.g., `1e12` for 6-decimal gems)
+- **Fees**: `tin` (gem→USDS) and `tout` (USDS→gem) are read fresh each call; governance can change them
+- **Canonical pair**: only one V4 pool per gem/USDS pair is allowed; duplicate registration reverts with `PairAlreadyHasCanonicalPool`
+
+#### Defined interfaces
+
+A minimal `ILitePSM` interface lives under `implementations/LitePSM/interfaces/` covering `sellGem`, `buyGem`, `tin`, `tout`, `to18ConversionFactor`, `gem`, and `pocket`.
+
+### Uniswap V3 / Slipstream
+
+Singleton hooks route swaps through **Uniswap V3–compatible** pools (`swap` + `uniswapV3SwapCallback`). One deployment serves many Uniswap V4 pools; each external pool is keyed by factory plus tokens plus either **fee tier** (Uniswap V3 factory) or **tick spacing** (Slipstream factory).
+
+| Pool Type      | Implementation         | Factory lookup                                                                                |
+| -------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Uniswap V3** | `UniswapV3Aggregator`  | `getPool(tokenA, tokenB, fee)` — align `PoolKey.fee` with the external fee tier               |
+| **Slipstream** | `SlipstreamAggregator` | `getPool(tokenA, tokenB, tickSpacing)` — align `PoolKey.tickSpacing` with the Slipstream pool |
+
+`SlipstreamAggregator` inherits `UniswapV3Aggregator` and overrides only external pool resolution (and canonical secondary key). Quotes use a chain-deployed **Quoter** compatible with `IQuoterV2`.
+
+#### Defined interfaces
+
+Minimal interfaces live under `implementations/UniswapV3/interfaces/` and `implementations/Slipstream/interfaces/` (`IUniswapV3Pool`, `IUniswapV3Factory`, `ISlipstreamFactory`, `IQuoterV2`, `IUniswapV3SwapCallback`) so the repo does not require a full `v3-core` submodule.
+
+### UniswapX (Dutch orders)
+
+The "liquidity source" is a single **UniswapX order** (e.g. an original Dutch order), supplied as swap `hookData` rather than a persistent on-chain pool. The hook acts as the UniswapX **filler**: it calls the Reactor's `executeWithCallback`, the Reactor pulls the order swapper's input (via Permit2) to the hook and invokes `reactorCallback`, during which the hook sources the order's required output from the V4 PoolManager (i.e. from the V4 swapper). The V4 swapper therefore provides the counter-side liquidity that fills the order and, in return, receives the order's input token. The Reactor address is fixed at construction (one hook deployment per reactor).
+
+| Pool Type    | Implementation       | Order delivery                                     |
+| ------------ | -------------------- | -------------------------------------------------- |
+| **UniswapX** | `UniswapXAggregator` | `SignedOrder` ABI-encoded and passed as `hookData` |
+
+#### Key Details
+
+- **No Quoter needed**: the Reactor resolves the order (applying Dutch decay) and returns the exact `ResolvedOrder` (input + outputs) inside `reactorCallback`.
+- **All-or-nothing**: original Dutch orders cannot be partially filled, so the V4 swap amount must exactly match the resolved order amount, otherwise the swap reverts (`OrderAmountMismatch`).
+- **No routing quotes**: `quote` / `pseudoTotalValueLocked` revert (`QuoteNotSupported`) because the order is only known at swap time, not when a router calls those view functions. This hook is solver-driven.
+- **Protocol fees**: pools using this hook opt out of protocol-fee classification (`protocolFeeFlags()` returns 0), so no protocol fee applies in practice. The shared `beforeSwap`/settlement accounting (and `quoteWithHookData`) would still charge one correctly if a fee were ever configured — opting out of classification is a policy choice, not a settlement limitation.
+- **Reactor fee controller**: if UniswapX protocol fees are injected as an extra order output in the same token as the order's other outputs, the hook's output-summing handles them and the V4 swapper pays them (quotes agree, since the `OrderQuoter` resolves through the reactor). A fee output in any other token makes every fill through this hook revert with `InconsistentOrderOutputs`.
+- **ETH/WETH**: native ETH on the V4 pool side is bridged to/from WETH on the order side (order inputs are always ERC20 because Permit2 cannot transfer native ETH; order outputs may be native ETH or WETH). WETH address is fixed at construction.
+
+#### Defined interfaces
+
+UniswapX interfaces are imported from the [`briefcase`](https://github.com/Uniswap/briefcase) submodule via the `@uniswapx/` remapping (`IReactor`, `IReactorCallback`, `ReactorStructs`).
+
 ## Architecture
 
 Each aggregator implementation follows a consistent pattern:
@@ -97,3 +170,7 @@ implementations/
 ```
 
 All aggregators extend `BaseAggregatorHook`, which provides the base hook functionality for routing swaps through external liquidity sources.
+
+### `hookData`-driven aggregators
+
+Most aggregators ignore the swap's `hookData` (their external pool is fixed at initialization). Hooks whose fill depends on per-swap `hookData` — e.g. `UniswapXAggregator`, which receives the signed order to fill — instead extend `BaseHookDataAggregator`. It mirrors `BaseAggregatorHook`'s `_beforeSwap`/settlement accounting but forwards `hookData` into a hookData-aware `_conductSwap(settle, take, params, poolId, hookData)`, so the data is read straight from calldata (no storage stash). Hooks that don't need `hookData` continue to extend `BaseAggregatorHook` directly and are unaffected.

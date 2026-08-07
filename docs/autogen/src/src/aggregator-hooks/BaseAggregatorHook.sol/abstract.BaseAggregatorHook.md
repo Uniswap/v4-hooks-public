@@ -1,8 +1,8 @@
 # BaseAggregatorHook
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/BaseAggregatorHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/46ab71e7645df3d64344767b0e4a437258051bb5/src/aggregator-hooks/BaseAggregatorHook.sol)
 
 **Inherits:**
-[IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
+[IAggregatorHook](/src/aggregator-hooks/interfaces/IAggregatorHook.sol/interface.IAggregatorHook.md), IFeeClassifiedHook, [ProtocolFees](/src/aggregator-hooks/ProtocolFees.sol/abstract.ProtocolFees.md), [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
 
 **Title:**
 BaseAggregatorHook
@@ -31,7 +31,7 @@ Initializes the hook with required dependencies
 
 
 ```solidity
-constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager);
+constructor(IPoolManager _manager, string memory _aggregatorHookVersion) BaseHook(_manager) ProtocolFees(25);
 ```
 **Parameters**
 
@@ -90,10 +90,7 @@ might be simulated but not finalized. Applies protocol fee on top of the raw quo
 
 
 ```solidity
-function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
-    external
-    payable
-    returns (uint256 amountUnspecified);
+function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId) external returns (uint256 amountUnspecified);
 ```
 **Parameters**
 
@@ -108,6 +105,33 @@ function quote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
 |Name|Type|Description|
 |----|----|-----------|
 |`amountUnspecified`|`uint256`|amount of unspecified side (always positive to adhere to practices by other quote functions)|
+
+
+### _innerQuote
+
+Shared quote tail: applies the protocol fee to a raw quote. Called by every quote variant so
+this fee adjustment lives in exactly one place.
+
+
+```solidity
+function _innerQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId, uint256 amountUnspecified)
+    internal
+    returns (uint256);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`zeroToOne`|`bool`|Whether the swap is from token0 to token1|
+|`amountSpecified`|`int256`|The amount specified (negative for exact-in, positive for exact-out)|
+|`poolId`|`PoolId`|The pool ID|
+|`amountUnspecified`|`uint256`|The raw unspecified amount before protocol fee adjustment|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`uint256`|The unspecified amount after protocol fee adjustment|
 
 
 ### getHookPermissions
@@ -126,6 +150,18 @@ function getHookPermissions() public pure override returns (Hooks.Permissions me
 |----|----|-----------|
 |`permissions`|`Hooks.Permissions`|Permissions struct|
 
+
+### protocolFeeFlags
+
+Returns the hook's self-reported behavioral flags.
+
+Return 0 to indicate no self-classification (falls through to defaultFee).
+The bitfield is opaque to the policy; see the governance guide for active conventions.
+
+
+```solidity
+function protocolFeeFlags() external view virtual override returns (uint256);
+```
 
 ### _conductSwap
 
@@ -209,9 +245,36 @@ function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams ca
 ```solidity
 function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
     internal
+    virtual
     override
     returns (bytes4, BeforeSwapDelta, uint24);
 ```
+
+### _innerBeforeSwap
+
+Shared `beforeSwap` tail: turns the settled amounts into the BeforeSwapDelta and applies the
+protocol fee. Called by every `_beforeSwap` variant so this accounting lives in exactly one place.
+
+
+```solidity
+function _innerBeforeSwap(
+    address sender,
+    PoolKey calldata key,
+    SwapParams calldata params,
+    uint256 amountIn,
+    uint256 amountOut
+) internal returns (bytes4, BeforeSwapDelta, uint24);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`sender`|`address`|The address that initiated the swap|
+|`key`|`PoolKey`|The pool key|
+|`params`|`SwapParams`|The swap parameters|
+|`amountIn`|`uint256`|The swapper's input amount resolved by settlement (the `takeCurrency` amount)|
+|`amountOut`|`uint256`|The swapper's output amount resolved by settlement (the `settleCurrency` amount)|
+
 
 ### _processAmounts
 
@@ -247,6 +310,6 @@ Required for handling native ETH transfers during swap operations
 
 
 ```solidity
-receive() external payable;
+receive() external payable virtual;
 ```
 
