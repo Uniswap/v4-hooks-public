@@ -1,5 +1,5 @@
 # UniswapV3Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/58a634e4518fd565ac92feb10dc56b548b28a1c8/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/IUniswapV3SwapCallback.sol/interface.IUniswapV3SwapCallback.md)
@@ -10,38 +10,13 @@ UniswapV3Aggregator
 Singleton hook aggregating concentrated liquidity from Uniswap V3 compatible pools (fee-tier factory lookup)
 
 
-## State Variables
+## Constants
 ### factory
 Uniswap V3 factory used for default pool resolution (fee tier from PoolKey.fee)
 
 
 ```solidity
 address public immutable factory
-```
-
-
-### poolIdToExternalPool
-External CL pool per registered Uniswap V4 pool
-
-
-```solidity
-mapping(PoolId => address) public poolIdToExternalPool
-```
-
-
-### _canonicalPoolKeyByAddress
-
-```solidity
-mapping(address => PoolKey) private _canonicalPoolKeyByAddress
-```
-
-
-### _initializedPools
-PoolKeys of all pools initialized with this hook, in initialization order
-
-
-```solidity
-PoolKey[] internal _initializedPools
 ```
 
 
@@ -72,6 +47,32 @@ bytes32 private constant TRANSIENT_EXPECTED_POOL =
 ```solidity
 bytes32 private constant TRANSIENT_SWAP_INPUT_PAID =
     0x582465caaa3a5bc4afb238d59b626acb3a16194fc90d0d5ec69b636bbd73057a
+```
+
+
+## State Variables
+### poolIdToExternalPool
+External CL pool per registered Uniswap V4 pool
+
+
+```solidity
+mapping(PoolId => address) public poolIdToExternalPool
+```
+
+
+### _canonicalPoolKeyByAddress
+
+```solidity
+mapping(address => PoolKey) private _canonicalPoolKeyByAddress
+```
+
+
+### _initializedPools
+PoolKeys of all pools initialized with this hook, in initialization order
+
+
+```solidity
+PoolKey[] internal _initializedPools
 ```
 
 

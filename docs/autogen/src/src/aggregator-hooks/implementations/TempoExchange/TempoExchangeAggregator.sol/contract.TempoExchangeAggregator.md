@@ -1,5 +1,5 @@
 # TempoExchangeAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -14,7 +14,7 @@ Supports multiple pools and both exact-input and exact-output swaps
 Tempo uses uint128 for amounts; this contract handles the conversion from uint256
 
 
-## State Variables
+## Constants
 ### tempoExchange
 The Tempo stablecoin exchange (precompiled contract)
 
@@ -24,6 +24,21 @@ ITempoExchange public immutable tempoExchange
 ```
 
 
+### INACCURACY_BUFFER
+
+```solidity
+uint256 private constant INACCURACY_BUFFER = 20
+```
+
+
+### INACCURACY_SCALE
+
+```solidity
+uint256 private constant INACCURACY_SCALE = 1_000_000
+```
+
+
+## State Variables
 ### poolIdToTokens
 Maps Uniswap V4 pool IDs to their token addresses
 
@@ -41,20 +56,6 @@ Enforces one pool per pair
 
 ```solidity
 mapping(bytes32 => PoolId) private _canonicalPoolByPair
-```
-
-
-### INACCURACY_BUFFER
-
-```solidity
-uint256 private constant INACCURACY_BUFFER = 20
-```
-
-
-### INACCURACY_SCALE
-
-```solidity
-uint256 private constant INACCURACY_SCALE = 1_000_000
 ```
 
 

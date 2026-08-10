@@ -1,5 +1,5 @@
 # WETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/WETHHook.sol)
 
 **Inherits:**
 [BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
@@ -12,7 +12,7 @@ Hook for wrapping/unwrapping ETH in Uniswap V4 pools
 Implements 1:1 wrapping/unwrapping of ETH to WETH
 
 
-## State Variables
+## Constants
 ### weth
 The WETH9 contract
 

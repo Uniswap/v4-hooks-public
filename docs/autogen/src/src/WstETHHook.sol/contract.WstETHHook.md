@@ -1,5 +1,5 @@
 # WstETHHook
-[Git Source](https://github.com/Uniswap/v4-hooks/blob/fc918c4c3fa3e5afc89d09732574ed28bc7c5602/src/WstETHHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/WstETHHook.sol)
 
 **Inherits:**
 [BaseTokenWrapperHook](/src/base/BaseTokenWrapperHook.sol/abstract.BaseTokenWrapperHook.md)
@@ -14,7 +14,7 @@ Implements dynamic exchange rate wrapping/unwrapping between stETH and wstETH
 wstETH represents stETH with accrued staking rewards, maintaining a dynamic exchange rate
 
 
-## State Variables
+## Constants
 ### wstETH
 The wstETH contract used for wrapping/unwrapping operations
 

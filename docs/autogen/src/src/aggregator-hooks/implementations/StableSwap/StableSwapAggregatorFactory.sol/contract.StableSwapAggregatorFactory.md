@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/7ae47fe1bceb326a11377fb81cb118374409cc3b/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating StableSwapAggregator hooks via CREATE2 and initializing Uni
 Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 
 
-## State Variables
+## Constants
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -28,6 +28,7 @@ IMetaRegistry public immutable metaRegistry
 ```
 
 
+## State Variables
 ### deployments
 All deployments, indexed by creation order
 
@@ -60,12 +61,8 @@ constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) ;
 
 Creates a new StableSwapAggregator hook and initializes pools for all token pairs
 
-Note: The caller should try to pass in the entire list of
-tokens they want tradeable from this pool in a single call.
-
-Note: If a pool has already been created using an incomplete token set, the remaining
-pools should be initialized directly on the PoolManager using .initialize()
-with the previously deployed hook address
+Note: The token count must match the Curve pool's coin count,
+so every token pair is initialized in this single call
 
 
 ```solidity
@@ -84,7 +81,7 @@ function createPool(
 |----|----|-----------|
 |`salt`|`bytes32`|The CREATE2 salt (pre-mined to produce valid hook address)|
 |`curvePool`|`ICurveStableSwap`|The Curve StableSwap pool to aggregate|
-|`tokens`|`Currency[]`|Array of currencies in the pool (must have at least 2 tokens)|
+|`tokens`|`Currency[]`|Array of currencies in the pool (must contain exactly the pool's coins)|
 |`fee`|`uint24`|The pool fee|
 |`tickSpacing`|`int24`|The pool tick spacing|
 |`sqrtPriceX96`|`uint160`|The initial sqrt price for each pool|
@@ -166,6 +163,12 @@ error DuplicateTokens(Currency token);
 
 ```solidity
 error DuplicatePool(address curvePool, address existingHook);
+```
+
+### TokenCountMismatch
+
+```solidity
+error TokenCountMismatch(uint256 provided);
 ```
 
 ## Structs

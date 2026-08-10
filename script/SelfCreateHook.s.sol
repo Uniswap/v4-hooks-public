@@ -17,9 +17,6 @@ import {
     PancakeSwapV3Aggregator
 } from "../src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol";
 import {SlipstreamAggregator} from "../src/aggregator-hooks/implementations/Slipstream/SlipstreamAggregator.sol";
-import {LitePSMAggregator} from "../src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol";
-import {UniswapV2Aggregator} from "../src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol";
-import {UniswapV3Aggregator} from "../src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol";
 
 import {ICurveStableSwap} from "../src/aggregator-hooks/implementations/StableSwap/interfaces/IStableSwap.sol";
 import {IMetaRegistry} from "../src/aggregator-hooks/implementations/StableSwap/interfaces/IMetaRegistry.sol";
@@ -38,7 +35,6 @@ import {IFluidDexLite} from "../src/aggregator-hooks/implementations/FluidDexLit
 import {
     IFluidDexLiteResolver
 } from "../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteResolver.sol";
-import {ILitePSM} from "../src/aggregator-hooks/implementations/LitePSM/interfaces/ILitePSM.sol";
 import {IAggregatorHook} from "../src/aggregator-hooks/interfaces/IAggregatorHook.sol";
 
 /// @notice Self-deploys an aggregator hook and initializes the pool without using a factory
@@ -50,9 +46,6 @@ contract SelfCreateHookScript is Script {
     uint8 constant ID_FLUIDDEXLITE = 0xF3;
     uint8 constant ID_PANCAKE_V3 = 0x93;
     uint8 constant ID_SLIPSTREAM = 0xA1;
-    uint8 constant ID_LITEPSM = 0x95;
-    uint8 constant ID_UNISWAP_V2 = 0x02;
-    uint8 constant ID_UNISWAP_V3 = 0x03;
 
     function run() public {
         // Load private key for broadcasting
@@ -63,12 +56,9 @@ contract SelfCreateHookScript is Script {
         bytes32 salt = vm.envBytes32("SALT");
         address poolManager = vm.envAddress("POOL_MANAGER");
 
-        // Singleton protocols (PancakeSwapV3, Slipstream, Uniswap V2/V3, SushiSwap V2/V3)
-        // only deploy the aggregator here; pool initialization is handled separately by
-        // the TypeScript orchestrator.
-        bool isSingleton =
-            (protocolId == ID_PANCAKE_V3 || protocolId == ID_SLIPSTREAM || protocolId == ID_UNISWAP_V2
-                || protocolId == ID_UNISWAP_V3);
+        // Singleton protocols (PancakeSwapV3, Slipstream) only deploy the aggregator here;
+        // pool initialization is handled separately by the TypeScript orchestrator.
+        bool isSingleton = (protocolId == ID_PANCAKE_V3 || protocolId == ID_SLIPSTREAM);
 
         uint24 fee;
         int24 tickSpacing;
@@ -95,12 +85,6 @@ contract SelfCreateHookScript is Script {
             hookAddress = _deployPancakeSwapV3(salt, poolManager);
         } else if (protocolId == ID_SLIPSTREAM) {
             hookAddress = _deploySlipstream(salt, poolManager);
-        } else if (protocolId == ID_LITEPSM) {
-            hookAddress = _deployLitePSM(salt, poolManager);
-        } else if (protocolId == ID_UNISWAP_V2) {
-            hookAddress = _deployUniswapV2Style(salt, poolManager);
-        } else if (protocolId == ID_UNISWAP_V3) {
-            hookAddress = _deployUniswapV3Style(salt, poolManager);
         } else {
             revert("Invalid protocol ID");
         }
@@ -206,41 +190,6 @@ contract SelfCreateHookScript is Script {
         address externalFactory = vm.envAddress("EXTERNAL_FACTORY");
 
         SlipstreamAggregator hook = new SlipstreamAggregator{salt: salt}(IPoolManager(poolManager), externalFactory);
-
-        return address(hook);
-    }
-
-    function _deployLitePSM(bytes32 salt, address poolManager) internal returns (address) {
-        address litePSM = vm.envAddress("LITE_PSM");
-        address stableToken = vm.envAddress("STABLE_TOKEN");
-
-        LitePSMAggregator hook =
-            new LitePSMAggregator{salt: salt}(IPoolManager(poolManager), ILitePSM(litePSM), stableToken);
-
-        return address(hook);
-    }
-
-    /// @dev Deploys UniswapV2Aggregator for any Uniswap V2 style fork (Uniswap V2, SushiSwap V2);
-    ///      the fork is selected purely by EXTERNAL_FACTORY. V2_FEE is the swap fee in ppm.
-    function _deployUniswapV2Style(bytes32 salt, address poolManager) internal returns (address) {
-        address externalFactory = vm.envAddress("EXTERNAL_FACTORY");
-        uint256 v2Fee = vm.envOr("V2_FEE", uint256(3000));
-        string memory hookVersion = vm.envOr("HOOK_VERSION", string("UniswapV2Aggregator v1.0"));
-
-        UniswapV2Aggregator hook =
-            new UniswapV2Aggregator{salt: salt}(IPoolManager(poolManager), externalFactory, v2Fee, hookVersion);
-
-        return address(hook);
-    }
-
-    /// @dev Deploys UniswapV3Aggregator for any Uniswap V3 style fork (Uniswap V3, SushiSwap V3);
-    ///      the fork is selected purely by EXTERNAL_FACTORY.
-    function _deployUniswapV3Style(bytes32 salt, address poolManager) internal returns (address) {
-        address externalFactory = vm.envAddress("EXTERNAL_FACTORY");
-        string memory hookVersion = vm.envOr("HOOK_VERSION", string("UniswapV3Aggregator v1.0"));
-
-        UniswapV3Aggregator hook =
-            new UniswapV3Aggregator{salt: salt}(IPoolManager(poolManager), externalFactory, hookVersion);
 
         return address(hook);
     }
