@@ -1,5 +1,5 @@
 # LitePSMAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -17,7 +17,7 @@ use the immutable to18ConversionFactor read from the PSM at construction time.
 tin  = fee on gem→stable (sellGem); tout = fee on stable→gem (buyGem). Both in WAD units.
 
 
-## State Variables
+## Constants
 ### WAD
 
 ```solidity
@@ -63,6 +63,7 @@ uint256 public immutable to18ConversionFactor
 ```
 
 
+## State Variables
 ### poolIdToTokens
 Maps Uniswap V4 pool IDs to their token addresses
 
