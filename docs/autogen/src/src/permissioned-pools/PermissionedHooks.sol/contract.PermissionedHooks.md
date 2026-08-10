@@ -1,5 +1,5 @@
 # PermissionedHooks
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0d80526d11c0689c2c79f9b7848f43b9357c02e9/src/permissioned-pools/PermissionedHooks.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/permissioned-pools/PermissionedHooks.sol)
 
 **Inherits:**
 IHooks, [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)

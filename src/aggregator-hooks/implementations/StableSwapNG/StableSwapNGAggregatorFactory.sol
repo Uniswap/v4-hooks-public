@@ -36,6 +36,7 @@ contract StableSwapNGAggregatorFactory {
     error InsufficientTokens();
     error DuplicateTokens(Currency token);
     error DuplicatePool(address curvePool, address existingHook);
+    error TokenCountMismatch(uint256 provided, uint256 actual);
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
@@ -47,16 +48,13 @@ contract StableSwapNGAggregatorFactory {
     /// @notice Creates a new StableSwapNGAggregator hook and initializes pools for all token pairs
     /// @param salt The CREATE2 salt (pre-mined to produce valid hook address)
     /// @param curvePool The Curve StableSwap NG pool to aggregate
-    /// @param tokens Array of currencies in the pool (must have at least 2 tokens)
+    /// @param tokens Array of currencies in the pool (must contain exactly the pool's coins)
     /// @param fee The pool fee
     /// @param tickSpacing The pool tick spacing
     /// @param sqrtPriceX96 The initial sqrt price for each pool
     /// @return hook The deployed hook address
-    /// @dev Note: The caller should try to pass in the entire list of
-    /// tokens they want tradeable from this pool in a single call.
-    /// @dev Note: If a pool has already been created using an incomplete token set, the remaining
-    ///  pools should be initialized directly on the PoolManager using .initialize()
-    ///  with the previously deployed hook address
+    /// @dev Note: The token count must match the Curve factory's get_n_coins for the pool,
+    ///  so every token pair is initialized in this single call
     function createPool(
         bytes32 salt,
         ICurveStableSwapNG curvePool,
@@ -73,6 +71,11 @@ contract StableSwapNGAggregatorFactory {
                 if (tokens[i] == tokens[j]) revert DuplicateTokens(tokens[i]);
             }
         }
+
+        // The token list must cover the whole Curve pool; same source of truth as the hook's
+        // _beforeInitialize (pools unknown to the Curve factory report 0 coins and revert here)
+        uint256 nCoins = curveFactory.get_n_coins(address(curvePool));
+        if (tokens.length != nCoins) revert TokenCountMismatch(tokens.length, nCoins);
 
         address existingHook = hookForPool[address(curvePool)];
         if (existingHook != address(0)) revert DuplicatePool(address(curvePool), existingHook);

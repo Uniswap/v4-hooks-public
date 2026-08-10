@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/58a634e4518fd565ac92feb10dc56b548b28a1c8/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)

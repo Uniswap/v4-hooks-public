@@ -36,6 +36,7 @@ contract StableSwapAggregatorFactory {
     error InsufficientTokens();
     error DuplicateTokens(Currency token);
     error DuplicatePool(address curvePool, address existingHook);
+    error TokenCountMismatch(uint256 provided);
 
     event HookDeployed(address indexed hook, address indexed curvePool, PoolKey poolKey);
 
@@ -47,16 +48,13 @@ contract StableSwapAggregatorFactory {
     /// @notice Creates a new StableSwapAggregator hook and initializes pools for all token pairs
     /// @param salt The CREATE2 salt (pre-mined to produce valid hook address)
     /// @param curvePool The Curve StableSwap pool to aggregate
-    /// @param tokens Array of currencies in the pool (must have at least 2 tokens)
+    /// @param tokens Array of currencies in the pool (must contain exactly the pool's coins)
     /// @param fee The pool fee
     /// @param tickSpacing The pool tick spacing
     /// @param sqrtPriceX96 The initial sqrt price for each pool
     /// @return hook The deployed hook address
-    /// @dev Note: The caller should try to pass in the entire list of
-    /// tokens they want tradeable from this pool in a single call.
-    /// @dev Note: If a pool has already been created using an incomplete token set, the remaining
-    ///  pools should be initialized directly on the PoolManager using .initialize()
-    ///  with the previously deployed hook address
+    /// @dev Note: The token count must match the Curve pool's coin count,
+    ///  so every token pair is initialized in this single call
     function createPool(
         bytes32 salt,
         ICurveStableSwap curvePool,
@@ -73,6 +71,19 @@ contract StableSwapAggregatorFactory {
                 if (tokens[i] == tokens[j]) revert DuplicateTokens(tokens[i]);
             }
         }
+
+        // Legacy pools expose no coin count, but coin arrays are contiguous, so two boundary
+        // probes prove tokens.length matches: coins(length - 1) must exist and coins(length)
+        // must not. Revert and address(0) both mean "past the end" — the same sentinel
+        // semantics as the hook's coin scan in _beforeInitialize.
+        try curvePool.coins(tokens.length - 1) returns (address coin) {
+            if (coin == address(0)) revert TokenCountMismatch(tokens.length);
+        } catch {
+            revert TokenCountMismatch(tokens.length);
+        }
+        try curvePool.coins(tokens.length) returns (address coin) {
+            if (coin != address(0)) revert TokenCountMismatch(tokens.length);
+        } catch {}
 
         address existingHook = hookForPool[address(curvePool)];
         if (existingHook != address(0)) revert DuplicatePool(address(curvePool), existingHook);

@@ -1,5 +1,5 @@
 # LitePSMAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b134d11cfb9e1067b3595e5b2b4ecc1e7eb38365/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/LitePSM/LitePSMAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)

@@ -1,5 +1,5 @@
 # FluidDexLiteAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ba86f4b9451d7b5fefeaa5f317dce77403609447/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
 
 **Title:**
 FluidDexLiteAggregatorFactory
@@ -46,12 +46,13 @@ Deployment[] public deployments
 ```
 
 
-### hookForDexSalt
-The hook deployed for a given Fluid DEX Lite dexSalt (address(0) if none)
+### hookForDexKeyHash
+The hook deployed for a given Fluid DEX Lite pool, keyed by
+keccak256(abi.encode(currency0, currency1, dexSalt)) (address(0) if none)
 
 
 ```solidity
-mapping(bytes32 dexSalt => address hook) public hookForDexSalt
+mapping(bytes32 dexKeyHash => address hook) public hookForDexKeyHash
 ```
 
 
@@ -155,7 +156,7 @@ event HookDeployed(address indexed hook, bytes32 indexed dexSalt, PoolKey poolKe
 ### DuplicatePool
 
 ```solidity
-error DuplicatePool(bytes32 dexSalt, address existingHook);
+error DuplicatePool(bytes32 dexSalt, Currency currency0, Currency currency1, address existingHook);
 ```
 
 ## Structs

@@ -1,5 +1,5 @@
 # HookMinerCreate3
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/9bc2d1c28a0cd3cd0bb66585ac293b2a918ccfee/src/utils/HookMinerCreate3.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/utils/HookMinerCreate3.sol)
 
 **Title:**
 HookMinerCreate3

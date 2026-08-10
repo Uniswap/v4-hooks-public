@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/1760682c09b9c83ece9c9ac2d65ba19a027d9e37/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
