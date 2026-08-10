@@ -22,7 +22,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1
         with:
-          version: v1.7.1
+          version: stable
       - name: Install pre-commit
         run: pip install pre-commit
       - name: Run pre-commit
