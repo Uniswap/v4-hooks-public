@@ -66,10 +66,9 @@ contract SelfCreateHookScript is Script {
         // Singleton protocols (PancakeSwapV3, Slipstream, Uniswap V2/V3, SushiSwap V2/V3)
         // only deploy the aggregator here; pool initialization is handled separately by
         // the TypeScript orchestrator.
-        bool isSingleton = (
-            protocolId == ID_PANCAKE_V3 || protocolId == ID_SLIPSTREAM || protocolId == ID_UNISWAP_V2
-                || protocolId == ID_UNISWAP_V3
-        );
+        bool isSingleton =
+            (protocolId == ID_PANCAKE_V3 || protocolId == ID_SLIPSTREAM || protocolId == ID_UNISWAP_V2
+                || protocolId == ID_UNISWAP_V3);
 
         uint24 fee;
         int24 tickSpacing;
