@@ -1,5 +1,5 @@
 # HookMinerCreate3
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/utils/HookMinerCreate3.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/utils/HookMinerCreate3.sol)
 
 **Title:**
 HookMinerCreate3
@@ -7,7 +7,7 @@ HookMinerCreate3
 A minimal library for mining hook addresses using CREATE3
 
 
-## Constants
+## State Variables
 ### FLAG_MASK
 
 ```solidity

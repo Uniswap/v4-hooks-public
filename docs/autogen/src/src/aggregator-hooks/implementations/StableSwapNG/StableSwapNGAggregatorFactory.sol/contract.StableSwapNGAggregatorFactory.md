@@ -1,5 +1,5 @@
 # StableSwapNGAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregatorFactory.sol)
 
 **Title:**
 StableSwapNGAggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating StableSwapNGAggregator hooks via CREATE2 and initializing U
 Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 
 
-## Constants
+## State Variables
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -28,7 +28,6 @@ ICurveStableSwapFactoryNG public immutable curveFactory
 ```
 
 
-## State Variables
 ### deployments
 All deployments, indexed by creation order
 

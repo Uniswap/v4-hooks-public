@@ -1,5 +1,5 @@
 # FluidDexT1Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md), [IDexCallback](/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IDexCallback.sol/interface.IDexCallback.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Fluid DEX T1 pools
 Implements Fluid's IDexCallback interface for swap callbacks
 
 
-## Constants
+## State Variables
 ### fluidPool
 The Fluid DEX T1 pool
 
@@ -49,35 +49,6 @@ IFluidDexResolver public immutable fluidDexResolver
 ```
 
 
-### FLUID_NATIVE_CURRENCY
-
-```solidity
-address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
-```
-
-
-### INFLIGHT_SLOT
-
-```solidity
-bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e
-```
-
-
-### INACCURACY_BUFFER
-
-```solidity
-uint256 private constant INACCURACY_BUFFER = 20
-```
-
-
-### INACCURACY_SCALE
-
-```solidity
-uint256 private constant INACCURACY_SCALE = 1_000_000
-```
-
-
-## State Variables
 ### localPoolId
 The Uniswap V4 pool ID associated with this aggregator
 
@@ -105,6 +76,34 @@ bool private _currency0IsNative
 
 ```solidity
 bool private _currency1IsNative
+```
+
+
+### FLUID_NATIVE_CURRENCY
+
+```solidity
+address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+```
+
+
+### INFLIGHT_SLOT
+
+```solidity
+bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e
+```
+
+
+### INACCURACY_BUFFER
+
+```solidity
+uint256 private constant INACCURACY_BUFFER = 20
+```
+
+
+### INACCURACY_SCALE
+
+```solidity
+uint256 private constant INACCURACY_SCALE = 1_000_000
 ```
 
 

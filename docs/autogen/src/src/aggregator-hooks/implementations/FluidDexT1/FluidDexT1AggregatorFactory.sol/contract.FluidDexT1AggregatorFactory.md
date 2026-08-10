@@ -1,5 +1,5 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 **Title:**
 FluidDexT1AggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating FluidDexT1Aggregator hooks via CREATE2 and initializing Uni
 Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
 
 
-## Constants
+## State Variables
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -46,7 +46,6 @@ address public immutable fluidLiquidity
 ```
 
 
-## State Variables
 ### deployments
 All deployments, indexed by creation order
 

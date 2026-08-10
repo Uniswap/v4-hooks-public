@@ -1,13 +1,5 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/b79803a2ede9257f7b93a8c746a6d78104abcfb3/src/aggregator-hooks/ProtocolFees.sol)
-
-
-## Constants
-### protocolFeeMultiplier
-
-```solidity
-uint24 public immutable protocolFeeMultiplier
-```
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/cefd9a2a30a0453cd2f2edc430198596f38b6004/src/aggregator-hooks/ProtocolFees.sol)
 
 
 ## State Variables
@@ -15,6 +7,13 @@ uint24 public immutable protocolFeeMultiplier
 
 ```solidity
 address public tokenJar
+```
+
+
+### protocolFeeMultiplier
+
+```solidity
+uint24 public immutable protocolFeeMultiplier
 ```
 
 
