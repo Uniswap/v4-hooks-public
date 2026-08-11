@@ -167,12 +167,6 @@ event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey pool
 ```
 
 ## Errors
-### HookAddressMismatch
-
-```solidity
-error HookAddressMismatch(address expected, address actual);
-```
-
 ### DuplicatePool
 
 ```solidity

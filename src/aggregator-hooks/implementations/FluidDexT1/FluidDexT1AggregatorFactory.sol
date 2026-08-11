@@ -38,7 +38,6 @@ contract FluidDexT1AggregatorFactory {
 
     event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey poolKey);
 
-    error HookAddressMismatch(address expected, address actual);
     error DuplicatePool(address fluidPool, address existingHook);
 
     constructor(
