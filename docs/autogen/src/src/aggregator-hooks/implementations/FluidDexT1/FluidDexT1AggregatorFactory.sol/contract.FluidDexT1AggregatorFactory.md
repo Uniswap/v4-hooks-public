@@ -1,5 +1,5 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/ba86f4b9451d7b5fefeaa5f317dce77403609447/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/111d58b2de250db76f683d405b2cd3bbe937ee4c/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 **Title:**
 FluidDexT1AggregatorFactory
@@ -166,12 +166,6 @@ event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey pool
 ```
 
 ## Errors
-### HookAddressMismatch
-
-```solidity
-error HookAddressMismatch(address expected, address actual);
-```
-
 ### DuplicatePool
 
 ```solidity
