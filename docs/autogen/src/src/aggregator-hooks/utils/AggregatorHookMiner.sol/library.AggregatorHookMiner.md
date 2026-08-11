@@ -1,5 +1,5 @@
 # AggregatorHookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/utils/AggregatorHookMiner.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/utils/AggregatorHookMiner.sol)
 
 **Title:**
 AggregatorHookMiner
@@ -9,7 +9,7 @@ a minimal library for mining aggregator hook addresses
 This library is a version of HookMiner that incorporates the aggregator hook identification system.
 
 
-## State Variables
+## Constants
 ### FLAG_MASK
 
 ```solidity

@@ -180,6 +180,29 @@ contract StableSwapNGFactoryUnitTest is Test {
         factory.createPool(bytes32(0), fuzzPool, tokens, FEE, TICK_SPACING, SQRT_PRICE_1_1);
     }
 
+    function test_factory_revertsTokenCountMismatch() public {
+        StableSwapNGAggregatorFactory factory =
+            new StableSwapNGAggregatorFactory(poolManager, ICurveStableSwapFactoryNG(address(mockFactory)));
+
+        // Too few: pool reports 3 coins, only 2 tokens passed
+        mockFactory.setNCoins(address(mockPool), 3);
+        Currency[] memory tooFew = new Currency[](2);
+        tooFew[0] = Currency.wrap(address(token0));
+        tooFew[1] = Currency.wrap(address(token1));
+        vm.expectRevert(abi.encodeWithSelector(StableSwapNGAggregatorFactory.TokenCountMismatch.selector, 2, 3));
+        factory.createPool(bytes32(0), mockPool, tooFew, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+
+        // Too many: pool reports 2 coins, 3 tokens passed
+        mockFactory.setNCoins(address(mockPool), 2);
+        MockERC20 tkC = new MockERC20("C", "C", 18);
+        Currency[] memory tooMany = new Currency[](3);
+        tooMany[0] = Currency.wrap(address(token0));
+        tooMany[1] = Currency.wrap(address(token1));
+        tooMany[2] = Currency.wrap(address(tkC));
+        vm.expectRevert(abi.encodeWithSelector(StableSwapNGAggregatorFactory.TokenCountMismatch.selector, 3, 2));
+        factory.createPool(bytes32(0), mockPool, tooMany, FEE, TICK_SPACING, SQRT_PRICE_1_1);
+    }
+
     function test_factory_revertsDuplicateTokens() public {
         StableSwapNGAggregatorFactory factory =
             new StableSwapNGAggregatorFactory(poolManager, ICurveStableSwapFactoryNG(address(mockFactory)));
