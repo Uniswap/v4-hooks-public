@@ -9,6 +9,32 @@ import {
 } from "../../../../src/aggregator-hooks/implementations/FluidDexLite/interfaces/IFluidDexLiteCallback.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/// @title ReentrancyAttacker
+/// @notice Contract that attempts to re-enter during callback
+contract ReentrancyAttacker {
+    address public target;
+    bytes public callData;
+
+    function setAttack(address _target, bytes calldata _callData) external {
+        target = _target;
+        callData = _callData;
+    }
+
+    function attack() external {
+        (bool success,) = target.call(callData);
+        // We expect this to fail with Reentrancy error
+        require(!success, "Reentrancy attack should fail");
+    }
+}
+
+/// @title UnauthorizedCallbackCaller
+/// @notice Contract that tries to call dexCallback when it's not the authorized pool
+contract UnauthorizedCallbackCaller {
+    function callDexCallback(address hook, address token, uint256 amount) external {
+        IFluidDexLiteCallback(hook).dexCallback(token, amount, "");
+    }
+}
+
 /// @title MockFluidDexLite
 /// @notice Mock Fluid DEX Lite pool with settable swapSingle return for unit tests.
 contract MockFluidDexLite is IFluidDexLite {
@@ -16,6 +42,11 @@ contract MockFluidDexLite is IFluidDexLite {
     bool public revertSwapSingle;
     bool public useNativeCurrencyInCallback;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    // For reentrancy testing - call this contract during callback
+    address public reentrancyAttacker;
+    // For unauthorized caller testing - have this contract call dexCallback instead
+    address public unauthorizedCaller;
 
     error SwapSingleRevert();
 
@@ -29,6 +60,14 @@ contract MockFluidDexLite is IFluidDexLite {
 
     function setUseNativeCurrencyInCallback(bool useNative) external {
         useNativeCurrencyInCallback = useNative;
+    }
+
+    function setReentrancyAttacker(address attacker) external {
+        reentrancyAttacker = attacker;
+    }
+
+    function setUnauthorizedCaller(address caller) external {
+        unauthorizedCaller = caller;
     }
 
     receive() external payable {}
@@ -57,7 +96,18 @@ contract MockFluidDexLite is IFluidDexLite {
             // Call back the hook to pull tokens
             // Use FLUID_NATIVE_CURRENCY if flag is set (for testing native currency conversion)
             address callbackToken = useNativeCurrencyInCallback ? FLUID_NATIVE_CURRENCY : tokenIn;
-            IFluidDexLiteCallback(msg.sender).dexCallback(callbackToken, amountIn, data_);
+
+            // If unauthorized caller is set, have them make the callback instead
+            if (unauthorizedCaller != address(0)) {
+                UnauthorizedCallbackCaller(unauthorizedCaller).callDexCallback(msg.sender, callbackToken, amountIn);
+            } else {
+                IFluidDexLiteCallback(msg.sender).dexCallback(callbackToken, amountIn, data_);
+            }
+
+            // If reentrancy attacker is set, try to re-enter after callback
+            if (reentrancyAttacker != address(0)) {
+                ReentrancyAttacker(reentrancyAttacker).attack();
+            }
         }
 
         if (tokenOut == FLUID_NATIVE_CURRENCY || tokenOut == address(0)) {

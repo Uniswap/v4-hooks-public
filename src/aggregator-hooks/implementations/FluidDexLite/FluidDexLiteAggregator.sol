@@ -34,8 +34,12 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
     bool private _isReversed;
     bytes32 private immutable salt;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
+    bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
 
     error UnauthorizedCaller();
+    error Reentrancy();
+    error ProhibitedEntry();
     error NativeCurrencyExactOut();
     error IncorrectNativeCurrency();
     error HookAlreadyInitialized(PoolId poolId);
@@ -60,6 +64,7 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
 
     /// @inheritdoc IFluidDexLiteCallback
     function dexCallback(address token, uint256 amount, bytes calldata) external override {
+        if (!_getTransientInflight()) revert ProhibitedEntry();
         if (msg.sender != address(fluidDexLite)) revert UnauthorizedCaller();
         if (token == FLUID_NATIVE_CURRENCY) {
             token = address(0);
@@ -128,11 +133,15 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
         override
         returns (uint256 amountSettle, uint256 amountTake, bool hasSettled)
     {
+        if (_getTransientInflight()) revert Reentrancy();
+
         bool isExactIn = params.amountSpecified < 0;
 
         if (!settleCurrency.isAddressZero()) {
             poolManager.sync(settleCurrency);
         }
+
+        _setTransientInflight(true);
 
         uint256 value;
         if (takeCurrency.isAddressZero()) {
@@ -159,6 +168,8 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
             }),
             value
         );
+
+        _setTransientInflight(false);
 
         if (!settleCurrency.isAddressZero()) {
             hasSettled = true;
@@ -187,6 +198,22 @@ contract FluidDexLiteAggregator is BaseAggregatorHook, IFluidDexLiteCallback {
             bytes(""),
             p.extraData
         );
+    }
+
+    function _setTransientInflight(bool value) private {
+        uint256 _value = value ? 1 : 0;
+        assembly {
+            tstore(INFLIGHT_SLOT, _value)
+        }
+    }
+
+    function _getTransientInflight() private view returns (bool value) {
+        uint256 _value;
+        assembly {
+            _value := tload(INFLIGHT_SLOT)
+        }
+        // Results to true if the slot is not empty
+        value = _value > 0;
     }
 
     function isEmpty(IFluidDexLite.DexState memory dexState) private pure returns (bool) {

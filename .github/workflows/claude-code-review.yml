@@ -14,6 +14,7 @@ jobs:
   claude-review-auto:
     if: |
       github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.action != 'review_requested' &&
       !contains(github.head_ref, 'gh-readonly-queue/') &&
       !startsWith(github.head_ref, 'release/') &&
@@ -22,14 +23,14 @@ jobs:
         github.event.action == 'ready_for_review'
       )
 
-    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@52b8f6c6c2096727193606c6403bbac13306d85e
+    uses: Uniswap/ai-toolkit/.github/workflows/_claude-code-review.yml@824dfc19f7c2eecc5b12f6ae7b8fccdb92433ca4
     with:
       pr_number: ${{ github.event.pull_request.number }}
       base_ref: ${{ github.base_ref }}
       force_review: false
-      toolkit_ref: 52b8f6c6c2096727193606c6403bbac13306d85e
+      toolkit_ref: 96ef665ba04221de07e94fcc3ea69fe32c7cf306
 
-      model: "claude-opus-4-5"
+      model: "claude-opus-4-7"
 
       # Standard timeout for most PRs
       timeout_minutes: 20

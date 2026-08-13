@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/392f635329800dcebe64292f3cc7fa02fc61a68f/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
 Supports both exact-input and exact-output swaps
 
 
-## State Variables
+## Constants
 ### pool
 The Curve StableSwap NG pool
 
@@ -45,6 +45,7 @@ uint256 internal constant INACCURACY_SCALE = 1_000_000
 ```
 
 
+## State Variables
 ### poolIdToTokenInfo
 Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
@@ -156,7 +157,20 @@ function _handleSwap(
 function _getBuffer(uint256 amount) internal pure returns (uint256);
 ```
 
+### receive
+
+
+```solidity
+receive() external payable override;
+```
+
 ## Errors
+### NativeCurrencyNotSupported
+
+```solidity
+error NativeCurrencyNotSupported();
+```
+
 ### AmountOutExceeded
 
 ```solidity

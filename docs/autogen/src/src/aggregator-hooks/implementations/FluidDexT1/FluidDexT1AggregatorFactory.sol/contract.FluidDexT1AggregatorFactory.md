@@ -1,5 +1,5 @@
 # FluidDexT1AggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/FluidDexT1/FluidDexT1AggregatorFactory.sol)
 
 **Title:**
 FluidDexT1AggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating FluidDexT1Aggregator hooks via CREATE2 and initializing Uni
 Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
 
 
-## State Variables
+## Constants
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -43,6 +43,25 @@ The Fluid Liquidity Layer contract address
 
 ```solidity
 address public immutable fluidLiquidity
+```
+
+
+## State Variables
+### deployments
+All deployments, indexed by creation order
+
+
+```solidity
+Deployment[] public deployments
+```
+
+
+### hookForPool
+The hook deployed for a given Fluid DEX T1 pool (address(0) if none)
+
+
+```solidity
+mapping(address fluidPool => address hook) public hookForPool
 ```
 
 
@@ -94,6 +113,30 @@ function createPool(
 |`hook`|`address`|The deployed hook address|
 
 
+### deploymentCount
+
+Total number of hooks deployed by this factory
+
+
+```solidity
+function deploymentCount() external view returns (uint256);
+```
+
+### getDeployment
+
+Returns the full deployment record for a deployment index
+
+
+```solidity
+function getDeployment(uint256 index) external view returns (Deployment memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The deployment index (in creation order)|
+
+
 ### computeAddress
 
 Computes the CREATE2 address for a hook without deploying
@@ -124,9 +167,22 @@ event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey pool
 ```
 
 ## Errors
-### HookAddressMismatch
+### DuplicatePool
 
 ```solidity
-error HookAddressMismatch(address expected, address actual);
+error DuplicatePool(address fluidPool, address existingHook);
+```
+
+## Structs
+### Deployment
+Full record of a hook deployment
+
+
+```solidity
+struct Deployment {
+    address hook;
+    address fluidPool;
+    PoolKey poolKey;
+}
 ```
 

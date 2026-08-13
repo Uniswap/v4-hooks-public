@@ -23,9 +23,22 @@ contract FluidDexT1AggregatorFactory {
     /// @notice The Fluid Liquidity Layer contract address
     address public immutable fluidLiquidity;
 
+    /// @notice Full record of a hook deployment
+    struct Deployment {
+        address hook;
+        address fluidPool;
+        PoolKey poolKey;
+    }
+
+    /// @notice All deployments, indexed by creation order
+    Deployment[] public deployments;
+
+    /// @notice The hook deployed for a given Fluid DEX T1 pool (address(0) if none)
+    mapping(address fluidPool => address hook) public hookForPool;
+
     event HookDeployed(address indexed hook, address indexed fluidPool, PoolKey poolKey);
 
-    error HookAddressMismatch(address expected, address actual);
+    error DuplicatePool(address fluidPool, address existingHook);
 
     constructor(
         IPoolManager _poolManager,
@@ -57,6 +70,9 @@ contract FluidDexT1AggregatorFactory {
         int24 tickSpacing,
         uint160 sqrtPriceX96
     ) external returns (address hook) {
+        address existingHook = hookForPool[address(fluidPool)];
+        if (existingHook != address(0)) revert DuplicatePool(address(fluidPool), existingHook);
+
         hook = address(
             new FluidDexT1Aggregator{salt: salt}(
                 poolManager, fluidPool, fluidDexReservesResolver, fluidDexResolver, fluidLiquidity
@@ -69,7 +85,21 @@ contract FluidDexT1AggregatorFactory {
 
         poolManager.initialize(poolKey, sqrtPriceX96);
 
+        hookForPool[address(fluidPool)] = hook;
+        deployments.push(Deployment({hook: hook, fluidPool: address(fluidPool), poolKey: poolKey}));
+
         emit HookDeployed(hook, address(fluidPool), poolKey);
+    }
+
+    /// @notice Total number of hooks deployed by this factory
+    function deploymentCount() external view returns (uint256) {
+        return deployments.length;
+    }
+
+    /// @notice Returns the full deployment record for a deployment index
+    /// @param index The deployment index (in creation order)
+    function getDeployment(uint256 index) external view returns (Deployment memory) {
+        return deployments[index];
     }
 
     /// @notice Computes the CREATE2 address for a hook without deploying

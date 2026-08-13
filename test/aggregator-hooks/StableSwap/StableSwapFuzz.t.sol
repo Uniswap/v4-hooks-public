@@ -13,7 +13,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {SafePoolSwapTest} from "../shared/SafePoolSwapTest.sol";
 import {MockV4FeeAdapter} from "../mocks/MockV4FeeAdapter.sol";
 import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibrary.sol";
@@ -472,7 +472,7 @@ contract StableSwapFuzz is Test {
         ctx.amountIn = bound(uint256(keccak256(abi.encode(swapSeed, "amount"))), 1000 ether, minPairBalance / 20);
         poolKey = _buildPoolKey(currencies[ctx.tokenInIdx], currencies[ctx.tokenOutIdx], IHooks(address(hook)));
         ctx.expectedOut = hook.quote(ctx.zeroForOne, -int256(ctx.amountIn), poolKey.toId());
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         ctx.expectedFeeAmount = (ctx.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 

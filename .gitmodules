@@ -13,7 +13,7 @@
 [submodule "lib/protocol-fees"]
 	path = lib/protocol-fees
 	url = https://github.com/Uniswap/protocol-fees
-	branch = v4-fee-adapter
+	branch = main
 [submodule "lib/v4-core"]
 	path = lib/v4-core
 	url = https://github.com/Uniswap/v4-core
@@ -23,3 +23,27 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts.git
+[submodule "lib/slipstream"]
+	path = lib/slipstream
+	url = https://github.com/aerodrome-finance/slipstream.git
+[submodule "lib/v3-core"]
+	path = lib/v3-core
+	url = https://github.com/Uniswap/v3-core.git
+[submodule "lib/v3-periphery"]
+	path = lib/v3-periphery
+	url = https://github.com/Uniswap/v3-periphery.git
+[submodule "lib/v2-core"]
+	path = lib/v2-core
+	url = https://github.com/Uniswap/v2-core
+[submodule "lib/pancake-v3-contracts"]
+	path = lib/pancake-v3-contracts
+	url = https://github.com/pancakeswap/pancake-v3-contracts.git
+[submodule "lib/uniswapx"]
+	path = lib/uniswapx
+	url = https://github.com/Uniswap/UniswapX
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/Vectorized/solady
+[submodule "lib/blocknumberish"]
+	path = lib/blocknumberish
+	url = https://github.com/Uniswap/blocknumberish

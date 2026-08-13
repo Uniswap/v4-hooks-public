@@ -35,6 +35,8 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
     PoolId public localPoolId;
 
     bool private _isReversed;
+    bool private _currency0IsNative;
+    bool private _currency1IsNative;
     address private constant FLUID_NATIVE_CURRENCY = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     // The slot holding the inflight state, transiently. bytes32(uint256(keccak256("InFlight")) - 1)
     bytes32 private constant INFLIGHT_SLOT = 0x60d3e47259b598a408c0f35a2690d6e03fbf8cbc79ab359d5d81f5f451a5750e;
@@ -87,6 +89,9 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
             amountUnspecified =
                 fluidDexResolver.estimateSwapIn(address(fluidPool), fluidSwap0to1, uint256(-amountSpecified), 0);
         } else {
+            // Native-input exact-output is unsupported in execution; gate the quote so it
+            // stays consistent with _swapExactOut rather than returning a misleading amount.
+            if (zeroToOne ? _currency0IsNative : _currency1IsNative) revert NativeCurrencyExactOut();
             uint256 amount = uint256(amountSpecified);
             amountUnspecified = fluidDexResolver.estimateSwapOut(
                 // Fluid's exactOut can be off so we add a scaled buffer to the amountOut
@@ -146,6 +151,8 @@ contract FluidDexT1Aggregator is BaseAggregatorHook, IDexCallback {
 
         localPoolId = key.toId();
 
+        _currency0IsNative = Currency.unwrap(key.currency0) == address(0);
+        _currency1IsNative = Currency.unwrap(key.currency1) == address(0);
         emit AggregatorPoolRegistered(key.toId());
         pollTokenJar();
         return IHooks.beforeInitialize.selector;

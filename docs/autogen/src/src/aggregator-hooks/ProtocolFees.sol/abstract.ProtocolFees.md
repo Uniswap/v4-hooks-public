@@ -1,5 +1,13 @@
 # ProtocolFees
-[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/31cb87e60f4a40a92b945f77ed7728229bdff170/src/aggregator-hooks/ProtocolFees.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/ProtocolFees.sol)
+
+
+## Constants
+### protocolFeeMultiplier
+
+```solidity
+uint24 public immutable protocolFeeMultiplier
+```
 
 
 ## State Variables
@@ -11,6 +19,13 @@ address public tokenJar
 
 
 ## Functions
+### constructor
+
+
+```solidity
+constructor(uint24 _protocolFeeMultiplier) ;
+```
+
 ### pollTokenJar
 
 Queries the token jar from the pool manager and emits an event if it is updated
@@ -65,6 +80,8 @@ function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint
 ```
 
 ### _getProtocolFee
+
+The protocol fee is multiplied by the protocol fee multiplier
 
 
 ```solidity

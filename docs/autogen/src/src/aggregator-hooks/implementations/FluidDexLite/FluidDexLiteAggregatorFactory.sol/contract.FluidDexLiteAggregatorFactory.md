@@ -1,5 +1,5 @@
 # FluidDexLiteAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/FluidDexLite/FluidDexLiteAggregatorFactory.sol)
 
 **Title:**
 FluidDexLiteAggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating FluidDexLiteAggregator hooks via CREATE2 and initializing U
 Deploys deterministic hook addresses that meet Uniswap V4's hook address requirements
 
 
-## State Variables
+## Constants
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -34,6 +34,26 @@ The Fluid DEX Lite resolver for pool state queries
 
 ```solidity
 IFluidDexLiteResolver public immutable fluidDexLiteResolver
+```
+
+
+## State Variables
+### deployments
+All deployments, indexed by creation order
+
+
+```solidity
+Deployment[] public deployments
+```
+
+
+### hookForDexKeyHash
+The hook deployed for a given Fluid DEX Lite pool, keyed by
+keccak256(abi.encode(currency0, currency1, dexSalt)) (address(0) if none)
+
+
+```solidity
+mapping(bytes32 dexKeyHash => address hook) public hookForDexKeyHash
 ```
 
 
@@ -80,6 +100,30 @@ function createPool(
 |`hook`|`address`|The deployed hook address|
 
 
+### deploymentCount
+
+Total number of hooks deployed by this factory
+
+
+```solidity
+function deploymentCount() external view returns (uint256);
+```
+
+### getDeployment
+
+Returns the full deployment record for a deployment index
+
+
+```solidity
+function getDeployment(uint256 index) external view returns (Deployment memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The deployment index (in creation order)|
+
+
 ### computeAddress
 
 Computes the CREATE2 address for a hook without deploying
@@ -107,5 +151,25 @@ function computeAddress(bytes32 salt, bytes32 dexSalt) external view returns (ad
 
 ```solidity
 event HookDeployed(address indexed hook, bytes32 indexed dexSalt, PoolKey poolKey);
+```
+
+## Errors
+### DuplicatePool
+
+```solidity
+error DuplicatePool(bytes32 dexSalt, Currency currency0, Currency currency1, address existingHook);
+```
+
+## Structs
+### Deployment
+Full record of a hook deployment
+
+
+```solidity
+struct Deployment {
+    address hook;
+    bytes32 dexSalt;
+    PoolKey poolKey;
+}
 ```
 

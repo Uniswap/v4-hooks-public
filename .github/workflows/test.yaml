@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: stable
 
@@ -40,6 +40,39 @@ jobs:
 
       - name: Run Forge tests
         run: forge test --isolate -vvv
+        id: test
+        env:
+          FORGE_SNAPSHOT_CHECK: true
+
+  forge-test-alf:
+    strategy:
+      fail-fast: true
+
+    name: Foundry project (alf)
+    runs-on: ubuntu-latest
+    env:
+      FOUNDRY_PROFILE: alf
+    steps:
+      - uses: bullfrogsec/bullfrog@dcde5841b19b7ef693224207a7fdec67fce604db # v0.8.3
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: stable
+
+      - name: Run Forge build
+        run: |
+          echo Foundry profile: $FOUNDRY_PROFILE
+          forge --version
+          forge build
+        id: build
+
+      - name: Run Forge tests
+        run: forge test --isolate -vvv --match-path 'test/alf/*'
         id: test
         env:
           FORGE_SNAPSHOT_CHECK: true

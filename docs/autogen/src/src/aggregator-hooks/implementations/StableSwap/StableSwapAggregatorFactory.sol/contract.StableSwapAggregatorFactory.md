@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/0a9543d023e4a9afc81334cdd79c203f8feab340/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating StableSwapAggregator hooks via CREATE2 and initializing Uni
 Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 
 
-## State Variables
+## Constants
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -28,6 +28,27 @@ IMetaRegistry public immutable metaRegistry
 ```
 
 
+## State Variables
+### deployments
+All deployments, indexed by creation order
+
+The auto-generated getter omits the poolKeys array; use getDeployment for the full record
+
+
+```solidity
+Deployment[] public deployments
+```
+
+
+### hookForPool
+The hook deployed for a given Curve pool (address(0) if none)
+
+
+```solidity
+mapping(address curvePool => address hook) public hookForPool
+```
+
+
 ## Functions
 ### constructor
 
@@ -40,12 +61,8 @@ constructor(IPoolManager _poolManager, IMetaRegistry _metaRegistry) ;
 
 Creates a new StableSwapAggregator hook and initializes pools for all token pairs
 
-Note: The caller should try to pass in the entire list of
-tokens they want tradeable from this pool in a single call.
-
-Note: If a pool has already been created using an incomplete token set, the remaining
-pools should be initialized directly on the PoolManager using .initialize()
-with the previously deployed hook address
+Note: The token count must match the Curve pool's coin count,
+so every token pair is initialized in this single call
 
 
 ```solidity
@@ -64,7 +81,7 @@ function createPool(
 |----|----|-----------|
 |`salt`|`bytes32`|The CREATE2 salt (pre-mined to produce valid hook address)|
 |`curvePool`|`ICurveStableSwap`|The Curve StableSwap pool to aggregate|
-|`tokens`|`Currency[]`|Array of currencies in the pool (must have at least 2 tokens)|
+|`tokens`|`Currency[]`|Array of currencies in the pool (must contain exactly the pool's coins)|
 |`fee`|`uint24`|The pool fee|
 |`tickSpacing`|`int24`|The pool tick spacing|
 |`sqrtPriceX96`|`uint160`|The initial sqrt price for each pool|
@@ -74,6 +91,30 @@ function createPool(
 |Name|Type|Description|
 |----|----|-----------|
 |`hook`|`address`|The deployed hook address|
+
+
+### deploymentCount
+
+Total number of hooks deployed by this factory
+
+
+```solidity
+function deploymentCount() external view returns (uint256);
+```
+
+### getDeployment
+
+Returns the full deployment record (including all pool keys) for a deployment index
+
+
+```solidity
+function getDeployment(uint256 index) external view returns (Deployment memory);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`index`|`uint256`|The deployment index (in creation order)|
 
 
 ### computeAddress
@@ -110,5 +151,36 @@ event HookDeployed(address indexed hook, address indexed curvePool, PoolKey pool
 
 ```solidity
 error InsufficientTokens();
+```
+
+### DuplicateTokens
+
+```solidity
+error DuplicateTokens(Currency token);
+```
+
+### DuplicatePool
+
+```solidity
+error DuplicatePool(address curvePool, address existingHook);
+```
+
+### TokenCountMismatch
+
+```solidity
+error TokenCountMismatch(uint256 provided);
+```
+
+## Structs
+### Deployment
+Full record of a hook deployment
+
+
+```solidity
+struct Deployment {
+    address hook;
+    address curvePool;
+    PoolKey[] poolKeys;
+}
 ```
 

@@ -111,17 +111,16 @@ contract FluidDexT1ERC20Fuzz is Test {
     }
 
     function setUp() public {
-        bool forked;
         string memory rpcUrl;
         // Forking requires an RPC URL env var and an optional block number
-        try vm.envString("FORK_RPC_URL") returns (string memory _rpcUrl) {
+        try vm.envString("FORK_RPC_URL_1") returns (string memory _rpcUrl) {
             rpcUrl = _rpcUrl;
-            forked = true;
         } catch {
-            console.log("Not forking skipping tests");
+            console.log("Not forking. Skipping tests");
             vm.skip(true);
+            return;
         }
-        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
+        uint256 forkBlockNumber = vm.envOr("FORK_BLOCK_NUMBER_1", uint256(0));
         // Load Fluid infrastructure addresses from env vars
         liquidity = vm.envAddress("FLUID_LIQUIDITY");
         dexFactoryAddress = vm.envAddress("FLUID_DEX_T1_FACTORY");
@@ -478,7 +477,7 @@ contract FluidDexT1ERC20Fuzz is Test {
         uint256 minLiquidity = setup.liquidity0 < setup.liquidity1 ? setup.liquidity0 : setup.liquidity1;
         params.amountIn = _deriveSwapAmount(swapSeed, minLiquidity);
         params.expectedOut = deployment.hook.quote(zeroForOne, -int256(params.amountIn), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         params.expectedFee = (params.expectedOut * protocolFee) / (ProtocolFeeLibrary.PIPS_DENOMINATOR - protocolFee);
     }
 
@@ -495,7 +494,7 @@ contract FluidDexT1ERC20Fuzz is Test {
         params.amountOut = _deriveSwapAmount(swapSeed, minLiquidity) / 10;
         if (params.amountOut == 0) params.amountOut = 1 ether;
         params.expectedIn = deployment.hook.quote(zeroForOne, int256(params.amountOut), deployment.poolId);
-        uint24 protocolFee = _deriveProtocolFee(seed);
+        uint24 protocolFee = _deriveProtocolFee(seed) * 25;
         params.expectedFee = (params.expectedIn * protocolFee) / ProtocolFeeLibrary.PIPS_DENOMINATOR;
     }
 
