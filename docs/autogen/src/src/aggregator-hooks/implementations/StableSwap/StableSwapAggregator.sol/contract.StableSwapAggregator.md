@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/f2aa843e266f8f9b34fdaf94ffb72eda5d9204f9/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Curve StableSwap pools
 Supports exact-input swaps only due to StableSwap pool limitations
 
 
-## Constants
+## State Variables
 ### CURVE_NATIVE_ETH
 Curve's address for native currency
 
@@ -40,13 +40,21 @@ IMetaRegistry public immutable metaRegistry
 ```
 
 
-## State Variables
 ### poolIdToTokenInfo
 Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
 
 ```solidity
 mapping(PoolId => PoolInfo) public poolIdToTokenInfo
+```
+
+
+### _canonicalPoolIdByPair
+The canonical V4 pool for each token pair (zero if none yet)
+
+
+```solidity
+mapping(bytes32 pairHash => PoolId poolId) private _canonicalPoolIdByPair
 ```
 
 
@@ -182,6 +190,12 @@ error ExchangeFailed();
 
 ```solidity
 error InvalidPoolId();
+```
+
+### PairAlreadyHasCanonicalPool
+
+```solidity
+error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 ```
 
 ## Structs

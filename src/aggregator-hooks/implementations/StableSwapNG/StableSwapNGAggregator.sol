@@ -38,12 +38,16 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
     /// @notice Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
     mapping(PoolId => PoolInfo) public poolIdToTokenInfo;
 
+    /// @notice The canonical V4 pool for each token pair (zero if none yet)
+    mapping(bytes32 pairHash => PoolId poolId) private _canonicalPoolIdByPair;
+
     error NativeCurrencyNotSupported();
     error AmountOutExceeded();
     error TokenNotInPool(address token);
     error TokensNotInPool(address token0, address token1);
     error PoolIsMetaPool();
     error InvalidPoolId();
+    error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 
     constructor(IPoolManager _manager, ICurveStableSwapNG _pool, ICurveStableSwapFactoryNG _curveFactory)
         BaseAggregatorHook(_manager, "StableSwapNGAggregator v1.0")
@@ -113,6 +117,14 @@ contract StableSwapNGAggregator is BaseAggregatorHook {
         if (!token1Found) {
             revert TokenNotInPool(Currency.unwrap(key.currency1));
         }
+
+        // One canonical V4 pool per token pair. Without this, the same pair could be initialized
+        // repeatedly with different fee/tickSpacing values — distinct pool IDs all routing to the
+        // same Curve pool.
+        bytes32 pairHash = keccak256(abi.encode(key.currency0, key.currency1));
+        PoolId existingPoolId = _canonicalPoolIdByPair[pairHash];
+        if (PoolId.unwrap(existingPoolId) != bytes32(0)) revert PairAlreadyHasCanonicalPool(existingPoolId);
+        _canonicalPoolIdByPair[pairHash] = key.toId();
 
         poolIdToTokenInfo[key.toId()] = PoolInfo({token0Index: token0Index, token1Index: token1Index});
 

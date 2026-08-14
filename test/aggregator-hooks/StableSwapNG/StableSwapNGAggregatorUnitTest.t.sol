@@ -267,6 +267,79 @@ contract StableSwapNGAggregatorUnitTest is Test {
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
+    function test_beforeInitialize_revertsOnSecondPoolForSamePair() public {
+        // Same pair as the pool initialized in setUp, but a different fee — a distinct
+        // pool ID the PoolManager would accept without the hook-side canonical guard
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 100,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapNGAggregator.PairAlreadyHasCanonicalPool.selector, poolId),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
+    function test_beforeInitialize_allowsDistinctPairsThenRevertsOnDuplicate() public {
+        // Three-coin pool: pairs (token0, token1) and (tokenC pair) share one hook and must
+        // both initialize; re-initializing the first pair at another fee must then revert
+        MockERC20 tokenC = new MockERC20("TokenC", "TKC", 18);
+        address[] memory coins = new address[](3);
+        coins[0] = address(token0);
+        coins[1] = address(token1);
+        coins[2] = address(tokenC);
+        MockCurveStableSwapNG triPool = new MockCurveStableSwapNG(coins);
+        mockFactory.setNCoins(address(triPool), 3);
+
+        StableSwapNGAggregator hook2 = _deployHook(triPool, mockFactory);
+
+        PoolKey memory keyAB = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+        (address tokenLo, address tokenHi) =
+            address(token0) < address(tokenC) ? (address(token0), address(tokenC)) : (address(tokenC), address(token0));
+        PoolKey memory keyAC = PoolKey({
+            currency0: Currency.wrap(tokenLo),
+            currency1: Currency.wrap(tokenHi),
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook2))
+        });
+
+        PoolId keyABId = keyAB.toId();
+        poolManager.initialize(keyAB, SQRT_PRICE_1_1);
+        // A distinct pair on the same hook is allowed
+        poolManager.initialize(keyAC, SQRT_PRICE_1_1);
+
+        // Memory structs assign by reference, so mutate only after capturing keyAB's id
+        PoolKey memory keyABDuplicate = keyAB;
+        keyABDuplicate.fee = FEE + 100;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook2),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapNGAggregator.PairAlreadyHasCanonicalPool.selector, keyABId),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(keyABDuplicate, SQRT_PRICE_1_1);
+    }
+
     function test_beforeInitialize_revertsPoolIsMetaPool() public {
         MockCurveStableSwapFactoryNG metaFactory = new MockCurveStableSwapFactoryNG();
         metaFactory.setNCoins(address(mockPool), 2);

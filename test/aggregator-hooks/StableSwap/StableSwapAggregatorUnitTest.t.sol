@@ -197,6 +197,29 @@ contract StableSwapAggregatorUnitTest is Test {
         poolManager.initialize(key2, SQRT_PRICE_1_1);
     }
 
+    function test_beforeInitialize_revertsOnSecondPoolForSamePair() public {
+        // Same pair as the pool initialized in setUp, but a different fee — a distinct
+        // pool ID the PoolManager would accept without the hook-side canonical guard
+        PoolKey memory key2 = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: FEE + 100,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeInitialize.selector,
+                abi.encodeWithSelector(StableSwapAggregator.PairAlreadyHasCanonicalPool.selector, poolId),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        poolManager.initialize(key2, SQRT_PRICE_1_1);
+    }
+
     function test_beforeInitialize_revertsToken0NotInPool() public {
         // Create mock pool with only token1 (token0 is missing)
         address[] memory partialCoins = new address[](2);

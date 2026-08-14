@@ -1,5 +1,5 @@
 # StableSwapNGAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/f2aa843e266f8f9b34fdaf94ffb72eda5d9204f9/src/aggregator-hooks/implementations/StableSwapNG/StableSwapNGAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Curve StableSwap NG pools
 Supports both exact-input and exact-output swaps
 
 
-## Constants
+## State Variables
 ### pool
 The Curve StableSwap NG pool
 
@@ -45,13 +45,21 @@ uint256 internal constant INACCURACY_SCALE = 1_000_000
 ```
 
 
-## State Variables
 ### poolIdToTokenInfo
 Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 
 
 ```solidity
 mapping(PoolId => PoolInfo) public poolIdToTokenInfo
+```
+
+
+### _canonicalPoolIdByPair
+The canonical V4 pool for each token pair (zero if none yet)
+
+
+```solidity
+mapping(bytes32 pairHash => PoolId poolId) private _canonicalPoolIdByPair
 ```
 
 
@@ -199,6 +207,12 @@ error PoolIsMetaPool();
 
 ```solidity
 error InvalidPoolId();
+```
+
+### PairAlreadyHasCanonicalPool
+
+```solidity
+error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
 ```
 
 ## Structs
