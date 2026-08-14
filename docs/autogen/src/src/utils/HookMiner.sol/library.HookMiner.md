@@ -1,5 +1,5 @@
 # HookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/utils/HookMiner.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/utils/HookMiner.sol)
 
 **Title:**
 HookMiner
@@ -7,7 +7,7 @@ HookMiner
 a minimal library for mining hook addresses
 
 
-## Constants
+## State Variables
 ### FLAG_MASK
 
 ```solidity

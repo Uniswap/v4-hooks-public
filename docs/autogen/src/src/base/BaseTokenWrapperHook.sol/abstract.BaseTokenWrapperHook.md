@@ -1,5 +1,5 @@
 # BaseTokenWrapperHook
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/base/BaseTokenWrapperHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/base/BaseTokenWrapperHook.sol)
 
 **Inherits:**
 [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md), DeltaResolver
@@ -16,7 +16,7 @@ All liquidity operations are blocked as liquidity is managed through the underly
 Implementing contracts must provide deposit() and withdraw() functions
 
 
-## Constants
+## State Variables
 ### wrapperCurrency
 The wrapped token currency (e.g., WETH)
 

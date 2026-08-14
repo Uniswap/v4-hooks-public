@@ -1,5 +1,5 @@
 # PermissionedHooks
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/permissioned-pools/PermissionedHooks.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/permissioned-pools/PermissionedHooks.sol)
 
 **Inherits:**
 IHooks, [BaseHook](/src/base/BaseHook.sol/abstract.BaseHook.md)
@@ -12,7 +12,7 @@ Enforces per-currency allowlist on pools containing permissioned tokens.
 Trusts wrapper-reported `msgSender()`; wrappers must be registered in adapter `allowedWrappers`.
 
 
-## Constants
+## State Variables
 ### PERMISSIONS_ADAPTER_FACTORY
 
 ```solidity
