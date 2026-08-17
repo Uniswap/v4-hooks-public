@@ -18,12 +18,7 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
 
     IERC4626 public immutable vault;
 
-    /// @notice The contract that deployed this hook. Canonical deployments go through the
-    ///         ERC-4626 wrapper family's `AllowlistedFactory`, so aggregators and third-party
-    ///         routers can verify a hook's provenance by checking `factory()` against the known
-    ///         factory address (or asking the factory via `isFromFactory`) and can discover new
-    ///         hooks from the factory's `Deployed` events. A hook deployed outside the factory
-    ///         reports whatever address created it.
+    /// @notice The contract that deployed this hook
     address public immutable factory;
 
     error SettlementMismatch(uint256 measured, uint256 settled);
