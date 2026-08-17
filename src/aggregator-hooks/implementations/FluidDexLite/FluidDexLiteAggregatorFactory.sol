@@ -30,10 +30,11 @@ contract FluidDexLiteAggregatorFactory {
     /// @notice All deployments, indexed by creation order
     Deployment[] public deployments;
 
-    /// @notice The hook deployed for a given Fluid DEX Lite dexSalt (address(0) if none)
-    mapping(bytes32 dexSalt => address hook) public hookForDexSalt;
+    /// @notice The hook deployed for a given Fluid DEX Lite pool, keyed by
+    ///         keccak256(abi.encode(currency0, currency1, dexSalt)) (address(0) if none)
+    mapping(bytes32 dexKeyHash => address hook) public hookForDexKeyHash;
 
-    error DuplicatePool(bytes32 dexSalt, address existingHook);
+    error DuplicatePool(bytes32 dexSalt, Currency currency0, Currency currency1, address existingHook);
 
     event HookDeployed(address indexed hook, bytes32 indexed dexSalt, PoolKey poolKey);
 
@@ -61,8 +62,13 @@ contract FluidDexLiteAggregatorFactory {
         int24 tickSpacing,
         uint160 sqrtPriceX96
     ) external returns (address hook) {
-        address existingHook = hookForDexSalt[dexSalt];
-        if (existingHook != address(0)) revert DuplicatePool(dexSalt, existingHook);
+        // The raw currencies + dexSalt uniquely identify the Fluid pool: the hook derives its DexKey
+        // deterministically from them and rejects Fluid's native currency representation (0xEeee...),
+        // so no two distinct currency pairs can map to the same DexKey. Sorting is unnecessary since
+        // the PoolManager rejects unsorted currencies before anything is registered.
+        bytes32 dexKeyHash = keccak256(abi.encode(currency0, currency1, dexSalt));
+        address existingHook = hookForDexKeyHash[dexKeyHash];
+        if (existingHook != address(0)) revert DuplicatePool(dexSalt, currency0, currency1, existingHook);
 
         hook = address(new FluidDexLiteAggregator{salt: salt}(poolManager, fluidDexLite, fluidDexLiteResolver, dexSalt));
 
@@ -72,7 +78,7 @@ contract FluidDexLiteAggregatorFactory {
 
         poolManager.initialize(poolKey, sqrtPriceX96);
 
-        hookForDexSalt[dexSalt] = hook;
+        hookForDexKeyHash[dexKeyHash] = hook;
         deployments.push(Deployment({hook: hook, dexSalt: dexSalt, poolKey: poolKey}));
 
         emit HookDeployed(hook, dexSalt, poolKey);

@@ -1,5 +1,5 @@
 # UniswapV2Aggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/58a634e4518fd565ac92feb10dc56b548b28a1c8/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/e58e5332928c7846d88bd1c017d97889048d3175/src/aggregator-hooks/implementations/UniswapV2/UniswapV2Aggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,7 +12,7 @@ Hook that aggregates liquidity from a canonical Uniswap V2 compatible pair resol
 Fee and tickSpacing on PoolKey do not participate in routing; routing is keyed by currency pair only.
 
 
-## State Variables
+## Constants
 ### factory
 
 ```solidity
@@ -34,6 +34,7 @@ uint256 internal constant FEE_DENOMINATOR = 1_000_000
 ```
 
 
+## State Variables
 ### poolIdToExternalPair
 
 ```solidity
