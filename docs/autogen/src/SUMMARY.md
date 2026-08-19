@@ -83,6 +83,7 @@
   - [❱ utils](src/utils/README.md)
     - [HookMiner](src/utils/HookMiner.sol/library.HookMiner.md)
     - [HookMinerCreate3](src/utils/HookMinerCreate3.sol/library.HookMinerCreate3.md)
+    - [PrefacedHookMiner](src/utils/PrefacedHookMiner.sol/library.PrefacedHookMiner.md)
   - [AllowlistedFactory](src/AllowlistedFactory.sol/contract.AllowlistedFactory.md)
   - [WETHHook](src/WETHHook.sol/contract.WETHHook.md)
   - [WstETHHook](src/WstETHHook.sol/contract.WstETHHook.md)

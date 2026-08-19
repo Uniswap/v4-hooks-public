@@ -1,10 +1,10 @@
-# HookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/utils/HookMiner.sol)
+# PrefacedHookMiner
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/utils/PrefacedHookMiner.sol)
 
 **Title:**
-HookMiner
+PrefacedHookMiner
 
-a minimal library for mining hook addresses
+a minimal library for mining hook addresses with a fixed leading address byte (same CREATE2 logic as HookMiner)
 
 
 ## Constants
@@ -25,14 +25,18 @@ uint256 constant MAX_LOOP = 160_444
 ## Functions
 ### find
 
-Find a salt that produces a hook address with the desired `flags`
+Find a salt that produces a hook address with the desired `flags` and leading byte `addressPrefix`
 
 
 ```solidity
-function find(address deployer, uint160 flags, bytes memory creationCode, bytes memory constructorArgs)
-    internal
-    view
-    returns (address, bytes32);
+function find(
+    address deployer,
+    uint160 flags,
+    bytes memory creationCode,
+    bytes memory constructorArgs,
+    uint8 addressPrefix,
+    uint256 saltStart
+) internal view returns (address, bytes32);
 ```
 **Parameters**
 
@@ -42,6 +46,8 @@ function find(address deployer, uint160 flags, bytes memory creationCode, bytes 
 |`flags`|`uint160`|The desired flags for the hook address. Example `uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | ...)`|
 |`creationCode`|`bytes`|The creation code of a hook contract. Example: `type(Counter).creationCode`|
 |`constructorArgs`|`bytes`|The encoded constructor arguments of a hook contract. Example: `abi.encode(address(manager))`|
+|`addressPrefix`|`uint8`|The most significant byte of the hook address (the `0xAB` in `0xABcd...`)|
+|`saltStart`|`uint256`|Lower bound (inclusive) for the salt search; chain windows of `MAX_LOOP` for long searches (e.g. bash minePrefacedHook.sh)|
 
 **Returns**
 
