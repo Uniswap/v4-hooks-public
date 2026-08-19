@@ -72,7 +72,7 @@ event TokenJarUpdated(address indexed tokenJar);
 ### HookSwap
 
 ```solidity
-event HookSwap(PoolId indexed poolId, address indexed sender, int256 amount0, int256 amount1, uint24 swapFee);
+event HookSwap(PoolId indexed poolId, address indexed sender, int128 amount0, int128 amount1, uint24 swapFee);
 ```
 
 ## Errors

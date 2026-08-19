@@ -170,8 +170,8 @@ abstract contract BaseAggregatorHook is IAggregatorHook, IFeeClassifiedHook, Pro
             specified = -int128(uint128(amountOut));
         }
 
-        int256 amount0;
-        int256 amount1;
+        int128 amount0;
+        int128 amount1;
         if (params.zeroForOne == params.amountSpecified < 0) {
             amount0 = specified;
             amount1 = unspecifiedDelta;

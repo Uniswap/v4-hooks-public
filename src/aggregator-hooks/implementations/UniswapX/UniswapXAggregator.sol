@@ -3,6 +3,8 @@ pragma solidity 0.8.29;
 
 import {BaseAggregatorHook} from "../../BaseAggregatorHook.sol";
 import {BaseHookDataAggregator} from "../../BaseHookDataAggregator.sol";
+import {IALFHook, MissingHookData, MalformedHookData} from "../../interfaces/IALFHook.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -39,9 +41,13 @@ import {OrderQuoter} from "@uniswapx/lens/OrderQuoter.sol";
 /// @dev    Routing-style quoting (no hookData) is unsupported: `quote`/`_rawQuote`/`pseudoTotalValueLocked` revert
 ///         because the order is only known at swap time. Use `quoteWithHookData`, which resolves the supplied order
 ///         via UniswapX's OrderQuoter (note: not a view — see `_rawQuoteWithHookData`).
+/// @dev    Implements URC-4 (`IALFHook`): `getIndicativeQuote` quotes via the same OrderQuoter path with
+///         URC-4 error semantics (caller-fixable input errors revert descriptively; order-state failures
+///         return 0), `isLive`/`maxGas` report coarse liveness and the quote gas budget, and `swapToPrice`
+///         returns (0, 0) since an all-or-nothing order fill has no price axis to simulate along.
 /// @dev    This hook opts out of protocol-fee classification: `protocolFeeFlags` returns 0, so pools using it
 ///         are not subject to a protocol fee.
-contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
+contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback, IALFHook {
     using SafeERC20 for IERC20;
 
     /// @notice The UniswapX reactor this hook fills orders against
@@ -66,11 +72,16 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
     ///      delta. Both the order input and (summed) output are validated against this before being used.
     uint256 private constant MAX_INT128 = uint256(uint128(type(int128).max));
 
+    /// @dev Declared gas budget for `getIndicativeQuote` (URC-4 `maxGas`). The quote path is dominated by the
+    ///      OrderQuoter resolution (reactor execution + Permit2 signature validation, rolled back); measured
+    ///      ~150k against the real ExclusiveDutchOrderReactor (see the integration test, which asserts the
+    ///      measured cost stays under this bound). Declared at 2x for headroom across order types.
+    uint32 private constant INDICATIVE_QUOTE_MAX_GAS = 300_000;
+
     error Reentrancy();
     error ProhibitedEntry();
     error UnauthorizedCaller();
     error UnexpectedOrderCount();
-    error NoOrderData();
     error NoOrderOutputs();
     error InconsistentOrderOutputs();
     error OrderInputMismatch();
@@ -109,16 +120,33 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         override
         returns (uint256 amountUnspecified)
     {
-        if (hookData.length == 0) revert NoOrderData();
-        SignedOrder memory order = abi.decode(hookData, (SignedOrder));
+        if (hookData.length == 0) revert MissingHookData();
+        SignedOrder memory order = _decodeOrder(hookData);
 
         ResolvedOrder memory resolved = orderQuoter.quote(order.order, order.sig);
 
-        // Sum the order's outputs. The fill requires all outputs share one token (the V4 swapper's input
-        // currency), so enforce that same-token invariant here too — otherwise a quote could return a
-        // meaningless sum across differing tokens that `reactorCallback` would later reject at fill time.
+        (amountUnspecified,) = _quoteResolvedOrder(resolved, amountSpecified);
+    }
+
+    /// @dev Shared validation + amount selection over a resolved order, used by both quote paths.
+    ///      Sums the order's outputs enforcing the same-token invariant (the fill requires all outputs share
+    ///      one token — the V4 swapper's input currency), mirrors the execution-time `int128` narrowing (see
+    ///      MAX_INT128), and enforces the same covering bounds as the fill: the order itself fills
+    ///      all-or-nothing at its resolved amounts, but the V4 swap amount only needs to cover it — an
+    ///      exact-in swap may specify more input than the order's required output, and an exact-out swap may
+    ///      request less than the order's input supplies; any surplus is forwarded to the token jar at swap
+    ///      time. A successful quote therefore implies the corresponding swap amount is fillable.
+    /// @return amountUnspecified The fixed amount on the side opposite `amountSpecified`: the V4 swapper
+    ///         provides the order's OUTPUT and receives its INPUT, so exact-in returns the order input and
+    ///         exact-out returns the (summed) order output.
+    /// @return outputToken The order's (single) output token, for pool/direction validation by callers.
+    function _quoteResolvedOrder(ResolvedOrder memory resolved, int256 amountSpecified)
+        internal
+        pure
+        returns (uint256 amountUnspecified, address outputToken)
+    {
         if (resolved.outputs.length == 0) revert NoOrderOutputs();
-        address outputToken = resolved.outputs[0].token;
+        outputToken = resolved.outputs[0].token;
         uint256 orderOutput;
         for (uint256 i = 0; i < resolved.outputs.length; i++) {
             if (resolved.outputs[i].token != outputToken) revert InconsistentOrderOutputs();
@@ -144,7 +172,101 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         // The hook fills atomically: the V4 swapper provides the order's OUTPUT and receives its INPUT.
         // exact-in  (amountSpecified < 0): swapper specified the input it provides (order output) -> receives order input
         // exact-out (amountSpecified > 0): swapper specified the output it wants (order input)   -> pays order output
-        return amountSpecified < 0 ? resolved.input.amount : orderOutput;
+        amountUnspecified = amountSpecified < 0 ? resolved.input.amount : orderOutput;
+    }
+
+    /// @dev ABI-decoding helper exposed externally only so the hook can try/catch its own decoding; a raw
+    ///      `abi.decode` of attacker-supplied bytes reverts with no data, which URC-4 requires classifying
+    ///      as `MalformedHookData`.
+    function decodeSignedOrder(bytes calldata hookData) external pure returns (SignedOrder memory order) {
+        return abi.decode(hookData, (SignedOrder));
+    }
+
+    /// @dev Decodes `hookData` as a SignedOrder, reverting with `MalformedHookData` when undecodable.
+    function _decodeOrder(bytes calldata hookData) internal view returns (SignedOrder memory order) {
+        try this.decodeSignedOrder(hookData) returns (SignedOrder memory decoded) {
+            return decoded;
+        } catch {
+            revert MalformedHookData();
+        }
+    }
+
+    // ─────────────────────────── IALFHook (URC-4) ───────────────────────────
+
+    /// @inheritdoc IALFHook
+    /// @dev Quotes are a step function of the order's resolved amounts: any covering swap amount succeeds and
+    ///      returns the order's fixed opposite-side amount (exact-in returns the order input for any specified
+    ///      input >= the order's required output; exact-out returns the order output for any requested amount
+    ///      <= the order's input) — the surplus is forwarded to the token jar at swap time (`SurplusCollected`).
+    ///      Caller-fixable input problems revert descriptively: empty `hookData` reverts `MissingHookData`,
+    ///      undecodable `hookData` reverts `MalformedHookData`, a swap amount the order cannot serve (exact-in
+    ///      input below the order's required output, or exact-out request above what the order supplies)
+    ///      reverts `OrderAmountMismatch`, and a `key`/`zeroForOne` combination whose currencies do not
+    ///      correspond to the order's tokens (ETH/WETH treated as equivalent) reverts
+    ///      `OrderInputMismatch`/`OrderOutputMismatch`. Order-state failures that no input change can fix —
+    ///      expired, already filled, invalid signature, i.e. any revert bubbling out of the OrderQuoter
+    ///      resolution — return 0 instead. Succeeds and reverts under exactly the same conditions as the fill.
+    ///      NOTE: like `quoteWithHookData` this is NOT a view (the OrderQuoter calls the reactor, pulling the
+    ///      maker's input via Permit2 before rolling back).
+    function getIndicativeQuote(PoolKey calldata key, bool zeroForOne, int256 amountSpecified, bytes calldata hookData)
+        external
+        returns (uint256 quoteAmount)
+    {
+        if (amountSpecified == 0) return 0;
+        if (hookData.length == 0) revert MissingHookData();
+        SignedOrder memory order = _decodeOrder(hookData);
+
+        // Resolve the order (Dutch decay applied). Resolution failures are order-state conditions no input
+        // change can fix (expired, filled, invalid signature, ...), so per URC-4 they are the absence of a
+        // quote: return 0. Input-classified errors are raised before (hookData) and after (validation below)
+        // this call, so they still revert descriptively.
+        ResolvedOrder memory resolved;
+        try orderQuoter.quote(order.order, order.sig) returns (ResolvedOrder memory resolvedOrder) {
+            resolved = resolvedOrder;
+        } catch {
+            return 0;
+        }
+
+        (uint256 rawAmount, address outputToken) = _quoteResolvedOrder(resolved, amountSpecified);
+
+        // Validate the pool/direction against the order's tokens: the V4 swapper receives the order's input
+        // (settle side) and provides the order's output (take side), with ETH/WETH treated as equivalent.
+        Currency settleCurrency = zeroForOne ? key.currency1 : key.currency0;
+        Currency takeCurrency = zeroForOne ? key.currency0 : key.currency1;
+        if (!_matches(settleCurrency, address(resolved.input.token))) revert OrderInputMismatch();
+        if (!_matches(takeCurrency, outputToken)) revert OrderOutputMismatch();
+
+        return _innerQuote(zeroForOne, amountSpecified, key.toId(), rawAmount);
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev The hook is stateless and its reactor is immutable, so it is live as long as it is deployed.
+    function isLive() external view returns (bool) {
+        return address(reactor) != address(0);
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev Conservative upper bound for `getIndicativeQuote`, measured against the real
+    ///      ExclusiveDutchOrderReactor + OrderQuoter resolution path (see the integration test).
+    function maxGas() external pure returns (uint32) {
+        return INDICATIVE_QUOTE_MAX_GAS;
+    }
+
+    /// @inheritdoc IALFHook
+    /// @dev Price-bounded simulation is unsupported: an order fills all-or-nothing at its resolved amounts,
+    ///      so there is no price axis to simulate along. Returns (0, 0) per URC-4.
+    function swapToPrice(PoolKey calldata, bool, int256, uint160, bytes calldata)
+        external
+        pure
+        returns (uint256 amountIn, uint256 amountOut)
+    {
+        return (0, 0);
+    }
+
+    /// @notice ERC-165 interface detection; URC-4 requires reporting `IALFHook` support.
+    /// @dev Returns true for `type(IALFHook).interfaceId` and for the ERC-165 interface ID itself.
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IALFHook).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @inheritdoc IReactorCallback
@@ -269,7 +391,7 @@ contract UniswapXAggregator is BaseHookDataAggregator, IReactorCallback {
         bytes calldata hookData
     ) internal override returns (uint256 amountSettle, uint256 amountTake, bool hasSettled) {
         if (_getTransientInflight()) revert Reentrancy();
-        if (hookData.length == 0) revert NoOrderData();
+        if (hookData.length == 0) revert MissingHookData();
 
         SignedOrder memory order = abi.decode(hookData, (SignedOrder));
 
