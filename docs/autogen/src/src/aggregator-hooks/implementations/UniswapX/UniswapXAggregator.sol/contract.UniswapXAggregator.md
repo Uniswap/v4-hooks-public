@@ -1,5 +1,5 @@
 # UniswapXAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/aggregator-hooks/implementations/UniswapX/UniswapXAggregator.sol)
 
 **Inherits:**
 [BaseHookDataAggregator](/src/aggregator-hooks/BaseHookDataAggregator.sol/abstract.BaseHookDataAggregator.md), IReactorCallback
@@ -37,7 +37,7 @@ This hook opts out of protocol-fee classification: `protocolFeeFlags` returns 0,
 are not subject to a protocol fee.
 
 
-## State Variables
+## Constants
 ### reactor
 The UniswapX reactor this hook fills orders against
 

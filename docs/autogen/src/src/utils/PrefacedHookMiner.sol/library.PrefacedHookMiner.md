@@ -1,5 +1,5 @@
 # PrefacedHookMiner
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/f164e162adf6a6a8982fc209ecbdb78643c51356/src/utils/PrefacedHookMiner.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/utils/PrefacedHookMiner.sol)
 
 **Title:**
 PrefacedHookMiner
@@ -7,7 +7,7 @@ PrefacedHookMiner
 a minimal library for mining hook addresses with a fixed leading address byte (same CREATE2 logic as HookMiner)
 
 
-## State Variables
+## Constants
 ### FLAG_MASK
 
 ```solidity

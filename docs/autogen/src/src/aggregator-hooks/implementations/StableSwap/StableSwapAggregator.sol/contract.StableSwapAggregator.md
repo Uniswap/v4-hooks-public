@@ -1,5 +1,5 @@
 # StableSwapAggregator
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregator.sol)
 
 **Inherits:**
 [BaseAggregatorHook](/src/aggregator-hooks/BaseAggregatorHook.sol/abstract.BaseAggregatorHook.md)
@@ -12,7 +12,7 @@ Uniswap V4 hook that aggregates liquidity from Curve StableSwap pools
 Supports exact-input swaps only due to StableSwap pool limitations
 
 
-## State Variables
+## Constants
 ### CURVE_NATIVE_ETH
 Curve's address for native currency
 
@@ -40,6 +40,7 @@ IMetaRegistry public immutable metaRegistry
 ```
 
 
+## State Variables
 ### poolIdToTokenInfo
 Maps Uniswap V4 pool IDs to their corresponding token indices in the Curve pool
 

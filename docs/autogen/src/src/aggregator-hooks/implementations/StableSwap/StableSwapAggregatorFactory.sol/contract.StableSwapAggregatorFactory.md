@@ -1,5 +1,5 @@
 # StableSwapAggregatorFactory
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5487b2c1a8e5d06a78754ce93a8634b8dd91d659/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/c8009b0f70f3ba0a73cedd796c1cbe2ddce0ddbb/src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol)
 
 **Title:**
 StableSwapAggregatorFactory
@@ -9,7 +9,7 @@ Factory for creating StableSwapAggregator hooks via CREATE2 and initializing Uni
 Deploys deterministic hook addresses and initializes pools for all token pairs in the Curve pool
 
 
-## State Variables
+## Constants
 ### poolManager
 The Uniswap V4 PoolManager contract
 
@@ -28,6 +28,7 @@ IMetaRegistry public immutable metaRegistry
 ```
 
 
+## State Variables
 ### deployments
 All deployments, indexed by creation order
 
