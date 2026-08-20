@@ -40,6 +40,20 @@ A companion hook to `WstETHHook` that enables swap simulation via the V4 Quoter.
 
 </details>
 
+<details>
+<summary><a href="src/ERC4626WrapperHook.sol">ERC4626WrapperHook</a></summary>
+
+A generic exact-input hook for exchanging an ERC-4626 vault's underlying asset and shares through a zero-fee Uniswap v4 pool. It accounts for rebasing transfer rounding and rejects liquidity additions.
+
+</details>
+
+<details>
+<summary><a href="src/ERC4626RoutingHook.sol">ERC4626RoutingHook</a></summary>
+
+A companion hook that uses ERC-4626 preview functions to simulate wrapper-hook swaps through the V4 Quoter.
+
+</details>
+
 ## Installation
 
 ```bash
@@ -103,12 +117,17 @@ src/
 |   IWstETH.sol
 ----utils/
 |   HookMiner.sol
+----ERC4626RoutingHook.sol
+----ERC4626WrapperHook.sol
 ----WETHHook.sol
 ----WstETHHook.sol
 ----WstETHRoutingHook.sol
 test/
 ----mocks/
 ----shared/
+----ERC4626WrapperHook.t.sol
+----ERC4626WrapperHook.fork.t.sol
+----ERC4626WrapperHookInvariant.t.sol
 ----WETHHook.t.sol
 ----WstETHHook.t.sol
 ----WstETHHook.fork.t.sol
