@@ -18,6 +18,9 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
 
     IERC4626 public immutable vault;
 
+    /// @notice The contract that deployed this hook
+    address public immutable factory;
+
     error SettlementMismatch(uint256 measured, uint256 settled);
 
     /// @notice Creates a new ERC-4626 wrapper hook
@@ -31,6 +34,7 @@ contract ERC4626WrapperHook is BaseTokenWrapperHook {
         )
     {
         vault = _vault;
+        factory = msg.sender;
         // the vault pulls the underlying asset from this hook during deposit()
         ERC20(Currency.unwrap(underlyingCurrency)).safeApprove(address(_vault), type(uint256).max);
     }
