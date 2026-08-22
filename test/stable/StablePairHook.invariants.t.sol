@@ -12,6 +12,7 @@ import {ProtocolFeeLibrary} from "@uniswap/v4-core/src/libraries/ProtocolFeeLibr
 import {StableFeeCalculation} from "../../src/stable/libraries/StableFeeCalculation.sol";
 
 /// @notice Fuzz invariants for StablePairHook driven through the mocked-price harness
+/// forge-config: default.fuzz.runs = 2048
 contract StablePairHookInvariantsTest is StablePairTestBase {
     using PoolIdLibrary for PoolKey;
 

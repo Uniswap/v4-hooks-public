@@ -24,6 +24,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 // Referenced only by name in `deployCodeTo`; imported so forge includes its artifact in the build.
 import {ERC1967Proxy as _ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+/// forge-config: default.fuzz.runs = 2048
 contract StablePairHookSwapTest is StablePairTestBase, Deployers {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;

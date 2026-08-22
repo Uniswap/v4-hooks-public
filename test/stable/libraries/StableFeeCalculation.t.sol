@@ -12,6 +12,7 @@ import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
 import {StablePairTestBase} from "../base/StablePairTestBase.sol";
 
 /// @notice Direct tests of the fee-math library
+/// forge-config: default.fuzz.runs = 2048
 contract StableFeeCalculationTest is StablePairTestBase {
     uint256 internal MAX_OPTIMAL_FEE_E6;
     uint256 internal MAX_TARGET_MULTIPLIER;

@@ -22,6 +22,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {StableFeeCalculation} from "../../src/stable/libraries/StableFeeCalculation.sol";
 
+/// forge-config: default.fuzz.runs = 2048
 contract StablePairHookBeforeSwapTest is StablePairTestBase {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;

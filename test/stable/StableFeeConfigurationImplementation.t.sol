@@ -24,6 +24,7 @@ import {IDynamicFeeHook} from "../../src/interfaces/IDynamicFeeHook.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {StablePairTestBase} from "./base/StablePairTestBase.sol";
 
+/// forge-config: default.fuzz.runs = 2048
 contract StableFeeConfigurationImplementationTest is StablePairTestBase {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
