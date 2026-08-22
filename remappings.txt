@@ -2,6 +2,7 @@
 @uniswap/v4-periphery/=lib/v4-periphery/
 @uniswap/blocknumberish/=lib/blocknumberish/
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
 @protocol-fees/=lib/protocol-fees/src/
 forge-std/=lib/forge-std/src/
 solmate/=lib/v4-core/lib/solmate/
