@@ -170,14 +170,14 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
     /// passing means the library math itself moved — cross-check the CSV spreadsheet oracle).
     function _runPriceMovesFurtherScenario(bool aboveReference) internal {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(aboveReference ? 1_000_130 : 999_870);
-        vm.roll(block.number + 750);
+        vm.roll(vm.getBlockNumber() + 750);
 
         // The away-from-reference direction is free; this swap stores the decaying fee state.
         bool awayDirection = !aboveReference; // above ref: oneForZero moves away; below ref: zeroForOne
         assertEq(_swapDirection(awayDirection), 0);
 
         // Advance a block and move a further 10 ppm from reference.
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (uint256 storedFeeE12, uint160 storedPriceX96,) = hook.feeState(testPoolKey.toId());
         sqrtAmmPriceX96 = _sqrtPriceFromBps(aboveReference ? 1_000_140 : 999_860);
 
@@ -188,7 +188,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
 
         // With 750 blocks passed: the adjusted fee decays toward targetFee.
         (storedFeeE12, storedPriceX96,) = hook.feeState(testPoolKey.toId());
-        vm.roll(block.number + 750);
+        vm.roll(vm.getBlockNumber() + 750);
         fee = _swapDirection(!awayDirection);
         assertEq(fee, _expectedAdjustedDecayedFee(storedFeeE12, storedPriceX96, 750));
         assertEq(fee, 205); // pinned sanity anchor
@@ -244,17 +244,17 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
 
         // Block 1: price well below reference (outside the optimal band). Stores the decaying fee.
         sqrtAmmPriceX96 = _sqrtPriceFromBps(990_000); // 0.99 * reference
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
 
         // Block 2 (much later, same price): the stored fee decays down to ~target(0.99).
-        vm.roll(block.number + 50);
+        vm.roll(vm.getBlockNumber() + 50);
         callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
 
         // Block 3: price moves toward reference (still outside). target(0.999) now exceeds the decayed
         // stored fee — the exact condition that underflowed pre-clamp.
         sqrtAmmPriceX96 = _sqrtPriceFromBps(999_000); // 0.999 * reference
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         uint24 fee = callBeforeSwap(false, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 101) / 100);
 
         // A toward-reference buy is charged the (clamped) decaying fee, not zero.
@@ -279,12 +279,12 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         // Extreme depeg: 0.005x reference. At m=100 the target is farFee - closeFee ≈ 2 * r * optimalFee
         // ≈ 2 * 0.005 * 90 ppm ≈ 0.9 ppm — nonzero but below 1 pip.
         sqrtAmmPriceX96 = _sqrtPriceFromBps(5_000);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         // Below reference, zeroForOne moves away: charged exactly zero (a true zero is not rounded up).
         assertEq(_swapDirection(true), 0);
 
         // Decay the stored fee down to the sub-pip target.
-        vm.roll(block.number + 50);
+        vm.roll(vm.getBlockNumber() + 50);
         uint24 fee = _swapDirection(false);
         assertEq(fee, 1); // pre-fix this truncated to an explicit 0-fee override
     }
@@ -308,7 +308,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
     /// multiplication. Gas is flat for all gaps 1-4 up to a few gas of fastPow multiplications.
     function test_beforeSwap_newBlock_outsideOptimalRange_fastPowDecay_gas() public {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_130);
-        vm.roll(block.number + 4);
+        vm.roll(vm.getBlockNumber() + 4);
 
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
@@ -321,7 +321,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
     /// crossing the 4 -> 5 switch: deriveLogK + expWad, minus fastPow.
     function test_beforeSwap_newBlock_outsideOptimalRange_expWadDecay_gas() public {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_130);
-        vm.roll(block.number + 5);
+        vm.roll(vm.getBlockNumber() + 5);
 
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
         hook.beforeSwap(address(this), testPoolKey, swapParams, Constants.ZERO_BYTES);
@@ -330,7 +330,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
 
     function test_beforeSwap_sameBlock_outsideOptimalRange_gas() public {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_130);
-        vm.roll(block.number + 750);
+        vm.roll(vm.getBlockNumber() + 750);
 
         // First swap (new block, full calculation)
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
@@ -349,7 +349,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         // Set price slightly below reference (inside optimal range)
         sqrtAmmPriceX96 = _sqrtPriceFromBps(999_950);
 
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         // First swap of block: fee is computed from current AMM price
         uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
@@ -367,12 +367,12 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
     function test_beforeSwap_newBlock_usesFreshPrice() public {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(999_950);
 
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
 
         // Move price to reference and advance to new block
         sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
 
@@ -383,7 +383,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
     /// @notice feeState should only be written on the first swap of a new block.
     function test_beforeSwap_sameBlock_feeStateNotUpdated() public {
         sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         // First swap sets feeState
         callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
@@ -406,7 +406,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
 
     function test_beforeSwap_sameBlock_insideOptimalRange_gas() public {
         sqrtAmmPriceX96 = REFERENCE_SQRT_PRICE_X96;
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         // First swap (new block, writes feeState)
         SwapParams memory swapParams = SwapParams(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
@@ -495,13 +495,13 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_130);
 
         // Establish fee state
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
 
         // Slightly move price further from reference to avoid equal-price edge case
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_131);
 
-        vm.roll(block.number + 750);
+        vm.roll(vm.getBlockNumber() + 750);
 
         uint24 fee1 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
 
@@ -514,7 +514,7 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         assertEq(fee1, expectedFee);
 
         // Large price shock: jump to 2000ppm above reference with only 1 block elapsed
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_002_000);
 
         uint24 fee2 = callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
@@ -549,14 +549,14 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_100);
 
         // First swap at this price: establishes fee state (first time outside optimal range)
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         callBeforeSwap(true, 50_000 * 1e18, (Constants.SQRT_PRICE_1_1 * 99) / 100);
 
         // Slightly adjust price so it's not exactly equal to previous (avoid equal-price edge case)
         sqrtAmmPriceX96 = _sqrtPriceFromBps(1_000_099);
 
         // Advance 2 blocks: with k=0.01, decay factor = 0.01^2 = 0.0001 → fee ≈ target
-        vm.roll(block.number + 2);
+        vm.roll(vm.getBlockNumber() + 2);
 
         // Two tiny swaps in opposite directions to measure the spread
         // Sell token0 (toward reference when price > ref): charged the decaying fee
@@ -641,14 +641,14 @@ contract StablePairHookBeforeSwapTest is StablePairTestBase {
         if (primeFeeState) {
             // Store a decaying-fee state so the adjustment/decay path is exercised, not just fresh state.
             sqrtAmmPriceX96 = _boundSqrtPriceRelative(primePriceSeed, cfg.referenceSqrtPriceX96);
-            vm.roll(block.number + 1);
+            vm.roll(vm.getBlockNumber() + 1);
             _swapFee(true);
         }
 
         // With a primed swap this block, gap 0 exercises the same-block cached-price path.
         blockGap = bound(blockGap, primeFeeState ? 0 : 1, 10_000);
         sqrtAmmPriceX96 = _boundSqrtPriceRelative(priceSeed, cfg.referenceSqrtPriceX96);
-        vm.roll(block.number + blockGap);
+        vm.roll(vm.getBlockNumber() + blockGap);
 
         _assertGetFeeMatchesSwap();
     }

@@ -35,15 +35,7 @@ optimizer_runs = 200
 [profile.alf]
 optimizer_runs = 200
 via_ir = true
-# The stable tests call vm.roll(block.number + N) repeatedly inside one test function. solc
-# treats block.number as movable, so the Yul optimizer evaluates it once and reuses it --
-# sound on a real chain, wrong when a cheatcode mutates it. Under via-ir a later roll then
-# computes from a stale value and can move the chain backward (1 -> 2 -> 752 -> 2), which
-# makes the hook correctly serve a cached price and the assertions fail. The hook itself is
-# fine; this is a test-harness limitation. Since alf has no dependency on stable, skip stable
-# here rather than run it under a pipeline its tests are not written for. The default profile
-# (via_ir = false) builds and tests it.
-skip = ["src/stable/**", "test/stable/**"]
+skip = []
 # fluid-contracts-public uses inline assembly without memory-safe annotations,
 # which prevents the via-ir Yul optimizer from reorganizing the stack and trips
 # stack-too-deep in dexLite/adminModule/main.sol. Compile fluid with legacy

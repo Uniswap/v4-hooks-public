@@ -62,7 +62,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
                 ? _boundSqrtPriceAbsolute(steps[i].priceSeed)
                 : _boundSqrtPriceRelative(steps[i].priceSeed, cfg.referenceSqrtPriceX96);
 
-            vm.roll(block.number + bound(uint256(steps[i].blockGap), 0, 10_000));
+            vm.roll(vm.getBlockNumber() + bound(uint256(steps[i].blockGap), 0, 10_000));
 
             (uint24 quoteZeroForOne, uint24 quoteOneForZero) = hook.getFee(testPoolKey);
             uint24 fee = _callBeforeSwap(steps[i].zeroForOne);
@@ -109,7 +109,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
         // Establish outside-range decaying-fee state at this price (first outside-range swap of a block).
         sqrtAmmPriceX96 = price;
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         _callBeforeSwap(false);
         (uint256 startFee,,) = hook.feeState(testPoolKey.toId());
         // If we are inside the optimal range here, there is no decaying fee to reason about — skip.
@@ -120,12 +120,12 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
         uint256 longGap = shortGap + bound(uint256(extraGap), 1, 5_000);
 
         uint256 snap = vm.snapshotState();
-        vm.roll(block.number + shortGap);
+        vm.roll(vm.getBlockNumber() + shortGap);
         _callBeforeSwap(false);
         (uint256 feeShort,,) = hook.feeState(testPoolKey.toId());
         vm.revertToState(snap);
 
-        vm.roll(block.number + longGap);
+        vm.roll(vm.getBlockNumber() + longGap);
         _callBeforeSwap(false);
         (uint256 feeLong,,) = hook.feeState(testPoolKey.toId());
 
@@ -148,19 +148,19 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
         // Establish outside-range decaying-fee state (~1% below reference in price space).
         sqrtAmmPriceX96 = uint160(uint256(REFERENCE_SQRT_PRICE_X96) * 995 / 1000);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         _callBeforeSwap(false);
         (uint256 startFee,,) = hook.feeState(testPoolKey.toId());
         assertTrue(startFee != StableFeeCalculation.UNDEFINED_DECAYING_FEE_E12);
 
         // Same stored state, same price => same target; only blocksPassed differs (4 fast, 5 slow).
         uint256 snap = vm.snapshotState();
-        vm.roll(block.number + 4);
+        vm.roll(vm.getBlockNumber() + 4);
         _callBeforeSwap(false);
         (uint256 fee4,,) = hook.feeState(testPoolKey.toId());
         vm.revertToState(snap);
 
-        vm.roll(block.number + 5);
+        vm.roll(vm.getBlockNumber() + 5);
         _callBeforeSwap(false);
         (uint256 fee5,,) = hook.feeState(testPoolKey.toId());
 
@@ -174,7 +174,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
         _setConfig(cfg);
 
         sqrtAmmPriceX96 = _boundSqrtPriceRelative(priceSeed, cfg.referenceSqrtPriceX96);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         uint256 snap = vm.snapshotState();
         uint24 feeZeroForOne = _callBeforeSwap(true);
@@ -199,7 +199,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
         // Price exactly at reference is always inside the band.
         sqrtAmmPriceX96 = cfg.referenceSqrtPriceX96;
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         uint256 snap = vm.snapshotState();
         uint24 feeZeroForOne = _callBeforeSwap(true);
@@ -224,7 +224,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
         _setConfig(cfg);
 
         sqrtAmmPriceX96 = _boundSqrtPriceRelative(priceSeedA, cfg.referenceSqrtPriceX96);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         uint24 fee1 = _callBeforeSwap(zeroForOne);
         (uint256 storedFee1, uint160 storedPrice1, uint256 storedBlock1) = hook.feeState(testPoolKey.toId());
 
@@ -252,7 +252,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
         // Establish an outside-range decaying-fee state at the fuzzed price.
         sqrtAmmPriceX96 = _boundSqrtPriceRelative(priceSeed, cfg.referenceSqrtPriceX96);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         _callBeforeSwap(true);
         (uint256 established,,) = hook.feeState(testPoolKey.toId());
         vm.assume(established != StableFeeCalculation.UNDEFINED_DECAYING_FEE_E12);
@@ -264,7 +264,7 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
         // Enough blocks that the decay factor is exactly 0 even for the smallest valid logK (1),
         // so the stored fee lands exactly on the target with no residual gap.
-        vm.roll(block.number + 100_000_000);
+        vm.roll(vm.getBlockNumber() + 100_000_000);
         _callBeforeSwap(true);
         (uint256 decayedFeeE12,,) = hook.feeState(testPoolKey.toId());
 
@@ -294,14 +294,14 @@ contract StablePairHookInvariantsTest is StablePairTestBase {
 
             // Establish an outside-range decaying-fee state at the fuzzed price.
             sqrtAmmPriceX96 = price;
-            vm.roll(block.number + 1);
+            vm.roll(vm.getBlockNumber() + 1);
             _callBeforeSwap(true);
             (uint256 established,,) = hook.feeState(testPoolKey.toId());
             // Only meaningful when outside the optimal band (inside band has no decaying fee).
             vm.assume(established != StableFeeCalculation.UNDEFINED_DECAYING_FEE_E12);
 
             // Decay in place; higher multiplier => lower target => lower decayed fee.
-            vm.roll(block.number + 750);
+            vm.roll(vm.getBlockNumber() + 750);
             _callBeforeSwap(true);
             (fees[i],,) = hook.feeState(testPoolKey.toId());
         }

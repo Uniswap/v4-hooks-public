@@ -111,7 +111,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
     function test_swap_outsideOptimalRange_directionalFeeAsymmetry() public {
         // Move the AMM price below reference
         swap(poolKey, true, -10e18, ZERO_BYTES);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         // Read the current AMM price to normalize cross-direction comparison
         (uint160 sqrtPriceX96,,,) = manager.getSlot0(poolKey.toId());
@@ -196,7 +196,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
         // Large swap moves price
         swap(poolKey, firstDirection, -int256(largeAmount), ZERO_BYTES);
 
-        vm.roll(block.number + blockGap);
+        vm.roll(vm.getBlockNumber() + blockGap);
 
         // Small swap in opposite direction (toward reference) — exercises decaying fee path
         swap(poolKey, !firstDirection, -int256(smallAmount), ZERO_BYTES);
@@ -222,7 +222,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
             bool exactOutput = (directions >> (i + 128)) & 1 == 1;
             swap(poolKey, zeroForOne, exactOutput ? int256(amount) : -int256(amount), ZERO_BYTES);
             uint256 gap = bound((blockGaps >> (i * 16)) & 0xFFFF, 0, 10_000);
-            vm.roll(block.number + gap);
+            vm.roll(vm.getBlockNumber() + gap);
         }
     }
 
@@ -250,7 +250,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
 
         // New block: the toward-reference fee recomputes from the stranded price and saturates
         // to the clamp (unclamped it would quote exactly 1e6).
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (uint24 feeZeroForOne, uint24 feeOneForZero) = hook.getFee(poolKey);
         assertEq(feeZeroForOne, 0, "away direction stays free");
         assertEq(feeOneForZero, 999_998, "toward-reference fee saturates to the clamp");
@@ -267,7 +267,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
 
         // Next block: the fee recomputes from the recovered price and de-saturates (~45% at the
         // -6000 range edge: 1 - 1.0001^-6000 * (1 - optimalFee)).
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (, uint24 feeTowardAfter) = hook.getFee(poolKey);
         assertGt(feeTowardAfter, 400_000, "fee should reflect the ~45% discount at the range edge");
         assertLt(feeTowardAfter, 500_000, "fee must de-saturate once price is back at liquidity");
@@ -301,7 +301,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
         (, int24 tickAfterPush,,) = manager.getSlot0(poolKey.toId());
         assertLt(tickAfterPush, -800_000, "push should strand the price inside the dust range");
 
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (, uint24 feeToward) = hook.getFee(poolKey);
         assertEq(feeToward, 999_998, "toward-reference fee saturates to the clamp");
 
@@ -311,7 +311,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
         (, int24 tickAfterRecovery,,) = manager.getSlot0(poolKey.toId());
         assertGt(tickAfterRecovery, -6060, "dust swap must cross dust liquidity back to the liquid range");
 
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (, uint24 feeTowardAfter) = hook.getFee(poolKey);
         assertLt(feeTowardAfter, 500_000, "fee must de-saturate after recovery");
     }
@@ -339,7 +339,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
         (, int24 tickAfterPush,,) = manager.getSlot0(poolKey.toId());
         assertLt(tickAfterPush, -800_000, "push should strand the price near MIN_TICK");
 
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         (, uint24 feeToward) = hook.getFee(poolKey);
         // Combined with the max protocol fee, the charged fee must still be below 100%.
         assertLt(
@@ -379,7 +379,7 @@ contract StablePairHookSwapTest is StablePairTestBase, Deployers {
 
         // Strand the price in empty tick space and let the toward-reference fee saturate.
         swap(poolKey, true, -100e18, ZERO_BYTES);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
 
         // (2) Sub-threshold exact-input: the post-fee remainder is zero, so the price coasts
         // through the EMPTY tick range up to the edge of active liquidity but no further, and
