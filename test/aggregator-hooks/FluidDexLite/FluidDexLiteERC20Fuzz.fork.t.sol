@@ -34,6 +34,8 @@ import {IFluidDexLite} from "../../../src/aggregator-hooks/implementations/Fluid
 /// @title FluidDexLiteERC20Fuzz
 /// @notice Fuzz tests for FluidDexLite through Uniswap V4 hooks (ERC20 tokens only)
 /// @dev Creates random pools and executes multiple swaps to verify quote accuracy
+/// @dev Fork-bound; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract FluidDexLiteERC20Fuzz is Test {
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;

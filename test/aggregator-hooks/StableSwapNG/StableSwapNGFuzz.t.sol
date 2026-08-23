@@ -30,6 +30,8 @@ import {
 /// @title StableSwapNGFuzz
 /// @notice Fuzz tests for StableSwapNG through Uniswap V4 hooks
 /// @dev Deploys Curve pools and V4 hooks locally for comprehensive testing
+/// @dev Heavy external-integration suite; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract StableSwapNGFuzz is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;

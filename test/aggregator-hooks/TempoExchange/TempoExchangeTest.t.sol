@@ -28,6 +28,8 @@ import {RevertingMockTempoExchange} from "./mocks/RevertingMockTempoExchange.sol
 /// @title TempoExchangeTest
 /// @notice Unit tests for Tempo Exchange aggregator hook
 /// @dev Uses mock contracts since Tempo is a separate chain
+/// @dev Heavy external-integration suite; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract TempoExchangeTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;

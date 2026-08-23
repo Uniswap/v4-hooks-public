@@ -18,6 +18,8 @@ import {
 } from "../../../src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexResolver.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
+/// @dev Factory tests deploy full pools (hundreds of millions of gas per run); pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract FluidDexT1FactoryUnitTest is Test {
     IPoolManager public poolManager;
     MockV4FeeAdapter public feeAdapter;

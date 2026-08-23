@@ -7,6 +7,8 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {HookMiner} from "../../src/utils/HookMiner.sol";
 import {MockBlankHook} from "../mocks/MockBlankHook.sol";
 
+/// @dev Address mining is expensive per run; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract HookMinerTest is Test {
     function test_fuzz_hookMiner(uint16 flags, uint256 number) public {
         (address addr, bytes32 salt) = HookMiner.find(

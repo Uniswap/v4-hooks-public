@@ -43,7 +43,10 @@ compilation_restrictions = [
 ]
 
 [fuzz]
-runs = 10
+# Raised from 10: at 10 runs a property test is close to meaningless. Heavy suites
+# (fork-bound, address mining, external integrations) opt back down with a
+# `/// forge-config: default.fuzz.runs = N` annotation on the contract.
+runs = 2048
 
 [invariant]
 runs = 256

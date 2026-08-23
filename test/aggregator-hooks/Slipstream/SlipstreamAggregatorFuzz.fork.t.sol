@@ -29,6 +29,8 @@ interface ISlipstreamCLFactory {
 /// @title SlipstreamAggregatorFuzz
 /// @notice Fuzz on a Base fork using canonical Slipstream CL factory; creates a fresh CL pool from mock ERC-20s.
 /// @dev Skips when RPC unset.
+/// @dev Fork-bound; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract SlipstreamAggregatorFuzz is Test {
     using PoolIdLibrary for PoolKey;
 
