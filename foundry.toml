@@ -35,7 +35,11 @@ optimizer_runs = 200
 [profile.alf]
 optimizer_runs = 200
 via_ir = true
-skip = []
+# StablePairHook is built and deployed with legacy codegen (the default profile), which is
+# what was audited and what is live on mainnet. Keep stable out of this via-ir profile so it
+# is never compiled under a pipeline it does not ship under. The tests are via-ir safe as of
+# this branch, so this is a deliberate policy choice rather than a workaround.
+skip = ["src/stable/**", "test/stable/**"]
 # fluid-contracts-public uses inline assembly without memory-safe annotations,
 # which prevents the via-ir Yul optimizer from reorganizing the stack and trips
 # stack-too-deep in dexLite/adminModule/main.sol. Compile fluid with legacy
