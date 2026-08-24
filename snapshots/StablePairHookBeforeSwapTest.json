@@ -1,0 +1,7 @@
+{
+  "beforeSwap_newBlock_insideOptimalRange": "52913",
+  "beforeSwap_newBlock_outsideOptimalRange_expWadDecay": "55966",
+  "beforeSwap_newBlock_outsideOptimalRange_fastPowDecay": "54619",
+  "beforeSwap_sameBlock_insideOptimalRange": "36697",
+  "beforeSwap_sameBlock_outsideOptimalRange": "36381"
+}
