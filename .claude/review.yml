@@ -1,0 +1,146 @@
+# review-cli config for Uniswap/v4-hooks-public.
+# Schema reference: packages/review-cli/src/config.ts in Uniswap/internal-tools.
+#
+# Read by .github/workflows/review.yml. Only fields that need to differ
+# from the cli defaults are set; everything else is inherited.
+#
+# This repo holds the official Uniswap Labs v4 hook contracts: a Foundry
+# Solidity project whose deployed hooks (WETHHook, WstETHHook,
+# WstETHRoutingHook) are live and non-upgradeable at mined addresses on
+# six chains, plus newer subsystems (ALF, aggregator hooks, permissioned
+# pools) that are on their way there.
+
+# ─── Post policy ───────────────────────────────────────────────────────
+# Only CI may write to GitHub. Without this block, any actor holding a
+# token with `repo` scope — including a teammate's local `gh` token —
+# could post a review into someone else's PR.
+post:
+  allowed_actors:
+    - github-actions
+    - github-actions[bot]
+
+# ─── Model ─────────────────────────────────────────────────────────────
+# The outgoing ai-toolkit caller pinned `claude-opus-4-7`; that Opus-class
+# choice is preserved and rolled forward to the current Opus. The bundled
+# agents declare `model: sonnet` in frontmatter, which resolve-model
+# treats as "unpinned", so this default is what actually selects the
+# model. Live, non-upgradeable hooks holding user funds justify the most
+# capable reviewer available — a missed finding here is a redeploy and an
+# address migration, not a patch.
+model:
+  default: claude-opus-5
+
+# ─── Budget ────────────────────────────────────────────────────────────
+# Well above the $5/$2 defaults. The hooks are small but sit on top of
+# v4-core's flash-accounting and unlock model, so a useful review means
+# reading the hook, its base contract, and the tests rather than stopping
+# early.
+max_budget_usd: 15.0
+agent_budget_usd: 10.0
+
+# Turn ceiling set high so the budget is always the binding cap, never
+# turns.
+agent_max_turns: 500
+
+# ─── Limits ────────────────────────────────────────────────────────────
+# The outgoing caller had no size floor, so every PR got a review. Keep
+# that. A one-line change to a delta sign, a rounding direction, or a
+# hook-permission bitmap is exactly the diff that is both tiny and
+# load-bearing here.
+trivial_threshold: 0
+
+# ─── Investigation gate ────────────────────────────────────────────────
+# An empty-findings APPROVE must be backed by evidence that the reviewers
+# actually opened the changed files. Raised above the defaults
+# (0 / 0.25 / 0.5) because "looks fine" is not an acceptable outcome for
+# contract code that ships to a mined, immutable address. Kept short of
+# tjar's 0.5/0.75/0.9 because PRs here routinely carry regenerated
+# `docs/autogen/**` alongside the real change, which inflates the file
+# count without adding review surface.
+investigation:
+  min_approve_coverage:
+    light: 0.5
+    standard: 0.7
+    thorough: 0.8
+
+# ─── Diff summarization ────────────────────────────────────────────────
+# Generated artifacts, summarized rather than read line by line so they
+# do not crowd the actual contract diff out of the prompt.
+#   docs/autogen/** — forge doc output, regenerated wholesale (see the
+#                     "regenerate autogen docs" commits); never hand-edited
+#   snapshots/**    — forge gas snapshots; the numbers matter, the JSON
+#                     does not reward line-level reading
+diff:
+  summarize:
+    - 'docs/autogen/**'
+    - 'snapshots/**'
+
+# ─── Triage guidance ───────────────────────────────────────────────────
+# Guidance for the triage agent, which decides which reviewers to staff.
+triage:
+  guidance: |
+    Solidity/Foundry repo — the official Uniswap Labs v4 hooks. Hooks are
+    external contracts attached to v4 pools that run at points in the
+    pool lifecycle, so every change here executes inside someone else's
+    swap or liquidity transaction. WETHHook, WstETHHook, and
+    WstETHRoutingHook are already deployed and non-upgradeable at mined
+    addresses across Ethereum, Unichain, Optimism, Base, Arbitrum, and
+    Monad, and are covered by an OpenZeppelin audit; a behavioral fix
+    means mining and deploying a new address, not patching the source.
+    Newer subsystems (src/alf/, src/aggregator-hooks/,
+    src/permissioned-pools/, src/AllowlistedFactory.sol) are on the same
+    trajectory. Bias toward staffing more reviewers rather than fewer.
+
+    Always staff contract-security-reviewer and defi-risk-reviewer on any
+    change under src/. They cover the point of this repo, not optional
+    extras:
+
+    - contract-security-reviewer owns the EVM-level surface: the hook
+      permission bitmap encoded in the mined address and whether it still
+      matches getHookPermissions(); the onlyPoolManager / msg.sender
+      authority on every callback; BeforeSwapDelta and BalanceDelta sign
+      conventions and settle/take/sync pairing against v4-core's
+      flash-accounting; reentrancy through unlock callbacks and hostile
+      or rebasing tokens (stETH rounding is a live concern in
+      WstETHHook); native-ETH handling; access control on
+      AllowlistedFactory and the permissioned-pools adapters; and CREATE2
+      / CREATE3 salt scoping in src/utils/HookMiner*.sol and the mining
+      scripts under script/.
+
+    - defi-risk-reviewer owns the economic surface: wrapper hooks quote a
+      1:1 or exchange-rate conversion with zero fee, so rounding
+      direction, exchange-rate staleness, and dust handling decide who
+      absorbs the loss. For src/alf/ and src/aggregator-hooks/, treat
+      quoting, inventory and ladder accounting, JIT locks, protocol-fee
+      math, and external-DEX liquidity aggregation as changing execution
+      terms and MEV exposure even when the diff looks mechanical.
+
+    Add correctness-reviewer on non-trivial logic changes, especially
+    delta arithmetic, fee and rounding math, the WstETHRoutingHook
+    simulation path (which must keep agreeing with WstETHHook's real
+    execution), and anything under src/alf/types/ or src/alf/libraries/
+    where packed types and bit layouts are easy to get subtly wrong.
+
+    Add security-reviewer for CI/workflow changes under .github/ and for
+    anything handling secrets or tokens. Skip it for pure Solidity diffs
+    — contract-security-reviewer covers that surface better.
+
+    Add patterns-reviewer only on larger refactors. Individual hooks are
+    small and deliberately minimal; structural advice on a 60-line
+    contract is usually noise.
+
+    Documentation-only diffs (README.md, CONTRIBUTING.md, docs/,
+    src/aggregator-hooks/README.md) usually warrant general-reviewer
+    alone — but deployment addresses, audit references, hook-ID
+    conventions, and the first-byte aggregator ID table are load-bearing
+    claims and should be checked against the source.
+
+    Review posture, carried over from this repo's previous prompt
+    overrides: approve is the default verdict. Request changes only when
+    something will provably break — a bug that reaches production, an
+    exploitable path, or a funds-loss risk. Prefer approving with
+    comments over a bare comment verdict. Keep findings short and
+    specific, one issue per comment, and skip stylistic or "consider
+    perhaps" notes that do not change safety or behavior. Do not review
+    vendored or generated code: lib/ submodules, foundry-out/, and
+    docs/autogen/**.
