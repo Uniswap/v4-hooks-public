@@ -35,7 +35,10 @@ model:
 # v4-core's flash-accounting and unlock model, so a useful review means
 # reading the hook, its base contract, and the tests rather than stopping
 # early.
-max_budget_usd: 15.0
+# Run cap holds three full-budget reviewers. The triage guidance mandates two
+# reviewers on most diffs; with the cap at 1.5x the per-agent budget the
+# second reviewer could exhaust the run before synthesis.
+max_budget_usd: 30.0
 agent_budget_usd: 10.0
 
 # Turn ceiling set high so the budget is always the binding cap, never

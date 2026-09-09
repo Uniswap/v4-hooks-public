@@ -38,17 +38,28 @@ concurrency:
   # supersede the previous review (no point reviewing stale code), but a
   # third-party bot comment must not kill an in-flight push review.
   #
-  # The draft/fork clauses mirror the triage gate below. Without them a push
-  # to a draft (or a fork PR) cancels a review a human asked for by comment,
-  # while its own triage skips — so nothing replaces what it killed. The
-  # predicate here must stay in sync with the `if:` on the triage job: cancel
-  # only for events that will actually produce a replacement review.
+  # Every skip clause on the triage job's `if:` is mirrored here, and the
+  # two MUST stay in sync: concurrency is evaluated when the run is created,
+  # before any job `if:`. A push this predicate accepts but triage then
+  # skips (draft, fork, bot author, release/ or dependabot/ branch, ...)
+  # would cancel a review a human asked for by comment and replace it with
+  # nothing — the commenter is left with a "cancelled, newer push" reply and
+  # no review. Cancel only for pushes that will produce a replacement.
   # Folded scalar: every continuation line sits at the same indent so YAML
   # collapses this to ONE line before Actions parses the expression.
   cancel-in-progress: >-
     ${{ github.event_name == 'pull_request'
-    && github.event.pull_request.draft == false
-    && github.event.pull_request.head.repo.fork == false }}
+    && !github.event.pull_request.draft
+    && !github.event.pull_request.head.repo.fork
+    && !endsWith(github.event.pull_request.user.login, '[bot]')
+    && github.event.pull_request.user.login != 'github-actions'
+    && !startsWith(github.head_ref, 'gh-readonly-queue/')
+    && !startsWith(github.head_ref, 'graphite-base/')
+    && !startsWith(github.head_ref, 'release/')
+    && !startsWith(github.head_ref, 'changeset-release/')
+    && !startsWith(github.head_ref, 'cherry-pick/')
+    && !startsWith(github.head_ref, 'dependabot/')
+    && !startsWith(github.head_ref, 'renovate/') }}
 
 # Permissions are scoped per-job — workflow-level permissions trip
 # zizmor's excessive-permissions rule. Only the review job needs
@@ -62,9 +73,9 @@ concurrency:
 env:
   REVIEW_CLI_VERSION: ${{ vars.REVIEW_CLI_VERSION || '1.10.7' }}
   # ── Pinned Claude Code version — BUMP IT HERE, nowhere else ─────────
-  # The install step runs the official installer with this exact version
-  # and verifies the binary's SHA256 against the release's GPG-signed
-  # manifest before anything executes it. Without the pin, `curl | bash`
+  # The install step downloads this exact release binary and verifies its
+  # SHA256 against the release's GPG-signed manifest before anything
+  # executes it. Without the pin, `curl | bash`
   # executes whatever upstream serves at that moment — every other
   # third-party input to this workflow is SHA-pinned, so this one
   # shouldn't be the exception. vars.CLAUDE_CODE_VERSION overrides
@@ -78,6 +89,10 @@ env:
   # Native installs auto-update in the background. A pin that silently
   # updates itself mid-job is not a pin.
   DISABLE_AUTOUPDATER: '1'
+  # Also switches off telemetry, error reporting and the update check, so
+  # the only outbound traffic from the binary is the model API. Keeps the
+  # Bullfrog egress log to what the job actually needs.
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
 
 jobs:
   triage:
@@ -88,6 +103,9 @@ jobs:
     # here: the triage step below runs with `--skip-config`, which loads
     # no policy at all, so only its draft check would otherwise apply.
     # Comment triggers deliberately bypass those skips (a human asked).
+    # Every clause added here must also be added to `cancel-in-progress`
+    # at the top of this file, or a skipped push cancels a comment-
+    # triggered review and nothing replaces it.
     # This `if:` is also the trust boundary for comment triggers: only OWNER / MEMBER /
     # COLLABORATOR comments can start a run. That matters because the
     # review job checks out PR head code in a job holding an LLM
@@ -130,6 +148,14 @@ jobs:
       thread_anchor: ${{ steps.gate.outputs.thread_anchor }}
       reply_id: ${{ steps.post_reply.outputs.id }}
     steps:
+      # Egress monitor. Must be the first step of the job or it cannot see
+      # the requests made before it started. Audit mode: every outbound
+      # connection is listed in the job summary without being blocked; that
+      # list is the input for switching this to `egress-policy: block`.
+      - uses: bullfrogsec/bullfrog@1831f79cce8ad602eef14d2163873f27081ebfb3 # v0.8.4
+        with:
+          egress-policy: audit
+
       # Install the CLI with NO repo content on disk — this job performs no
       # checkout at all, so nothing PR-author-controlled can influence
       # dependency resolution. (An earlier revision checked out the repo here
@@ -159,14 +185,20 @@ jobs:
           [install.scopes]
           "@uniswap" = { url = "https://npm.pkg.github.com", token = "$GH_PACKAGES_TOKEN" }
           EOF
+          # The bunfig holds GITHUB_TOKEN in cleartext and is only needed until
+          # the package resolves. Remove it on every exit path — a failed
+          # `bun add` must not leave it under $RUNNER_TEMP either.
+          trap 'rm -f "$install_dir/bunfig.toml" "$RUNNER_TEMP/bun-add.err"' EXIT
           cd "$install_dir"
           export BUN_CONFIG_FILE="$install_dir/bunfig.toml"
           bun init -y > /dev/null
-          bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}"
-          # The bunfig holds GITHUB_TOKEN in cleartext and is no longer
-          # needed once the package is resolved. Remove it rather than
-          # leaving it under $RUNNER_TEMP while untrusted PR code is on disk.
-          rm -f "$install_dir/bunfig.toml"
+          if ! bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}" 2> "$RUNNER_TEMP/bun-add.err"; then
+            cat "$RUNNER_TEMP/bun-add.err" >&2
+            if grep -qE '(^|[^0-9])403([^0-9]|$)' "$RUNNER_TEMP/bun-add.err"; then
+              echo "::error::403 from GitHub Packages. $GITHUB_REPOSITORY has no read access to @uniswap/review-cli. Fix: Uniswap/internal-tools -> Packages -> review-cli -> Package settings -> Manage Actions access -> add this repository. This is a per-repo grant; no workflow change can confer it."
+            fi
+            exit 1
+          fi
           echo "bin=$install_dir/node_modules/.bin/review-cli" >> "$GITHUB_OUTPUT"
 
       # Gate — reads GITHUB_EVENT_NAME + GITHUB_EVENT_PATH itself and
@@ -247,7 +279,16 @@ jobs:
       issues: write
     timeout-minutes: 30
     steps:
-      # Install the CLI FIRST, before any other step in this job, for two
+      # Egress monitor. Must be the first step of the job or it cannot see
+      # the requests made before it started. Audit mode: every outbound
+      # connection is listed in the job summary without being blocked; that
+      # list is the input for switching this to `egress-policy: block`.
+      - uses: bullfrogsec/bullfrog@1831f79cce8ad602eef14d2163873f27081ebfb3 # v0.8.4
+        with:
+          egress-policy: audit
+
+      # Install the CLI FIRST — before anything but the egress monitor
+      # above — for two
       # independent reasons:
       #
       # 1. No PR-author-controlled content is on disk yet (the only
@@ -289,14 +330,20 @@ jobs:
           [install.scopes]
           "@uniswap" = { url = "https://npm.pkg.github.com", token = "$GH_PACKAGES_TOKEN" }
           EOF
+          # The bunfig holds GITHUB_TOKEN in cleartext and is only needed until
+          # the package resolves. Remove it on every exit path — a failed
+          # `bun add` must not leave it under $RUNNER_TEMP either.
+          trap 'rm -f "$install_dir/bunfig.toml" "$RUNNER_TEMP/bun-add.err"' EXIT
           cd "$install_dir"
           export BUN_CONFIG_FILE="$install_dir/bunfig.toml"
           bun init -y > /dev/null
-          bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}"
-          # The bunfig holds GITHUB_TOKEN in cleartext and is no longer
-          # needed once the package is resolved. Remove it rather than
-          # leaving it under $RUNNER_TEMP while untrusted PR code is on disk.
-          rm -f "$install_dir/bunfig.toml"
+          if ! bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}" 2> "$RUNNER_TEMP/bun-add.err"; then
+            cat "$RUNNER_TEMP/bun-add.err" >&2
+            if grep -qE '(^|[^0-9])403([^0-9]|$)' "$RUNNER_TEMP/bun-add.err"; then
+              echo "::error::403 from GitHub Packages. $GITHUB_REPOSITORY has no read access to @uniswap/review-cli. Fix: Uniswap/internal-tools -> Packages -> review-cli -> Package settings -> Manage Actions access -> add this repository. This is a per-repo grant; no workflow change can confer it."
+            fi
+            exit 1
+          fi
           echo "bin=$install_dir/node_modules/.bin/review-cli" >> "$GITHUB_OUTPUT"
 
       # Defense in depth for the `ref:` on the PR-head checkout below.
@@ -351,34 +398,17 @@ jobs:
             exit 1
           fi
 
-      # The SDK looks for a per-platform Claude Code binary shipped via
-      # optional deps; Bun on Linux extracts only the host variant while
-      # the SDK probes the musl path first. The official installer
-      # sidesteps it. The version installed is pinned by
-      # CLAUDE_CODE_VERSION in the workflow env block and the binary is
-      # verified against the release's GPG-signed manifest before
-      # anything executes it.
+      # Claude Code is fetched as a bare release binary and verified against
+      # the release's GPG-signed manifest BEFORE anything executes. Earlier
+      # revisions piped https://claude.ai/install.sh into bash first and
+      # verified the binary it produced; that left the one unpinned, unsigned
+      # executable in the chain running before any check, in a job holding
+      # the LLM credential. Nothing here runs until the checksum matches.
+      # (The bun SDK's optional-dep binary is not used: bun on Linux extracts
+      # only the host variant while the SDK probes the musl path first.)
       - name: Install Claude Code binary
         run: |
           set -euo pipefail
-
-          # `bash -s <version>` is the installer's documented version argument
-          # (it also accepts the channel names `latest` / `stable`, which are
-          # moving targets — don't use those here).
-          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
-
-          for candidate in "$HOME/.local/bin/claude" "$HOME/.claude/bin/claude" "$HOME/.npm-global/bin/claude"; do
-            [ -x "$candidate" ] && { CLAUDE_BIN="$candidate"; break; }
-          done
-          [ -z "${CLAUDE_BIN:-}" ] && CLAUDE_BIN="$(command -v claude || true)"
-          [ -z "$CLAUDE_BIN" ] && { echo "::error::claude binary not found"; exit 1; }
-
-          # The launcher at ~/.local/bin/claude is a symlink into the versioned
-          # install dir. Verify the real binary, not the launcher, and do it
-          # BEFORE running it — hashing something you have already executed
-          # proves nothing.
-          CLAUDE_REAL="$HOME/.local/share/claude/versions/$CLAUDE_CODE_VERSION"
-          [ -f "$CLAUDE_REAL" ] || CLAUDE_REAL="$(readlink -f "$CLAUDE_BIN")"
 
           case "$(uname -s)/$(uname -m)" in
             Linux/x86_64) PLATFORM='linux-x64' ;;
@@ -396,19 +426,20 @@ jobs:
 
           # The manifest lists a SHA256 for every platform binary and is itself
           # GPG-signed, so a good signature on the manifest transitively covers
-          # the binary. Assert the KEY FINGERPRINT before trusting the
-          # signature — a valid signature from an attacker's key proves nothing.
+          # the binary. Import into a throwaway keyring, assert the KEY
+          # FINGERPRINT, then require the signature itself to come from that
+          # key: `gpg --verify` alone accepts a valid signature from ANY key in
+          # the keyring, so a poisoned key bundle would pass the fingerprint
+          # check and then sign a tampered manifest. VALIDSIG lists the signing
+          # key first and the primary key last.
+          export GNUPGHOME="$WORK/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
           curl -fsSL https://downloads.claude.ai/keys/claude-code.asc | gpg --batch --quiet --import
           if ! gpg --batch --with-colons --fingerprint security@anthropic.com \
             | grep -q "^fpr:.*:${CLAUDE_CODE_GPG_FINGERPRINT}:"; then
             echo "::error::Claude Code release signing key does not match the pinned fingerprint $CLAUDE_CODE_GPG_FINGERPRINT"
             exit 1
           fi
-          # `gpg --verify` on its own accepts a valid signature from ANY key in
-          # the keyring, so a poisoned key bundle would still pass the
-          # fingerprint check above and then sign a tampered manifest. Require
-          # the signature itself to come from the pinned key. VALIDSIG lists
-          # the signing key first and the primary key last.
           if ! gpg --batch --status-fd 1 --verify "$WORK/manifest.json.sig" "$WORK/manifest.json" \
             | grep -qE "^\[GNUPG:\] VALIDSIG (${CLAUDE_CODE_GPG_FINGERPRINT} |.* ${CLAUDE_CODE_GPG_FINGERPRINT}$)"; then
             echo "::error::manifest.json signature was not made by the pinned key $CLAUDE_CODE_GPG_FINGERPRINT"
@@ -420,16 +451,24 @@ jobs:
             echo "::error::manifest.json for $CLAUDE_CODE_VERSION lists no checksum for $PLATFORM"
             exit 1
           fi
-          ACTUAL="$(sha256sum "$CLAUDE_REAL" | cut -d' ' -f1)"
+
+          # Same URL the official installer downloads from, verified against
+          # the signed manifest before it is made executable.
+          curl -fsSL "$RELEASES/$CLAUDE_CODE_VERSION/$PLATFORM/claude" -o "$WORK/claude"
+          ACTUAL="$(sha256sum "$WORK/claude" | cut -d' ' -f1)"
           if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::Claude Code $CLAUDE_CODE_VERSION checksum mismatch for $PLATFORM at $CLAUDE_REAL (expected $EXPECTED, got $ACTUAL)"
+            echo "::error::Claude Code $CLAUDE_CODE_VERSION checksum mismatch for $PLATFORM (expected $EXPECTED, got $ACTUAL). The download does not match the signed manifest; do not work around this by changing the version pin."
             exit 1
           fi
+          CLAUDE_DIR="$RUNNER_TEMP/claude-code"
+          mkdir -p "$CLAUDE_DIR"
+          install -m 0755 "$WORK/claude" "$CLAUDE_DIR/claude"
+          rm -rf "$WORK"
           echo "Verified Claude Code $CLAUDE_CODE_VERSION ($PLATFORM) against the signed release manifest."
 
           # Point the SDK at the binary we actually verified.
-          echo "CLAUDE_CODE_EXECUTABLE_PATH=$CLAUDE_REAL" >> "$GITHUB_ENV"
-          echo "$(dirname "$CLAUDE_BIN")" >> "$GITHUB_PATH"
+          echo "CLAUDE_CODE_EXECUTABLE_PATH=$CLAUDE_DIR/claude" >> "$GITHUB_ENV"
+          echo "$CLAUDE_DIR" >> "$GITHUB_PATH"
 
       # The ONLY checkout in this workflow, and it is explicitly pinned to
       # the PR head rather than left to default. Everything from here runs
@@ -446,15 +485,31 @@ jobs:
           ref: refs/pull/${{ needs.triage.outputs.pr_number }}/head
 
       # Reviewers read dependencies under lib/ (Foundry submodules), which a
-      # plain checkout leaves empty. Best effort on purpose: no credentials
-      # are persisted, so a private submodule fails here with a warning
-      # instead of failing the review. A no-op in repos without submodules.
+      # plain checkout leaves empty. Two guards, because `.gitmodules` in the
+      # PR head is PR-author-controlled and a recursive init would otherwise
+      # fetch whatever URLs it names: (1) fetch only when the PR's
+      # `.gitmodules` is byte-identical to the default branch's, so a PR
+      # cannot redirect a submodule; (2) allow only the https transport, so
+      # file://, ext::, git:// and ssh URLs in any nested `.gitmodules` are
+      # refused rather than fetched. Best effort on purpose: no credentials
+      # are persisted, so a private submodule warns instead of failing the
+      # review, and `continue-on-error` keeps a timeout kill from failing it
+      # either. A no-op in repos without submodules.
       - name: Fetch submodules (best effort)
         timeout-minutes: 10
+        continue-on-error: true
         env:
           GIT_TERMINAL_PROMPT: '0'
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          git submodule update --init --recursive --depth 1 \
+          set -uo pipefail
+          [ -f .gitmodules ] || { echo "No .gitmodules; nothing to fetch."; exit 0; }
+          if ! git diff --quiet "origin/$DEFAULT_BRANCH" -- .gitmodules; then
+            echo "::warning::.gitmodules differs from $DEFAULT_BRANCH (or that branch was not fetched); skipping the submodule fetch so no PR-controlled URL is fetched. Reviewers will see an incomplete lib/"
+            exit 0
+          fi
+          git -c protocol.allow=never -c protocol.https.allow=always \
+            submodule update --init --recursive --depth 1 \
             || echo "::warning::Some submodules could not be fetched; reviewers will see an incomplete lib/"
 
       - name: Pre — running sticky placeholder
