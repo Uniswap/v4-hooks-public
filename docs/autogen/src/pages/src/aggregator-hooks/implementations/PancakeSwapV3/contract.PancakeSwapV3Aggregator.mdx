@@ -1,0 +1,50 @@
+---
+title: "PancakeSwapV3Aggregator"
+description: "Same as UniswapV3Aggregator but implements PancakeSwap V3 swap callback ABI"
+---
+
+# PancakeSwapV3Aggregator
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/implementations/PancakeSwapV3/PancakeSwapV3Aggregator.sol)
+
+**Inherits:** [UniswapV3Aggregator](/src/aggregator-hooks/implementations/UniswapV3/contract.UniswapV3Aggregator), [IPancakeSwapV3Callback](/src/aggregator-hooks/implementations/PancakeSwapV3/interfaces/interface.IPancakeSwapV3Callback)
+
+Same as UniswapV3Aggregator but implements PancakeSwap V3 swap callback ABI
+
+## Functions
+
+<a id="constructor-ipoolmanager-address-string"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager manager, address factory_, string memory hookVersion)
+        UniswapV3Aggregator(manager, factory_, hookVersion);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| manager | `IPoolManager` |  |
+| factory_ | `address` |  |
+| hookVersion | `string` |  |
+
+<a id="pancakev3swapcallback-int256-int256-bytes"></a>
+
+### pancakeV3SwapCallback
+
+Called to `msg.sender` after executing a swap on the pool
+
+```solidity
+function pancakeV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Delta | `int256` | Owed amount of token0: pay pool if positive, receive from pool if negative |
+| amount1Delta | `int256` | Owed amount of token1: pay pool if positive, receive from pool if negative |
+| data | `bytes` | Arbitrary data forwarded from the `swap` call, e.g. payer routing |
+

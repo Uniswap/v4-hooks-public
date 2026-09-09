@@ -1,0 +1,529 @@
+---
+title: "UniswapV3Aggregator"
+description: "Singleton hook aggregating concentrated liquidity from Uniswap V3 compatible pools (fee-tier factory lookup)"
+---
+
+# UniswapV3Aggregator
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/implementations/UniswapV3/UniswapV3Aggregator.sol)
+
+**Inherits:** [BaseAggregatorHook](/src/aggregator-hooks/abstract.BaseAggregatorHook), [IUniswapV3SwapCallback](/src/aggregator-hooks/implementations/UniswapV3/interfaces/interface.IUniswapV3SwapCallback)
+
+**Title:** UniswapV3Aggregator
+
+Singleton hook aggregating concentrated liquidity from Uniswap V3 compatible pools (fee-tier factory lookup)
+
+## Constants
+
+### factory
+
+Uniswap V3 factory used for default pool resolution (fee tier from PoolKey.fee)
+
+```solidity
+address public immutable factory;
+```
+
+### MIN_SQRT_RATIO_ADJ
+
+```solidity
+uint160 internal constant MIN_SQRT_RATIO_ADJ = TickMath.MIN_SQRT_PRICE + 1;
+```
+
+### MAX_SQRT_RATIO_ADJ
+
+```solidity
+uint160 internal constant MAX_SQRT_RATIO_ADJ = TickMath.MAX_SQRT_PRICE - 1;
+```
+
+### TRANSIENT_EXPECTED_POOL
+
+```solidity
+bytes32 private constant TRANSIENT_EXPECTED_POOL =
+        0x6eabd122407eeebc08f840712abe83f91a845b97d0fe375ce6644f6d5a2cb3a2;
+```
+
+### TRANSIENT_SWAP_INPUT_PAID
+
+```solidity
+bytes32 private constant TRANSIENT_SWAP_INPUT_PAID =
+        0x582465caaa3a5bc4afb238d59b626acb3a16194fc90d0d5ec69b636bbd73057a;
+```
+
+## State Variables
+
+### poolIdToExternalPool
+
+External CL pool per registered Uniswap V4 pool
+
+```solidity
+mapping(PoolId => address) public poolIdToExternalPool;
+```
+
+### _canonicalPoolKeyByAddress
+
+```solidity
+mapping(address => PoolKey) private _canonicalPoolKeyByAddress;
+```
+
+### _initializedPools
+
+PoolKeys of all pools initialized with this hook, in initialization order
+
+```solidity
+PoolKey[] internal _initializedPools;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-address-string"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager manager, address factory_, string memory hookVersion)
+        BaseAggregatorHook(manager, hookVersion);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| manager | `IPoolManager` | PoolManager |
+| factory_ | `address` | Uniswap V3 factory (fee-tier `getPool`) |
+| hookVersion | `string` | Display version string |
+
+<a id="uniswapv3swapcallback-int256-int256-bytes"></a>
+
+### uniswapV3SwapCallback
+
+Called to `msg.sender` after executing a swap on the pool
+
+```solidity
+function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Delta | `int256` | Owed amount of token0: pay pool if positive, receive from pool if negative |
+| amount1Delta | `int256` | Owed amount of token1: pay pool if positive, receive from pool if negative |
+| data | `bytes` | Arbitrary data forwarded from the `swap` call, e.g. payer routing |
+
+<a id="_processcallback-int256-int256-bytes"></a>
+
+### _processCallback
+
+```solidity
+function _processCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Delta | `int256` |  |
+| amount1Delta | `int256` |  |
+| data | `bytes` |  |
+
+<a id="_rawquote-bool-int256-poolid"></a>
+
+### _rawQuote
+
+Returns the raw quote from the underlying liquidity source without protocol fees
+
+```solidity
+function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        virtual
+        override
+        returns (uint256 amountUnspecified);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| zeroToOne | `bool` | Whether the swap is from token0 to token1 |
+| amountSpecified | `int256` | The amount specified (negative for exact-in, positive for exact-out) |
+| poolId | `PoolId` | The pool ID |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountUnspecified | `uint256` | The raw unspecified amount before protocol fee adjustment |
+
+<a id="_quoteviapoolcallrevertdata-address-bool-int256-poolid"></a>
+
+### _quoteViaPoolCallRevertData
+
+<i>
+
+Low-level `call`: same-contract callback reverts do not surface through try/catch on a direct `swap` call.
+
+</i>
+
+```solidity
+function _quoteViaPoolCallRevertData(address poolAddr, bool zeroToOne, int256 v3AmountSpecified, PoolId poolId)
+        private
+        returns (bytes memory revertData);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolAddr | `address` |  |
+| zeroToOne | `bool` |  |
+| v3AmountSpecified | `int256` |  |
+| poolId | `PoolId` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| revertData | `bytes` |  |
+
+<a id="_unspecifiedsidefromquotedeltas-bool-bool-int256-int256"></a>
+
+### _unspecifiedSideFromQuoteDeltas
+
+```solidity
+function _unspecifiedSideFromQuoteDeltas(bool zeroToOne, bool exactInput, int256 amount0Delta, int256 amount1Delta)
+        private
+        pure
+        returns (uint256 amt);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| zeroToOne | `bool` |  |
+| exactInput | `bool` |  |
+| amount0Delta | `int256` |  |
+| amount1Delta | `int256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amt | `uint256` |  |
+
+<a id="_decodequoterevert-bytes"></a>
+
+### _decodeQuoteRevert
+
+```solidity
+function _decodeQuoteRevert(bytes memory reason) private pure returns (int256 amount0Delta, int256 amount1Delta);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| reason | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Delta | `int256` |  |
+| amount1Delta | `int256` |  |
+
+<a id="pseudototalvaluelocked-poolid"></a>
+
+### pseudoTotalValueLocked
+
+Returns the pseudo TVL: the amount of the UniswapV4 pool's tokens locked in the aggregated pool
+
+```solidity
+function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The pool ID of the UniswapV4 pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0 | `uint256` | The amount of token0 in the aggregated pool |
+| amount1 | `uint256` | The amount of token1 in the aggregated pool |
+
+<a id="_resolveexternalpool-address-address-poolkey"></a>
+
+### _resolveExternalPool
+
+Resolve external pool from PoolKey (Uni V3 factory + fee tier)
+
+```solidity
+function _resolveExternalPool(address token0, address token1, PoolKey calldata key)
+        internal
+        view
+        virtual
+        returns (address pool);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token0 | `address` |  |
+| token1 | `address` |  |
+| key | `PoolKey` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| pool | `address` |  |
+
+<a id="initializedlength"></a>
+
+### initializedLength
+
+Number of pools initialized with this hook
+
+```solidity
+function initializedLength() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="initialized-uint256"></a>
+
+### initialized
+
+Returns the PoolKey of an initialized pool
+
+```solidity
+function initialized(uint256 index) external view returns (PoolKey memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| index | `uint256` | The pool index (in initialization order) |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `PoolKey` |  |
+
+<a id="_beforeinitialize-address-poolkey-uint160"></a>
+
+### _beforeInitialize
+
+```solidity
+function _beforeInitialize(address, PoolKey calldata key, uint160) internal virtual override returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| key | `PoolKey` |  |
+| _ | `uint160` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+
+<a id="_conductswap-currency-currency-swapparams-poolid"></a>
+
+### _conductSwap
+
+Abstract function for contracts to implement conducting the swap on the aggregated liquidity source
+
+<i>
+
+To settle the swap inside of the _conductSwap function, you must follow the 'sync, send,
+settle' pattern and set hasSettled to true
+
+</i>
+
+```solidity
+function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId poolId)
+        internal
+        override
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| settleCurrency | `Currency` | The currency to be settled on the V4 PoolManager (swapper's output currency) |
+| takeCurrency | `Currency` | The currency to be taken from the V4 PoolManager (swapper's input currency) |
+| params | `SwapParams` | The swap parameters |
+| poolId | `PoolId` | The V4 Pool ID |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountSettle | `uint256` | The amount of the currency being settled (swapper's output amount) |
+| amountTake | `uint256` | The amount of the currency being taken (swapper's input amount) |
+| hasSettled | `bool` | Whether the swap has been settled inside of the _conductSwap function |
+
+<a id="_settransientexpectedpool-address"></a>
+
+### _setTransientExpectedPool
+
+```solidity
+function _setTransientExpectedPool(address pool) private;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| pool | `address` |  |
+
+<a id="_transientexpectedpool"></a>
+
+### _transientExpectedPool
+
+```solidity
+function _transientExpectedPool() private view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="_settransientswapinputpaid-uint256"></a>
+
+### _setTransientSwapInputPaid
+
+```solidity
+function _setTransientSwapInputPaid(uint256 amt) private;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amt | `uint256` |  |
+
+<a id="_gettransientswapinputpaid"></a>
+
+### _getTransientSwapInputPaid
+
+```solidity
+function _getTransientSwapInputPaid() private view returns (uint256 amt);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amt | `uint256` |  |
+
+<a id="receive"></a>
+
+### receive
+
+Allows the contract to receive ETH for native currency swaps
+
+<i>
+
+Required for handling native ETH transfers during swap operations
+
+</i>
+
+```solidity
+receive() external payable override;
+```
+
+## Errors
+
+### NativeCurrencyNotSupported
+
+```solidity
+error NativeCurrencyNotSupported();
+```
+
+### ExternalPoolNotFound
+
+```solidity
+error ExternalPoolNotFound();
+```
+
+### ExternalPoolMismatch
+
+```solidity
+error ExternalPoolMismatch();
+```
+
+### UnauthorizedCallback
+
+```solidity
+error UnauthorizedCallback();
+```
+
+### CallbackOutsideActiveSwap
+
+```solidity
+error CallbackOutsideActiveSwap();
+```
+
+### Reentrancy
+
+```solidity
+error Reentrancy();
+```
+
+### UnexpectedSwapOutputDelta
+
+```solidity
+error UnexpectedSwapOutputDelta();
+```
+
+### PairAlreadyHasCanonicalPool
+
+```solidity
+error PairAlreadyHasCanonicalPool(PoolId existingPoolId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| existingPoolId | `PoolId` |  |
+
+### QuoteRevert
+
+```solidity
+error QuoteRevert(int256 amount0Delta, int256 amount1Delta);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Delta | `int256` |  |
+| amount1Delta | `int256` |  |
+
+### UnexpectedQuoteBehavior
+
+```solidity
+error UnexpectedQuoteBehavior();
+```
+
