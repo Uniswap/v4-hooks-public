@@ -35,10 +35,11 @@ model:
 # v4-core's flash-accounting and unlock model, so a useful review means
 # reading the hook, its base contract, and the tests rather than stopping
 # early.
-# Run cap holds three full-budget reviewers. Triage mandates two reviewers
-# on most diffs; at the previous $15 cap (1.5 agents' worth) the second
-# reviewer could exhaust the run before synthesis ran.
-max_budget_usd: 30.0
+# Whole-run ceiling, stated as intent: review-cli 1.10.7 and 1.12.0 parse
+# max_budget_usd but enforce only the per-agent budget below. Sized for
+# four reviewers at their cap plus triage and synthesis, because the
+# triage guidance staffs four or more reviewers on a Solidity change.
+max_budget_usd: 40.0
 agent_budget_usd: 10.0
 
 # Turn ceiling set high so the budget is always the binding cap, never
@@ -67,16 +68,11 @@ investigation:
     thorough: 0.8
 
 # ─── Diff summarization ────────────────────────────────────────────────
-# Generated artifacts, summarized rather than read line by line so they
-# do not crowd the actual contract diff out of the prompt.
-#   docs/autogen/** — forge doc output, regenerated wholesale (see the
-#                     "regenerate autogen docs" commits); never hand-edited
-#   snapshots/**    — forge gas snapshots; the numbers matter, the JSON
-#                     does not reward line-level reading
-diff:
-  summarize:
-    - 'docs/autogen/**'
-    - 'snapshots/**'
+# There is no diff-summarization setting in review-cli 1.10.7 or 1.12.0.
+# The bundled template documents `diff.summarize`, but the config parser
+# has no such key and drops it silently, so regenerated files (forge doc
+# output, gas snapshots, lockfiles) reach reviewers in full and count
+# against max_diff_lines. Tracked upstream in Uniswap/internal-tools.
 
 # ─── Triage guidance ───────────────────────────────────────────────────
 # Guidance for the triage agent, which decides which reviewers to staff.

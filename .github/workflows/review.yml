@@ -106,11 +106,13 @@ jobs:
     # Every clause added here must also be added to `cancel-in-progress`
     # at the top of this file, or a skipped push cancels a comment-
     # triggered review and nothing replaces it.
-    # This `if:` is also the trust boundary for comment triggers: only OWNER / MEMBER /
-    # COLLABORATOR comments can start a run. That matters because the
+    # This `if:` is also the trust boundary for comment triggers: only
+    # OWNER / MEMBER comments can start a run. That matters because the
     # review job checks out PR head code in a job holding an LLM
     # credential, so an outside contributor must not be able to trigger
-    # it by commenting.
+    # it by commenting. COLLABORATOR is deliberately excluded: it reflects
+    # an invitation to the repo, not a permission level, so a read-only
+    # outside collaborator would otherwise qualify.
     if: |
       (github.event_name == 'pull_request'
         && !github.event.pull_request.draft
@@ -128,11 +130,11 @@ jobs:
         && github.event.issue.pull_request != null
         && contains(github.event.comment.body, '@request-claude-review')
         && github.event.comment.user.type != 'Bot'
-        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+        && contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment'
         && contains(github.event.comment.body, '@request-claude-review')
         && github.event.comment.user.type != 'Bot'
-        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+        && contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association))
     permissions:
       contents: read           # baseline; this job performs no checkout
       packages: read           # pull @uniswap/review-cli from GH Packages
@@ -397,7 +399,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::No LLM credential. Set CLAUDE_CODE_OAUTH_TOKEN (preferred) or ANTHROPIC_API_KEY as a repo secret."
+            echo "::error::No LLM credential. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN as a repo secret. If both are set, Claude Code uses the API key."
             exit 1
           fi
 
@@ -492,12 +494,22 @@ jobs:
       # PR head is PR-author-controlled and a recursive init would otherwise
       # fetch whatever URLs it names: (1) fetch only when the PR's
       # `.gitmodules` is byte-identical to the default branch's, so a PR
-      # cannot redirect a submodule; (2) allow only the https transport, so
-      # file://, ext::, git:// and ssh URLs in any nested `.gitmodules` are
-      # refused rather than fetched. Best effort on purpose: no credentials
-      # are persisted, so a private submodule warns instead of failing the
-      # review, and `continue-on-error` keeps a timeout kill from failing it
-      # either. A no-op in repos without submodules.
+      # cannot redirect a submodule to another host; (2) allow only the https
+      # transport, so file://, ext::, git:// and ssh URLs in any nested
+      # `.gitmodules` are refused rather than fetched. The submodule COMMIT
+      # (the gitlink) stays PR-controlled: a PR can point at any commit in
+      # the pinned upstream, and that content lands under lib/ as read-only
+      # review context. Nothing under lib/ is executed.
+      #
+      # The default branch is compared as `origin/<default>`, which the
+      # checkout above already fetched (`fetch-depth: 0` pulls every branch
+      # alongside the pull ref). Do NOT add an explicit `git fetch` here:
+      # `persist-credentials: false` leaves it with no credentials, so it
+      # fails on every private repo, and `--depth` would leave a shallow
+      # graft that breaks `git diff origin/main...HEAD` for later steps.
+      # Best effort on purpose: a private submodule warns instead of failing
+      # the review, and `continue-on-error` keeps a timeout kill from failing
+      # it either. A no-op in repos without submodules.
       - name: Fetch submodules (best effort)
         timeout-minutes: 10
         continue-on-error: true
@@ -507,11 +519,8 @@ jobs:
         run: |
           set -uo pipefail
           [ -f .gitmodules ] || { echo "No .gitmodules; nothing to fetch."; exit 0; }
-          # Fetch the default branch ourselves rather than relying on what
-          # actions/checkout happened to bring along with the PR-head ref.
-          if ! git fetch --no-tags --depth=1 origin \
-              "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"; then
-            echo "::warning::Could not fetch $DEFAULT_BRANCH to compare .gitmodules against; skipping the submodule fetch. Reviewers will see an incomplete lib/"
+          if ! git rev-parse --verify --quiet "origin/$DEFAULT_BRANCH^{commit}" > /dev/null; then
+            echo "::warning::origin/$DEFAULT_BRANCH is not present in the checkout, so .gitmodules cannot be verified; skipping the submodule fetch. Reviewers will see an incomplete lib/"
             exit 0
           fi
           if ! git diff --quiet "origin/$DEFAULT_BRANCH" -- .gitmodules; then
