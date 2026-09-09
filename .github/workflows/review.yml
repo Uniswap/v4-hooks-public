@@ -150,6 +150,10 @@ jobs:
           export BUN_CONFIG_FILE="$install_dir/bunfig.toml"
           bun init -y > /dev/null
           bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}"
+          # The bunfig holds GITHUB_TOKEN in cleartext and is no longer
+          # needed once the package is resolved. Remove it rather than
+          # leaving it under $RUNNER_TEMP while untrusted PR code is on disk.
+          rm -f "$install_dir/bunfig.toml"
           echo "bin=$install_dir/node_modules/.bin/review-cli" >> "$GITHUB_OUTPUT"
 
       # Gate — reads GITHUB_EVENT_NAME + GITHUB_EVENT_PATH itself and
@@ -275,6 +279,10 @@ jobs:
           export BUN_CONFIG_FILE="$install_dir/bunfig.toml"
           bun init -y > /dev/null
           bun add "@uniswap/review-cli@${REVIEW_CLI_VERSION}"
+          # The bunfig holds GITHUB_TOKEN in cleartext and is no longer
+          # needed once the package is resolved. Remove it rather than
+          # leaving it under $RUNNER_TEMP while untrusted PR code is on disk.
+          rm -f "$install_dir/bunfig.toml"
           echo "bin=$install_dir/node_modules/.bin/review-cli" >> "$GITHUB_OUTPUT"
 
       # Defense in depth for the `ref:` on the PR-head checkout below.

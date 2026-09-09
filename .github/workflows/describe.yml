@@ -103,6 +103,10 @@ jobs:
             fi
             exit 1
           fi
+          # The bunfig holds GITHUB_TOKEN in cleartext and is no longer
+          # needed once the package is resolved. Remove it rather than
+          # leaving it under $RUNNER_TEMP while untrusted PR code is on disk.
+          rm -f "$install_dir/bunfig.toml" "$RUNNER_TEMP/bun-add.err"
           echo "bin=$install_dir/node_modules/.bin/describe-cli" >> "$GITHUB_OUTPUT"
 
       # Everything from here runs with untrusted PR files in the working
