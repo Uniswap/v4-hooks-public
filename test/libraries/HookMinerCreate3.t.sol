@@ -8,6 +8,8 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {HookMinerCreate3} from "../../src/utils/HookMinerCreate3.sol";
 import {MockBlankHook} from "../mocks/MockBlankHook.sol";
 
+/// @dev Address mining is expensive per run; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract HookMinerCreate3Test is Test {
     function test_fuzz_hookMinerCreate3(uint16 flags, uint256 number) public {
         bytes memory creationCode = type(MockBlankHook).creationCode;

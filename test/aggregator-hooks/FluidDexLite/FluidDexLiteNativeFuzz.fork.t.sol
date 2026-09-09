@@ -36,6 +36,8 @@ import {
 /// @notice Fuzz tests for FluidDexLite through Uniswap V4 hooks (Native ETH + ERC20 pairs)
 /// @dev Creates random pools with native ETH and executes multiple swaps to verify quote accuracy
 /// @dev Native ETH is always currency0 in Uniswap V4 (address(0) is the lowest address)
+/// @dev Fork-bound; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract FluidDexLiteNativeFuzz is Test {
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;

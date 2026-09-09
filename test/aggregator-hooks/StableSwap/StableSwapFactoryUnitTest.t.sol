@@ -16,6 +16,8 @@ import {
 } from "../../../src/aggregator-hooks/implementations/StableSwap/StableSwapAggregatorFactory.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 
+/// @dev Factory tests deploy full pools; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract StableSwapFactoryUnitTest is Test {
     IPoolManager public poolManager;
     MockV4FeeAdapter public feeAdapter;

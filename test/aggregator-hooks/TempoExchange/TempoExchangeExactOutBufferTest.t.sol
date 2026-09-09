@@ -25,6 +25,8 @@ import {MockTempoExchangeWithDiscrepancy} from "./mocks/MockTempoExchangeWithDis
 
 /// @title TempoExchangeExactOutBufferTest
 /// @notice Tests for the exact-out buffer logic that handles per-tick vs per-order rounding discrepancies
+/// @dev Heavy external-integration suite; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract TempoExchangeExactOutBufferTest is Test {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;

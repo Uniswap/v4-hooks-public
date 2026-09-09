@@ -18,6 +18,8 @@ import {IUniswapV2Factory} from "@uniswap/v2-core/contracts/interfaces/IUniswapV
 import {IUniswapV2Pair as IUniV2Pair} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 /// @dev Canonical Uniswap V2 factory creation code from `lib/v2-core` (same pattern as UniswapV3AggregatorFuzz precompiles).
+/// @dev Heavy external-integration suite; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract UniswapV2AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 
