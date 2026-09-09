@@ -83,16 +83,29 @@ jobs:
   triage:
     name: Triage
     runs-on: ubuntu-latest
-    # Coarse event-level gate. The cli's `triage --from-github-actions`
-    # below is the authoritative policy lookup; this `if:` avoids paying
-    # runner startup for events that obviously don't apply, AND is the
-    # trust boundary for comment triggers: only OWNER / MEMBER /
+    # Event-level gate. The branch-prefix and bot-author skips mirror
+    # review-cli's built-in defaults (config.ts `skip`) and have to live
+    # here: the triage step below runs with `--skip-config`, which loads
+    # no policy at all, so only its draft check would otherwise apply.
+    # Comment triggers deliberately bypass those skips (a human asked).
+    # This `if:` is also the trust boundary for comment triggers: only OWNER / MEMBER /
     # COLLABORATOR comments can start a run. That matters because the
     # review job checks out PR head code in a job holding an LLM
     # credential, so an outside contributor must not be able to trigger
     # it by commenting.
     if: |
-      (github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork) ||
+      (github.event_name == 'pull_request'
+        && !github.event.pull_request.draft
+        && !github.event.pull_request.head.repo.fork
+        && !endsWith(github.event.pull_request.user.login, '[bot]')
+        && github.event.pull_request.user.login != 'github-actions'
+        && !startsWith(github.head_ref, 'gh-readonly-queue/')
+        && !startsWith(github.head_ref, 'graphite-base/')
+        && !startsWith(github.head_ref, 'release/')
+        && !startsWith(github.head_ref, 'changeset-release/')
+        && !startsWith(github.head_ref, 'cherry-pick/')
+        && !startsWith(github.head_ref, 'dependabot/')
+        && !startsWith(github.head_ref, 'renovate/')) ||
       (github.event_name == 'issue_comment'
         && github.event.issue.pull_request != null
         && contains(github.event.comment.body, '@request-claude-review')
@@ -159,7 +172,8 @@ jobs:
       # Gate — reads GITHUB_EVENT_NAME + GITHUB_EVENT_PATH itself and
       # writes the decision to GITHUB_OUTPUT. `--skip-config` because this
       # job never checks out the repo, so no `.claude/review.yml` is on
-      # disk to read; the cli's built-in skip defaults apply.
+      # disk to read. With that flag the cli applies only its draft check;
+      # the branch and author skips are enforced by the job `if:` above.
       - name: Decide whether to run
         id: gate
         env:
@@ -430,6 +444,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: refs/pull/${{ needs.triage.outputs.pr_number }}/head
+
+      # Reviewers read dependencies under lib/ (Foundry submodules), which a
+      # plain checkout leaves empty. Best effort on purpose: no credentials
+      # are persisted, so a private submodule fails here with a warning
+      # instead of failing the review. A no-op in repos without submodules.
+      - name: Fetch submodules (best effort)
+        timeout-minutes: 10
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          git submodule update --init --recursive --depth 1 \
+            || echo "::warning::Some submodules could not be fetched; reviewers will see an incomplete lib/"
 
       - name: Pre — running sticky placeholder
         continue-on-error: true

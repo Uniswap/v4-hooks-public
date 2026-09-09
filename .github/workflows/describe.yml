@@ -114,7 +114,9 @@ jobs:
       # BUN_CONFIG_FILE=/dev/null: bun auto-loads ./bunfig.toml from CWD
       # and executes its `preload` array in-process. The install above
       # already completed against its own pinned bunfig.
-      - name: Checkout PR head
+      # On pull_request this resolves to refs/pull/N/merge: the PR merged
+      # into its base, which is the state a description should describe.
+      - name: Checkout PR merge commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
