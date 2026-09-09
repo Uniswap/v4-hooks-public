@@ -277,7 +277,10 @@ jobs:
       packages: read
       pull-requests: write
       issues: write
-    timeout-minutes: 30
+    # Must stay comfortably above what the budget in .claude/review.yml can
+    # buy. A timed-out job is cancelled, so the Post step that writes the
+    # terminal state never runs and the sticky stays on "Review running".
+    timeout-minutes: 60
     steps:
       # Egress monitor. Must be the first step of the job or it cannot see
       # the requests made before it started. Audit mode: every outbound
@@ -504,8 +507,15 @@ jobs:
         run: |
           set -uo pipefail
           [ -f .gitmodules ] || { echo "No .gitmodules; nothing to fetch."; exit 0; }
+          # Fetch the default branch ourselves rather than relying on what
+          # actions/checkout happened to bring along with the PR-head ref.
+          if ! git fetch --no-tags --depth=1 origin \
+              "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "::warning::Could not fetch $DEFAULT_BRANCH to compare .gitmodules against; skipping the submodule fetch. Reviewers will see an incomplete lib/"
+            exit 0
+          fi
           if ! git diff --quiet "origin/$DEFAULT_BRANCH" -- .gitmodules; then
-            echo "::warning::.gitmodules differs from $DEFAULT_BRANCH (or that branch was not fetched); skipping the submodule fetch so no PR-controlled URL is fetched. Reviewers will see an incomplete lib/"
+            echo "::warning::.gitmodules differs from $DEFAULT_BRANCH; skipping the submodule fetch so no PR-controlled URL is fetched. Reviewers will see an incomplete lib/"
             exit 0
           fi
           git -c protocol.allow=never -c protocol.https.allow=always \
@@ -606,6 +616,13 @@ jobs:
           REVIEW_CLI: ${{ steps.install.outputs.bin }}
           BUN_CONFIG_FILE: /dev/null
         run: |
+          # If the install step failed (a 403 from GitHub Packages is the
+          # usual cause) there is no binary; "" would exit 127 under
+          # continue-on-error and the 👀 would stay forever. Say so instead.
+          if [ -z "${REVIEW_CLI:-}" ] || [ ! -x "$REVIEW_CLI" ]; then
+            echo "::warning::review-cli was never installed, so the 👀 reaction on the trigger comment cannot be updated"
+            exit 0
+          fi
           REACTION=$([ "$OUTCOME" = "success" ] && echo "success" || echo "failure")
           "$REVIEW_CLI" react \
             --repo "$GH_REPO" \
@@ -635,6 +652,18 @@ jobs:
             BODY="✅ **Reviewed** · [view run ↗](${RUN_URL}) · scroll up for the full summary."
           else
             BODY="⚠ **Review failed** · [view run ↗](${RUN_URL}) · scroll up for the partial state, or comment \`@request-claude-review\` to retry."
+          fi
+          # If the install step failed there is no binary to post with. The
+          # reply still has to leave the "Reviewing now" state, so edit it
+          # through the REST API directly: issue comments and review comments
+          # live under different endpoints.
+          if [ -z "${REVIEW_CLI:-}" ] || [ ! -x "$REVIEW_CLI" ]; then
+            case "$EVENT_NAME" in
+              pull_request_review_comment) ENDPOINT="repos/$GH_REPO/pulls/comments/$REPLY_ID" ;;
+              *) ENDPOINT="repos/$GH_REPO/issues/comments/$REPLY_ID" ;;
+            esac
+            gh api -X PATCH "$ENDPOINT" -f body="⚠ **Review failed before it started** · [view run ↗](${RUN_URL}) · the review-cli install step failed; see the run log."
+            exit 0
           fi
           "$REVIEW_CLI" reply \
             --repo "$GH_REPO" \
