@@ -176,7 +176,16 @@ jobs:
             echo "::error::Claude Code release signing key does not match the pinned fingerprint $CLAUDE_CODE_GPG_FINGERPRINT"
             exit 1
           fi
-          gpg --batch --verify "$WORK/manifest.json.sig" "$WORK/manifest.json"
+          # `gpg --verify` on its own accepts a valid signature from ANY key in
+          # the keyring, so a poisoned key bundle would still pass the
+          # fingerprint check above and then sign a tampered manifest. Require
+          # the signature itself to come from the pinned key. VALIDSIG lists
+          # the signing key first and the primary key last.
+          if ! gpg --batch --status-fd 1 --verify "$WORK/manifest.json.sig" "$WORK/manifest.json" \
+            | grep -qE "^\[GNUPG:\] VALIDSIG (${CLAUDE_CODE_GPG_FINGERPRINT} |.* ${CLAUDE_CODE_GPG_FINGERPRINT}$)"; then
+            echo "::error::manifest.json signature was not made by the pinned key $CLAUDE_CODE_GPG_FINGERPRINT"
+            exit 1
+          fi
 
           EXPECTED="$(jq -r --arg p "$PLATFORM" '.platforms[$p].checksum // empty' "$WORK/manifest.json")"
           if [ -z "$EXPECTED" ]; then
