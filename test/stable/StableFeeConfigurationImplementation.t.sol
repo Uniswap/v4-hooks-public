@@ -274,7 +274,7 @@ contract StableFeeConfigurationImplementationTest is StablePairTestBase {
         StableFeeConfig memory newParams = _validParams();
 
         // Roll forward so the fee-state reset below is observable against setUp's block number
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
         vm.expectEmit(true, false, false, true);
         emit FeeConfigUpdated(testPoolKey.toId(), newParams);
         vm.prank(poolFeeController);
@@ -317,7 +317,7 @@ contract StableFeeConfigurationImplementationTest is StablePairTestBase {
         assertEq(sqrtAmmPriceX96, uint160(2 ** 96 + 1000));
 
         // Update fee config again - should reset fee state
-        vm.roll(block.number + 100);
+        vm.roll(vm.getBlockNumber() + 100);
         vm.prank(poolFeeController);
         feeConfigurationImplementation.updateFeeConfig(testPoolKey.toId(), newParams);
 
