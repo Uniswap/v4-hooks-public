@@ -1,8 +1,9 @@
 name: test
 
 on:
+  # No branch filter: stacked PRs target long-lived integration branches (e.g. `public`),
+  # and a filtered list silently skips the whole test job for them while the PR shows green.
   pull_request:
-    branches: [main, master, staging, dev, public, feat/**, fix/**]
   push:
     branches: [main, master, staging, dev, public]
 
@@ -13,6 +14,8 @@ permissions: {}
 
 jobs:
   forge-test:
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
 
@@ -80,6 +83,8 @@ jobs:
           FORGE_SNAPSHOT_CHECK: true
 
   forge-test-alf:
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
 
