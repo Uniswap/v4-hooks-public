@@ -19,26 +19,12 @@ This repository contains the official Uniswap v4 hook contracts developed and ma
 
 ## Hooks
 
-<details>
-<summary><a href="src/WETHHook.sol">WETHHook</a></summary>
-
-A hook for wrapping ETH to WETH and unwrapping WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees.
-
-</details>
-
-<details>
-<summary><a href="src/WstETHHook.sol">WstETHHook</a></summary>
-
-A hook for wrapping stETH to wstETH and unwrapping wstETH to stETH through a Uniswap v4 pool. Handles the dynamic exchange rate between stETH and wstETH, accounting for accrued staking rewards and rebasing rounding errors.
-
-</details>
-
-<details>
-<summary><a href="src/WstETHRoutingHook.sol">WstETHRoutingHook</a></summary>
-
-A companion hook to `WstETHHook` that enables swap simulation via the V4 Quoter. Since the `WstETHHook` requires actual token deposits that aren't present during simulation, this hook calculates the expected wrapping output without executing the actual token transfers.
-
-</details>
+| Hook                                            | Description                                                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| [StablePairHook](src/stable/StablePairHook.sol) | Dynamic fee hook for pools of two assets expected to hold the same price, with optimal range pricing and time-decaying fees           |
+| [WETHHook](src/WETHHook.sol)                    | Wraps ETH to WETH and unwraps WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees                                      |
+| [WstETHHook](src/WstETHHook.sol)                | Wraps stETH to wstETH and back through a Uniswap v4 pool, handling the dynamic exchange rate and rebasing rounding errors             |
+| [WstETHRoutingHook](src/WstETHRoutingHook.sol)  | Companion to `WstETHHook` that enables swap simulation via the V4 Quoter, computing wrapping output without executing token transfers |
 
 ## Installation
 
