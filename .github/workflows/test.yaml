@@ -81,7 +81,13 @@ jobs:
         env:
           FORGE_SNAPSHOT_CHECK: true
 
+  # This job builds src/alf and test/alf through via-ir, which peaks at ~8.5 GB in a single
+  # solc process. GitHub's standard runners give public repositories 16 GB and private or
+  # internal ones 8 GB, so the same build finishes in ~8 minutes on v4-hooks-public and
+  # thrashes until the runner is killed here ("lost communication" at ~53 minutes). alf is
+  # developed and tested in the public repo, so run it only where it fits.
   forge-test-alf:
+    if: ${{ !github.event.repository.private }}
     permissions:
       contents: read
     strategy:
