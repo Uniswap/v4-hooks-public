@@ -1,0 +1,327 @@
+---
+title: "TempoExchangeAggregator"
+description: "Singleton Uniswap V4 hook that aggregates liquidity from Tempo's enshrined stablecoin DEX"
+---
+
+# TempoExchangeAggregator
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/implementations/TempoExchange/TempoExchangeAggregator.sol)
+
+**Inherits:** [BaseAggregatorHook](/src/aggregator-hooks/abstract.BaseAggregatorHook)
+
+**Title:** TempoExchangeAggregator
+
+Singleton Uniswap V4 hook that aggregates liquidity from Tempo's enshrined stablecoin DEX
+
+<i>
+
+Supports multiple pools and both exact-input and exact-output swaps
+
+</i>
+
+<i>
+
+Tempo uses uint128 for amounts; this contract handles the conversion from uint256
+
+</i>
+
+## Constants
+
+### tempoExchange
+
+The Tempo stablecoin exchange (precompiled contract)
+
+```solidity
+ITempoExchange public immutable tempoExchange;
+```
+
+### INACCURACY_BUFFER
+
+```solidity
+uint256 private constant INACCURACY_BUFFER = 20;
+```
+
+### INACCURACY_SCALE
+
+```solidity
+uint256 private constant INACCURACY_SCALE = 1_000_000;
+```
+
+## State Variables
+
+### poolIdToTokens
+
+Maps Uniswap V4 pool IDs to their token addresses
+
+```solidity
+mapping(PoolId => PoolTokens) public poolIdToTokens;
+```
+
+### _canonicalPoolByPair
+
+Canonical pool per token pair (key = keccak256(abi.encode(ordered token0, ordered token1)))
+
+<i>
+
+Enforces one pool per pair
+
+</i>
+
+```solidity
+mapping(bytes32 => PoolId) private _canonicalPoolByPair;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-itempoexchange"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager _manager, ITempoExchange _tempoExchange)
+        BaseAggregatorHook(_manager, "TempoExchangeAggregator v1.0");
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` | The Uniswap V4 PoolManager contract |
+| _tempoExchange | `ITempoExchange` | The Tempo stablecoin exchange address |
+
+<a id="_rawquote-bool-int256-poolid"></a>
+
+### _rawQuote
+
+Returns the raw quote from the underlying liquidity source without protocol fees
+
+```solidity
+function _rawQuote(bool zeroToOne, int256 amountSpecified, PoolId poolId)
+        internal
+        view
+        override
+        returns (uint256 amountUnspecified);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| zeroToOne | `bool` | Whether the swap is from token0 to token1 |
+| amountSpecified | `int256` | The amount specified (negative for exact-in, positive for exact-out) |
+| poolId | `PoolId` | The pool ID |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountUnspecified | `uint256` | The raw unspecified amount before protocol fee adjustment |
+
+<a id="pseudototalvaluelocked-poolid"></a>
+
+### pseudoTotalValueLocked
+
+Returns the pseudo TVL: the amount of the UniswapV4 pool's tokens locked in the aggregated pool
+
+```solidity
+function pseudoTotalValueLocked(PoolId poolId) external view override returns (uint256 amount0, uint256 amount1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The pool ID of the UniswapV4 pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0 | `uint256` | The amount of token0 in the aggregated pool |
+| amount1 | `uint256` | The amount of token1 in the aggregated pool |
+
+<a id="_beforeinitialize-address-poolkey-uint160"></a>
+
+### _beforeInitialize
+
+```solidity
+function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| key | `PoolKey` |  |
+| _ | `uint160` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+
+<a id="_conductswap-currency-currency-swapparams-poolid"></a>
+
+### _conductSwap
+
+```solidity
+function _conductSwap(Currency settleCurrency, Currency takeCurrency, SwapParams calldata params, PoolId)
+        internal
+        override
+        returns (uint256 amountSettle, uint256 amountTake, bool hasSettled);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| settleCurrency | `Currency` |  |
+| takeCurrency | `Currency` |  |
+| params | `SwapParams` |  |
+| _ | `PoolId` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountSettle | `uint256` |  |
+| amountTake | `uint256` |  |
+| hasSettled | `bool` |  |
+
+<a id="_canonicalpairkey-address-address"></a>
+
+### _canonicalPairKey
+
+Returns the canonical storage key for a token pair (ordered by address)
+
+```solidity
+function _canonicalPairKey(address token0, address token1) private pure returns (bytes32);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token0 | `address` |  |
+| token1 | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes32` |  |
+
+<a id="_getbuffer-uint256"></a>
+
+### _getBuffer
+
+Returns a buffer to account for per-tick vs per-order rounding in exact-out quotes
+
+```solidity
+function _getBuffer(uint256 amount) internal pure returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="_safetouint128-uint256"></a>
+
+### _safeToUint128
+
+Safely converts uint256 to uint128, reverting on overflow
+
+```solidity
+function _safeToUint128(uint256 value) internal pure returns (uint128);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| value | `uint256` | The uint256 value to convert |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint128` | The uint128 value |
+
+## Errors
+
+### AmountExceedsUint128
+
+```solidity
+error AmountExceedsUint128();
+```
+
+### TokensNotSupported
+
+```solidity
+error TokensNotSupported(address token0, address token1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token0 | `address` |  |
+| token1 | `address` |  |
+
+### ExchangeDoesNotSupportPair
+
+```solidity
+error ExchangeDoesNotSupportPair(address token0, address token1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token0 | `address` |  |
+| token1 | `address` |  |
+
+### PairAlreadyHasCanonicalPool
+
+```solidity
+error PairAlreadyHasCanonicalPool(PoolId existingPoolId, address token0, address token1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| existingPoolId | `PoolId` |  |
+| token0 | `address` |  |
+| token1 | `address` |  |
+
+## Structs
+
+### PoolTokens
+
+Token pair info for each registered pool
+
+```solidity
+struct PoolTokens {
+        address token0;
+        address token1;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token0 | `address` |  |
+| token1 | `address` |  |
+

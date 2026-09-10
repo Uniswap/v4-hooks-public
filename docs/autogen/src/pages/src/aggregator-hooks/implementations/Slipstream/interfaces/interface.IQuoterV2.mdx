@@ -1,0 +1,105 @@
+---
+title: "IQuoterV2"
+description: "Aerodrome Slipstream Base quoter ABI (`int24 tickSpacing` — Uni QuoterV2 uses `uint24 fee`)."
+---
+
+# IQuoterV2
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/implementations/Slipstream/interfaces/IQuoterV2.sol)
+
+**Title:** IQuoterV2
+
+Aerodrome Slipstream Base quoter ABI (`int24 tickSpacing` — Uni QuoterV2 uses `uint24 fee`).
+
+## Functions
+
+<a id="quoteexactinputsingle-quoteexactinputsingleparams"></a>
+
+### quoteExactInputSingle
+
+Simulates a single-hop exact-input swap and returns the output amount without state changes
+
+```solidity
+function quoteExactInputSingle(QuoteExactInputSingleParams memory params) external returns (uint256 amountOut);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| params | `QuoteExactInputSingleParams` | Single-hop exact-input quote parameters |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountOut | `uint256` | Amount of `tokenOut` that would be received for `params.amountIn` |
+
+<a id="quoteexactoutputsingle-quoteexactoutputsingleparams"></a>
+
+### quoteExactOutputSingle
+
+Simulates a single-hop exact-output swap and returns the required input without state changes
+
+```solidity
+function quoteExactOutputSingle(QuoteExactOutputSingleParams memory params) external returns (uint256 amountIn);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| params | `QuoteExactOutputSingleParams` | Single-hop exact-output quote parameters |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amountIn | `uint256` | Amount of `tokenIn` required to receive `params.amountOut` |
+
+## Structs
+
+### QuoteExactInputSingleParams
+
+```solidity
+struct QuoteExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        int24 tickSpacing;
+        uint160 sqrtPriceLimitX96;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenIn | `address` |  |
+| tokenOut | `address` |  |
+| amountIn | `uint256` |  |
+| tickSpacing | `int24` |  |
+| sqrtPriceLimitX96 | `uint160` |  |
+
+### QuoteExactOutputSingleParams
+
+```solidity
+struct QuoteExactOutputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountOut;
+        int24 tickSpacing;
+        uint160 sqrtPriceLimitX96;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenIn | `address` |  |
+| tokenOut | `address` |  |
+| amountOut | `uint256` |  |
+| tickSpacing | `int24` |  |
+| sqrtPriceLimitX96 | `uint160` |  |
+

@@ -1,0 +1,257 @@
+---
+title: "BaseDynamicFeeHook"
+description: "Shared base for the upgradeable dynamic-fee hooks: owns the frozen 6-flag permission set, the three-role AccessControl wiring, the pool-creation guard, and inert defaults for the optional callbacks."
+---
+
+# BaseDynamicFeeHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/base/BaseDynamicFeeHook.sol)
+
+**Inherits:** [BaseUUPSHook](/src/base/abstract.BaseUUPSHook), [HookRoles](/src/base/abstract.HookRoles), [IDynamicFeeHook](/src/interfaces/interface.IDynamicFeeHook)
+
+**Title:** BaseDynamicFeeHook
+
+Shared base for the upgradeable dynamic-fee hooks: owns the frozen 6-flag permission
+set, the three-role AccessControl wiring, the pool-creation guard, and inert defaults
+for the optional callbacks.
+
+**Note:**
+
+- **security-contact:** security@uniswap.org
+
+## Functions
+
+<a id="constructor-ipoolmanager"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager _manager) BaseUUPSHook(_manager);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` |  |
+
+<a id="initialize-address-address-address"></a>
+
+### initialize
+
+Initializes the proxy's roles and validates its hook-permission flags
+
+```solidity
+function initialize(address _admin, address _poolInitializer, address _configManager) external initializer;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _admin | `address` | Granted DEFAULT_ADMIN_ROLE: controls upgrades and administers all roles |
+| _poolInitializer | `address` | Granted POOL_INITIALIZER_ROLE |
+| _configManager | `address` | Granted CONFIG_MANAGER_ROLE |
+
+<a id="_authorizeupgrade-address"></a>
+
+### _authorizeUpgrade
+
+Restricts upgrades to the admin (governance) and validates that the proposed
+implementation keeps the same PoolManager and hook-permission set
+
+```solidity
+function _authorizeUpgrade(address newImplementation) internal view override onlyRole(DEFAULT_ADMIN_ROLE);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| newImplementation | `address` |  |
+
+<a id="gethookpermissions"></a>
+
+### getHookPermissions
+
+Returns a struct of permissions to signal which hook functions are to be implemented
+
+<i>
+
+The proxy's mined address freezes this flag set forever — flags not claimed now can
+never be used by a future implementation. beforeInitialize backs the pool-creation
+guard and beforeSwap the fee logic; the other enabled flags are optional callbacks or
+future headroom (afterInitialize never runs today: initializePool self-calls, and v4
+skips callbacks on self-calls). Remove-liquidity, return-delta, and donate flags stay
+off so exits can never be blocked and amounts never altered.
+
+</i>
+
+```solidity
+function getHookPermissions() public pure override returns (Hooks.Permissions memory);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `Hooks.Permissions` | Permissions struct |
+
+<a id="_beforeinitialize-address-poolkey-uint160"></a>
+
+### _beforeInitialize
+
+Rejects direct pool initialization
+
+<i>
+
+This requires pool initialization to be done through `initializePool`, as this function is not called when the hook itself is caller.
+
+</i>
+
+```solidity
+function _beforeInitialize(address sender, PoolKey calldata, uint160) internal virtual override returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sender | `address` |  |
+| _ | `PoolKey` |  |
+| _ | `uint160` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+
+<a id="_beforeaddliquidity-address-poolkey-modifyliquidityparams-bytes"></a>
+
+### _beforeAddLiquidity
+
+Inert default for the BEFORE_ADD_LIQUIDITY flag; inheriting hooks may override.
+
+```solidity
+function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        virtual
+        override
+        returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| _ | `PoolKey` |  |
+| _ | `ModifyLiquidityParams` |  |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+
+<a id="_afteraddliquidity-address-poolkey-modifyliquidityparams-balancedelta-balancedelta-bytes"></a>
+
+### _afterAddLiquidity
+
+Inert default for the AFTER_ADD_LIQUIDITY flag; inheriting hooks may override
+(the returned delta is ignored: the RETURNS_DELTA flag is off).
+
+```solidity
+function _afterAddLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata
+    ) internal virtual override returns (bytes4, BalanceDelta);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| _ | `PoolKey` |  |
+| _ | `ModifyLiquidityParams` |  |
+| _ | `BalanceDelta` |  |
+| _ | `BalanceDelta` |  |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+| &lt;none&gt; | `BalanceDelta` |  |
+
+<a id="_afterswap-address-poolkey-swapparams-balancedelta-bytes"></a>
+
+### _afterSwap
+
+Inert default for the AFTER_SWAP flag; inheriting hooks may override.
+
+```solidity
+function _afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
+        internal
+        virtual
+        override
+        returns (bytes4, int128);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| _ | `PoolKey` |  |
+| _ | `SwapParams` |  |
+| _ | `BalanceDelta` |  |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+| &lt;none&gt; | `int128` |  |
+
+## Errors
+
+### InvalidAdmin
+
+Thrown when initializing with a disallowed admin: the zero address (would
+permanently freeze upgrades) or the hook itself (could never act)
+
+```solidity
+error InvalidAdmin(address admin);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| admin | `address` | The invalid admin |
+
+### InvalidInitializer
+
+Thrown when a pool with this hook is initialized directly on the PoolManager
+instead of through the hook's pool-initialization entrypoint
+
+```solidity
+error InvalidInitializer(address caller);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| caller | `address` | The address that attempted to initialize the pool |
+

@@ -1,0 +1,498 @@
+---
+title: "BaseTokenWrapperHook"
+description: "Abstract base contract for implementing token wrapper hooks in Uniswap V4"
+---
+
+# BaseTokenWrapperHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/base/BaseTokenWrapperHook.sol)
+
+**Inherits:** [BaseHook](/src/base/abstract.BaseHook), DeltaResolver
+
+**Title:** Base Token Wrapper Hook
+
+Abstract base contract for implementing token wrapper hooks in Uniswap V4
+
+<i>
+
+This contract provides the base functionality for wrapping/unwrapping tokens through V4 pools
+
+</i>
+
+<i>
+
+All liquidity operations are blocked as liquidity is managed through the underlying token wrapper
+
+</i>
+
+<i>
+
+Implementing contracts must provide deposit() and withdraw() functions
+
+</i>
+
+## Constants
+
+### wrapperCurrency
+
+The wrapped token currency (e.g., WETH)
+
+```solidity
+Currency public immutable wrapperCurrency;
+```
+
+### underlyingCurrency
+
+The underlying token currency (e.g., ETH)
+
+```solidity
+Currency public immutable underlyingCurrency;
+```
+
+### wrapZeroForOne
+
+Indicates whether wrapping occurs when swapping from token0 to token1
+
+<i>
+
+This is determined by the relative ordering of the wrapper and underlying tokens
+
+</i>
+
+<i>
+
+If true: token0 is underlying (e.g. ETH) and token1 is wrapper (e.g. WETH)
+
+</i>
+
+<i>
+
+If false: token0 is wrapper (e.g. WETH) and token1 is underlying (e.g. ETH)
+
+</i>
+
+<i>
+
+This is set in the constructor based on the token addresses to ensure consistent behavior
+
+</i>
+
+```solidity
+bool public immutable wrapZeroForOne;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-currency-currency"></a>
+
+### constructor
+
+Creates a new token wrapper hook
+
+```solidity
+constructor(IPoolManager _manager, Currency _wrapper, Currency _underlying) BaseHook(_manager);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` | The Uniswap V4 pool manager |
+| _wrapper | `Currency` | The wrapped token currency (e.g., WETH) |
+| _underlying | `Currency` | The underlying token currency (e.g., ETH) |
+
+<a id="gethookpermissions"></a>
+
+### getHookPermissions
+
+Returns a struct of permissions to signal which hook functions are to be implemented
+
+<i>
+
+Used at deployment to validate the address correctly represents the expected permissions
+
+</i>
+
+```solidity
+function getHookPermissions() public pure override returns (Hooks.Permissions memory);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `Hooks.Permissions` | Permissions struct |
+
+<a id="_beforeinitialize-address-poolkey-uint160"></a>
+
+### _beforeInitialize
+
+Validates pool initialization parameters
+
+<i>
+
+Ensures pool contains wrapper and underlying tokens with zero fee
+
+</i>
+
+```solidity
+function _beforeInitialize(address, PoolKey calldata poolKey, uint160) internal view override returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| poolKey | `PoolKey` | The pool configuration including tokens and fee |
+| _ | `uint160` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` | The function selector if validation passes |
+
+<a id="_beforeaddliquidity-address-poolkey-modifyliquidityparams-bytes"></a>
+
+### _beforeAddLiquidity
+
+Prevents liquidity operations on wrapper pools
+
+<i>
+
+Always reverts as liquidity is managed through the token wrapper
+
+</i>
+
+```solidity
+function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+        internal
+        pure
+        override
+        returns (bytes4);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| _ | `PoolKey` |  |
+| _ | `ModifyLiquidityParams` |  |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` |  |
+
+<a id="_beforeswap-address-poolkey-swapparams-bytes"></a>
+
+### _beforeSwap
+
+Handles token wrapping and unwrapping during swaps
+
+<i>
+
+Processes both exact input (amountSpecified &lt; 0) and exact output (amountSpecified > 0) swaps
+
+</i>
+
+```solidity
+function _beforeSwap(address, PoolKey calldata, SwapParams calldata params, bytes calldata)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta swapDelta, uint24);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| _ | `PoolKey` |  |
+| params | `SwapParams` | The swap parameters including direction and amount |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` | selector The function selector |
+| swapDelta | `BeforeSwapDelta` | The input/output token amounts for pool accounting |
+| &lt;none&gt; | `uint24` | lpFeeOverride The fee override (always 0 for wrapper pools) |
+
+<a id="_pay-currency-address-uint256"></a>
+
+### _pay
+
+Transfers tokens to the pool manager
+
+<i>
+
+The recipient of the payment should be the poolManager
+
+</i>
+
+```solidity
+function _pay(Currency token, address, uint256 amount) internal override;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token | `Currency` | The token to transfer |
+| _ | `address` |  |
+| amount | `uint256` | The amount to transfer |
+
+<a id="_deposit-uint256"></a>
+
+### _deposit
+
+Deposits underlying tokens to receive wrapper tokens
+
+<i>
+
+Implementing contracts should handle:
+
+</i>
+
+```solidity
+function _deposit(uint256 underlyingAmount)
+        internal
+        virtual
+        returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| underlyingAmount | `uint256` | The amount of underlying tokens to deposit |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| actualUnderlyingAmount | `uint256` | the actual number of underlying tokens used, i.e. to account for rebasing rounding errors |
+| wrappedAmount | `uint256` | The amount of wrapper tokens received |
+
+<a id="_withdraw-uint256"></a>
+
+### _withdraw
+
+Withdraws wrapper tokens to receive underlying tokens
+
+<i>
+
+Implementing contracts should handle:
+
+</i>
+
+```solidity
+function _withdraw(uint256 wrappedAmount)
+        internal
+        virtual
+        returns (uint256 actualWrappedAmount, uint256 underlyingAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| wrappedAmount | `uint256` | The amount of wrapper tokens to withdraw |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| actualWrappedAmount | `uint256` | the actual number of wrapped tokens used, i.e. to account for rebasing rounding errors |
+| underlyingAmount | `uint256` | The amount of underlying tokens received |
+
+<a id="_getwrapinputrequired-uint256"></a>
+
+### _getWrapInputRequired
+
+Calculates underlying tokens needed to receive desired wrapper tokens
+
+<i>
+
+Default implementation assumes 1:1 ratio
+
+</i>
+
+<i>
+
+Override for wrappers with different exchange rates
+
+</i>
+
+```solidity
+function _getWrapInputRequired(uint256 wrappedAmount) internal view virtual returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| wrappedAmount | `uint256` | The desired amount of wrapper tokens |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | The required amount of underlying tokens |
+
+<a id="_getunwrapinputrequired-uint256"></a>
+
+### _getUnwrapInputRequired
+
+Calculates wrapper tokens needed to receive desired underlying tokens
+
+<i>
+
+Default implementation assumes 1:1 ratio
+
+</i>
+
+<i>
+
+Override for wrappers with different exchange rates
+
+</i>
+
+```solidity
+function _getUnwrapInputRequired(uint256 underlyingAmount) internal view virtual returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| underlyingAmount | `uint256` | The desired amount of underlying tokens |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | The required amount of wrapper tokens |
+
+<a id="_supportsexactoutput"></a>
+
+### _supportsExactOutput
+
+Indicates whether the hook supports exact output swaps
+
+<i>
+
+Default implementation returns true
+
+</i>
+
+<i>
+
+Override for wrappers that cannot support exact output swaps
+
+</i>
+
+```solidity
+function _supportsExactOutput() internal view virtual returns (bool);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bool` |  |
+
+<a id="_supportsexactinput"></a>
+
+### _supportsExactInput
+
+Indicates whether the hook supports exact input swaps
+
+<i>
+
+Default implementation returns true
+
+</i>
+
+<i>
+
+Override for wrappers that cannot support exact input swaps
+
+</i>
+
+```solidity
+function _supportsExactInput() internal view virtual returns (bool);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bool` |  |
+
+## Errors
+
+### LiquidityNotAllowed
+
+Thrown when attempting to add or remove liquidity
+
+<i>
+
+Liquidity operations are blocked since all liquidity is managed by the token wrapper
+
+</i>
+
+```solidity
+error LiquidityNotAllowed();
+```
+
+### InvalidPoolToken
+
+Thrown when initializing a pool with invalid tokens
+
+<i>
+
+Pool must contain exactly one wrapper token and its underlying token
+
+</i>
+
+```solidity
+error InvalidPoolToken();
+```
+
+### InvalidPoolFee
+
+Thrown when initializing a pool with non-zero fee
+
+<i>
+
+Fee must be 0 as wrapper pools don't charge fees
+
+</i>
+
+```solidity
+error InvalidPoolFee();
+```
+
+### ExactInputNotSupported
+
+Thrown when exact input swaps are not supported
+
+```solidity
+error ExactInputNotSupported();
+```
+
+### ExactOutputNotSupported
+
+Thrown when exact output swaps are not supported
+
+```solidity
+error ExactOutputNotSupported();
+```
+
