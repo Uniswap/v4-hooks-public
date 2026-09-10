@@ -1,0 +1,213 @@
+---
+title: "ProtocolFees"
+---
+
+# ProtocolFees
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/ProtocolFees.sol)
+
+## Constants
+
+### protocolFeeMultiplier
+
+```solidity
+uint24 public immutable protocolFeeMultiplier;
+```
+
+## State Variables
+
+### tokenJar
+
+```solidity
+address public tokenJar;
+```
+
+## Functions
+
+<a id="constructor-uint24"></a>
+
+### constructor
+
+```solidity
+constructor(uint24 _protocolFeeMultiplier);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _protocolFeeMultiplier | `uint24` |  |
+
+<a id="polltokenjar"></a>
+
+### pollTokenJar
+
+Queries the token jar from the pool manager and emits an event if it is updated
+
+<i>
+
+This function should not need to be called externally except in the case of the tokenJar address changing
+after the protocol fee has been set
+
+</i>
+
+```solidity
+function pollTokenJar() public virtual returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` | The token jar address |
+
+<a id="_applyprotocolfee-ipoolmanager-poolkey-swapparams-int128"></a>
+
+### _applyProtocolFee
+
+```solidity
+function _applyProtocolFee(
+        IPoolManager poolManager,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        int128 unspecifiedDelta
+    ) internal returns (int128);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager | `IPoolManager` |  |
+| key | `PoolKey` |  |
+| params | `SwapParams` |  |
+| unspecifiedDelta | `int128` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `int128` |  |
+
+<a id="_applywithprotocolfee-ipoolmanager-poolkey-swapparams-int128-uint24"></a>
+
+### _applyWithProtocolFee
+
+```solidity
+function _applyWithProtocolFee(
+        IPoolManager poolManager,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        int128 unspecifiedDelta,
+        uint24 protocolFee
+    ) internal returns (int128);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager | `IPoolManager` |  |
+| key | `PoolKey` |  |
+| params | `SwapParams` |  |
+| unspecifiedDelta | `int128` |  |
+| protocolFee | `uint24` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `int128` |  |
+
+<a id="_calculateprotocolfeeamount-uint24-bool-uint256"></a>
+
+### _calculateProtocolFeeAmount
+
+```solidity
+function _calculateProtocolFeeAmount(uint24 protocolFee, bool isExactInput, uint256 amountUnspecified)
+        internal
+        pure
+        returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| protocolFee | `uint24` |  |
+| isExactInput | `bool` |  |
+| amountUnspecified | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="_getprotocolfee-ipoolmanager-bool-poolid"></a>
+
+### _getProtocolFee
+
+<i>
+
+The protocol fee is multiplied by the protocol fee multiplier
+
+</i>
+
+```solidity
+function _getProtocolFee(IPoolManager poolManager, bool zeroToOne, PoolId poolId)
+        internal
+        view
+        returns (uint24 protocolFee);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager | `IPoolManager` |  |
+| zeroToOne | `bool` |  |
+| poolId | `PoolId` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| protocolFee | `uint24` |  |
+
+<a id="_gettokenjar-ipoolmanager"></a>
+
+### _getTokenJar
+
+```solidity
+function _getTokenJar(IPoolManager poolManager) internal view returns (address currentJar);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager | `IPoolManager` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| currentJar | `address` |  |
+
+## Events
+
+### ProtocolFeesCollected
+
+```solidity
+event ProtocolFeesCollected(address indexed recipient, Currency indexed currency, uint256 amount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| recipient | `address` |  |
+| currency | `Currency` |  |
+| amount | `uint256` |  |
+

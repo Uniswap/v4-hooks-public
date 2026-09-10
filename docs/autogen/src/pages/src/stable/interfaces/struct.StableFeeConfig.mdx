@@ -1,0 +1,26 @@
+---
+title: "StableFeeConfig"
+---
+
+# StableFeeConfig
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/stable/interfaces/IStableFeeConfiguration.sol)
+
+```solidity
+struct StableFeeConfig {
+    uint24 k; // Decay factor per block in Q24 format: each block the excess fee retains a factor of k, so smaller k = faster decay (e.g., 0.99 in Q24 retains 99% per block)
+    uint24 optimalFeeE6; // Fee rate defining optimal range width in PRICE space (not sqrt price), 1e6 precision
+    uint8 targetMultiplier; // Multiplier for target fee: targetFee = farBoundaryFee - closeBoundaryFee * targetMultiplier / 100. Must be 0-100.
+    uint160 referenceSqrtPriceX96; // Reference center point in sqrt Q96 format
+}
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| k | `uint24` |  |
+| optimalFeeE6 | `uint24` |  |
+| targetMultiplier | `uint8` |  |
+| referenceSqrtPriceX96 | `uint160` |  |
+

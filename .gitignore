@@ -13,3 +13,12 @@ lcov.info
 broadcast/*/31337
 deployments/**/31337.*
 /node_modules
+broadcast/
+
+# `forge doc` writes a runnable vocs site scaffold next to the generated pages. Only the
+# pages are worth committing: the scaffold is reproduced by `forge doc` on demand, it
+# carries the checked-out branch in its edit links, and its package.json pulls the whole
+# vocs/waku npm tree into dependency scanning for a site nothing in CI builds.
+docs/autogen/package.json
+docs/autogen/vocs.config.ts
+docs/autogen/vocs.sidebar.ts

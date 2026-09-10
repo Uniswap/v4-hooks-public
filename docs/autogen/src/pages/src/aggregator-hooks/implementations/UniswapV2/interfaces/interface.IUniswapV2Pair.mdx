@@ -1,0 +1,74 @@
+---
+title: "IUniswapV2Pair"
+description: "Minimal subset of canonical Uniswap V2 pair surface"
+---
+
+# IUniswapV2Pair
+
+[Git Source](https://github.com/Uniswap/v4-hooks-internal/blob/d2a38d0852d124855be2202d8846e0259e3cfe28/src/aggregator-hooks/implementations/UniswapV2/interfaces/IUniswapV2Pair.sol)
+
+Minimal subset of canonical Uniswap V2 pair surface
+
+## Functions
+
+<a id="token0"></a>
+
+### token0
+
+```solidity
+function token0() external view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="token1"></a>
+
+### token1
+
+```solidity
+function token1() external view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="getreserves"></a>
+
+### getReserves
+
+```solidity
+function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| reserve0 | `uint112` |  |
+| reserve1 | `uint112` |  |
+| blockTimestampLast | `uint32` |  |
+
+<a id="swap-uint256-uint256-address-bytes"></a>
+
+### swap
+
+```solidity
+function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0Out | `uint256` |  |
+| amount1Out | `uint256` |  |
+| to | `address` |  |
+| data | `bytes` |  |
+
