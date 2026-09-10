@@ -39,13 +39,16 @@ contract Parameters {
     uint256 public constant ARBITRUM_CHAIN_ID = 42161;
     uint256 public constant SEPOLIA_CHAIN_ID = 11155111;
 
+    string public constant POOL_USDC_USDT = "USDC/USDT";
+    string public constant POOL_USDC_USDG = "USDC/USDG";
+
     /// @notice Thrown when parameters are not set for a given chainId
     error ParametersNotSetForChainId(uint256 chainId);
-    /// @notice Thrown when pool parameters are not set for a given chainId
-    error PoolParametersNotSetForChainId(uint256 chainId);
+    /// @notice Thrown when pool parameters are not set for a given chainId and pool name
+    error PoolParametersNotSetForChainId(uint256 chainId, string poolName);
 
     mapping(uint256 chainId => DeployParameters) public parameters;
-    mapping(uint256 chainId => PoolParameters) internal poolParameters;
+    mapping(uint256 chainId => mapping(string poolName => PoolParameters)) internal poolParameters;
 
     constructor() {
         // PoolManager addresses: https://docs.uniswap.org/contracts/v4/deployments
@@ -108,19 +111,31 @@ contract Parameters {
             configManager: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95
         });
 
-        poolParameters[ETHEREUM_CHAIN_ID] = PoolParameters({
+        poolParameters[ETHEREUM_CHAIN_ID][POOL_USDC_USDT] = PoolParameters({
             currency0: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, // USDC
             currency1: 0xdAC17F958D2ee523a2206206994597C13D831ec7, // USDT
             tickSpacing: 1,
             sqrtPriceX96: 79228162514264337593543950336, // 1:1
             feeConfig: StableFeeConfig({
-                k: 167772, // .01
+                k: 11_744_051, // 0.7 in Q24 (0.7 * 2**24)
                 optimalFeeE6: 7, // = .07bps = .0007%
                 targetMultiplier: 100,
                 referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
             })
         });
-        poolParameters[SEPOLIA_CHAIN_ID] = PoolParameters({
+        poolParameters[ETHEREUM_CHAIN_ID][POOL_USDC_USDG] = PoolParameters({
+            currency0: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, // USDC
+            currency1: 0xe343167631d89B6Ffc58B88d6b7fB0228795491D, // USDG
+            tickSpacing: 1,
+            sqrtPriceX96: 79228162514264337593543950336, // 1:1
+            feeConfig: StableFeeConfig({
+                k: 11_744_051, // 0.7 in Q24 (0.7 * 2**24)
+                optimalFeeE6: 50, // = .5bps = .005%
+                targetMultiplier: 100,
+                referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
+            })
+        });
+        poolParameters[SEPOLIA_CHAIN_ID][POOL_USDC_USDT] = PoolParameters({
             currency0: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238, // USDC (Circle)
             currency1: 0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0, // USDT (Aave testnet)
             tickSpacing: 1,
@@ -141,10 +156,17 @@ contract Parameters {
         }
     }
 
-    function getPoolParameters(uint256 chainId) public view returns (PoolParameters memory params) {
-        params = poolParameters[chainId];
+    /// @notice Pool parameters for a named pool on a chain
+    /// @param chainId The chain the pool lives on
+    /// @param poolName One of the POOL_* constants
+    function getPoolParameters(uint256 chainId, string memory poolName)
+        public
+        view
+        returns (PoolParameters memory params)
+    {
+        params = poolParameters[chainId][poolName];
         if (params.currency0 == address(0)) {
-            revert PoolParametersNotSetForChainId(chainId);
+            revert PoolParametersNotSetForChainId(chainId, poolName);
         }
     }
 }
