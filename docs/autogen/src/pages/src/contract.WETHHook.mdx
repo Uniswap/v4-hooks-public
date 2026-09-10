@@ -1,0 +1,123 @@
+---
+title: "WETHHook"
+description: "Hook for wrapping/unwrapping ETH in Uniswap V4 pools"
+---
+
+# WETHHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/WETHHook.sol)
+
+**Inherits:** [BaseTokenWrapperHook](/src/base/abstract.BaseTokenWrapperHook)
+
+**Title:** Wrapped Ether Hook
+
+Hook for wrapping/unwrapping ETH in Uniswap V4 pools
+
+<i>
+
+Implements 1:1 wrapping/unwrapping of ETH to WETH
+
+</i>
+
+## Constants
+
+### weth
+
+The WETH9 contract
+
+```solidity
+WETH public immutable weth;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-address-payable"></a>
+
+### constructor
+
+Creates a new WETH wrapper hook
+
+```solidity
+constructor(IPoolManager _manager, address payable _weth)
+        BaseTokenWrapperHook(
+            _manager,
+            Currency.wrap(_weth), // wrapper token is WETH
+            CurrencyLibrary.ADDRESS_ZERO // underlying token is ETH (address(0))
+        );
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` | The Uniswap V4 pool manager |
+| _weth | `address payable` | The WETH9 contract address |
+
+<a id="_deposit-uint256"></a>
+
+### _deposit
+
+Deposits underlying tokens to receive wrapper tokens
+
+<i>
+
+Note the WETH deposit relies on the WETH wrapper having a receive function that mints WETH to msg.sender
+
+</i>
+
+```solidity
+function _deposit(uint256 underlyingAmount) internal override returns (uint256, uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| underlyingAmount | `uint256` | The amount of underlying tokens to deposit |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | the actual number of underlying tokens used, i.e. to account for rebasing rounding errors |
+| &lt;none&gt; | `uint256` | The amount of wrapper tokens received |
+
+<a id="_withdraw-uint256"></a>
+
+### _withdraw
+
+Withdraws wrapper tokens to receive underlying tokens
+
+<i>
+
+Implementing contracts should handle:
+
+</i>
+
+```solidity
+function _withdraw(uint256 wrapperAmount) internal override returns (uint256, uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| wrapperAmount | `uint256` | The amount of wrapper tokens to withdraw |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | the actual number of wrapped tokens used, i.e. to account for rebasing rounding errors |
+| &lt;none&gt; | `uint256` | The amount of underlying tokens received |
+
+<a id="receive"></a>
+
+### receive
+
+Required to receive ETH
+
+```solidity
+receive() external payable;
+```
+

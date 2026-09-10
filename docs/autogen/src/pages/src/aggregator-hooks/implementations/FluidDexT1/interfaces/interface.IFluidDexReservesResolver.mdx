@@ -1,0 +1,111 @@
+---
+title: "IFluidDexReservesResolver"
+description: "Interface for the Fluid DEX T1 reserves resolver"
+---
+
+# IFluidDexReservesResolver
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/aggregator-hooks/implementations/FluidDexT1/interfaces/IFluidDexReservesResolver.sol)
+
+**Title:** IFluidDexReservesResolver
+
+Interface for the Fluid DEX T1 reserves resolver
+
+## Functions
+
+<a id="getpoolreserves-address"></a>
+
+### getPoolReserves
+
+Get pool data with reserves for a specific DEX
+
+<i>
+
+Matches Fluid's FluidDexReservesResolver.getPoolReserves
+
+</i>
+
+```solidity
+function getPoolReserves(address pool_) external view returns (PoolWithReserves memory poolReserves_);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| pool_ | `address` | The address of the pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolReserves_ | `PoolWithReserves` | The pool data including reserves |
+
+## Structs
+
+### DexLimits
+
+```solidity
+struct DexLimits {
+        TokenLimit withdrawableToken0;
+        TokenLimit withdrawableToken1;
+        TokenLimit borrowableToken0;
+        TokenLimit borrowableToken1;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| withdrawableToken0 | `TokenLimit` |  |
+| withdrawableToken1 | `TokenLimit` |  |
+| borrowableToken0 | `TokenLimit` |  |
+| borrowableToken1 | `TokenLimit` |  |
+
+### TokenLimit
+
+```solidity
+struct TokenLimit {
+        uint256 available;
+        uint256 expandsTo;
+        uint256 expandDuration;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| available | `uint256` |  |
+| expandsTo | `uint256` |  |
+| expandDuration | `uint256` |  |
+
+### PoolWithReserves
+
+```solidity
+struct PoolWithReserves {
+        address pool;
+        address token0;
+        address token1;
+        uint256 fee;
+        uint256 centerPrice;
+        IFluidDexT1.CollateralReserves collateralReserves;
+        IFluidDexT1.DebtReserves debtReserves;
+        DexLimits limits;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| pool | `address` |  |
+| token0 | `address` |  |
+| token1 | `address` |  |
+| fee | `uint256` |  |
+| centerPrice | `uint256` |  |
+| collateralReserves | `IFluidDexT1.CollateralReserves` |  |
+| debtReserves | `IFluidDexT1.DebtReserves` |  |
+| limits | `DexLimits` |  |
+

@@ -1,0 +1,91 @@
+---
+title: "ITIP20"
+description: "Interface for Tempo TIP-20 tokens (precompile stablecoins)"
+---
+
+# ITIP20
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/aggregator-hooks/implementations/TempoExchange/interfaces/ITIP20.sol)
+
+**Title:** ITIP20
+
+Interface for Tempo TIP-20 tokens (precompile stablecoins)
+
+<i>
+
+Each TIP-20 token defines a quoteToken() forming a DEX tree. PathUSD is the root (quoteToken = address(0)).
+
+</i>
+
+## Functions
+
+<a id="name"></a>
+
+### name
+
+Returns the token name
+
+```solidity
+function name() external view returns (string memory);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `string` |  |
+
+<a id="symbol"></a>
+
+### symbol
+
+Returns the token symbol
+
+```solidity
+function symbol() external view returns (string memory);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `string` |  |
+
+<a id="quotetoken"></a>
+
+### quoteToken
+
+Returns the parent token in the DEX tree
+
+<i>
+
+PathUSD (the root token) returns address(0)
+
+</i>
+
+```solidity
+function quoteToken() external view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="totalsupply"></a>
+
+### totalSupply
+
+Returns the total supply of the token
+
+```solidity
+function totalSupply() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+

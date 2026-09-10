@@ -1,0 +1,216 @@
+---
+title: "WstETHHook"
+description: "Hook for wrapping/unwrapping stETH/wstETH in Uniswap V4 pools"
+---
+
+# WstETHHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/WstETHHook.sol)
+
+**Inherits:** [BaseTokenWrapperHook](/src/base/abstract.BaseTokenWrapperHook)
+
+**Title:** Wrapped Staked ETH (wstETH) Hook
+
+Hook for wrapping/unwrapping stETH/wstETH in Uniswap V4 pools
+
+<i>
+
+Implements dynamic exchange rate wrapping/unwrapping between stETH and wstETH
+
+</i>
+
+<i>
+
+wstETH represents stETH with accrued staking rewards, maintaining a dynamic exchange rate
+
+</i>
+
+## Constants
+
+### wstETH
+
+The wstETH contract used for wrapping/unwrapping operations
+
+```solidity
+IWstETH public immutable wstETH;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-iwsteth"></a>
+
+### constructor
+
+Creates a new wstETH wrapper hook
+
+<i>
+
+Initializes with wstETH as wrapper token and stETH as underlying token
+
+</i>
+
+```solidity
+constructor(IPoolManager _manager, IWstETH _wsteth)
+        BaseTokenWrapperHook(
+            _manager,
+            Currency.wrap(address(_wsteth)), // wrapper token is wstETH
+            Currency.wrap(_wsteth.stETH()) // underlying token is stETH
+        );
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` | The Uniswap V4 pool manager |
+| _wsteth | `IWstETH` | The wstETH contract address |
+
+<a id="_deposit-uint256"></a>
+
+### _deposit
+
+Deposits underlying tokens to receive wrapper tokens
+
+<i>
+
+Implementing contracts should handle:
+
+</i>
+
+```solidity
+function _deposit(uint256 underlyingAmount)
+        internal
+        virtual
+        override
+        returns (uint256 actualUnderlyingAmount, uint256 wrappedAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| underlyingAmount | `uint256` | The amount of underlying tokens to deposit |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| actualUnderlyingAmount | `uint256` | the actual number of underlying tokens used, i.e. to account for rebasing rounding errors |
+| wrappedAmount | `uint256` | The amount of wrapper tokens received |
+
+<a id="_withdraw-uint256"></a>
+
+### _withdraw
+
+Withdraws wrapper tokens to receive underlying tokens
+
+<i>
+
+Implementing contracts should handle:
+
+</i>
+
+```solidity
+function _withdraw(uint256 wrapperAmount)
+        internal
+        override
+        returns (uint256 actualWrappedAmount, uint256 actualUnwrappedAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| wrapperAmount | `uint256` | The amount of wrapper tokens to withdraw |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| actualWrappedAmount | `uint256` | the actual number of wrapped tokens used, i.e. to account for rebasing rounding errors |
+| actualUnwrappedAmount | `uint256` | The amount of underlying tokens received |
+
+<a id="_getwrapinputrequired-uint256"></a>
+
+### _getWrapInputRequired
+
+Calculates how much stETH is needed to receive a specific amount of wstETH
+
+<i>
+
+Uses current stETH/wstETH exchange rate for calculation
+
+</i>
+
+```solidity
+function _getWrapInputRequired(uint256 wrappedAmount) internal view override returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| wrappedAmount | `uint256` | Desired amount of wstETH |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | Amount of stETH required |
+
+<a id="_getunwrapinputrequired-uint256"></a>
+
+### _getUnwrapInputRequired
+
+Calculates how much wstETH is needed to receive a specific amount of stETH
+
+<i>
+
+Uses current stETH/wstETH exchange rate for calculation
+
+</i>
+
+```solidity
+function _getUnwrapInputRequired(uint256 underlyingAmount) internal view override returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| underlyingAmount | `uint256` | Desired amount of stETH |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | Amount of wstETH required |
+
+<a id="_supportsexactoutput"></a>
+
+### _supportsExactOutput
+
+Indicates whether the hook supports exact output swaps
+
+<i>
+
+Default implementation returns true
+
+</i>
+
+<i>
+
+Override for wrappers that cannot support exact output swaps
+
+</i>
+
+```solidity
+function _supportsExactOutput() internal pure override returns (bool);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bool` |  |
+

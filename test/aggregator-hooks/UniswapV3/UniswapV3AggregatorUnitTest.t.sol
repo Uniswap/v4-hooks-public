@@ -19,6 +19,8 @@ import {MockUniV3Factory} from "./mocks/MockUniV3Factory.sol";
 import {IV4Quoter} from "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol";
 import {Deploy} from "@uniswap/v4-periphery/test/shared/Deploy.sol";
 
+/// @dev Heavy external-integration suite; pinned low to keep CI fast (global default is raised in foundry.toml).
+/// forge-config: default.fuzz.runs = 10
 contract UniswapV3AggregatorUnitTest is Test {
     using PoolIdLibrary for PoolKey;
 

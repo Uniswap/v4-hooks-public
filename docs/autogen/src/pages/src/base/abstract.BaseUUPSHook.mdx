@@ -1,0 +1,118 @@
+---
+title: "BaseUUPSHook"
+description: "Generic base for upgradeable v4 hooks: a UUPS implementation behind a mined ERC1967 proxy (the registered hook). Role, flag, and upgrade-auth choices belong to inheriting bases (e.g. `BaseDynamicFeeHook`)."
+---
+
+# BaseUUPSHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/base/BaseUUPSHook.sol)
+
+**Inherits:** [BaseHook](/src/base/abstract.BaseHook), UUPSUpgradeable, Initializable
+
+**Title:** BaseUUPSHook
+
+Generic base for upgradeable v4 hooks: a UUPS implementation behind a mined ERC1967
+proxy (the registered hook). Role, flag, and upgrade-auth choices belong to
+inheriting bases (e.g. `BaseDynamicFeeHook`).
+
+<i>
+
+Rules for every implementation (the proxy's address and storage are forever):
+- Storage: ERC-7201 namespaced structs only, append-only; validate layouts off-chain.
+- Keep the same PoolManager and permission set (`_validateNewImplementation` checks both).
+- Deploy the proxy with the `initialize` calldata as constructor `data`, or the first
+caller takes admin.
+
+</i>
+
+**Note:**
+
+- **security-contact:** security@uniswap.org
+
+## Functions
+
+<a id="constructor-ipoolmanager"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager _manager) BaseHook(_manager);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` |  |
+
+<a id="_validatenewimplementation-address"></a>
+
+### _validateNewImplementation
+
+Validates a proposed implementation against the on-chain-checkable upgrade rules:
+same PoolManager, and a hook-permission set matching the proxy's address flags
+
+<i>
+
+This is used in `_authorizeUpgrade` to prevent against incorrect configurations.
+
+</i>
+
+```solidity
+function _validateNewImplementation(address newImplementation) internal view;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| newImplementation | `address` | The proposed implementation |
+
+<a id="__baseuupshook_init"></a>
+
+### __BaseUUPSHook_init
+
+Validates the proxy's hook-permission flags
+
+```solidity
+function __BaseUUPSHook_init() internal view onlyInitializing;
+```
+
+<a id="validatehookaddress-basehook"></a>
+
+### validateHookAddress
+
+Skips BaseHook's constructor-time address validation
+
+<i>
+
+The proxy's address flags are verified in `__BaseUUPSHook_init`.
+
+</i>
+
+```solidity
+function validateHookAddress(BaseHook) internal pure override;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `BaseHook` |  |
+
+## Errors
+
+### InvalidPoolManager
+
+Thrown when a proposed implementation was built against a different PoolManager
+
+```solidity
+error InvalidPoolManager(IPoolManager poolManager);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager | `IPoolManager` | The proposed implementation's PoolManager |
+

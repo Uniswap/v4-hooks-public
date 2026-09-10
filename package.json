@@ -1,0 +1,8 @@
+{
+    "name": "v4-hooks-public",
+    "private": true,
+    "description": "npm dependencies are used only by CI's upgrade storage-layout validation; the lockfile pins the full transitive tree so the validator cannot be influenced by upstream package changes",
+    "devDependencies": {
+        "@openzeppelin/upgrades-core": "1.46.0"
+    }
+}

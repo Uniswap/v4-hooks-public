@@ -1,0 +1,312 @@
+---
+title: "StableFeeCalculation"
+description: "Library providing core mathematical functions for calculating dynamic swap fees"
+---
+
+# StableFeeCalculation
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/stable/libraries/StableFeeCalculation.sol)
+
+**Title:** StableFeeCalculation
+
+Library providing core mathematical functions for calculating dynamic swap fees
+
+## Constants
+
+### ONE_E6
+
+Scalar for pips precision (1e6 = 100%)
+
+```solidity
+uint256 internal constant ONE_E6 = 1e6;
+```
+
+### ONE_E12
+
+Scalar for scaled precision (1e12 = 100%)
+
+```solidity
+uint256 internal constant ONE_E12 = 1e12;
+```
+
+### UNDEFINED_DECAYING_FEE_E12
+
+Sentinel: no decaying fee (inside optimal range).
+
+```solidity
+uint256 internal constant UNDEFINED_DECAYING_FEE_E12 = 1e12 + 1;
+```
+
+### MAX_FEE_E6
+
+Maximum LP fee toFeeE6 returns. Pool.swap compounds the LP fee with the directional
+protocol fee (protocol taken from the input first, LP fee on the remainder) and
+rounds the result UP to a whole pip, so an LP fee of 999_999 compounds to exactly
+1e6 (100%) for ANY nonzero protocol fee; 999_998 compounds to at most 999_999 for
+all protocol fees up to ProtocolFeeLibrary.MAX_PROTOCOL_FEE
+(= LPFeeLibrary.MAX_LP_FEE - 2).
+
+```solidity
+uint256 internal constant MAX_FEE_E6 = 1e6 - 2;
+```
+
+### Q48
+
+Scale used to preserve precision in sqrt ratio math.
+
+```solidity
+uint256 internal constant Q48 = 2 ** 48;
+```
+
+## Functions
+
+<a id="tofeee6-uint256"></a>
+
+### toFeeE6
+
+Convert a fee from 1e12 precision to the uint24 E6 (pips) precision v4 charges
+
+<i>
+
+Rounds up, so a nonzero fee never rounds down to a lower pip: a fee below 1 pip
+charges 1 pip instead of becoming an explicit 0-fee override. A fee of exactly zero
+still converts to zero.
+
+</i>
+
+```solidity
+function toFeeE6(uint256 feeE12) internal pure returns (uint24);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| feeE12 | `uint256` | The fee in 1e12 precision |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint24` | The fee in E6 precision, rounded up and clamped to MAX_FEE_E6 so the fee v4 actually<br/>charges (LP fee compounded with the protocol fee) stays strictly below 100%. At a<br/>charged fee of exactly 1e6, exact-output swaps revert and exact-input swaps consume<br/>the whole input as fee, so no swap can move the price through active liquidity —<br/>leaving no way to move a saturated pool back toward reference. The clamp keeps<br/>exact-output swaps available and lets exact-input swaps large enough to leave a<br/>nonzero post-fee remainder move the price. |
+
+<a id="calculatepriceratiox96-uint256-uint256"></a>
+
+### calculatePriceRatioX96
+
+Calculate the price ratio between two sqrt prices in Q96 format, ensuring result &lt;= 2^96
+
+```solidity
+function calculatePriceRatioX96(uint256 sqrtPrice1X96, uint256 sqrtPrice2X96)
+        internal
+        pure
+        returns (uint256 priceRatioX96);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPrice1X96 | `uint256` | First sqrt price in Q96 format |
+| sqrtPrice2X96 | `uint256` | Second sqrt price in Q96 format |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| priceRatioX96 | `uint256` | Price ratio in Q96 format, always &lt;= 2^96 |
+
+<a id="calculatecloseboundaryfee-uint256-uint256"></a>
+
+### calculateCloseBoundaryFee
+
+Calculate close boundary fee - measures the fee that places the pre-impact price at the close boundary of the optimal range.
+
+```solidity
+function calculateCloseBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
+        internal
+        pure
+        returns (int256 closeBoundaryFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| priceRatioX96 | `uint256` | Price ratio to reference price in Q96 format from calculatePriceRatioX96 |
+| optimalFeeE6 | `uint256` | Optimal fee in parts per million (e.g., 90 = 0.009%). Cannot be >= 1e6. |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| closeBoundaryFeeE12 | `int256` | Close boundary fee. If &lt;= 0, price is inside optimal range. If > 0, price is outside. |
+
+<a id="calculateinsideoptimalrangefee-uint256-uint256-bool-bool"></a>
+
+### calculateInsideOptimalRangeFee
+
+Calculate fee when price is inside optimal range. Sets fee such that the pre-impact price equals the boundary.
+
+```solidity
+function calculateInsideOptimalRangeFee(
+        uint256 priceRatioX96,
+        uint256 optimalFeeE6,
+        bool ammPriceBelowRP,
+        bool userSellsZeroForOne
+    ) internal pure returns (uint256 feeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| priceRatioX96 | `uint256` | Price ratio in Q96 format |
+| optimalFeeE6 | `uint256` | Optimal fee in parts per million |
+| ammPriceBelowRP | `bool` | True if AMM price &lt; reference price |
+| userSellsZeroForOne | `bool` | True if user is selling token0 for token1 |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| feeE12 | `uint256` | Calculated fee in 1e12 precision |
+
+<a id="calculatefarboundaryfee-uint256-uint256"></a>
+
+### calculateFarBoundaryFee
+
+Calculate far boundary fee - the fee that places the pre-impact price at the "far" boundary.
+The far boundary is whichever edge of the optimal range is farthest from the current AMM price.
+
+```solidity
+function calculateFarBoundaryFee(uint256 priceRatioX96, uint256 optimalFeeE6)
+        internal
+        pure
+        returns (uint256 farBoundaryFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| priceRatioX96 | `uint256` | Price ratio in Q96 format from calculatePriceRatioX96, must be &lt;= Q96 |
+| optimalFeeE6 | `uint256` | Optimal fee in parts per million |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| farBoundaryFeeE12 | `uint256` | Fee to get to the "far" boundary in 1e12 precision |
+
+<a id="adjustpreviousfeeforpricemovement-uint256-uint256"></a>
+
+### adjustPreviousFeeForPriceMovement
+
+Adjust previous fee to preserve the same pre-impact price when AMM price moves further from reference
+
+```solidity
+function adjustPreviousFeeForPriceMovement(uint256 priceRatioX96, uint256 previousDecayingFeeE12)
+        internal
+        pure
+        returns (uint256 adjustedFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| priceRatioX96 | `uint256` | Price ratio in Q96 format from calculatePriceRatioX96 (always &lt;= Q96 since it's min/max) |
+| previousDecayingFeeE12 | `uint256` | Previous flexible fee in 1e12 precision |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| adjustedFeeE12 | `uint256` | Adjusted previous fee accounting for price movement in 1e12 precision |
+
+<a id="calculatedecayingfee-uint256-uint256-uint256-uint256"></a>
+
+### calculateDecayingFee
+
+Calculate flexible fee with exponential decay. Fee decays from previous fee toward target fee over time.
+
+```solidity
+function calculateDecayingFee(uint256 targetFeeE12, uint256 previousDecayingFeeE12, uint256 k, uint256 blocksPassed)
+        internal
+        pure
+        returns (uint256 decayingFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| targetFeeE12 | `uint256` | Target fee to decay toward in 1e12 precision |
+| previousDecayingFeeE12 | `uint256` | Previous flexible fee in 1e12 precision, previousFee >= targetFee |
+| k | `uint256` | Decay constant in Q24 format (e.g., 16_609_443 for k=0.99), &lt;= Q24, nonzero |
+| blocksPassed | `uint256` | Number of blocks since last fee update, &lt;= type(uint40).max |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| decayingFeeE12 | `uint256` | New flexible fee after decay in 1e12 precision |
+
+<a id="derivelogk-uint256"></a>
+
+### deriveLogK
+
+Derive the quantized log-space decay rate the slow path exponentiates with
+
+<i>
+
+logK = ceil(-lnWad(k as wad) / 2^24). Rounding UP keeps the reconstructed exponent
+(logK &lt;&lt; 24) at least as large as the computed -ln(k), so the slow-path decay factor
+never exceeds the exact k^n — the fee never decays slower than configured and stays
+monotone across the blocksPassed 4 -> 5 switch from exact k^n multiplication (fast
+path) to the approximate exp(-logK * n) formula (slow path). Since the uint24 type
+caps k below Q24 1.0 (2^24), -ln(k) > 0 always and ceil rounding keeps the result
+nonzero — so logK = 0 (which would disable decay entirely) is unreachable.
+
+</i>
+
+```solidity
+function deriveLogK(uint256 k) internal pure returns (uint256 logK);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| k | `uint256` | The decay factor per block in Q24 format; must be nonzero (validated at config time) |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| logK | `uint256` | The derived value |
+
+<a id="fastpow-uint256-uint256"></a>
+
+### fastPow
+
+Calculate the fast power of k to the power of blocksPassed
+
+```solidity
+function fastPow(uint256 k, uint256 blocksPassed) internal pure returns (uint256 z);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| k | `uint256` | The base of the power |
+| blocksPassed | `uint256` | The power to raise k to. Must be &lt;= 4. |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| z | `uint256` | The result of k to the power of blocksPassed |
+

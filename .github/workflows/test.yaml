@@ -2,9 +2,9 @@ name: test
 
 on:
   pull_request:
-    branches: [main, master, staging, dev, feat/**, fix/**]
+    branches: [main, master, staging, dev, public, feat/**, fix/**]
   push:
-    branches: [main, master, staging, dev]
+    branches: [main, master, staging, dev, public]
 
 env:
   FOUNDRY_PROFILE: ${{ github.event_name == 'push' && 'ci' || 'pr' }}
@@ -13,6 +13,8 @@ permissions: {}
 
 jobs:
   forge-test:
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
 
@@ -30,13 +32,48 @@ jobs:
         with:
           version: stable
 
+      # upgrades-core (the storage-layout validator below) must come from the committed lockfile
+      - name: Install npm dependencies (lockfile-pinned)
+        run: npm ci --ignore-scripts
+
       - name: Run Forge build
         run: |
           echo Foundry profile: $FOUNDRY_PROFILE
           forge --version
           forge build
-          forge build --sizes src/*
         id: build
+
+      # Checks that a new hook implementation's storage layout is upgrade-safe - the one
+      # rule `_validateNewImplementation` can't check on-chain. Must run right after the
+      # full `forge build`: later commands (`--sizes`, `forge test`) recompile subsets and
+      # add partial build-info files, which the validator rejects.
+      - name: Validate upgrade storage layout
+        run: |
+          npx --no-install @openzeppelin/upgrades-core validate foundry-out/build-info --contract StablePairHookV2Mock --reference StablePairHook --unsafeAllow constructor,state-variable-immutable,missing-initializer
+        id: validate-upgrades
+
+      # Negative control for the step above: StablePairHookBadV2Mock has a known-incompatible
+      # layout (a field inserted, not appended, into V1's namespace), so the validator MUST
+      # reject it. If this step fails, nothing is wrong with the mock - the validation
+      # pipeline itself has stopped catching bad layouts (flag creep, tool regression).
+      - name: Verify layout validation rejects an incompatible upgrade
+        run: |
+          if OUTPUT=$(npx --no-install @openzeppelin/upgrades-core validate foundry-out/build-info --contract StablePairHookBadV2Mock --reference StablePairHook --unsafeAllow constructor,state-variable-immutable,missing-initializer 2>&1); then
+            echo "ERROR: upgrades-core accepted StablePairHookBadV2Mock, whose layout is known-incompatible."
+            exit 1
+          fi
+          # It must fail WITH the mock's planted layout error: a renamed/missing mock also exits
+          # nonzero, which would leave this control passing while proving nothing.
+          echo "$OUTPUT" | grep -q 'Inserted `inserted`' || {
+            echo "ERROR: validate failed, but not with the known layout incompatibility:"
+            echo "$OUTPUT"
+            exit 1
+          }
+        id: validate-upgrades-negative
+
+      - name: Check contract sizes
+        run: forge build --sizes src/*
+        id: sizes
 
       - name: Run Forge tests
         run: forge test --isolate -vvv
@@ -44,7 +81,15 @@ jobs:
         env:
           FORGE_SNAPSHOT_CHECK: true
 
+  # This job builds src/alf and test/alf through via-ir, which peaks at ~8.5 GB in a single
+  # solc process. GitHub's standard runners give public repositories 16 GB and private or
+  # internal ones 8 GB, so the same build finishes in ~8 minutes on v4-hooks-public and
+  # thrashes until the runner is killed here ("lost communication" at ~53 minutes). alf is
+  # developed and tested in the public repo, so run it only where it fits.
   forge-test-alf:
+    if: ${{ !github.event.repository.private }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
 

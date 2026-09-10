@@ -1,0 +1,130 @@
+---
+title: "IStableFeeConfiguration"
+description: "Interface for the StableFeeConfiguration"
+---
+
+# IStableFeeConfiguration
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/stable/interfaces/IStableFeeConfiguration.sol)
+
+Interface for the StableFeeConfiguration
+
+## Functions
+
+<a id="updatefeeconfig-poolid-stablefeeconfig"></a>
+
+### updateFeeConfig
+
+Update the fee config for a pool
+
+```solidity
+function updateFeeConfig(PoolId poolId, StableFeeConfig calldata feeConfig) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The ID of the pool |
+| feeConfig | `StableFeeConfig` | The new fee config |
+
+<a id="batchupdatefeeconfig-poolid-stablefeeconfig"></a>
+
+### batchUpdateFeeConfig
+
+Update the fee config for multiple pools in a single call
+
+```solidity
+function batchUpdateFeeConfig(PoolId[] calldata poolIds, StableFeeConfig[] calldata feeConfigs) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolIds | `PoolId[]` | The IDs of the pools to update |
+| feeConfigs | `StableFeeConfig[]` | The new fee configs for each pool, index-aligned with `poolIds` |
+
+## Events
+
+### FeeConfigUpdated
+
+Event emitted when the fee config is updated
+
+```solidity
+event FeeConfigUpdated(PoolId indexed poolId, StableFeeConfig feeConfig);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The ID of the pool |
+| feeConfig | `StableFeeConfig` | The new fee config |
+
+## Errors
+
+### InvalidK
+
+Error thrown when k is invalid (zero would mean instant decay)
+
+```solidity
+error InvalidK(uint256 k);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| k | `uint256` | The invalid k value |
+
+### InvalidOptimalFeeE6
+
+Error thrown when optimal fee is invalid
+
+```solidity
+error InvalidOptimalFeeE6(uint256 optimalFeeE6);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| optimalFeeE6 | `uint256` | The invalid optimal fee |
+
+### InvalidReferenceSqrtPriceX96
+
+Error thrown when reference sqrt price is invalid
+
+```solidity
+error InvalidReferenceSqrtPriceX96(uint256 invalidSqrtPrice);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| invalidSqrtPrice | `uint256` | The invalid reference sqrt price |
+
+### InvalidTargetMultiplier
+
+Error thrown when target multiplier is invalid (must be 0-100)
+
+```solidity
+error InvalidTargetMultiplier(uint256 targetMultiplier);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| targetMultiplier | `uint256` | The invalid target multiplier |
+
+### LengthMismatch
+
+Error thrown when the poolIds and feeConfigs arrays have different lengths
+
+```solidity
+error LengthMismatch();
+```
+

@@ -1,0 +1,59 @@
+---
+title: "IDynamicFeeHook"
+---
+
+# IDynamicFeeHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/interfaces/IDynamicFeeHook.sol)
+
+**Title:** IDynamicFeeHook
+
+## Functions
+
+<a id="getfee-poolkey"></a>
+
+### getFee
+
+The LP fee a swap would be charged this block, per direction.
+
+<i>
+
+The returned fee MUST be size-independent: it does not depend on the swap amount.
+A hook whose fee depends on swap size MUST revert here instead of returning a misleading value
+
+</i>
+
+```solidity
+function getFee(PoolKey calldata key) external view returns (uint24 feeE6ZeroForOne, uint24 feeE6OneForZero);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| key | `PoolKey` | The PoolKey of the pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| feeE6ZeroForOne | `uint24` | The fee for a zeroForOne swap this block |
+| feeE6OneForZero | `uint24` | The fee for a oneForZero swap this block |
+
+## Errors
+
+### PoolNotInitialized
+
+Thrown when an operation targets a pool that has no fee configuration, i.e. was
+never initialized through the hook.
+
+```solidity
+error PoolNotInitialized(PoolId poolId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The id of the uninitialized pool |
+

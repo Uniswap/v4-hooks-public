@@ -1,0 +1,218 @@
+---
+title: "StablePairHook"
+description: "Dynamic fee hook for pools of two assets expected to hold the same price; a UUPS implementation whose ERC1967 proxy is the registered v4 hook."
+---
+
+# StablePairHook
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/stable/StablePairHook.sol)
+
+**Inherits:** [BaseDynamicFeeHook](/src/base/abstract.BaseDynamicFeeHook), [StableFeeConfiguration](/src/stable/base/abstract.StableFeeConfiguration), [IStablePairHook](/src/stable/interfaces/interface.IStablePairHook)
+
+**Title:** StablePairHook
+
+Dynamic fee hook for pools of two assets expected to hold the same price; a UUPS implementation whose ERC1967 proxy
+is the registered v4 hook.
+
+<i>
+
+The fee calculations adjust the LP fee to hit the target pre-impact buy/sell prices and do
+not take the pool's protocolFee into account if it's turned on.
+
+</i>
+
+**Note:**
+
+- **security-contact:** security@uniswap.org
+
+## Functions
+
+<a id="constructor-ipoolmanager"></a>
+
+### constructor
+
+```solidity
+constructor(IPoolManager _manager) BaseDynamicFeeHook(_manager);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _manager | `IPoolManager` | The Uniswap v4 PoolManager |
+
+<a id="initializepool-poolkey-uint160-stablefeeconfig"></a>
+
+### initializePool
+
+Initialize a Uniswap v4 pool
+
+```solidity
+function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, StableFeeConfig calldata feeConfig)
+        external
+        onlyRole(POOL_INITIALIZER_ROLE)
+        returns (int24 tick);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolKey | `PoolKey` | The PoolKey of the pool to initialize |
+| sqrtPriceX96 | `uint160` | The initial starting price of the pool, expressed as a sqrtPriceX96 |
+| feeConfig | `StableFeeConfig` | The fee config for the pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tick | `int24` | The current tick of the pool |
+
+<a id="getfee-poolkey"></a>
+
+### getFee
+
+The LP fee a swap would be charged this block, per direction.
+
+<i>
+
+StablePair's fee is size-independent (it never reads the swap amount), so this always
+returns and never reverts on the size-dependence basis. It reverts only for an uninitialized pool, whose fee is undefined.
+
+</i>
+
+```solidity
+function getFee(PoolKey calldata key) external view returns (uint24 feeE6ZeroForOne, uint24 feeE6OneForZero);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| key | `PoolKey` | The PoolKey of the pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| feeE6ZeroForOne | `uint24` | The fee for a zeroForOne swap this block |
+| feeE6OneForZero | `uint24` | The fee for a oneForZero swap this block |
+
+<a id="_beforeswap-address-poolkey-swapparams-bytes"></a>
+
+### _beforeSwap
+
+Calculate and apply dynamic fee before each swap
+
+```solidity
+function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _ | `address` |  |
+| key | `PoolKey` | The PoolKey of the pool |
+| params | `SwapParams` | The SwapParams of the swap |
+| _ | `bytes` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes4` | selector The function selector for IHooks.beforeSwap |
+| &lt;none&gt; | `BeforeSwapDelta` | delta BeforeSwapDelta (always zero for this hook) |
+| &lt;none&gt; | `uint24` | lpFeeOverride The calculated dynamic fee with override flag |
+
+<a id="_loadprice-poolid"></a>
+
+### _loadPrice
+
+Select the AMM price used for fee calculation and whether this is a new block.
+
+```solidity
+function _loadPrice(PoolId poolId) private view returns (uint256 sqrtAmmPriceX96, bool isNewBlock);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The PoolId of the pool |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtAmmPriceX96 | `uint256` | The (potentially cached) AMM sqrt price to compute the fee from |
+| isNewBlock | `bool` | True if this is the first swap of a new block (or after init/reset) |
+
+<a id="_getfee-poolid-uint256-bool-bool"></a>
+
+### _getFee
+
+Calculate the LP fee for one swap direction, plus the decaying fee to persist.
+
+```solidity
+function _getFee(PoolId poolId, uint256 sqrtAmmPriceX96, bool isNewBlock, bool zeroForOne)
+        private
+        view
+        returns (uint256 lpFeeE12, uint256 decayingFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` | The PoolId of the pool |
+| sqrtAmmPriceX96 | `uint256` | The AMM sqrt price to compute the fee from (from _loadPrice) |
+| isNewBlock | `bool` | Whether this is the first swap of a new block (from _loadPrice) |
+| zeroForOne | `bool` | The swap direction |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| lpFeeE12 | `uint256` | The lp fee for this swap in 1e12 precision |
+| decayingFeeE12 | `uint256` | The decaying fee to persist for this block (UNDEFINED inside optimal range) |
+
+<a id="_calculatedecayingfee-stablefeeconfig-stablefeestate-uint256-uint256-uint256-uint256-bool"></a>
+
+### _calculateDecayingFee
+
+Calculate decaying fee when price is outside optimal range
+
+```solidity
+function _calculateDecayingFee(
+        StableFeeConfig storage poolFeeConfig,
+        StableFeeState storage poolFeeState,
+        uint256 sqrtAmmPriceX96,
+        uint256 sqrtReferencePriceX96,
+        uint256 closeBoundaryFeeE12,
+        uint256 farBoundaryFeeE12,
+        bool ammPriceBelowRP
+    ) private view returns (uint256 decayingFeeE12);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolFeeConfig | `StableFeeConfig` | The StableFeeConfig of the pool |
+| poolFeeState | `StableFeeState` | The StableFeeState of the pool |
+| sqrtAmmPriceX96 | `uint256` | The current AMM sqrt price |
+| sqrtReferencePriceX96 | `uint256` | The reference sqrt price |
+| closeBoundaryFeeE12 | `uint256` | The fee to reach the close boundary of the optimal range (negative = already inside) |
+| farBoundaryFeeE12 | `uint256` | The fee to reach the far boundary of the optimal range |
+| ammPriceBelowRP | `bool` | True if current AMM price &lt; reference price |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| decayingFeeE12 | `uint256` | The calculated decaying fee in 1e12 precision |
+

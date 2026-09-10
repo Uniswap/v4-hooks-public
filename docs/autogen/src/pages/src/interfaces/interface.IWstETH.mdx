@@ -1,0 +1,132 @@
+---
+title: "IWstETH"
+---
+
+# IWstETH
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/3d5b2620fe2b9ba7f01645160e1b841cf585c425/src/interfaces/IWstETH.sol)
+
+## Functions
+
+<a id="wrap-uint256"></a>
+
+### wrap
+
+```solidity
+function wrap(uint256 _stETHAmount) external returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _stETHAmount | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="unwrap-uint256"></a>
+
+### unwrap
+
+```solidity
+function unwrap(uint256 _wstETHAmount) external returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _wstETHAmount | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="getstethbywsteth-uint256"></a>
+
+### getStETHByWstETH
+
+```solidity
+function getStETHByWstETH(uint256 _wstETHAmount) external view returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _wstETHAmount | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="getwstethbysteth-uint256"></a>
+
+### getWstETHByStETH
+
+```solidity
+function getWstETHByStETH(uint256 _stETHAmount) external view returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| _stETHAmount | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="tokenspersteth"></a>
+
+### tokensPerStEth
+
+```solidity
+function tokensPerStEth() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="stethpertoken"></a>
+
+### stEthPerToken
+
+```solidity
+function stEthPerToken() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="steth"></a>
+
+### stETH
+
+```solidity
+function stETH() external view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+

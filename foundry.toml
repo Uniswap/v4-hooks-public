@@ -8,6 +8,11 @@ fs_permissions = [{ access = "read-write", path = ".forge-snapshots/" }, { acces
 evm_version = "cancun"
 gas_limit = "3000000000"
 bytecode_hash = "none"
+# Emitted for CI's upgrade storage-layout validation (@openzeppelin/upgrades-core
+# reads foundry-out/build-info); required by the UUPS StablePairHook.
+ast = true
+build_info = true
+extra_output = ["storageLayout"]
 # ALF contracts trip stack-too-deep under legacy codegen, and compiling them
 # through a second compiler profile in the same invocation suffixes shared
 # artifacts (PoolManager.json becomes PoolManager.default.json), which breaks
@@ -30,7 +35,11 @@ optimizer_runs = 200
 [profile.alf]
 optimizer_runs = 200
 via_ir = true
-skip = []
+# StablePairHook is built and deployed with legacy codegen (the default profile), which is
+# what was audited and what is live on mainnet. Keep stable out of this via-ir profile so it
+# is never compiled under a pipeline it does not ship under. The tests are via-ir safe as of
+# this branch, so this is a deliberate policy choice rather than a workaround.
+skip = ["src/stable/**", "test/stable/**"]
 # fluid-contracts-public uses inline assembly without memory-safe annotations,
 # which prevents the via-ir Yul optimizer from reorganizing the stack and trips
 # stack-too-deep in dexLite/adminModule/main.sol. Compile fluid with legacy
@@ -43,7 +52,10 @@ compilation_restrictions = [
 ]
 
 [fuzz]
-runs = 10
+# Raised from 10: at 10 runs a property test is close to meaningless. Heavy suites
+# (fork-bound, address mining, external integrations) opt back down with a
+# `/// forge-config: default.fuzz.runs = N` annotation on the contract.
+runs = 2048
 
 [invariant]
 runs = 256
