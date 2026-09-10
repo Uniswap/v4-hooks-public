@@ -19,26 +19,12 @@ This repository contains the official Uniswap v4 hook contracts developed and ma
 
 ## Hooks
 
-<details>
-<summary><a href="src/WETHHook.sol">WETHHook</a></summary>
-
-A hook for wrapping ETH to WETH and unwrapping WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees.
-
-</details>
-
-<details>
-<summary><a href="src/WstETHHook.sol">WstETHHook</a></summary>
-
-A hook for wrapping stETH to wstETH and unwrapping wstETH to stETH through a Uniswap v4 pool. Handles the dynamic exchange rate between stETH and wstETH, accounting for accrued staking rewards and rebasing rounding errors.
-
-</details>
-
-<details>
-<summary><a href="src/WstETHRoutingHook.sol">WstETHRoutingHook</a></summary>
-
-A companion hook to `WstETHHook` that enables swap simulation via the V4 Quoter. Since the `WstETHHook` requires actual token deposits that aren't present during simulation, this hook calculates the expected wrapping output without executing the actual token transfers.
-
-</details>
+| Hook                                            | Description                                                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| [StablePairHook](src/stable/StablePairHook.sol) | Dynamic fee hook for pools of two assets expected to hold the same price, with optimal range pricing and time-decaying fees           |
+| [WETHHook](src/WETHHook.sol)                    | Wraps ETH to WETH and unwraps WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees                                      |
+| [WstETHHook](src/WstETHHook.sol)                | Wraps stETH to wstETH and back through a Uniswap v4 pool, handling the dynamic exchange rate and rebasing rounding errors             |
+| [WstETHRoutingHook](src/WstETHRoutingHook.sol)  | Companion to `WstETHHook` that enables swap simulation via the V4 Quoter, computing wrapping output without executing token transfers |
 
 ## Installation
 
@@ -72,6 +58,29 @@ forge test --isolate
 | Network  | Address                                    | Commit Hash |
 | -------- | ------------------------------------------ | ----------- |
 | Ethereum | 0x3ac6e14a142251eb3fe739399e0a8da81ed06888 | 320811c     |
+
+### StablePairHook
+
+The registered v4 hook is the ERC1967 proxy — its address is permanent and carries the hook flags.
+The implementation behind it changes on UUPS upgrades, so the implementation column reflects the
+current implementation as of the listed commit.
+
+| Network  | Proxy (hook)                               | Implementation                             | Commit Hash | Date       |
+| -------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
+| Ethereum | 0x0000113dCf4ADd69999Fad8F20F2b63F979bfcC0 | 0x5f216d21b1C81346938EDDc1Df7e0111A0F64000 | ecb8c96     | 2026-07-27 |
+
+`owner` and `configManager` are the [Uniswap Governance Timelock](https://etherscan.io/address/0x1a9C8182C09F50C8318d769245beA52c32BE35BC),
+so fee-config changes and implementation upgrades go through a governance proposal.
+
+#### Pools
+
+Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0x800000`) and a
+`tickSpacing` of 1, so the pool ID is `keccak256(abi.encode(PoolKey))` over the values below.
+
+| Pool      | Currency0                                         | Currency1                                         | Pool ID                                                            | Date       |
+| --------- | ------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
+| USDC/USDT | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7` | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
+| USDC/USDG | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D` | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
 
 ## Audits
 
