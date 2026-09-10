@@ -75,10 +75,12 @@ forge test --isolate
 
 ## Audits
 
-| Name       | Date       | Report                                                                   |
-| ---------- | ---------- | ------------------------------------------------------------------------ |
-| WETHHook   | 04/24/2025 | [OpenZeppelin](./docs/audits/Uniswap_V4_WETH_and_WstETH_Hooks_Audit.pdf) |
-| WstETHHook | 04/24/2025 | [OpenZeppelin](./docs/audits/Uniswap_V4_WETH_and_WstETH_Hooks_Audit.pdf) |
+| Name           | Date       | Report                                                     |
+| -------------- | ---------- | ---------------------------------------------------------- |
+| WETHHook       | 04/24/2025 | [OpenZeppelin](./docs/audits/openzeppelin-weth-wsteth.pdf) |
+| WstETHHook     | 04/24/2025 | [OpenZeppelin](./docs/audits/openzeppelin-weth-wsteth.pdf) |
+| StablePairHook | 03/02/2026 | [OpenZeppelin](./docs/audits/openzeppelin-stablepair.pdf)  |
+| DualPoolHook   | 07/14/2026 | [OpenZeppelin](./docs/audits/openzeppelin-dualpool.pdf)    |
 
 ### Security Contact
 
