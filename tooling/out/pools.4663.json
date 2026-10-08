@@ -1,0 +1,217 @@
+{
+  "chainId": 4663,
+  "hook": "0x0000000000000000000000000000000000000000",
+  "indexToken": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+  "pools": [
+    {
+      "symbol": "NVDA",
+      "stock": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "currency0": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "44008867560037260232683945984",
+      "currentTick": -11760,
+      "tickLower": -14640,
+      "tickUpper": -9520,
+      "targetBps": 1719,
+      "tier": "high",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 5000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "44008867560037260232683945984"
+      }
+    },
+    {
+      "symbol": "AAPL",
+      "stock": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "currency0": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "53420805508597643748380246016",
+      "currentTick": -7884,
+      "tickLower": -9510,
+      "tickUpper": -6480,
+      "targetBps": 1484,
+      "tier": "low",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 3000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "53420805508597643748380246016"
+      }
+    },
+    {
+      "symbol": "MSFT",
+      "stock": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "currency0": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "currency1": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "stockIsCurrency0": false,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "94798957924354112861782409216",
+      "currentTick": 3588,
+      "tickLower": 1960,
+      "tickUpper": 4990,
+      "targetBps": 1172,
+      "tier": "low",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 3000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "94798957924354112861782409216"
+      }
+    },
+    {
+      "symbol": "GOOGL",
+      "stock": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "currency0": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "54014828324037285316980113408",
+      "currentTick": -7662,
+      "tickLower": -9290,
+      "tickUpper": -6260,
+      "targetBps": 1172,
+      "tier": "low",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 3000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "54014828324037285316980113408"
+      }
+    },
+    {
+      "symbol": "MU",
+      "stock": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
+      "currency0": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "currency1": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
+      "stockIsCurrency0": false,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "67019325044887551452374892544",
+      "currentTick": -3348,
+      "tickLower": -6230,
+      "tickUpper": -1110,
+      "targetBps": 1016,
+      "tier": "high",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 5000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "67019325044887551452374892544"
+      }
+    },
+    {
+      "symbol": "AMD",
+      "stock": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "currency0": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "72039428095095529074501615616",
+      "currentTick": -1903,
+      "tickLower": -4780,
+      "tickUpper": 330,
+      "targetBps": 859,
+      "tier": "high",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 5000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "72039428095095529074501615616"
+      }
+    },
+    {
+      "symbol": "AMZN",
+      "stock": "0x12f190a9F9d7D37a250758b26824B97CE941bF54",
+      "currency0": "0x12f190a9F9d7D37a250758b26824B97CE941bF54",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "46248134805586864719798468608",
+      "currentTick": -10767,
+      "tickLower": -12400,
+      "tickUpper": -9360,
+      "targetBps": 840,
+      "tier": "low",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 3000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "46248134805586864719798468608"
+      }
+    },
+    {
+      "symbol": "META",
+      "stock": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "currency0": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "77608382840502413662391107584",
+      "currentTick": -414,
+      "tickLower": -2040,
+      "tickUpper": 990,
+      "targetBps": 645,
+      "tier": "low",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 3000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "77608382840502413662391107584"
+      }
+    },
+    {
+      "symbol": "TSLA",
+      "stock": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "currency0": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "55808190830845359042821357568",
+      "currentTick": -7009,
+      "tickLower": -10580,
+      "tickUpper": -4380,
+      "targetBps": 566,
+      "tier": "tsla",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 5000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "55808190830845359042821357568"
+      }
+    },
+    {
+      "symbol": "AVGO",
+      "stock": "0x156E175DD063a8cE274C50654eF40e0032b3fbcF",
+      "currency0": "0x156E175DD063a8cE274C50654eF40e0032b3fbcF",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "stockIsCurrency0": true,
+      "fee": 8388608,
+      "tickSpacing": 10,
+      "sqrtPriceX96": "55114241622535560367899148288",
+      "currentTick": -7259,
+      "tickLower": -10140,
+      "tickUpper": -5020,
+      "targetBps": 527,
+      "tier": "high",
+      "feeConfig": {
+        "k": 16757000,
+        "optimalFeeE6": 5000,
+        "targetMultiplier": 100,
+        "referenceSqrtPriceX96": "55114241622535560367899148288"
+      }
+    }
+  ]
+}
