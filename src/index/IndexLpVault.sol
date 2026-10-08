@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -16,22 +15,23 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
-import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
-import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IIndexLpVault} from "./interfaces/IIndexLpVault.sol";
+import {IStableFeeConfigView} from "./interfaces/IStableFeeConfigView.sol";
+import {IndexVaultMath} from "./libraries/IndexVaultMath.sol";
 
 /// @title IndexLpVault
 /// @notice Holds one v4 PositionManager position per `stock / index token` pool and issues itself as the share token.
 ///         Deposits bring both tokens of every pool (`previewDeposit` routes value toward the target weights), mint or
 ///         increase the positions in one `modifyLiquidities` call and return whatever the positions did not take.
 ///         Redemptions pay the same fraction of every position and idle balance and are never paused.
-/// @dev Values use each pool's spot price: the owner-free paths (deposit, redeem) are protected by the caller's
-///      `minShares` / per-token minimums, not by an oracle.
-contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTransient {
+/// @dev Deposits price shares with each pool's current composition valued at the hook's keeper reference price, and
+///      revert while a pool's price is off that reference by more than `maxDeviationBps`: pushing a pool's price moves
+///      only the composition. Redemptions pay in kind; the views value at spot.
+contract IndexLpVault is IIndexLpVault, ERC20, Ownable, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
     using PoolIdLibrary for PoolKey;
@@ -40,6 +40,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     /// @dev `tokenId` is 0 until a deposit (or `rerange`) gives the constituent liquidity
     struct Constituent {
         PoolKey key;
+        PoolId poolId;
         bool stockIsCurrency0;
         uint16 targetBps;
         int24 tickLower;
@@ -80,6 +81,8 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     address public immutable indexToken;
 
     bool public depositsPaused;
+    /// @inheritdoc IIndexLpVault
+    uint16 public maxDeviationBps = 100;
     Constituent[] internal _constituents;
 
     /// @notice The constituents' target weights do not sum to 10000
@@ -91,6 +94,8 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     error InvalidConstituent(uint256 i);
     /// @notice Shares exist but the vault holds nothing to price a deposit against
     error ZeroNav();
+    /// @notice `setMaxDeviationBps` takes a value in (0, 10000)
+    error InvalidMaxDeviation(uint16 maxDeviationBps);
 
     /// @param positionManager_ The v4 PositionManager the positions are minted on
     /// @param permit2_ Permit2, through which the PositionManager pulls the vault's tokens
@@ -118,15 +123,17 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
                 if (inits[j].stock == init.stock) revert InvalidConstituent(i);
             }
             totalBps += init.targetBps;
+            PoolKey memory key = PoolKey(
+                Currency.wrap(init.currency0),
+                Currency.wrap(init.currency1),
+                init.fee,
+                init.tickSpacing,
+                IHooks(init.hooks)
+            );
             _constituents.push(
                 Constituent({
-                    key: PoolKey(
-                        Currency.wrap(init.currency0),
-                        Currency.wrap(init.currency1),
-                        init.fee,
-                        init.tickSpacing,
-                        IHooks(init.hooks)
-                    ),
+                    key: key,
+                    poolId: key.toId(),
                     stockIsCurrency0: init.currency0 == init.stock,
                     targetBps: init.targetBps,
                     tickLower: init.tickLower,
@@ -148,7 +155,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         Constituent storage c = _constituents[i];
         return ConstituentView({
             stock: _stock(c),
-            poolId: PoolId.unwrap(c.key.toId()),
+            poolId: PoolId.unwrap(c.poolId),
             tokenId: c.tokenId,
             targetBps: c.targetBps,
             tickLower: c.tickLower,
@@ -158,7 +165,8 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
 
     /// @inheritdoc IIndexLpVault
     function nav() external view returns (uint256 navInIndex) {
-        (, navInIndex) = _values(_snapshot());
+        Snapshot memory s = _snapshot();
+        (, navInIndex) = _values(s, s.sqrtPriceX96);
     }
 
     /// @inheritdoc IIndexLpVault
@@ -167,8 +175,9 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         view
         returns (uint256[] memory valueInIndex, uint16[] memory bps, bool[] memory inBand)
     {
+        Snapshot memory s = _snapshot();
         uint256 total;
-        (valueInIndex, total) = _values(_snapshot());
+        (valueInIndex, total) = _values(s, s.sqrtPriceX96);
         uint256 n = valueInIndex.length;
         bps = new uint16[](n);
         inBand = new bool[](n);
@@ -198,31 +207,33 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         edgeProximityBps = new uint16[](n);
         for (uint256 i; i < n; ++i) {
             Constituent storage c = _constituents[i];
-            (, int24 tick,,) = poolManager.getSlot0(c.key.toId());
+            (, int24 tick,,) = poolManager.getSlot0(c.poolId);
             (currentTick[i], lower[i], upper[i]) = (tick, c.tickLower, c.tickUpper);
-            edgeProximityBps[i] = _edgeProximityBps(tick, c.tickLower, c.tickUpper);
+            edgeProximityBps[i] = IndexVaultMath.edgeProximityBps(tick, c.tickLower, c.tickUpper);
         }
     }
 
     /// @inheritdoc IIndexLpVault
-    /// @dev The first deposit's shares are its NAV after (idle donations included) less the dead shares
+    /// @dev Values, routing and shares use the deposit's valuation: current composition at the reference price
     function previewDeposit(uint256 indexValue)
         external
         view
         returns (uint256[] memory stockAmounts, uint256[] memory indexAmounts, uint256 shares)
     {
         Snapshot memory s = _snapshot();
-        (uint256[] memory values, uint256 navNow) = _values(s);
+        uint160[] memory refs = _referencePrices(s.sqrtPriceX96);
+        (uint256[] memory values, uint256 navNow) = _values(s, refs);
         uint256[] memory alloc = _route(indexValue, navNow, values);
         uint256 n = alloc.length;
         stockAmounts = new uint256[](n);
         indexAmounts = new uint256[](n);
         for (uint256 i; i < n; ++i) {
-            (stockAmounts[i], indexAmounts[i]) = _amountsForValue(_constituents[i], s.sqrtPriceX96[i], alloc[i]);
+            (stockAmounts[i], indexAmounts[i]) =
+                _amountsForValue(_constituents[i], s.sqrtPriceX96[i], refs[i], alloc[i]);
         }
         uint256 supply = totalSupply();
         if (supply == 0) {
-            shares = navNow + indexValue > DEAD_SHARES ? navNow + indexValue - DEAD_SHARES : 0;
+            shares = indexValue > DEAD_SHARES ? indexValue - DEAD_SHARES : 0;
         } else if (navNow != 0) {
             shares = FullMath.mulDiv(indexValue, supply, navNow);
         }
@@ -267,7 +278,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     /// @inheritdoc IIndexLpVault
     /// @dev Fees are collected first so the deposit is priced against a NAV that includes them. The tokens a position
     ///      does not take stay in the vault after the PositionManager's Permit2 pulls, so they are refunded from here
-    ///      (a PositionManager SWEEP would find nothing to sweep).
+    ///      (a PositionManager SWEEP would find nothing to sweep). The event carries the spot NAV, as `nav()` reports.
     function deposit(uint256[] calldata stockAmounts, uint256[] calldata indexAmounts, uint256 minShares, address to)
         external
         nonReentrant
@@ -276,7 +287,9 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         if (depositsPaused) revert DepositsArePaused();
         uint256 n = _constituents.length;
         if (stockAmounts.length != n || indexAmounts.length != n) revert LengthMismatch();
-        (Snapshot memory s, uint256 navBefore) = _collectFees();
+        (Snapshot memory s,) = _collectFees();
+        uint160[] memory refs = _referencePrices(s.sqrtPriceX96);
+        (, uint256 navBefore) = _values(s, refs);
         uint256 supply = totalSupply();
 
         _pull(stockAmounts, indexAmounts);
@@ -287,8 +300,9 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         for (uint256 i; i < n; ++i) {
             s.liquidity[i] += added[i];
         }
-        (, uint256 navAfter) = _values(s);
+        (, uint256 navAfter) = _values(s, refs);
         shares = _mintShares(to, supply, navBefore, navAfter, minShares);
+        (, navAfter) = _values(s, s.sqrtPriceX96);
         emit Deposit(msg.sender, to, shares, navAfter);
     }
 
@@ -318,7 +332,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
             s.idleStock[i] -= p.idleStock[i];
         }
         s.idleIndex -= p.idleIndex;
-        (, uint256 navAfter) = _values(s);
+        (, uint256 navAfter) = _values(s, s.sqrtPriceX96);
         emit Redeem(msg.sender, to, shares, navAfter);
         return (p.stockOut, p.indexOut);
     }
@@ -345,15 +359,34 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     }
 
     /// @inheritdoc IIndexLpVault
-    /// @dev Burns the old position (its NFT goes away) and mints with the vault's whole balance of both tokens as the
-    ///      maximums, so what the new range cannot take stays idle. Liquidity 0 leaves `tokenId` 0 for the next deposit.
+    function setMaxDeviationBps(uint16 maxDeviationBps_) external onlyOwner {
+        if (maxDeviationBps_ == 0 || maxDeviationBps_ >= BPS) revert InvalidMaxDeviation(maxDeviationBps_);
+        maxDeviationBps = maxDeviationBps_;
+        emit MaxDeviationBpsSet(maxDeviationBps_);
+    }
+
+    /// @inheritdoc IIndexLpVault
+    /// @dev Decreases the old position to zero (its empty NFT stays with the vault) and mints with the vault's whole
+    ///      balance of both tokens as the maximums, so what the new range cannot take stays idle. Liquidity 0 leaves
+    ///      `tokenId` 0 for the next deposit.
     function rerange(uint256 i, int24 tickLower, int24 tickUpper) external onlyOwner nonReentrant {
         Constituent storage c = _constituents[i];
         _checkRange(i, tickLower, tickUpper, c.key.tickSpacing);
-        _collectFees();
-        if (c.tokenId != 0) _burnPosition(c);
-        (c.tickLower, c.tickUpper) = (tickLower, tickUpper);
-        c.tokenId = _mintFromBalances(c);
+        (Snapshot memory s,) = _collectFees();
+        _referencePrices(s.sqrtPriceX96);
+        uint128[] memory close = new uint128[](s.liquidity.length);
+        close[i] = s.liquidity[i];
+        _decreaseAndTake(close, false, address(this));
+        _readIdle(s);
+        (c.tickLower, c.tickUpper, c.tokenId) = (tickLower, tickUpper, 0);
+        (uint128 liquidity,, bytes memory mint) =
+            _addAction(c, s.sqrtPriceX96[i], s.idleStock[i], s.idleIndex, positionManager.nextTokenId());
+        if (liquidity != 0) {
+            bytes[] memory params = new bytes[](2);
+            params[0] = mint;
+            params[1] = abi.encode(c.key.currency0, c.key.currency1);
+            _modify(abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR)), params, 2);
+        }
         emit Reranged(i, tickLower, tickUpper, c.tokenId);
     }
 
@@ -366,7 +399,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
     function _collectFees() internal returns (Snapshot memory s, uint256 navNow) {
         s = _snapshot();
         if (_decreaseAndTake(s.liquidity, true, address(this))) _readIdle(s);
-        (, navNow) = _values(s);
+        (, navNow) = _values(s, s.sqrtPriceX96);
         emit FeesCollected(navNow);
     }
 
@@ -445,29 +478,6 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
             : _modifyParams(c.tokenId, liquidity, amount0, amount1);
     }
 
-    /// @dev BURN_POSITION (removes any liquidity left, fees included) + TAKE_PAIR to the vault
-    function _burnPosition(Constituent storage c) internal {
-        bytes[] memory params = new bytes[](2);
-        params[0] = abi.encode(c.tokenId, uint128(0), uint128(0), bytes(""));
-        params[1] = _takePairParams(c.key, address(this));
-        _modify(abi.encodePacked(uint8(Actions.BURN_POSITION), uint8(Actions.TAKE_PAIR)), params, 2);
-    }
-
-    /// @dev MINT_POSITION over the constituent's (new) range with the vault's balances of its two tokens as maximums
-    ///      + SETTLE_PAIR. Returns the new token id, or 0 when the balances give no liquidity.
-    function _mintFromBalances(Constituent storage c) internal returns (uint256 tokenId) {
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(c.key.toId());
-        uint256 amount0 = IERC20(Currency.unwrap(c.key.currency0)).balanceOf(address(this));
-        uint256 amount1 = IERC20(Currency.unwrap(c.key.currency1)).balanceOf(address(this));
-        uint128 liquidity = _liquidityForAmounts(c, sqrtPriceX96, amount0, amount1);
-        if (liquidity == 0) return 0;
-        tokenId = positionManager.nextTokenId();
-        bytes[] memory params = new bytes[](2);
-        params[0] = _mintParams(c, liquidity, amount0, amount1);
-        params[1] = abi.encode(c.key.currency0, c.key.currency1);
-        _modify(abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR)), params, 2);
-    }
-
     /// @dev Runs the first `count` actions in one unlock; a no-op for 0
     function _modify(bytes memory actions, bytes[] memory params, uint256 count) internal {
         if (count == 0) return;
@@ -544,17 +554,19 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         if (p.idleIndex != 0) IERC20(indexToken).safeTransfer(to, p.idleIndex);
     }
 
-    /// @dev First deposit: its NAV in shares, `DEAD_SHARES` of them to 0xdead. Later: the NAV it added at the NAV per
+    /// @dev First deposit: the NAV it added in shares, `DEAD_SHARES` of them to 0xdead (never the NAV already held, so a
+    ///      zero-value first deposit cannot claim tokens sitting in the vault). Later: the NAV it added at the NAV per
     ///      share before it, rounded down.
     function _mintShares(address to, uint256 supply, uint256 navBefore, uint256 navAfter, uint256 minShares)
         internal
         returns (uint256 shares)
     {
+        uint256 added = navAfter > navBefore ? navAfter - navBefore : 0;
         if (supply == 0) {
-            shares = navAfter > DEAD_SHARES ? navAfter - DEAD_SHARES : 0;
+            shares = added > DEAD_SHARES ? added - DEAD_SHARES : 0;
         } else {
             if (navBefore == 0) revert ZeroNav();
-            shares = FullMath.mulDiv(navAfter - navBefore, supply, navBefore);
+            shares = FullMath.mulDiv(added, supply, navBefore);
         }
         if (shares == 0) revert ZeroShares();
         if (shares < minShares) revert SlippageExceeded();
@@ -614,15 +626,17 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         }
     }
 
-    /// @dev The token amounts (round down) of the liquidity worth `value` over the constituent's range at `sqrtPriceX96`
-    function _amountsForValue(Constituent storage c, uint160 sqrtPriceX96, uint256 value)
+    /// @dev The token amounts (round down) at `sqrtPriceX96` of the liquidity worth `value`, its stock valued at
+    ///      `valuationSqrtPriceX96`
+    function _amountsForValue(Constituent storage c, uint160 sqrtPriceX96, uint160 valuationSqrtPriceX96, uint256 value)
         internal
         view
         returns (uint256 stockAmount, uint256 indexAmount)
     {
         if (value == 0) return (0, 0);
         (uint256 unitStock, uint256 unitIndex) = _positionAmounts(c, sqrtPriceX96, UNIT_LIQUIDITY);
-        uint256 unitValue = unitIndex + _stockToIndex(c.stockIsCurrency0, unitStock, sqrtPriceX96);
+        uint256 unitValue =
+            unitIndex + IndexVaultMath.stockToIndex(c.stockIsCurrency0, unitStock, valuationSqrtPriceX96);
         if (unitValue == 0) return (0, 0);
         return _positionAmounts(c, sqrtPriceX96, FullMath.mulDiv(value, UNIT_LIQUIDITY, unitValue).toUint128());
     }
@@ -635,7 +649,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         s.idleStock = new uint256[](n);
         for (uint256 i; i < n; ++i) {
             Constituent storage c = _constituents[i];
-            (s.sqrtPriceX96[i],,,) = poolManager.getSlot0(c.key.toId());
+            (s.sqrtPriceX96[i],,,) = poolManager.getSlot0(c.poolId);
             uint256 tokenId = c.tokenId;
             if (tokenId != 0) s.liquidity[i] = positionManager.getPositionLiquidity(tokenId);
         }
@@ -650,17 +664,37 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         s.idleIndex = IERC20(indexToken).balanceOf(address(this));
     }
 
-    /// @dev Per constituent: its position's index amount plus its position and idle stock at the pool price. `navNow`
-    ///      adds the idle index token.
-    function _values(Snapshot memory s) internal view returns (uint256[] memory values, uint256 navNow) {
+    /// @dev Per constituent: its position's index amount (at the pool price) plus its position and idle stock valued at
+    ///      `valuationSqrtPriceX96` (spot for the views, the reference for deposits). `navNow` adds the idle index token.
+    function _values(Snapshot memory s, uint160[] memory valuationSqrtPriceX96)
+        internal
+        view
+        returns (uint256[] memory values, uint256 navNow)
+    {
         uint256 n = s.liquidity.length;
         values = new uint256[](n);
         navNow = s.idleIndex;
         for (uint256 i; i < n; ++i) {
             Constituent storage c = _constituents[i];
             (uint256 stockAmount, uint256 indexAmount) = _positionAmounts(c, s.sqrtPriceX96[i], s.liquidity[i]);
-            values[i] = indexAmount + _stockToIndex(c.stockIsCurrency0, stockAmount + s.idleStock[i], s.sqrtPriceX96[i]);
+            values[i] = indexAmount
+                + IndexVaultMath.stockToIndex(
+                    c.stockIsCurrency0, stockAmount + s.idleStock[i], valuationSqrtPriceX96[i]
+                );
             navNow += values[i];
+        }
+    }
+
+    /// @dev Each constituent's hook reference price; reverts `PriceDeviation(i)` when pool i's price is off it by more
+    ///      than `maxDeviationBps`
+    function _referencePrices(uint160[] memory sqrtPriceX96) internal view returns (uint160[] memory refs) {
+        uint256 n = sqrtPriceX96.length;
+        uint256 maxDeviation = maxDeviationBps;
+        refs = new uint160[](n);
+        for (uint256 i; i < n; ++i) {
+            Constituent storage c = _constituents[i];
+            refs[i] = IStableFeeConfigView(address(c.key.hooks)).feeConfig(c.poolId).referenceSqrtPriceX96;
+            if (!IndexVaultMath.withinBand(sqrtPriceX96[i], refs[i], maxDeviation)) revert PriceDeviation(i);
         }
     }
 
@@ -671,7 +705,7 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
         returns (uint256 stockAmount, uint256 indexAmount)
     {
         if (liquidity == 0) return (0, 0);
-        (uint256 amount0, uint256 amount1) = _amountsForLiquidity(
+        (uint256 amount0, uint256 amount1) = IndexVaultMath.amountsForLiquidity(
             sqrtPriceX96, TickMath.getSqrtPriceAtTick(c.tickLower), TickMath.getSqrtPriceAtTick(c.tickUpper), liquidity
         );
         return c.stockIsCurrency0 ? (amount0, amount1) : (amount1, amount0);
@@ -689,47 +723,6 @@ contract IndexLpVault is IIndexLpVault, ERC20, Ownable2Step, ReentrancyGuardTran
             amount0,
             amount1
         );
-    }
-
-    /// @dev LiquidityAmounts.getAmountsForLiquidity (v4-periphery's copy lacks it) with v4-core's own round-down math,
-    ///      so the amounts are exactly what a decrease of `liquidity` pays at `sqrtPriceX96`
-    function _amountsForLiquidity(uint160 sqrtPriceX96, uint160 sqrtPriceAX96, uint160 sqrtPriceBX96, uint128 liquidity)
-        internal
-        pure
-        returns (uint256 amount0, uint256 amount1)
-    {
-        if (sqrtPriceX96 <= sqrtPriceAX96) {
-            amount0 = SqrtPriceMath.getAmount0Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, false);
-        } else if (sqrtPriceX96 < sqrtPriceBX96) {
-            amount0 = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtPriceBX96, liquidity, false);
-            amount1 = SqrtPriceMath.getAmount1Delta(sqrtPriceAX96, sqrtPriceX96, liquidity, false);
-        } else {
-            amount1 = SqrtPriceMath.getAmount1Delta(sqrtPriceAX96, sqrtPriceBX96, liquidity, false);
-        }
-    }
-
-    /// @dev `amount` of stock in index-token wei at `sqrtPriceX96` (currency1 per currency0): × P when the stock is
-    ///      currency0, ÷ P otherwise. Two mulDivs by 2^96 keep 18-decimal amounts clear of overflow up to MAX_SQRT_PRICE.
-    function _stockToIndex(bool stockIsCurrency0, uint256 amount, uint160 sqrtPriceX96)
-        internal
-        pure
-        returns (uint256)
-    {
-        if (amount == 0 || sqrtPriceX96 == 0) return 0;
-        return stockIsCurrency0
-            ? FullMath.mulDiv(FullMath.mulDiv(amount, sqrtPriceX96, FixedPoint96.Q96), sqrtPriceX96, FixedPoint96.Q96)
-            : FullMath.mulDiv(FullMath.mulDiv(amount, FixedPoint96.Q96, sqrtPriceX96), FixedPoint96.Q96, sqrtPriceX96);
-    }
-
-    /// @dev 10000 × (halfWidth − distance to the nearer edge) / halfWidth, clamped to [0, 20000]; computed over the
-    ///      whole width (identical for the even widths of tick-spaced ranges, and never a division by zero)
-    function _edgeProximityBps(int24 tick, int24 tickLower, int24 tickUpper) internal pure returns (uint16) {
-        int256 width = int256(tickUpper) - tickLower;
-        int256 below = int256(tick) - tickLower;
-        int256 above = int256(tickUpper) - tick;
-        int256 nearest = below < above ? below : above;
-        int256 bps = 10_000 * (width - 2 * nearest) / width;
-        return uint16(uint256(bps > 20_000 ? int256(20_000) : bps));
     }
 
     function _stock(Constituent storage c) internal view returns (address) {

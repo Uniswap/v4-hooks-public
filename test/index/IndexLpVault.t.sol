@@ -19,6 +19,7 @@ import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol"
 import {PoolConfigLib, PoolEntry} from "../../script/index-vault/PoolConfigLib.sol";
 import {IndexLpVault} from "../../src/index/IndexLpVault.sol";
 import {IIndexLpVault} from "../../src/index/interfaces/IIndexLpVault.sol";
+import {IndexVaultMath} from "../../src/index/libraries/IndexVaultMath.sol";
 import {IndexVaultTestBase} from "./base/IndexVaultTestBase.sol";
 
 /// @notice The vault against the real 4663 PoolManager, PositionManager, Permit2 and tokens (fork; skipped without RPC_4663)
@@ -122,11 +123,13 @@ contract IndexLpVaultTest is IndexVaultTestBase {
     function test_previewDeposit_routesTowardTargets() public {
         _deposit(alice, 100e18);
         _movePrice(alice, NVDA, 11000);
+        _syncReference(NVDA); // the keeper follows the rally
+        vault.collectFees(); // previews exclude uncollected fees, which the deposit collects first
         (, uint16[] memory bps,) = vault.allocations();
         assertGt(bps[NVDA], pools[NVDA].targetBps, "NVDA overweight after its rally");
-        uint256 deviationBefore = _maxDeviationBps();
+        uint256 deviationBefore = _maxAllocationDeviationBps();
 
-        (uint256[] memory s, uint256[] memory q,) = vault.previewDeposit(50e18);
+        (uint256[] memory s, uint256[] memory q, uint256 previewShares) = vault.previewDeposit(50e18);
         for (uint256 i = 0; i < N; i++) {
             uint256 routed = _valueOf(i, s[i], q[i]);
             uint256 proRata = uint256(50e18) * pools[i].targetBps / 10_000;
@@ -136,9 +139,10 @@ contract IndexLpVaultTest is IndexVaultTestBase {
 
         (uint256[] memory aliceBefore, uint256 aliceIndexBefore) = _balances(alice);
         vm.prank(alice);
-        vault.deposit(s, q, 0, alice);
+        uint256 shares = vault.deposit(s, q, 0, alice);
+        assertApproxEqRel(shares, previewShares, 1e9, "the preview prices as the deposit does");
         _assertSpentWithinOneBps(aliceBefore, aliceIndexBefore, s, q);
-        assertLt(_maxDeviationBps(), deviationBefore);
+        assertLt(_maxAllocationDeviationBps(), deviationBefore);
     }
 
     function test_redeem_proRata() public {
@@ -240,6 +244,11 @@ contract IndexLpVaultTest is IndexVaultTestBase {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         vm.prank(alice);
         vault.rerange(NVDA, lower, upper);
+        // the pool sits 15% off a reference the keeper has not moved yet
+        vm.expectRevert(abi.encodeWithSelector(IIndexLpVault.PriceDeviation.selector, NVDA));
+        vm.prank(owner);
+        vault.rerange(NVDA, lower, upper);
+        _syncReference(NVDA);
 
         uint256 navBefore = vault.nav();
         uint256 newId = IPositionManager(POSM).nextTokenId();
@@ -251,8 +260,9 @@ contract IndexLpVaultTest is IndexVaultTestBase {
         assertEq(vault.constituent(NVDA).tokenId, newId);
         assertEq(IERC721(POSM).ownerOf(newId), address(vault));
         assertGt(IPositionManager(POSM).getPositionLiquidity(newId), 0);
-        vm.expectRevert(); // the old position is burned
-        IERC721(POSM).ownerOf(oldId);
+        // the old position is emptied into the vault; its NFT stays with the vault
+        assertEq(IPositionManager(POSM).getPositionLiquidity(oldId), 0);
+        assertEq(IERC721(POSM).ownerOf(oldId), address(vault));
         (, int24[] memory lowers, int24[] memory uppers, uint16[] memory proximity) = vault.rangeStatus();
         assertEq(lowers[NVDA], lower);
         assertEq(uppers[NVDA], upper);
@@ -405,6 +415,139 @@ contract IndexLpVaultTest is IndexVaultTestBase {
         assertEq(idleIndex - idleIndexAfter, idleIndex * shares / supply);
     }
 
+    /// @dev Preview and deposit price identically at fixed prices: first deposit and a later one
+    function test_previewDeposit_sharesMatchDeposit() public {
+        _approveAll(alice);
+        (uint256[] memory s, uint256[] memory q, uint256 preview) = vault.previewDeposit(100e18);
+        vm.prank(alice);
+        uint256 shares = vault.deposit(s, q, 0, alice);
+        emit log_named_uint("first deposit: |preview - minted| (share wei)", _absDiff(preview, shares));
+        assertApproxEqRel(shares, preview, 1e9);
+
+        _fundAll(bob);
+        _approveAll(bob);
+        (s, q, preview) = vault.previewDeposit(37e18);
+        vm.prank(bob);
+        shares = vault.deposit(s, q, 0, bob);
+        emit log_named_uint("later deposit: |preview - minted| (share wei)", _absDiff(preview, shares));
+        assertApproxEqRel(shares, preview, 1e9);
+    }
+
+    /// @dev The band is 1% in price either way from the hook reference, whichever side of the pair the stock is: just
+    ///      past it the preview and the deposit revert `PriceDeviation(i)`, just inside the deposit goes through
+    function test_deposit_priceBand() public {
+        _deposit(alice, 100e18);
+        _fundAll(bob);
+        _approveAll(bob);
+        (uint256[] memory s, uint256[] memory q,) = vault.previewDeposit(10e18);
+        uint256[2] memory constituents = [NVDA, MSFT]; // the stock is currency0, then currency1
+        for (uint256 k = 0; k < 2; k++) {
+            _assertBand(constituents[k], 0.9899e18, false, s, q); // stock -1.01%
+            _assertBand(constituents[k], 1.0102e18, false, s, q); // stock +1.02% (1/1.0102 < 0.99)
+            _assertBand(constituents[k], 0.9901e18, true, s, q); // stock -0.99%
+            _assertBand(constituents[k], 1.01e18, true, s, q); // stock +1.00% (1/1.01 > 0.99)
+        }
+    }
+
+    function test_redeem_worksWithAPoolOutOfBand() public {
+        uint256 shares = _deposit(alice, 100e18);
+        _moveStockPrice(alice, 4, 0.95e18); // MU (stock is currency1), 5% under its reference
+        vm.expectRevert(abi.encodeWithSelector(IIndexLpVault.PriceDeviation.selector, 4));
+        vault.previewDeposit(1e18);
+        (uint256[] memory previewStock, uint256[] memory previewIndex) = vault.previewRedeem(shares / 2);
+        (uint256[] memory stockOut,) = _redeem(alice, shares / 2, previewStock, previewIndex);
+        assertGt(stockOut[4], 0);
+        assertEq(vault.balanceOf(alice), shares - shares / 2);
+    }
+
+    /// @dev Tokens already in the vault are not claimable by a first deposit that adds nothing, and the first deposit
+    ///      mints only the value it added
+    function test_firstDeposit_mintsOnTheValueAdded() public {
+        vm.prank(alice);
+        IERC20(QQQ).transfer(address(vault), 10e18);
+        uint256[] memory zeros = new uint256[](N);
+        vm.expectRevert(IIndexLpVault.ZeroShares.selector);
+        vm.prank(bob);
+        vault.deposit(zeros, zeros, 0, bob);
+
+        uint256 shares = _deposit(alice, 50e18);
+        assertEq(shares + 1000, vault.nav() - 10e18, "shares are the value added, not the vault's balance");
+        assertEq(vault.totalSupply(), shares + 1000);
+    }
+
+    /// @dev Review cycle: push the five largest pools' stock prices down 10% through the PoolManager, deposit, let the
+    ///      hook's corrective fee decay, swap back to the exact starting prices and redeem. The deposit is the shape that
+    ///      profits from spot pricing (only the five pools left alone, bought into a depressed NAV; a routed deposit
+    ///      mirrors the vault's own mix and gains nothing even at spot). The band is widened so the deposit goes through
+    ///      at all: reference pricing alone leaves the attacker no gain.
+    function test_manipulationCycle_netsTheAttackerNoGain() public {
+        _deposit(alice, 100e18);
+        vm.prank(owner);
+        vault.setMaxDeviationBps(1500);
+        _fundAll(bob);
+        _approveAll(bob);
+        uint160[5] memory start;
+        for (uint256 i = 0; i < 5; i++) {
+            (start[i],) = _slot0(i);
+        }
+        (uint256[] memory s, uint256[] memory q,) = vault.previewDeposit(100e18);
+        for (uint256 i = 0; i < 5; i++) {
+            (s[i], q[i]) = (0, 0);
+        }
+        uint256 before = _valueAtReference(bob);
+
+        for (uint256 i = 0; i < 5; i++) {
+            _moveStockPrice(bob, i, 0.9e18);
+        }
+        uint256 mid = _valueAtReference(bob);
+        vm.prank(bob);
+        uint256 shares = vault.deposit(s, q, 0, bob);
+        uint256 deposited = mid - _valueAtReference(bob);
+
+        vm.roll(block.number + 5000);
+        for (uint256 i = 0; i < 5; i++) {
+            _swapToPrice(bob, i, start[i]);
+        }
+        uint256 beforeRedeem = _valueAtReference(bob);
+        uint256[] memory zeros = new uint256[](N);
+        vm.prank(bob);
+        vault.redeem(shares, zeros, zeros, bob);
+        uint256 redeemed = _valueAtReference(bob) - beforeRedeem;
+        uint256 after_ = _valueAtReference(bob);
+
+        emit log_named_uint("attacker value before (QQQ wei)", before);
+        emit log_named_uint("attacker value after  (QQQ wei)", after_);
+        emit log_named_uint("deposited at reference (QQQ wei)", deposited);
+        emit log_named_uint("redeemed at reference  (QQQ wei)", redeemed);
+        assertLe(redeemed, deposited + 5 * N, "the deposit/redeem leg returns no more than it took");
+        assertLe(after_, before + 5 * N, "the whole cycle nets the attacker nothing");
+    }
+
+    /// @dev At fixed prices, a deposit (routed or off-ratio, first or later) followed by redeeming every share it
+    ///      minted never returns more value than it took, up to the floor rounding of the eleven valuations and of the
+    ///      NAV difference (a few wei per constituent)
+    /// forge-config: default.fuzz.runs = 32
+    function testFuzz_depositThenRedeem_returnsNoMoreThanDeposited(uint256 indexValue, uint256 tiltBps, bool first)
+        public
+    {
+        indexValue = bound(indexValue, 1e14, 100e18);
+        tiltBps = bound(tiltBps, 5000, 15_000);
+        if (!first) _deposit(alice, 100e18);
+        _fundAll(bob);
+        _approveAll(bob);
+        (uint256[] memory s, uint256[] memory q,) = vault.previewDeposit(indexValue);
+        for (uint256 i = 0; i < N; i++) {
+            s[i] = s[i] * tiltBps / 10_000;
+        }
+        uint256 before = _valueAtReference(bob);
+        vm.prank(bob);
+        uint256 shares = vault.deposit(s, q, 0, bob);
+        uint256[] memory zeros = new uint256[](N);
+        vm.prank(bob);
+        vault.redeem(shares, zeros, zeros, bob);
+        assertLe(_valueAtReference(bob), before + 5 * N);
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
 
     uint256 internal _lastIndexBalance;
@@ -423,6 +566,30 @@ contract IndexLpVaultTest is IndexVaultTestBase {
         _lastIndexBalance = IERC20(QQQ).balanceOf(who);
         vm.prank(who);
         (stockOut, indexOut) = vault.redeem(shares, minStock, minIndex, who);
+    }
+
+    function _absDiff(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a > b ? a - b : b - a;
+    }
+
+    /// @dev Moves constituent i's stock price by `stockRatioWad` (in a state snapshot that is rolled back) and checks
+    ///      whether bob's deposit of the in-band amounts goes through or reverts `PriceDeviation(i)`
+    function _assertBand(uint256 i, uint256 stockRatioWad, bool inside, uint256[] memory s, uint256[] memory q)
+        internal
+    {
+        uint256 snapshot = vm.snapshotState();
+        _moveStockPrice(alice, i, stockRatioWad);
+        if (inside) {
+            vm.prank(bob);
+            assertGt(vault.deposit(s, q, 0, bob), 0);
+        } else {
+            vm.expectRevert(abi.encodeWithSelector(IIndexLpVault.PriceDeviation.selector, i));
+            vault.previewDeposit(1e18);
+            vm.expectRevert(abi.encodeWithSelector(IIndexLpVault.PriceDeviation.selector, i));
+            vm.prank(bob);
+            vault.deposit(s, q, 0, bob);
+        }
+        vm.revertToState(snapshot);
     }
 
     /// @dev The arrays add up to exactly what arrives, and the payout is at least the preview (fees collected first)
@@ -541,6 +708,30 @@ contract IndexLpVaultConstructorTest is Test {
         }
     }
 
+    /// @dev CI's `forge build --sizes` skips any contract with a `setup()` function, so the limit is checked here
+    function test_runtimeFitsTheContractSizeLimit() public {
+        IndexLpVault vault = _deploy(_inits());
+        emit log_named_uint("IndexLpVault runtime size (bytes)", address(vault).code.length);
+        assertLe(address(vault).code.length, 24_576);
+    }
+
+    function test_setMaxDeviationBps_ownerOnlyAndBounded() public {
+        IndexLpVault vault = _deploy(_inits());
+        assertEq(vault.maxDeviationBps(), 100);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        vault.setMaxDeviationBps(200);
+        vm.startPrank(owner);
+        vm.expectRevert(abi.encodeWithSelector(IndexLpVault.InvalidMaxDeviation.selector, 0));
+        vault.setMaxDeviationBps(0);
+        vm.expectRevert(abi.encodeWithSelector(IndexLpVault.InvalidMaxDeviation.selector, 10_000));
+        vault.setMaxDeviationBps(10_000);
+        vm.expectEmit(address(vault));
+        emit IIndexLpVault.MaxDeviationBpsSet(9999);
+        vault.setMaxDeviationBps(9999);
+        vm.stopPrank();
+        assertEq(vault.maxDeviationBps(), 9999);
+    }
+
     function test_constructor_revertsWhenTargetsDoNotSumTo10000() public {
         IIndexLpVault.ConstituentInit[] memory inits = _inits();
         inits[3].targetBps += 1;
@@ -626,16 +817,10 @@ contract IndexLpVaultConstructorTest is Test {
     }
 }
 
-/// @notice Exposes the vault's pure math to unit tests
-contract IndexLpVaultHarness is IndexLpVault {
-    constructor(IIndexLpVault.ConstituentInit[] memory inits)
-        IndexLpVault(
-            IPoolManager(address(0x1)), address(0x2), address(0x3), inits[0].currency1, inits, "h", "h", address(0x4)
-        )
-    {}
-
+/// @notice Exposes IndexVaultMath to unit tests
+contract IndexVaultMathHarness {
     function stockToIndex(bool stockIsCurrency0, uint256 amount, uint160 sqrtPriceX96) external pure returns (uint256) {
-        return _stockToIndex(stockIsCurrency0, amount, sqrtPriceX96);
+        return IndexVaultMath.stockToIndex(stockIsCurrency0, amount, sqrtPriceX96);
     }
 
     function amountsForLiquidity(uint160 sqrtPriceX96, uint160 sqrtPriceAX96, uint160 sqrtPriceBX96, uint128 liquidity)
@@ -643,24 +828,28 @@ contract IndexLpVaultHarness is IndexLpVault {
         pure
         returns (uint256, uint256)
     {
-        return _amountsForLiquidity(sqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
+        return IndexVaultMath.amountsForLiquidity(sqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
     }
 
     function edgeProximityBps(int24 tick, int24 tickLower, int24 tickUpper) external pure returns (uint16) {
-        return _edgeProximityBps(tick, tickLower, tickUpper);
+        return IndexVaultMath.edgeProximityBps(tick, tickLower, tickUpper);
+    }
+
+    function withinBand(uint160 sqrtPriceX96, uint160 referenceSqrtPriceX96, uint256 maxDeviationBps)
+        external
+        pure
+        returns (bool)
+    {
+        return IndexVaultMath.withinBand(sqrtPriceX96, referenceSqrtPriceX96, maxDeviationBps);
     }
 }
 
 /// @notice The valuation and range math, no fork needed
 contract IndexLpVaultMathTest is Test {
-    IndexLpVaultHarness harness;
+    IndexVaultMathHarness harness;
 
     function setUp() public {
-        IIndexLpVault.ConstituentInit[] memory inits = new IIndexLpVault.ConstituentInit[](1);
-        inits[0] = IIndexLpVault.ConstituentInit(
-            address(0xA), address(0xA), address(0xB), 0x800000, 10, address(0), -100, 100, 10_000
-        );
-        harness = new IndexLpVaultHarness(inits);
+        harness = new IndexVaultMathHarness();
     }
 
     /// @dev 18-decimal amounts up to 1e12 whole tokens value without overflow at both price extremes
@@ -712,5 +901,32 @@ contract IndexLpVaultMathTest is Test {
         assertEq(harness.edgeProximityBps(150, -100, 100), 15_000, "half a half-width out of range");
         assertEq(harness.edgeProximityBps(TickMath.MIN_TICK, -100, 100), 20_000, "clamped");
         assertEq(harness.edgeProximityBps(0, 0, 1), 10_000, "width 1 does not divide by zero");
+    }
+
+    /// @dev 1% band in price, either direction, from a reference at price 1 (and at a price far from 1)
+    function test_withinBand_boundaries() public view {
+        uint160 one = uint160(1 << 96);
+        assertTrue(harness.withinBand(one, one, 100));
+        assertTrue(harness.withinBand(_sqrtPriceOf(0.9901e18, one), one, 100), "-0.99%");
+        assertFalse(harness.withinBand(_sqrtPriceOf(0.9899e18, one), one, 100), "-1.01%");
+        assertTrue(harness.withinBand(_sqrtPriceOf(1.01e18, one), one, 100), "+1.00%: 1/1.01 > 0.99");
+        assertFalse(harness.withinBand(_sqrtPriceOf(1.0102e18, one), one, 100), "+1.02%: 1/1.0102 < 0.99");
+        uint160 far = TickMath.getSqrtPriceAtTick(-200_000);
+        assertTrue(harness.withinBand(_sqrtPriceOf(1.0099e18, far), far, 100));
+        assertFalse(harness.withinBand(_sqrtPriceOf(0.98e18, far), far, 100));
+        assertTrue(harness.withinBand(_sqrtPriceOf(0.98e18, far), far, 300), "wider band");
+        assertFalse(harness.withinBand(0, one, 100), "uninitialized pool");
+        assertFalse(harness.withinBand(one, 0, 100), "no reference");
+    }
+
+    /// @dev The sqrt price of `ratioWad / 1e18` times the price at `sqrtPriceX96`
+    function _sqrtPriceOf(uint256 ratioWad, uint160 sqrtPriceX96) internal pure returns (uint160) {
+        uint256 root = ratioWad;
+        uint256 z = (ratioWad + 1) / 2;
+        while (z < root) {
+            root = z;
+            z = (ratioWad / z + z) / 2;
+        }
+        return uint160(FullMath.mulDiv(sqrtPriceX96, root, 1e9));
     }
 }

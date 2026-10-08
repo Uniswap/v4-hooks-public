@@ -34,6 +34,7 @@ interface IIndexLpVault {
     event FeesCollected(uint256 navAfter);
     event Reranged(uint256 indexed i, int24 tickLower, int24 tickUpper, uint256 tokenId);
     event DepositsPaused(bool paused);
+    event MaxDeviationBpsSet(uint16 maxDeviationBps);
 
     /// @notice An amounts array does not have one entry per constituent
     error LengthMismatch();
@@ -43,6 +44,8 @@ interface IIndexLpVault {
     error DepositsArePaused();
     /// @notice The deposit would mint, or the redemption burns, zero shares
     error ZeroShares();
+    /// @notice Constituent i's pool price is more than `maxDeviationBps` away from its hook reference price
+    error PriceDeviation(uint256 i);
 
     /// @notice The token every pool pairs with and every value is expressed in
     function indexToken() external view returns (address);
@@ -51,7 +54,7 @@ interface IIndexLpVault {
 
     function constituent(uint256 i) external view returns (ConstituentView memory);
 
-    /// @notice Positions valued at each pool's current price, plus the vault's idle balances; uncollected fees excluded
+    /// @notice Positions and idle balances valued at each pool's current price (spot); uncollected fees excluded
     function nav() external view returns (uint256 navInIndex);
 
     /// @notice Per constituent: its value (position plus idle stock), its share of `nav` in bps, and whether that share
@@ -74,7 +77,7 @@ interface IIndexLpVault {
         );
 
     /// @notice The amounts a deposit worth `indexValue` should bring, routed toward target weights, and the shares it
-    ///         mints at the current NAV
+    ///         mints: priced as `deposit` prices, so it reverts `PriceDeviation` when `deposit` would
     function previewDeposit(uint256 indexValue)
         external
         view
@@ -96,7 +99,9 @@ interface IIndexLpVault {
         );
 
     /// @notice Adds `stockAmounts[i]` and `indexAmounts[i]` to constituent i's position (minting it on first use), returns
-    ///         what the positions did not take to the caller and mints shares for the value added to `to`
+    ///         what the positions did not take to the caller and mints shares for the value added to `to`. Shares are
+    ///         priced with each pool's current composition valued at the hook's reference price, and the deposit
+    ///         reverts `PriceDeviation` while any pool is off its reference by more than `maxDeviationBps`.
     function deposit(uint256[] calldata stockAmounts, uint256[] calldata indexAmounts, uint256 minShares, address to)
         external
         returns (uint256 shares);
@@ -114,7 +119,14 @@ interface IIndexLpVault {
 
     function setDepositsPaused(bool paused) external;
 
+    /// @notice How far (in price, either direction) a pool may sit from its hook reference price before deposits and
+    ///         reranges revert `PriceDeviation`; redemptions are never checked
+    function maxDeviationBps() external view returns (uint16);
+
+    /// @notice Owner: sets `maxDeviationBps`, which must be in (0, 10000)
+    function setMaxDeviationBps(uint16 maxDeviationBps_) external;
+
     /// @notice Owner: closes constituent i's position into the vault and re-mints the vault's balances of its two
-    ///         tokens over `[tickLower, tickUpper)`
+    ///         tokens over `[tickLower, tickUpper)`; reverts `PriceDeviation` like `deposit`
     function rerange(uint256 i, int24 tickLower, int24 tickUpper) external;
 }

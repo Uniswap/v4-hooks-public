@@ -17,6 +17,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {HookMiner} from "../../../src/utils/HookMiner.sol";
 import {StablePairHook} from "../../../src/stable/StablePairHook.sol";
+import {StableFeeConfig} from "../../../src/stable/interfaces/IStableFeeConfiguration.sol";
 import {BaseDynamicFeeHook} from "../../../src/base/BaseDynamicFeeHook.sol";
 import {ArbSysMock} from "../../../script/index-vault/ArbSysMock.sol";
 import {PoolConfigLib, PoolEntry} from "../../../script/index-vault/PoolConfigLib.sol";
@@ -161,8 +162,23 @@ abstract contract IndexVaultTestBase is Test {
 
     /// @dev Moves pool i's price (currency1 per currency0) by `priceBps` (e.g. 11000 = +10%), as the only LP's swap
     function _movePrice(address who, uint256 i, uint256 priceBps) internal {
+        _movePoolPrice(who, i, priceBps * 1e14);
+    }
+
+    /// @dev Moves pool i's price (currency1 per currency0) to `ratioWad / 1e18` times its current value
+    function _movePoolPrice(address who, uint256 i, uint256 ratioWad) internal {
         (uint160 sqrtP,) = _slot0(i);
-        uint160 target = uint160(FullMath.mulDiv(sqrtP, _sqrt(priceBps * 1e14), 1e9));
+        _swapToPrice(who, i, uint160(FullMath.mulDiv(sqrtP, _sqrt(ratioWad), 1e9)));
+    }
+
+    /// @dev Moves pool i's stock price in index terms by `ratioWad / 1e18`, on whichever side of the pair the stock is
+    function _moveStockPrice(address who, uint256 i, uint256 ratioWad) internal {
+        _movePoolPrice(who, i, pools[i].stockIsCurrency0 ? ratioWad : 1e36 / ratioWad);
+    }
+
+    /// @dev One exact-input swap by `who` that stops exactly at `target` (half `who`'s balance of the input token)
+    function _swapToPrice(address who, uint256 i, uint160 target) internal {
+        (uint160 sqrtP,) = _slot0(i);
         // price up = currency1 in (oneForZero); the limit stops the swap exactly at the target
         address tokenIn = target > sqrtP ? pools[i].currency1 : pools[i].currency0;
         _swap(who, i, target < sqrtP, IERC20(tokenIn).balanceOf(who) / 2, target);
@@ -170,18 +186,42 @@ abstract contract IndexVaultTestBase is Test {
         assertEq(after_, target, "price move did not reach its target");
     }
 
+    /// @dev What the keeper does: moves pool i's hook reference price to the pool's current price
+    function _syncReference(uint256 i) internal {
+        PoolId id = _key(i).toId();
+        (uint24 k, uint24 optimalFeeE6, uint8 targetMultiplier,) = hook.feeConfig(id);
+        (uint160 sqrtP,) = _slot0(i);
+        vm.prank(owner);
+        hook.updateFeeConfig(id, StableFeeConfig(k, optimalFeeE6, targetMultiplier, sqrtP));
+    }
+
+    function _referenceSqrtPrice(uint256 i) internal view returns (uint160 referenceSqrtPriceX96) {
+        (,,, referenceSqrtPriceX96) = hook.feeConfig(_key(i).toId());
+    }
+
     /// @dev Value in index-token wei of `stockAmount` of pool i's stock plus `indexAmount`, at pool i's current price
     function _valueOf(uint256 i, uint256 stockAmount, uint256 indexAmount) internal view returns (uint256) {
         (uint160 sqrtP,) = _slot0(i);
+        return _stockValueAt(i, stockAmount, sqrtP) + indexAmount;
+    }
+
+    function _stockValueAt(uint256 i, uint256 stockAmount, uint160 sqrtP) internal view returns (uint256) {
         uint256 q96 = 1 << 96;
-        uint256 stockValue = pools[i].stockIsCurrency0
+        return pools[i].stockIsCurrency0
             ? FullMath.mulDiv(FullMath.mulDiv(stockAmount, sqrtP, q96), sqrtP, q96)
             : FullMath.mulDiv(FullMath.mulDiv(stockAmount, q96, sqrtP), q96, sqrtP);
-        return stockValue + indexAmount;
+    }
+
+    /// @dev `who`'s eleven token balances in index-token wei, every stock at its hook reference price
+    function _valueAtReference(address who) internal view returns (uint256 value) {
+        value = IERC20(QQQ).balanceOf(who);
+        for (uint256 i = 0; i < pools.length; i++) {
+            value += _stockValueAt(i, IERC20(pools[i].stock).balanceOf(who), _referenceSqrtPrice(i));
+        }
     }
 
     /// @dev Largest |bps − target| over the constituents, from allocations()
-    function _maxDeviationBps() internal view returns (uint256 maxDev) {
+    function _maxAllocationDeviationBps() internal view returns (uint256 maxDev) {
         (, uint16[] memory bps,) = vault.allocations();
         for (uint256 i = 0; i < bps.length; i++) {
             uint256 t = pools[i].targetBps;
