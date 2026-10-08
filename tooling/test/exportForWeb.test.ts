@@ -1,17 +1,31 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeFunctionResult, encodeAbiParameters, toFunctionSelector } from "viem";
-import { INDEX_TOKEN } from "../src/constituents";
 import {
+  decodeFunctionResult,
+  encodeAbiParameters,
+  getAddress,
+  isAddress,
+  keccak256,
+  toFunctionSelector,
+  type Hex,
+} from "viem";
+import { CONSTITUENTS, DYNAMIC_FEE_FLAG, INDEX_TOKEN } from "../src/constituents";
+import {
+  DEFAULT_ABI_DIR,
+  DEFAULT_DEPLOYMENTS,
+  DEFAULT_OUT,
   HOOK_FUNCTIONS,
   VAULT_FUNCTIONS,
   buildStateViewAbi,
   checkAbiHas,
   main,
+  parseCli,
+  poolIdOf,
   validateDeployments,
 } from "../src/exportForWeb";
+import { DEFAULT_DEPLOYMENTS as KEEPER_DEPLOYMENTS, parseDeployments } from "../src/keeper";
 
 type Json = Record<string, unknown>;
 type Raw = Json & { constituents: Json[] };
@@ -27,14 +41,25 @@ interface PoolRow {
   targetBps: number;
 }
 
-/** The ten real pools: out/pools.4663.json is tracked, so this is the same in every checkout. */
-const POOLS = (
-  JSON.parse(readFileSync(join(import.meta.dir, "../out/pools.4663.json"), "utf8")) as { pools: PoolRow[] }
-).pools;
+let poolsRead: PoolRow[] | undefined;
+
+/**
+ * The ten real pools of out/pools.4663.json (tracked in git), read on first use so that a missing file fails the tests
+ * that need it rather than the whole file. Their addresses, order and weights are fixed by constituents.ts. Their ticks
+ * follow the prices the file was generated at and change whenever it is regenerated, so no test may hard-code one:
+ * expectations are taken from these rows, or the test sets its own ticks.
+ */
+function loadPools(): PoolRow[] {
+  poolsRead ??= (
+    JSON.parse(readFileSync(join(import.meta.dir, "../out/pools.4663.json"), "utf8")) as { pools: PoolRow[] }
+  ).pools;
+  return poolsRead;
+}
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 const HOOK = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
-const VAULT = "0x1234567890123456789012345678901234567890";
+const OTHER_HOOK = "0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed";
+const VAULT = "0x1234567890abcdef1234567890abcdef12345678";
 const POSITION_MANAGER = "0x58daec3116aae6d93017baaea7749052e8a04fa7";
 const POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
 const STATE_VIEW = "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b";
@@ -96,19 +121,29 @@ const STATE_VIEW_JSON = `[
 ]
 `;
 
-const poolId = (i: number) => `0x${(i + 1).toString(16).padStart(2, "0").repeat(32)}`;
+/**
+ * v4's PoolId of a dynamic-fee pool, keccak256(abi.encode(PoolKey)). The fixture's ids come from this, written out with
+ * viem here rather than taken from the code under test.
+ */
+const poolIdFor = (currency0: string, currency1: string, tickSpacing: number, hook: string): Hex =>
+  keccak256(
+    encodeAbiParameters(
+      [{ type: "address" }, { type: "address" }, { type: "uint24" }, { type: "int24" }, { type: "address" }],
+      [currency0 as Hex, currency1 as Hex, DYNAMIC_FEE_FLAG, tickSpacing, hook as Hex],
+    ),
+  );
 
 /**
- * A valid deployments file the way forge writes it (keys alphabetical, not in the page's order): the ten real pools
- * with made-up pool ids, hook and vault.
+ * A valid deployments file the way forge writes it (keys alphabetical, not in the page's order): the ten real pools,
+ * their ids computed for the fixture's hook, and a made-up hook and vault.
  */
 function rawDeployments(): Raw {
   return {
     chainId: 4663,
-    constituents: POOLS.map((p, i) => ({
+    constituents: loadPools().map((p) => ({
       currency0: p.currency0,
       currency1: p.currency1,
-      poolId: poolId(i),
+      poolId: poolIdFor(p.currency0, p.currency1, p.tickSpacing, HOOK),
       stock: p.stock,
       symbol: p.symbol,
       targetBps: p.targetBps,
@@ -148,7 +183,7 @@ const pageShape = (raw: Raw) => ({
 });
 
 const pool = (raw: Raw, symbol: string): Json => raw.constituents.find((c) => c.symbol === symbol)!;
-const stockOf = (symbol: string): string => POOLS.find((p) => p.symbol === symbol)!.stock;
+const stockOf = (symbol: string): string => loadPools().find((p) => p.symbol === symbol)!.stock;
 
 /** The message of the error `run` throws; fails the test if it does not throw. */
 function rejection(run: () => unknown): string {
@@ -158,6 +193,23 @@ function rejection(run: () => unknown): string {
     return (error as Error).message;
   }
   throw new Error("expected the call to throw");
+}
+
+const ADDRESS_FIELDS = ["hook", "vault", "indexToken", "positionManager", "poolManager", "stateView"];
+
+/** `address` with the case of one letter flipped from its EIP-55 form: mixed case, and not the checksum. */
+function wrongChecksum(address: string): string {
+  const good = getAddress(address);
+  for (let i = 2; i < good.length; i++) {
+    const letter = good[i]!;
+    if (!/[a-fA-F]/.test(letter)) continue;
+    const flipped =
+      good.slice(0, i) +
+      (letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase()) +
+      good.slice(i + 1);
+    if (flipped !== flipped.toLowerCase() && !isAddress(flipped)) return flipped;
+  }
+  throw new Error(`no wrong-checksum variant of ${address}`);
 }
 
 describe("validateDeployments", () => {
@@ -174,13 +226,16 @@ describe("validateDeployments", () => {
   test("keeps every value as written (checksummed addresses, negative ticks) and drops unknown keys", () => {
     const raw = rawDeployments();
     raw.deployedAt = "yesterday";
-    raw.constituents[0]!.note = "not part of the page's schema";
+    const nvda = pool(raw, "NVDA");
+    nvda.note = "not part of the page's schema";
+    // negative multiples of the spacing, whatever ticks the pools file was generated with
+    [nvda.tickLower, nvda.tickUpper] = [-14010, -9540];
     const bundle = validateDeployments(raw);
-    expect<unknown>(bundle).toEqual(pageShape(rawDeployments()));
+    expect<unknown>(bundle).toEqual(pageShape(raw));
     expect(bundle).not.toHaveProperty("deployedAt");
     expect(bundle.constituents[0]).not.toHaveProperty("note");
     expect(bundle.indexToken).toBe(INDEX_TOKEN);
-    expect(bundle.constituents[0]!.tickLower).toBeLessThan(0);
+    expect(bundle.constituents[0]).toMatchObject({ tickLower: -14010, tickUpper: -9540 });
   });
 
   test("accepts targetBps that sum to 2 off 10000 in either direction", () => {
@@ -189,6 +244,26 @@ describe("validateDeployments", () => {
       pool(raw, "NVDA").targetBps = (pool(raw, "NVDA").targetBps as number) + delta;
       expect(() => validateDeployments(raw)).not.toThrow();
     }
+  });
+
+  test("accepts every address checksummed or all-lowercase", () => {
+    for (const form of [(address: string) => getAddress(address), (address: string) => address.toLowerCase()]) {
+      const raw = rawDeployments();
+      for (const field of ADDRESS_FIELDS) raw[field] = form(raw[field] as string);
+      for (const c of raw.constituents) {
+        for (const field of ["stock", "currency0", "currency1"]) c[field] = form(c[field] as string);
+      }
+      expect(() => validateDeployments(raw)).not.toThrow();
+    }
+  });
+
+  test("accepts a poolId in uppercase hex and keeps it as written", () => {
+    const raw = rawDeployments();
+    const nvda = pool(raw, "NVDA");
+    const shouting = `0x${(nvda.poolId as string).slice(2).toUpperCase()}`;
+    expect(shouting).not.toBe(nvda.poolId);
+    nvda.poolId = shouting;
+    expect(validateDeployments(raw).constituents[0]!.poolId).toBe(shouting);
   });
 
   test("compares addresses case-insensitively and keeps them as written", () => {
@@ -207,7 +282,7 @@ describe("validateDeployments", () => {
     }
   });
 
-  for (const field of ["hook", "vault", "indexToken", "positionManager", "poolManager", "stateView"]) {
+  for (const field of ADDRESS_FIELDS) {
     test(`rejects a ${field} that is not 0x plus 40 hex digits`, () => {
       for (const bad of ["0x1234", `0x${"g".repeat(40)}`, `0x${"1".repeat(41)}`, 123, undefined]) {
         const raw = rawDeployments();
@@ -219,6 +294,31 @@ describe("validateDeployments", () => {
     });
   }
 
+  for (const field of ADDRESS_FIELDS) {
+    test(`rejects a ${field} in mixed case that is not its EIP-55 checksum`, () => {
+      const raw = rawDeployments();
+      const good = getAddress(raw[field] as string);
+      const bad = wrongChecksum(good);
+      raw[field] = bad;
+      expect(rejection(() => validateDeployments(raw))).toBe(
+        `deployments: ${field} has a wrong EIP-55 checksum, got ${bad}, expected ${good}`,
+      );
+    });
+  }
+
+  for (const field of ["stock", "currency0", "currency1"]) {
+    test(`rejects a constituent ${field} in mixed case that is not its EIP-55 checksum`, () => {
+      const raw = rawDeployments();
+      const msft = pool(raw, "MSFT");
+      const good = getAddress(msft[field] as string);
+      const bad = wrongChecksum(good);
+      msft[field] = bad;
+      expect(rejection(() => validateDeployments(raw))).toBe(
+        `deployments: constituents[2] (MSFT).${field} has a wrong EIP-55 checksum, got ${bad}, expected ${good}`,
+      );
+    });
+  }
+
   // [name, break one thing in a valid file, the one line that must say so]
   const rejected: [string, (raw: Raw) => void, RegExp][] = [
     ["a different chain", (r) => void (r.chainId = 1), /^deployments: chainId is 1, expected 4663$/],
@@ -226,9 +326,19 @@ describe("validateDeployments", () => {
     ["the zero hook", (r) => void (r.hook = ZERO), /^deployments: hook is the zero address$/],
     ["the zero vault", (r) => void (r.vault = ZERO), /^deployments: vault is the zero address$/],
     [
+      "an indexToken that is not QQQ",
+      (r) => void (r.indexToken = stockOf("AAPL")),
+      new RegExp(`^deployments: indexToken is 0x\\w+, expected ${INDEX_TOKEN}$`),
+    ],
+    [
       "a constituent stock that is not an address",
       (r) => void (pool(r, "AAPL").stock = "0x1234"),
       /^deployments: constituents\[1\] \(AAPL\)\.stock must be 0x plus 40 hex digits, got "0x1234"$/,
+    ],
+    [
+      "a constituent currency0 that is not an address",
+      (r) => void (pool(r, "MSFT").currency0 = "0x1234"),
+      /^deployments: constituents\[2\] \(MSFT\)\.currency0 must be 0x plus 40 hex digits, got "0x1234"$/,
     ],
     [
       "a constituent currency1 that is not an address",
@@ -298,16 +408,19 @@ describe("validateDeployments", () => {
     ],
     [
       "equal ticks",
-      (r) => void (pool(r, "MSFT").tickLower = pool(r, "MSFT").tickUpper),
-      /^deployments: constituents\[2\] \(MSFT\): tickLower 4990 must be below tickUpper 4990$/,
+      (r) => {
+        const c = pool(r, "MSFT");
+        [c.tickLower, c.tickUpper] = [600, 600];
+      },
+      /^deployments: constituents\[2\] \(MSFT\): tickLower 600 must be below tickUpper 600$/,
     ],
     [
       "ticks the wrong way round",
       (r) => {
         const c = pool(r, "MSFT");
-        [c.tickLower, c.tickUpper] = [c.tickUpper, c.tickLower];
+        [c.tickLower, c.tickUpper] = [600, -400];
       },
-      /^deployments: constituents\[2\] \(MSFT\): tickLower 4990 must be below tickUpper 2190$/,
+      /^deployments: constituents\[2\] \(MSFT\): tickLower 600 must be below tickUpper -400$/,
     ],
     [
       "a zero tickSpacing",
@@ -315,7 +428,12 @@ describe("validateDeployments", () => {
       /\(NVDA\)\.tickSpacing must be an integer >= 1, got 0$/,
     ],
     [
-      "a tick that is not an integer",
+      "a tickLower that is not an integer",
+      (r) => void (pool(r, "NVDA").tickLower = 1.5),
+      /\(NVDA\)\.tickLower must be an integer, got 1\.5$/,
+    ],
+    [
+      "a tickUpper that is not an integer",
       (r) => void (pool(r, "NVDA").tickUpper = 1.5),
       /\(NVDA\)\.tickUpper must be an integer, got 1\.5$/,
     ],
@@ -369,6 +487,68 @@ describe("validateDeployments", () => {
       expect(error).not.toContain("\n");
     });
   }
+
+  test("rejects a poolId that is not the id of its pool key, naming the id it should have", () => {
+    const [nvda, aapl] = rawDeployments().constituents as [Json, Json];
+    const [currency0, currency1, spacing] = [
+      nvda.currency0 as string,
+      nvda.currency1 as string,
+      nvda.tickSpacing as number,
+    ];
+    const expected = poolIdFor(currency0, currency1, spacing, HOOK);
+    const stale = [
+      poolIdFor(currency0, currency1, spacing, OTHER_HOOK), // made for another hook
+      poolIdFor(currency0, currency1, spacing * 6, HOOK), // made for another tickSpacing
+      poolIdFor(currency1, currency0, spacing, HOOK), // made with the currencies swapped
+      aapl.poolId as string, // another pool's
+    ];
+    for (const id of stale) {
+      const raw = rawDeployments();
+      raw.constituents[0]!.poolId = id;
+      expect(rejection(() => validateDeployments(raw))).toBe(
+        `deployments: constituents[0] (NVDA): poolId ${id} is not the id of its pool key, expected ${expected}`,
+      );
+    }
+  });
+
+  test("derives the expected id from the entry's own tickSpacing and from the bundle's hook", () => {
+    const respaced = rawDeployments();
+    const nvda = pool(respaced, "NVDA");
+    nvda.tickSpacing = 1; // the ticks stay multiples of it; the id was made for the old spacing
+    expect(rejection(() => validateDeployments(respaced))).toBe(
+      `deployments: constituents[0] (NVDA): poolId ${nvda.poolId} is not the id of its pool key, ` +
+        `expected ${poolIdFor(nvda.currency0 as string, nvda.currency1 as string, 1, HOOK)}`,
+    );
+
+    const rehooked = rawDeployments();
+    rehooked.hook = OTHER_HOOK; // every id was made for HOOK
+    const first = rehooked.constituents[0]!;
+    expect(rejection(() => validateDeployments(rehooked))).toBe(
+      `deployments: constituents[0] (NVDA): poolId ${first.poolId} is not the id of its pool key, ` +
+        `expected ${poolIdFor(
+          first.currency0 as string,
+          first.currency1 as string,
+          first.tickSpacing as number,
+          OTHER_HOOK,
+        )}`,
+    );
+  });
+
+  test("rejects a pool listed twice, whatever the case of its pool id", () => {
+    const copied = rawDeployments();
+    copied.constituents[3] = { ...copied.constituents[0] };
+    const id = copied.constituents[0]!.poolId as string;
+    expect(rejection(() => validateDeployments(copied))).toBe(
+      `deployments: constituents[3] (NVDA): poolId ${id} duplicates constituents[0] (NVDA)`,
+    );
+
+    const shouting = `0x${id.slice(2).toUpperCase()}`;
+    const recased = rawDeployments();
+    recased.constituents[3] = { ...recased.constituents[0], poolId: shouting };
+    expect(rejection(() => validateDeployments(recased))).toBe(
+      `deployments: constituents[3] (NVDA): poolId ${shouting} duplicates constituents[0] (NVDA)`,
+    );
+  });
 });
 
 const fn = (name: string) => ({ type: "function", name, inputs: [], outputs: [], stateMutability: "view" });
@@ -387,6 +567,7 @@ describe("checkAbiHas", () => {
   test("the required functions are the ones the page calls on the vault and the hook", () => {
     expect([...VAULT_FUNCTIONS]).toEqual([
       "nav",
+      "totalSupply",
       "allocations",
       "rangeStatus",
       "constituentCount",
@@ -437,11 +618,24 @@ describe("checkAbiHas", () => {
   });
 
   test("rejects anything that is not a JSON array of ABI items", () => {
-    for (const abi of [{}, { abi: abiWith(HOOK_FUNCTIONS) }, "[]", null, 7]) {
+    for (const abi of [{}, { abi: "[]" }, "[]", null, 7]) {
       expect(rejection(() => checkAbiHas(abi, HOOK_FUNCTIONS, "StablePairHook ABI"))).toBe(
         "StablePairHook ABI is not a JSON array of ABI items",
       );
     }
+  });
+
+  test("calls a forge artifact by its name, and ends the message with the hint when given one", () => {
+    const artifact = { abi: abiWith(HOOK_FUNCTIONS), bytecode: { object: "0x" } };
+    expect(rejection(() => checkAbiHas(artifact, HOOK_FUNCTIONS, "StablePairHook ABI"))).toBe(
+      "StablePairHook ABI is a forge artifact, not a JSON array of ABI items",
+    );
+    expect(rejection(() => checkAbiHas(artifact, HOOK_FUNCTIONS, "StablePairHook ABI", "export it properly"))).toBe(
+      "StablePairHook ABI is a forge artifact, not a JSON array of ABI items; export it properly",
+    );
+    expect(rejection(() => checkAbiHas({}, HOOK_FUNCTIONS, "StablePairHook ABI", "export it properly"))).toBe(
+      "StablePairHook ABI is not a JSON array of ABI items; export it properly",
+    );
   });
 
   test("rejects an item that is not an ABI item and says which", () => {
@@ -560,6 +754,7 @@ describe("export end to end", () => {
     const ws = workspace();
     expect(run(ws.args).code).toBe(0);
     const text = readFileSync(join(ws.out, "deployments.json"), "utf8");
+    const first = rawDeployments().constituents[0]!;
     expect(text.split("\n").slice(0, 21)).toEqual([
       "{",
       '  "chainId": 4663,',
@@ -571,15 +766,15 @@ describe("export end to end", () => {
       `  "stateView": "${STATE_VIEW}",`,
       '  "constituents": [',
       "    {",
-      '      "symbol": "NVDA",',
-      `      "stock": "${stockOf("NVDA")}",`,
-      `      "poolId": "${poolId(0)}",`,
-      `      "currency0": "${stockOf("NVDA")}",`,
-      `      "currency1": "${INDEX_TOKEN}",`,
-      '      "tickSpacing": 10,',
-      '      "tickLower": -14010,',
-      '      "tickUpper": -9540,',
-      '      "targetBps": 1719',
+      `      "symbol": "${first.symbol}",`,
+      `      "stock": "${first.stock}",`,
+      `      "poolId": "${first.poolId}",`,
+      `      "currency0": "${first.currency0}",`,
+      `      "currency1": "${first.currency1}",`,
+      `      "tickSpacing": ${first.tickSpacing},`,
+      `      "tickLower": ${first.tickLower},`,
+      `      "tickUpper": ${first.tickUpper},`,
+      `      "targetBps": ${first.targetBps}`,
       "    },",
       "    {",
     ]);
@@ -656,6 +851,58 @@ describe("export end to end", () => {
     expect(existsSync(ws.out) || existsSync(other.out)).toBe(false);
   });
 
+  test("a directory in place of an input is reported as unreadable, not as bad JSON", () => {
+    const ws = workspace();
+    rmSync(ws.deployments);
+    mkdirSync(ws.deployments);
+    const deployments = run(ws.args);
+    expect({ code: deployments.code, stdout: deployments.stdout }).toEqual({ code: 1, stdout: [] });
+    expect(deployments.stderr).toHaveLength(1);
+    expect(deployments.stderr[0]).toStartWith(
+      `exportForWeb: cannot read deployments file at ${ws.deployments} (EISDIR`,
+    );
+    expect(deployments.stderr[0]).toEndWith("run the deploy script first, or pass --deployments <file>");
+    expect(deployments.stderr[0]).not.toContain("not valid JSON");
+
+    const other = workspace();
+    const abiPath = join(other.abi, "IndexLpVault.json");
+    rmSync(abiPath);
+    mkdirSync(abiPath);
+    const abi = run(other.args);
+    expect(abi.stderr).toHaveLength(1);
+    expect(abi.stderr[0]).toStartWith(`exportForWeb: cannot read IndexLpVault ABI at ${abiPath} (EISDIR`);
+    expect(abi.stderr[0]).toEndWith("export it with forge inspect <Contract> abi --json, or pass --abi <dir>");
+    expect(abi.stderr[0]).not.toContain("not valid JSON");
+    expect(existsSync(ws.out) || existsSync(other.out)).toBe(false);
+  });
+
+  // root can read any file, so there is nothing for it to be refused
+  test.skipIf(process.getuid?.() === 0)("a file that is not readable is reported as unreadable too", () => {
+    const ws = workspace();
+    chmodSync(ws.deployments, 0o000);
+    const { code, stdout, stderr } = run(ws.args);
+    expect({ code, stdout }).toEqual({ code: 1, stdout: [] });
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]).toStartWith(`exportForWeb: cannot read deployments file at ${ws.deployments} (EACCES`);
+    expect(stderr[0]).not.toContain("not valid JSON");
+    expect(existsSync(ws.out)).toBe(false);
+  });
+
+  test("a forge artifact (an object with an abi array) gets the same forge inspect --json hint as the table", () => {
+    const ws = workspace();
+    const path = join(ws.abi, "StablePairHook.json");
+    writeFileSync(path, JSON.stringify({ abi: abiWith(HOOK_FUNCTIONS), bytecode: { object: "0x" } }));
+    expect(run(ws.args)).toEqual({
+      code: 1,
+      stdout: [],
+      stderr: [
+        `exportForWeb: StablePairHook ABI (${path}) is a forge artifact, not a JSON array of ABI items; ` +
+          "export it with forge inspect <Contract> abi --json, or pass --abi <dir>",
+      ],
+    });
+    expect(existsSync(ws.out)).toBe(false);
+  });
+
   test("an ABI file that is forge's table (inspect without --json) fails with a hint, not a stack", () => {
     const ws = workspace();
     const table = "╭-------------+------------╮\n| Type        | Signature  |\n+===========================+\n";
@@ -695,5 +942,73 @@ describe("export end to end", () => {
     expect(failure.stdout.toString()).toBe("");
     expect(failure.stderr.toString()).toBe("exportForWeb: deployments: chainId is 1, expected 4663\n");
     expect(existsSync(bad.out)).toBe(false);
+  });
+});
+
+describe("poolIdOf", () => {
+  // Two of the real pools at the hook live on chain 4663. Each id exists there (StateView.getSlot0 returns a non-zero
+  // sqrtPriceX96) and equals Foundry's keccak of abi.encode(currency0, currency1, 8388608, 10, hook), so these pin the
+  // formula against something other than a second copy of it.
+  const LIVE_HOOK = "0xD5711B1F57e75B1c91c32AD96C4d4E5019D6Bcc0";
+  const stock = (symbol: string) => CONSTITUENTS.find((c) => c.symbol === symbol)!.address;
+
+  test("gives the ids of real pools on chain, with the stock as currency0 and as currency1", () => {
+    expect(poolIdOf(stock("NVDA"), INDEX_TOKEN, 10, LIVE_HOOK)).toBe(
+      "0xc7a754401be5e95905b290fd6a356c246fe0004643f36f18ddf9b38fa682d768",
+    );
+    expect(poolIdOf(INDEX_TOKEN, stock("MSFT"), 10, LIVE_HOOK)).toBe(
+      "0x3340fa91eae89286403650775fa7c0e7ee794f691c495fbe1df1e470de524c5f",
+    );
+  });
+
+  test("changes with every field of the pool key and not with the case of an address", () => {
+    const [nvda, qqq] = [stock("NVDA"), INDEX_TOKEN];
+    const id = poolIdOf(nvda, qqq, 10, LIVE_HOOK);
+    const others = [
+      poolIdOf(qqq, nvda, 10, LIVE_HOOK),
+      poolIdOf(nvda, qqq, 60, LIVE_HOOK),
+      poolIdOf(nvda, qqq, 10, HOOK),
+    ];
+    expect(new Set([id, ...others]).size).toBe(4);
+    expect(poolIdOf(nvda.toLowerCase(), qqq.toLowerCase(), 10, LIVE_HOOK.toLowerCase())).toBe(id);
+  });
+});
+
+describe("parseCli", () => {
+  test("defaults to the documented paths under tooling/", () => {
+    const tooling = join(import.meta.dir, "..");
+    expect(DEFAULT_DEPLOYMENTS).toBe(join(tooling, "deployments", "4663.json"));
+    expect(DEFAULT_ABI_DIR).toBe(join(tooling, "deployments", "abi"));
+    expect(DEFAULT_OUT).toBe(join(tooling, "out", "web"));
+    expect(parseCli([])).toEqual({ deployments: DEFAULT_DEPLOYMENTS, abiDir: DEFAULT_ABI_DIR, out: DEFAULT_OUT });
+  });
+
+  test("each flag replaces only its own path", () => {
+    const defaults = { deployments: DEFAULT_DEPLOYMENTS, abiDir: DEFAULT_ABI_DIR, out: DEFAULT_OUT };
+    expect(parseCli(["--deployments", "d.json"])).toEqual({ ...defaults, deployments: "d.json" });
+    expect(parseCli(["--abi", "abis"])).toEqual({ ...defaults, abiDir: "abis" });
+    expect(parseCli(["--out", "web/"])).toEqual({ ...defaults, out: "web/" });
+    expect(parseCli(["--out", "web/", "--abi", "abis", "--deployments", "d.json"])).toEqual({
+      deployments: "d.json",
+      abiDir: "abis",
+      out: "web/",
+    });
+  });
+
+  test("rejects an unknown flag and a stray argument", () => {
+    expect(() => parseCli(["--abis", "somewhere"])).toThrow("Unknown option '--abis'");
+    expect(() => parseCli(["somewhere"])).toThrow();
+  });
+});
+
+describe("agreement with the keeper", () => {
+  test("the keeper's parseDeployments accepts the fixture the exporter accepts", () => {
+    const raw = rawDeployments();
+    expect(() => validateDeployments(raw)).not.toThrow();
+    expect(parseDeployments(raw).pools).toHaveLength(10);
+  });
+
+  test("both read the same deployments file by default", () => {
+    expect(DEFAULT_DEPLOYMENTS).toBe(KEEPER_DEPLOYMENTS);
   });
 });
