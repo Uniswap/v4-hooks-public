@@ -12,15 +12,20 @@ export function tickFromSqrtPriceX96(sqrtPriceX96: bigint): number {
   return Math.floor((Math.log(Number(sqrtPriceX96) / 2 ** 96) * 2) / LOG_TICK_BASE);
 }
 
-/** Ticks covering price × (1 ∓ halfWidthPct%) around centerTick, rounded outward to multiples of spacing. */
+/**
+ * Ticks covering price / (1 + x) to price × (1 + x) around centerTick, x = halfWidthPct / 100, rounded outward to
+ * multiples of spacing. Symmetric in ticks, so the band is the same whichever token is currency0.
+ */
 export function rangeTicks(
   centerTick: number,
   halfWidthPct: number,
   spacing: number,
 ): { tickLower: number; tickUpper: number } {
-  const lower = centerTick + Math.log(1 - halfWidthPct / 100) / LOG_TICK_BASE;
-  const upper = centerTick + Math.log(1 + halfWidthPct / 100) / LOG_TICK_BASE;
-  return { tickLower: Math.floor(lower / spacing) * spacing, tickUpper: Math.ceil(upper / spacing) * spacing };
+  const halfTicks = Math.log(1 + halfWidthPct / 100) / LOG_TICK_BASE;
+  return {
+    tickLower: Math.floor((centerTick - halfTicks) / spacing) * spacing,
+    tickUpper: Math.ceil((centerTick + halfTicks) / spacing) * spacing,
+  };
 }
 
 /** v4 currency order for a stock / index pair: [currency0, currency1, stockIsCurrency0]. */

@@ -13,7 +13,7 @@ import {
   TIERS,
   type Tier,
 } from "./constituents";
-import { fetchUsdPrices } from "./prices";
+import { fetchUsdPrices, usdPrice, type UsdPrices } from "./prices";
 import { computeReference, orderCurrencies, rangeTicks, tickFromSqrtPriceX96 } from "./sqrtPrice";
 
 /** One pool of out/pools.4663.json, the schema script/index-vault/PoolConfigLib.sol reads; bigints are decimal strings. */
@@ -41,17 +41,11 @@ export interface PoolConfig {
   pools: PoolEntry[];
 }
 
-function usd(prices: Record<string, number>, address: Address): number {
-  const price = prices[address.toLowerCase()];
-  if (price === undefined) throw new Error(`no USD price for ${address}`);
-  return price;
-}
-
 /** Every pool starts at its reference, sqrt(usd(currency0) / usd(currency1)), with its tier's range around that tick. */
-export function buildPoolConfig(hook: string, prices: Record<string, number>): PoolConfig {
+export function buildPoolConfig(hook: string, prices: UsdPrices): PoolConfig {
   const pools = CONSTITUENTS.map((c): PoolEntry => {
     const [currency0, currency1, stockIsCurrency0] = orderCurrencies(c.address, INDEX_TOKEN);
-    const sqrtPriceX96 = computeReference(usd(prices, currency0), usd(prices, currency1));
+    const sqrtPriceX96 = computeReference(usdPrice(prices, currency0), usdPrice(prices, currency1));
     const currentTick = tickFromSqrtPriceX96(sqrtPriceX96);
     const { halfWidthPct, optimalFeeE6 } = TIERS[c.tier];
     const { tickLower, tickUpper } = rangeTicks(currentTick, halfWidthPct, TICK_SPACING);
@@ -80,7 +74,7 @@ export function buildPoolConfig(hook: string, prices: Record<string, number>): P
   return { chainId: CHAIN_ID, hook: getAddress(hook), indexToken: INDEX_TOKEN, pools };
 }
 
-function formatTable(config: PoolConfig, prices: Record<string, number>): string {
+function formatTable(config: PoolConfig, prices: UsdPrices): string {
   const header = [
     "symbol",
     "stockUsd",
@@ -96,10 +90,10 @@ function formatTable(config: PoolConfig, prices: Record<string, number>): string
   const rows = config.pools.map((p) =>
     [
       p.symbol,
-      usd(prices, p.stock).toFixed(2),
-      usd(prices, config.indexToken).toFixed(2),
+      usdPrice(prices, p.stock).toFixed(2),
+      usdPrice(prices, config.indexToken).toFixed(2),
       p.stockIsCurrency0 ? `${p.symbol}/QQQ` : `QQQ/${p.symbol}`,
-      (usd(prices, p.currency0) / usd(prices, p.currency1)).toFixed(6),
+      (usdPrice(prices, p.currency0) / usdPrice(prices, p.currency1)).toFixed(6),
       p.currentTick,
       p.tickLower,
       p.tickUpper,

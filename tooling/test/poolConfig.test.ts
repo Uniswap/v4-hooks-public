@@ -17,13 +17,26 @@ describe("sqrtPrice", () => {
   });
   test("tick of 2^96 is 0 and range rounds to spacing", () => {
     expect(tickFromSqrtPriceX96(Q96)).toBe(0);
-    const r = rangeTicks(0, 15, 10);
-    expect(Math.abs(r.tickLower % 10)).toBe(0); // -1630 % 10 is -0, which toBe(0) rejects
-    expect(r.tickUpper % 10).toBe(0);
-    expect(r.tickUpper).toBeGreaterThan(1300);
-    expect(r.tickUpper).toBeLessThan(1500);
-    expect(r.tickLower).toBeLessThan(-1500);
-    expect(r.tickLower).toBeGreaterThan(-1700); // log(0.85)/log(1.0001) = -1625
+    expect(rangeTicks(0, 15, 10)).toEqual({ tickLower: -1400, tickUpper: 1400 }); // ln(1.15)/ln(1.0001) = 1397.7 each side
+  });
+  test("tick floors toward negative infinity", () => {
+    expect(tickFromSqrtPriceX96(computeReference(1, 2))).toBe(-6932); // ln(0.5)/ln(1.0001) = -6931.8
+    expect(tickFromSqrtPriceX96(computeReference(2, 1))).toBe(6931);
+  });
+  test("rangeTicks spans ln(1 + x) / ln(1.0001) ticks each side, rounded outward to spacing", () => {
+    // [centerTick, halfWidthPct, tickLower, tickUpper]
+    const cases = [
+      [0, 15, -1400, 1400],
+      [-7884, 15, -9290, -6480],
+      [3588, 15, 2190, 4990],
+      [0, 25, -2240, 2240],
+      [-3348, 25, -5580, -1110],
+      [0, 30, -2630, 2630],
+      [-7009, 30, -9640, -4380],
+    ] as const;
+    for (const [center, pct, tickLower, tickUpper] of cases) {
+      expect({ center, pct, ...rangeTicks(center, pct, 10) }).toEqual({ center, pct, tickLower, tickUpper });
+    }
   });
   test("orderCurrencies sorts by address", () => {
     const [c0, c1, stockIs0] = orderCurrencies(
@@ -140,6 +153,23 @@ describe("buildPoolConfig", () => {
     }
   });
 
+  test("band is ±x% in log terms of the stock price in QQQ, whichever currency the stock is", () => {
+    const halfWidthPct = { low: 15, high: 25, tsla: 30 };
+    expect(config.pools.filter((p) => !p.stockIsCurrency0).map((p) => p.symbol)).toEqual(["MSFT", "MU"]);
+    const bands = config.pools.map((p) => {
+      const toStockInQqq = (poolPrice: number) => (p.stockIsCurrency0 ? poolPrice : 1 / poolPrice);
+      const center = toStockInQqq((Number(BigInt(p.sqrtPriceX96)) / 2 ** 96) ** 2);
+      const [lower, upper] = [1.0001 ** p.tickLower, 1.0001 ** p.tickUpper].map(toStockInQqq).sort((a, b) => a - b);
+      return {
+        symbol: p.symbol,
+        x: halfWidthPct[p.tier],
+        up: (upper! / center - 1) * 100,
+        down: (center / lower! - 1) * 100,
+      };
+    });
+    expect(bands.filter((b) => Math.abs(b.up - b.x) > 0.2 || Math.abs(b.down - b.x) > 0.2)).toEqual([]);
+  });
+
   test("dynamic fee key and per-tier fee config", () => {
     for (const p of config.pools) {
       expect([p.fee, p.tickSpacing]).toEqual([8388608, 10]);
@@ -153,6 +183,15 @@ describe("buildPoolConfig", () => {
   });
 
   test("throws when a constituent has no price", () => {
-    expect(() => buildPoolConfig(HOOK, { [INDEX_TOKEN.toLowerCase()]: 610 })).toThrow("no USD price");
+    expect(() => buildPoolConfig(HOOK, { [INDEX_TOKEN.toLowerCase()]: 610 })).toThrow("no valid USD price");
+  });
+
+  test("rejects non-finite or non-positive prices", () => {
+    const nvda = CONSTITUENTS.find((c) => c.symbol === "NVDA")!.address;
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => buildPoolConfig(HOOK, { ...PRICES, [nvda.toLowerCase()]: bad })).toThrow(
+        `no valid USD price for ${nvda}`,
+      );
+    }
   });
 });

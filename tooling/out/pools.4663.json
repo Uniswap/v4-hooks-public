@@ -11,17 +11,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "44008867560037260232683945984",
-      "currentTick": -11760,
-      "tickLower": -14640,
-      "tickUpper": -9520,
+      "sqrtPriceX96": "43976376245197058051810525184",
+      "currentTick": -11775,
+      "tickLower": -14010,
+      "tickUpper": -9540,
       "targetBps": 1719,
       "tier": "high",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 5000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "44008867560037260232683945984"
+        "referenceSqrtPriceX96": "43976376245197058051810525184"
       }
     },
     {
@@ -32,17 +32,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "53420805508597643748380246016",
-      "currentTick": -7884,
-      "tickLower": -9510,
-      "tickUpper": -6480,
+      "sqrtPriceX96": "53548363058097665704013594624",
+      "currentTick": -7836,
+      "tickLower": -9240,
+      "tickUpper": -6430,
       "targetBps": 1484,
       "tier": "low",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 3000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "53420805508597643748380246016"
+        "referenceSqrtPriceX96": "53548363058097665704013594624"
       }
     },
     {
@@ -53,9 +53,9 @@
       "stockIsCurrency0": false,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "94798957924354112861782409216",
-      "currentTick": 3588,
-      "tickLower": 1960,
+      "sqrtPriceX96": "94812219064746351485857562624",
+      "currentTick": 3591,
+      "tickLower": 2190,
       "tickUpper": 4990,
       "targetBps": 1172,
       "tier": "low",
@@ -63,7 +63,7 @@
         "k": 16757000,
         "optimalFeeE6": 3000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "94798957924354112861782409216"
+        "referenceSqrtPriceX96": "94812219064746351485857562624"
       }
     },
     {
@@ -74,17 +74,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "54014828324037285316980113408",
-      "currentTick": -7662,
-      "tickLower": -9290,
-      "tickUpper": -6260,
+      "sqrtPriceX96": "54065306525424329981849239552",
+      "currentTick": -7644,
+      "tickLower": -9050,
+      "tickUpper": -6240,
       "targetBps": 1172,
       "tier": "low",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 3000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "54014828324037285316980113408"
+        "referenceSqrtPriceX96": "54065306525424329981849239552"
       }
     },
     {
@@ -95,17 +95,17 @@
       "stockIsCurrency0": false,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "67019325044887551452374892544",
-      "currentTick": -3348,
-      "tickLower": -6230,
-      "tickUpper": -1110,
+      "sqrtPriceX96": "67142184415269565941252358144",
+      "currentTick": -3311,
+      "tickLower": -5550,
+      "tickUpper": -1070,
       "targetBps": 1016,
       "tier": "high",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 5000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "67019325044887551452374892544"
+        "referenceSqrtPriceX96": "67142184415269565941252358144"
       }
     },
     {
@@ -116,17 +116,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "72039428095095529074501615616",
-      "currentTick": -1903,
-      "tickLower": -4780,
-      "tickUpper": 330,
+      "sqrtPriceX96": "71929266534456299996630220800",
+      "currentTick": -1934,
+      "tickLower": -4170,
+      "tickUpper": 300,
       "targetBps": 859,
       "tier": "high",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 5000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "72039428095095529074501615616"
+        "referenceSqrtPriceX96": "71929266534456299996630220800"
       }
     },
     {
@@ -137,9 +137,9 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "46248134805586864719798468608",
-      "currentTick": -10767,
-      "tickLower": -12400,
+      "sqrtPriceX96": "46255323143359027210662969344",
+      "currentTick": -10764,
+      "tickLower": -12170,
       "tickUpper": -9360,
       "targetBps": 840,
       "tier": "low",
@@ -147,7 +147,7 @@
         "k": 16757000,
         "optimalFeeE6": 3000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "46248134805586864719798468608"
+        "referenceSqrtPriceX96": "46255323143359027210662969344"
       }
     },
     {
@@ -158,9 +158,9 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "77608382840502413662391107584",
-      "currentTick": -414,
-      "tickLower": -2040,
+      "sqrtPriceX96": "77620448628926566351780184064",
+      "currentTick": -411,
+      "tickLower": -1810,
       "tickUpper": 990,
       "targetBps": 645,
       "tier": "low",
@@ -168,7 +168,7 @@
         "k": 16757000,
         "optimalFeeE6": 3000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "77608382840502413662391107584"
+        "referenceSqrtPriceX96": "77620448628926566351780184064"
       }
     },
     {
@@ -179,17 +179,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "55808190830845359042821357568",
-      "currentTick": -7009,
-      "tickLower": -10580,
-      "tickUpper": -4380,
+      "sqrtPriceX96": "55825473869664780873910714368",
+      "currentTick": -7003,
+      "tickLower": -9630,
+      "tickUpper": -4370,
       "targetBps": 566,
       "tier": "tsla",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 5000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "55808190830845359042821357568"
+        "referenceSqrtPriceX96": "55825473869664780873910714368"
       }
     },
     {
@@ -200,17 +200,17 @@
       "stockIsCurrency0": true,
       "fee": 8388608,
       "tickSpacing": 10,
-      "sqrtPriceX96": "55114241622535560367899148288",
-      "currentTick": -7259,
-      "tickLower": -10140,
-      "tickUpper": -5020,
+      "sqrtPriceX96": "55027261747909319088928718848",
+      "currentTick": -7291,
+      "tickLower": -9530,
+      "tickUpper": -5050,
       "targetBps": 527,
       "tier": "high",
       "feeConfig": {
         "k": 16757000,
         "optimalFeeE6": 5000,
         "targetMultiplier": 100,
-        "referenceSqrtPriceX96": "55114241622535560367899148288"
+        "referenceSqrtPriceX96": "55027261747909319088928718848"
       }
     }
   ]
