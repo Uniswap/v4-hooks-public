@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import "forge-std/Script.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -16,7 +17,7 @@ import {PoolConfigLib, PoolEntry} from "./PoolConfigLib.sol";
 /// @notice Deploys the IndexLpVault over the pools of a pools JSON (tooling/out/pools.4663.json), already initialized
 ///         on the StablePairHook at HOOK_ADDRESS, and calls the vault's setup() in the same broadcast, so OWNER must be
 ///         the broadcaster. Then writes tooling/deployments/<chainId>.json, the input of the tooling's exportForWeb.ts;
-///         a dry run writes it too, with the simulated vault address.
+///         a dry run writes tooling/deployments/<chainId>.dry-run.json instead, so it never overwrites the live file.
 ///
 /// Broadcast on Robinhood Chain (drop --broadcast for a dry run):
 ///   POOLS_JSON=tooling/out/pools.4663.json HOOK_ADDRESS=0xD5711B1F57e75B1c91c32AD96C4d4E5019D6Bcc0 \
@@ -151,7 +152,10 @@ contract DeployIndexVaultScript is Script {
         vm.serializeAddress(root, "stateView", STATE_VIEW);
         string memory json = vm.serializeString(root, "constituents", constituents);
         vm.createDir("tooling/deployments", true);
-        path = string.concat("tooling/deployments/", vm.toString(block.chainid), ".json");
+        bool broadcasting =
+            vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.isContext(VmSafe.ForgeContext.ScriptResume);
+        path =
+            string.concat("tooling/deployments/", vm.toString(block.chainid), broadcasting ? ".json" : ".dry-run.json");
         vm.writeJson(json, path);
     }
 
