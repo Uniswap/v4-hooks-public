@@ -1,0 +1,121 @@
+{
+  "chainId": 4663,
+  "constituents": [
+    {
+      "currency0": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0xc7a754401be5e95905b290fd6a356c246fe0004643f36f18ddf9b38fa682d768",
+      "stock": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "symbol": "NVDA",
+      "targetBps": 1719,
+      "tickLower": -14000,
+      "tickSpacing": 10,
+      "tickUpper": -9520
+    },
+    {
+      "currency0": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0xc42c3a781ec6e008c0e3092e8ba17d500ed9755e648b3b55d1f33e20f27c9c8d",
+      "stock": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "symbol": "AAPL",
+      "targetBps": 1484,
+      "tickLower": -9270,
+      "tickSpacing": 10,
+      "tickUpper": -6470
+    },
+    {
+      "currency0": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "currency1": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "poolId": "0x3340fa91eae89286403650775fa7c0e7ee794f691c495fbe1df1e470de524c5f",
+      "stock": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "symbol": "MSFT",
+      "targetBps": 1172,
+      "tickLower": 2170,
+      "tickSpacing": 10,
+      "tickUpper": 4980
+    },
+    {
+      "currency0": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0xac9b1fff8cf83ffe15edec204486e5fa2ba7851339f8f3e1d573de5a42c4c34e",
+      "stock": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "symbol": "GOOGL",
+      "targetBps": 1172,
+      "tickLower": -9040,
+      "tickSpacing": 10,
+      "tickUpper": -6240
+    },
+    {
+      "currency0": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "currency1": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
+      "poolId": "0x0afc430976a3f02a89691c3b4c6f31a2703d848feb3c2317a61d6717a310edff",
+      "stock": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
+      "symbol": "MU",
+      "targetBps": 1016,
+      "tickLower": -5490,
+      "tickSpacing": 10,
+      "tickUpper": -1010
+    },
+    {
+      "currency0": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0x3d05b5685239f58e48df38c69d05931d4fa6ff40d5699e6cc8f90e592eb8a245",
+      "stock": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "symbol": "AMD",
+      "targetBps": 859,
+      "tickLower": -4100,
+      "tickSpacing": 10,
+      "tickUpper": 370
+    },
+    {
+      "currency0": "0x12f190a9F9d7D37a250758b26824B97CE941bF54",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0xca86f34dc51962d5a10f237bee1d23d7b0c50b5286c56b9d181c5062023e42cd",
+      "stock": "0x12f190a9F9d7D37a250758b26824B97CE941bF54",
+      "symbol": "AMZN",
+      "targetBps": 840,
+      "tickLower": -12190,
+      "tickSpacing": 10,
+      "tickUpper": -9380
+    },
+    {
+      "currency0": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0x49ce0075491da8a30ae2a44f3d651dbff9de09c91200ae668a074d2bd3c307d1",
+      "stock": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "symbol": "META",
+      "targetBps": 645,
+      "tickLower": -1780,
+      "tickSpacing": 10,
+      "tickUpper": 1030
+    },
+    {
+      "currency0": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0x4859c042c5867b538f892e31bbecd6f68edeb0cdcbbe6e907ccd68a5beb8cfb4",
+      "stock": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "symbol": "TSLA",
+      "targetBps": 566,
+      "tickLower": -9570,
+      "tickSpacing": 10,
+      "tickUpper": -4310
+    },
+    {
+      "currency0": "0x156E175DD063a8cE274C50654eF40e0032b3fbcF",
+      "currency1": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "poolId": "0x5c59ebe7c60fa8881b35a2c80d25187f2f23e61d842ff930d20daf709f42a8cc",
+      "stock": "0x156E175DD063a8cE274C50654eF40e0032b3fbcF",
+      "symbol": "AVGO",
+      "targetBps": 527,
+      "tickLower": -9550,
+      "tickSpacing": 10,
+      "tickUpper": -5080
+    }
+  ],
+  "hook": "0xD5711B1F57e75B1c91c32AD96C4d4E5019D6Bcc0",
+  "indexToken": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+  "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+  "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+  "stateView": "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b",
+  "vault": "0x511eE26059390b74b9a35ed3fB2466a17f09856f"
+}
