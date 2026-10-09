@@ -1,0 +1,34 @@
+---
+title: "IStableFeeConfigView"
+description: "The StableFeeConfiguration view the vault reads each pool's keeper reference price from; the hook exposes it, but IStableFeeConfiguration does not declare it"
+---
+
+# IStableFeeConfigView
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5695a6964b93f4313077d695f6d6c584fbab25a4/src/index/interfaces/IStableFeeConfigView.sol)
+
+The StableFeeConfiguration view the vault reads each pool's keeper reference price from; the hook exposes
+it, but IStableFeeConfiguration does not declare it
+
+## Functions
+
+<a id="feeconfig-poolid"></a>
+
+### feeConfig
+
+```solidity
+function feeConfig(PoolId poolId) external view returns (StableFeeConfig memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolId | `PoolId` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `StableFeeConfig` |  |
+

@@ -1,0 +1,132 @@
+---
+title: "IndexVaultMath"
+description: "IndexLpVault's pure valuation, position and range math"
+---
+
+# IndexVaultMath
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5695a6964b93f4313077d695f6d6c584fbab25a4/src/index/libraries/IndexVaultMath.sol)
+
+**Title:** IndexVaultMath
+
+IndexLpVault's pure valuation, position and range math
+
+## Constants
+
+### BPS
+
+```solidity
+uint256 internal constant BPS = 10_000;
+```
+
+## Functions
+
+<a id="stocktoindex-bool-uint256-uint160"></a>
+
+### stockToIndex
+
+`amount` of stock in index-token wei at `sqrtPriceX96` (currency1 per currency0): × P when the stock is
+currency0, ÷ P otherwise. Two mulDivs by 2^96 keep 18-decimal amounts clear of overflow up to
+MAX_SQRT_PRICE; a 0 price (uninitialized pool) values the stock at 0.
+
+```solidity
+function stockToIndex(bool stockIsCurrency0, uint256 amount, uint160 sqrtPriceX96) internal pure returns (uint256);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockIsCurrency0 | `bool` |  |
+| amount | `uint256` |  |
+| sqrtPriceX96 | `uint160` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="amountsforliquidity-uint160-uint160-uint160-uint128"></a>
+
+### amountsForLiquidity
+
+LiquidityAmounts.getAmountsForLiquidity (v4-periphery's copy lacks it) on v4-core's round-down math, so
+the amounts are exactly what a decrease of `liquidity` pays at `sqrtPriceX96`
+
+```solidity
+function amountsForLiquidity(uint160 sqrtPriceX96, uint160 sqrtPriceAX96, uint160 sqrtPriceBX96, uint128 liquidity)
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPriceX96 | `uint160` |  |
+| sqrtPriceAX96 | `uint160` |  |
+| sqrtPriceBX96 | `uint160` |  |
+| liquidity | `uint128` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| amount0 | `uint256` |  |
+| amount1 | `uint256` |  |
+
+<a id="edgeproximitybps-int24-int24-int24"></a>
+
+### edgeProximityBps
+
+10000 × (halfWidth − distance to the nearer edge) / halfWidth, clamped to [0, 20000]; computed over the
+whole width (identical for the even widths of tick-spaced ranges, and never a division by zero)
+
+```solidity
+function edgeProximityBps(int24 tick, int24 tickLower, int24 tickUpper) internal pure returns (uint16);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tick | `int24` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint16` |  |
+
+<a id="withinband-uint160-uint160-uint256"></a>
+
+### withinBand
+
+Whether the price at `sqrtPriceX96` is within `maxDeviationBps` of the reference price in either
+direction: min/max of the two prices ≥ 1 − maxDeviationBps / 10000 (the hook's own ratio measure)
+
+```solidity
+function withinBand(uint160 sqrtPriceX96, uint160 referenceSqrtPriceX96, uint256 maxDeviationBps)
+        internal
+        pure
+        returns (bool);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPriceX96 | `uint160` |  |
+| referenceSqrtPriceX96 | `uint160` |  |
+| maxDeviationBps | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bool` |  |
+

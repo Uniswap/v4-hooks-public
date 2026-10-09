@@ -51,6 +51,10 @@ src/contract.AllowlistedFactory.mdx
 src/contract.WETHHook.mdx
 src/contract.WstETHHook.mdx
 src/contract.WstETHRoutingHook.mdx
+src/index/contract.IndexLpVault.mdx
+src/index/interfaces/interface.IIndexLpVault.mdx
+src/index/interfaces/interface.IStableFeeConfigView.mdx
+src/index/libraries/library.IndexVaultMath.mdx
 src/interfaces/interface.IAllowlistedFactory.mdx
 src/interfaces/interface.IDynamicFeeHook.mdx
 src/interfaces/interface.IIndicativeQuote.mdx
