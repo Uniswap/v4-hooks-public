@@ -1,0 +1,552 @@
+---
+title: "IIndexLpVault"
+description: "A passive index of `stock / index token` Uniswap v4 pools: one PositionManager position per pool, deposits routed toward target weights, proportional redemptions. Shares are the vault's own ERC-20."
+---
+
+# IIndexLpVault
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5695a6964b93f4313077d695f6d6c584fbab25a4/src/index/interfaces/IIndexLpVault.sol)
+
+**Title:** IIndexLpVault
+
+A passive index of `stock / index token` Uniswap v4 pools: one PositionManager position per pool, deposits routed
+toward target weights, proportional redemptions. Shares are the vault's own ERC-20.
+
+<i>
+
+Every amount is in token wei; every value (`nav`, `indexValue`, `valueInIndex`) is in index-token wei.
+
+</i>
+
+## Functions
+
+<a id="indextoken"></a>
+
+### indexToken
+
+The token every pool pairs with and every value is expressed in
+
+```solidity
+function indexToken() external view returns (address);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="constituentcount"></a>
+
+### constituentCount
+
+```solidity
+function constituentCount() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="constituent-uint256"></a>
+
+### constituent
+
+```solidity
+function constituent(uint256 i) external view returns (ConstituentView memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `ConstituentView` |  |
+
+<a id="nav"></a>
+
+### nav
+
+Positions and idle balances valued at each pool's current price (spot); uncollected fees excluded
+
+```solidity
+function nav() external view returns (uint256 navInIndex);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| navInIndex | `uint256` |  |
+
+<a id="allocations"></a>
+
+### allocations
+
+Per constituent: its value (position plus idle stock), its share of `nav` in bps, and whether that share
+is within `BAND_BPS` (relative) of its target
+
+```solidity
+function allocations()
+        external
+        view
+        returns (uint256[] memory valueInIndex, uint16[] memory bps, bool[] memory inBand);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| valueInIndex | `uint256[]` |  |
+| bps | `uint16[]` |  |
+| inBand | `bool[]` |  |
+
+<a id="rangestatus"></a>
+
+### rangeStatus
+
+Per constituent: the pool's tick, the position's range, and how close the tick is to the nearer edge
+(0 at the centre, 10000 at an edge, up to 20000 out of range)
+
+```solidity
+function rangeStatus()
+        external
+        view
+        returns (
+            int24[] memory currentTick,
+            int24[] memory lower,
+            int24[] memory upper,
+            uint16[] memory edgeProximityBps
+        );
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| currentTick | `int24[]` |  |
+| lower | `int24[]` |  |
+| upper | `int24[]` |  |
+| edgeProximityBps | `uint16[]` |  |
+
+<a id="previewdeposit-uint256"></a>
+
+### previewDeposit
+
+The amounts a deposit worth `indexValue` should bring, routed toward target weights, and the shares it
+mints: priced as `deposit` prices, so it reverts `PriceDeviation` when `deposit` would
+
+```solidity
+function previewDeposit(uint256 indexValue)
+        external
+        view
+        returns (uint256[] memory stockAmounts, uint256[] memory indexAmounts, uint256 shares);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| indexValue | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+| shares | `uint256` |  |
+
+<a id="previewredeem-uint256"></a>
+
+### previewRedeem
+
+What `redeem(shares, ...)` pays per constituent at the current prices, its idle share included
+
+```solidity
+function previewRedeem(uint256 shares) external view returns (uint256[] memory stockOut, uint256[] memory indexOut);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockOut | `uint256[]` |  |
+| indexOut | `uint256[]` |  |
+
+<a id="holdings"></a>
+
+### holdings
+
+Per constituent the position's current token amounts, plus the vault's idle balance of each stock and of
+the index token
+
+```solidity
+function holdings()
+        external
+        view
+        returns (
+            uint256[] memory positionStock,
+            uint256[] memory positionIndex,
+            uint256[] memory idleStock,
+            uint256 idleIndex
+        );
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| positionStock | `uint256[]` |  |
+| positionIndex | `uint256[]` |  |
+| idleStock | `uint256[]` |  |
+| idleIndex | `uint256` |  |
+
+<a id="deposit-uint256-uint256-uint256-address"></a>
+
+### deposit
+
+Adds `stockAmounts[i]` and `indexAmounts[i]` to constituent i's position (minting it on first use), returns
+what the positions did not take to the caller and mints shares for the value added to `to`. Shares are
+priced with each pool's current composition valued at the hook's reference price, and the deposit
+reverts `PriceDeviation` while any pool is off its reference by more than `maxDeviationBps`.
+
+```solidity
+function deposit(uint256[] calldata stockAmounts, uint256[] calldata indexAmounts, uint256 minShares, address to)
+        external
+        returns (uint256 shares);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+| minShares | `uint256` |  |
+| to | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+
+<a id="redeem-uint256-uint256-uint256-address"></a>
+
+### redeem
+
+Burns the caller's `shares` and pays `to` the same fraction of every position and idle balance
+
+```solidity
+function redeem(uint256 shares, uint256[] calldata minStock, uint256[] calldata minIndex, address to)
+        external
+        returns (uint256[] memory stockOut, uint256[] memory indexOut);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+| minStock | `uint256[]` |  |
+| minIndex | `uint256[]` |  |
+| to | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockOut | `uint256[]` |  |
+| indexOut | `uint256[]` |  |
+
+<a id="collectfees"></a>
+
+### collectFees
+
+Moves every position's accrued fees into the vault's idle balances, which count in `nav`
+
+```solidity
+function collectFees() external;
+```
+
+<a id="setup"></a>
+
+### setup
+
+Owner: approves Permit2 for the eleven tokens and the PositionManager on Permit2. Idempotent.
+
+```solidity
+function setup() external;
+```
+
+<a id="setdepositspaused-bool"></a>
+
+### setDepositsPaused
+
+```solidity
+function setDepositsPaused(bool paused) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| paused | `bool` |  |
+
+<a id="maxdeviationbps"></a>
+
+### maxDeviationBps
+
+How far (in price, either direction) a pool may sit from its hook reference price before deposits and
+reranges revert `PriceDeviation`; redemptions are never checked
+
+```solidity
+function maxDeviationBps() external view returns (uint16);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint16` |  |
+
+<a id="setmaxdeviationbps-uint16"></a>
+
+### setMaxDeviationBps
+
+Owner: sets `maxDeviationBps`, which must be in (0, 10000)
+
+```solidity
+function setMaxDeviationBps(uint16 maxDeviationBps_) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| maxDeviationBps_ | `uint16` |  |
+
+<a id="rerange-uint256-int24-int24"></a>
+
+### rerange
+
+Owner: closes constituent i's position into the vault and re-mints the vault's balances of its two
+tokens over `[tickLower, tickUpper)`; reverts `PriceDeviation` like `deposit`
+
+```solidity
+function rerange(uint256 i, int24 tickLower, int24 tickUpper) external;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+
+## Events
+
+### Deposit
+
+```solidity
+event Deposit(address indexed from, address indexed to, uint256 shares, uint256 navAfter);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| from | `address` |  |
+| to | `address` |  |
+| shares | `uint256` |  |
+| navAfter | `uint256` |  |
+
+### Redeem
+
+```solidity
+event Redeem(address indexed from, address indexed to, uint256 shares, uint256 navAfter);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| from | `address` |  |
+| to | `address` |  |
+| shares | `uint256` |  |
+| navAfter | `uint256` |  |
+
+### FeesCollected
+
+```solidity
+event FeesCollected(uint256 navAfter);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| navAfter | `uint256` |  |
+
+### Reranged
+
+```solidity
+event Reranged(uint256 indexed i, int24 tickLower, int24 tickUpper, uint256 tokenId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+| tokenId | `uint256` |  |
+
+### DepositsPaused
+
+```solidity
+event DepositsPaused(bool paused);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| paused | `bool` |  |
+
+### MaxDeviationBpsSet
+
+```solidity
+event MaxDeviationBpsSet(uint16 maxDeviationBps);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| maxDeviationBps | `uint16` |  |
+
+## Errors
+
+### LengthMismatch
+
+An amounts array does not have one entry per constituent
+
+```solidity
+error LengthMismatch();
+```
+
+### SlippageExceeded
+
+Fewer shares minted than `minShares`, or less of a token paid out than its redeem minimum
+
+```solidity
+error SlippageExceeded();
+```
+
+### DepositsArePaused
+
+Deposits are paused by the owner (redemptions never are)
+
+```solidity
+error DepositsArePaused();
+```
+
+### ZeroShares
+
+The deposit would mint, or the redemption burns, zero shares
+
+```solidity
+error ZeroShares();
+```
+
+### PriceDeviation
+
+Constituent i's pool price is more than `maxDeviationBps` away from its hook reference price
+
+```solidity
+error PriceDeviation(uint256 i);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+
+## Structs
+
+### ConstituentInit
+
+One constituent at deployment: its pool key (stock paired with the index token) and position range
+
+```solidity
+struct ConstituentInit {
+        address stock;
+        address currency0;
+        address currency1;
+        uint24 fee;
+        int24 tickSpacing;
+        address hooks;
+        int24 tickLower;
+        int24 tickUpper;
+        uint16 targetBps;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stock | `address` |  |
+| currency0 | `address` |  |
+| currency1 | `address` |  |
+| fee | `uint24` |  |
+| tickSpacing | `int24` |  |
+| hooks | `address` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+| targetBps | `uint16` |  |
+
+### ConstituentView
+
+A constituent as stored: `tokenId` is 0 until the first deposit that gives it liquidity mints its position
+
+```solidity
+struct ConstituentView {
+        address stock;
+        bytes32 poolId;
+        uint256 tokenId;
+        uint16 targetBps;
+        int24 tickLower;
+        int24 tickUpper;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stock | `address` |  |
+| poolId | `bytes32` |  |
+| tokenId | `uint256` |  |
+| targetBps | `uint16` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+

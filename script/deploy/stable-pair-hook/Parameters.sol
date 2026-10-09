@@ -35,6 +35,7 @@ contract Parameters {
     uint256 public constant OPTIMISM_CHAIN_ID = 10;
     uint256 public constant UNICHAIN_CHAIN_ID = 130;
     uint256 public constant MONAD_CHAIN_ID = 143;
+    uint256 public constant ROBINHOOD_CHAIN_ID = 4663;
     uint256 public constant BASE_CHAIN_ID = 8453;
     uint256 public constant ARBITRUM_CHAIN_ID = 42161;
     uint256 public constant SEPOLIA_CHAIN_ID = 11155111;
@@ -85,6 +86,15 @@ contract Parameters {
             owner: address(0),
             poolInitializer: address(0),
             configManager: address(0)
+        });
+        parameters[ROBINHOOD_CHAIN_ID] = DeployParameters({
+            poolManager: IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951),
+            // mined for 0xD5711B1F57e75B1c91c32AD96C4d4E5019D6Bcc0 (flags 0x3CC0)
+            stablePairHookProxySalt: bytes32(uint256(0x2d56)),
+            stablePairHookImplementationSalt: bytes32(uint256(0xff59)),
+            owner: 0x45c35C4d1bc85A1339573c3Bd5Cf0C890bbbb6c3,
+            poolInitializer: 0x45c35C4d1bc85A1339573c3Bd5Cf0C890bbbb6c3,
+            configManager: 0x45c35C4d1bc85A1339573c3Bd5Cf0C890bbbb6c3
         });
         parameters[BASE_CHAIN_ID] = DeployParameters({
             poolManager: IPoolManager(0x498581fF718922c3f8e6A244956aF099B2652b2b),

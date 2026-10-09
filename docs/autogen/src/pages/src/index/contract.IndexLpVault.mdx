@@ -1,0 +1,1291 @@
+---
+title: "IndexLpVault"
+description: "Holds one v4 PositionManager position per `stock / index token` pool and issues itself as the share token. Deposits bring both tokens of every pool (`previewDeposit` routes value toward the target weights), mint or increase the positions in one `modifyLiquidities` call and return whatever the positions did not take. Redemptions pay the same fraction of every position and idle balance and are never paused."
+---
+
+# IndexLpVault
+
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/5695a6964b93f4313077d695f6d6c584fbab25a4/src/index/IndexLpVault.sol)
+
+**Inherits:** [IIndexLpVault](/src/index/interfaces/interface.IIndexLpVault), ERC20, Ownable, ReentrancyGuardTransient
+
+**Title:** IndexLpVault
+
+Holds one v4 PositionManager position per `stock / index token` pool and issues itself as the share token.
+Deposits bring both tokens of every pool (`previewDeposit` routes value toward the target weights), mint or
+increase the positions in one `modifyLiquidities` call and return whatever the positions did not take.
+Redemptions pay the same fraction of every position and idle balance and are never paused.
+
+<i>
+
+Deposits price shares with each pool's current composition valued at the hook's keeper reference price, and
+revert while a pool's price is off that reference by more than `maxDeviationBps`: pushing a pool's price moves
+only the composition. Redemptions pay in kind; the views value at spot.
+
+</i>
+
+## Constants
+
+### BPS
+
+```solidity
+uint256 internal constant BPS = 10_000;
+```
+
+### UNIT_LIQUIDITY
+
+<i>
+
+Value of a position is computed per this much liquidity to turn a value into liquidity
+
+</i>
+
+```solidity
+uint128 internal constant UNIT_LIQUIDITY = 1e18;
+```
+
+### DEAD
+
+```solidity
+address internal constant DEAD = address(0xdead);
+```
+
+### BAND_BPS
+
+A constituent is in band while |bps − targetBps| ≤ BAND_BPS × targetBps / 10000 (±25% of its target)
+
+```solidity
+uint256 public constant BAND_BPS = 2500;
+```
+
+### DEAD_SHARES
+
+Shares minted to 0xdead by the first deposit, so the share price cannot be inflated from a dust supply
+
+```solidity
+uint256 public constant DEAD_SHARES = 1000;
+```
+
+### poolManager
+
+```solidity
+IPoolManager public immutable poolManager;
+```
+
+### positionManager
+
+```solidity
+IPositionManager public immutable positionManager;
+```
+
+### permit2
+
+```solidity
+IAllowanceTransfer public immutable permit2;
+```
+
+### indexToken
+
+The token every pool pairs with and every value is expressed in
+
+```solidity
+address public immutable indexToken;
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+## State Variables
+
+### depositsPaused
+
+```solidity
+bool public depositsPaused;
+```
+
+### maxDeviationBps
+
+How far (in price, either direction) a pool may sit from its hook reference price before deposits and
+reranges revert `PriceDeviation`; redemptions are never checked
+
+```solidity
+uint16 public maxDeviationBps = 100;
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint16` |  |
+
+### _constituents
+
+```solidity
+Constituent[] internal _constituents;
+```
+
+## Functions
+
+<a id="constructor-ipoolmanager-address-address-address-constituentinit-string-string-address"></a>
+
+### constructor
+
+```solidity
+constructor(
+        IPoolManager poolManager_,
+        address positionManager_,
+        address permit2_,
+        address indexToken_,
+        ConstituentInit[] memory inits,
+        string memory name_,
+        string memory symbol_,
+        address owner_
+    ) ERC20(name_, symbol_) Ownable(owner_);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| poolManager_ | `IPoolManager` |  |
+| positionManager_ | `address` | The v4 PositionManager the positions are minted on |
+| permit2_ | `address` | Permit2, through which the PositionManager pulls the vault's tokens |
+| indexToken_ | `address` | The token every pool pairs with; all values are expressed in it |
+| inits | `ConstituentInit[]` | The constituents, their target weights summing to 10000 |
+| name_ | `string` |  |
+| symbol_ | `string` |  |
+| owner_ | `address` |  |
+
+<a id="constituentcount"></a>
+
+### constituentCount
+
+```solidity
+function constituentCount() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` |  |
+
+<a id="constituent-uint256"></a>
+
+### constituent
+
+```solidity
+function constituent(uint256 i) external view returns (ConstituentView memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `ConstituentView` |  |
+
+<a id="nav"></a>
+
+### nav
+
+Positions and idle balances valued at each pool's current price (spot); uncollected fees excluded
+
+```solidity
+function nav() external view returns (uint256 navInIndex);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| navInIndex | `uint256` |  |
+
+<a id="allocations"></a>
+
+### allocations
+
+Per constituent: its value (position plus idle stock), its share of `nav` in bps, and whether that share
+is within `BAND_BPS` (relative) of its target
+
+```solidity
+function allocations()
+        external
+        view
+        returns (uint256[] memory valueInIndex, uint16[] memory bps, bool[] memory inBand);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| valueInIndex | `uint256[]` |  |
+| bps | `uint16[]` |  |
+| inBand | `bool[]` |  |
+
+<a id="rangestatus"></a>
+
+### rangeStatus
+
+Per constituent: the pool's tick, the position's range, and how close the tick is to the nearer edge
+(0 at the centre, 10000 at an edge, up to 20000 out of range)
+
+```solidity
+function rangeStatus()
+        external
+        view
+        returns (
+            int24[] memory currentTick,
+            int24[] memory lower,
+            int24[] memory upper,
+            uint16[] memory edgeProximityBps
+        );
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| currentTick | `int24[]` |  |
+| lower | `int24[]` |  |
+| upper | `int24[]` |  |
+| edgeProximityBps | `uint16[]` |  |
+
+<a id="previewdeposit-uint256"></a>
+
+### previewDeposit
+
+The amounts a deposit worth `indexValue` should bring, routed toward target weights, and the shares it
+mints: priced as `deposit` prices, so it reverts `PriceDeviation` when `deposit` would
+
+<i>
+
+Values, routing and shares use the deposit's valuation: current composition at the reference price
+
+</i>
+
+```solidity
+function previewDeposit(uint256 indexValue)
+        external
+        view
+        returns (uint256[] memory stockAmounts, uint256[] memory indexAmounts, uint256 shares);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| indexValue | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+| shares | `uint256` |  |
+
+<a id="previewredeem-uint256"></a>
+
+### previewRedeem
+
+What `redeem(shares, ...)` pays per constituent at the current prices, its idle share included
+
+<i>
+
+`stockOut[i]` adds the share of the idle stock to the position's stock; the share of the idle index token
+is split across `indexOut` by target weight. Fees accrued since the last collection are not included (the
+redemption collects them first, so it pays at least this).
+
+</i>
+
+```solidity
+function previewRedeem(uint256 shares)
+        external
+        view
+        returns (uint256[] memory stockOut, uint256[] memory indexOut);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockOut | `uint256[]` |  |
+| indexOut | `uint256[]` |  |
+
+<a id="holdings"></a>
+
+### holdings
+
+Per constituent the position's current token amounts, plus the vault's idle balance of each stock and of
+the index token
+
+```solidity
+function holdings()
+        external
+        view
+        returns (
+            uint256[] memory positionStock,
+            uint256[] memory positionIndex,
+            uint256[] memory idleStock,
+            uint256 idleIndex
+        );
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| positionStock | `uint256[]` |  |
+| positionIndex | `uint256[]` |  |
+| idleStock | `uint256[]` |  |
+| idleIndex | `uint256` |  |
+
+<a id="deposit-uint256-uint256-uint256-address"></a>
+
+### deposit
+
+Adds `stockAmounts[i]` and `indexAmounts[i]` to constituent i's position (minting it on first use), returns
+what the positions did not take to the caller and mints shares for the value added to `to`. Shares are
+priced with each pool's current composition valued at the hook's reference price, and the deposit
+reverts `PriceDeviation` while any pool is off its reference by more than `maxDeviationBps`.
+
+<i>
+
+Fees are collected first so the deposit is priced against a NAV that includes them. The tokens a position
+does not take stay in the vault after the PositionManager's Permit2 pulls, so they are refunded from here
+(a PositionManager SWEEP would find nothing to sweep). The event carries the spot NAV, as `nav()` reports.
+
+</i>
+
+```solidity
+function deposit(uint256[] calldata stockAmounts, uint256[] calldata indexAmounts, uint256 minShares, address to)
+        external
+        nonReentrant
+        returns (uint256 shares);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+| minShares | `uint256` |  |
+| to | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+
+<a id="redeem-uint256-uint256-uint256-address"></a>
+
+### redeem
+
+Burns the caller's `shares` and pays `to` the same fraction of every position and idle balance
+
+<i>
+
+The minimums apply to the returned per-constituent amounts (position plus idle share), which equal what the
+pool pays: the same round-down amounts at the same price the decrease executes at.
+
+</i>
+
+```solidity
+function redeem(uint256 shares, uint256[] calldata minStock, uint256[] calldata minIndex, address to)
+        external
+        nonReentrant
+        returns (uint256[] memory stockOut, uint256[] memory indexOut);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+| minStock | `uint256[]` |  |
+| minIndex | `uint256[]` |  |
+| to | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockOut | `uint256[]` |  |
+| indexOut | `uint256[]` |  |
+
+<a id="collectfees"></a>
+
+### collectFees
+
+Moves every position's accrued fees into the vault's idle balances, which count in `nav`
+
+```solidity
+function collectFees() external nonReentrant;
+```
+
+<a id="setup"></a>
+
+### setup
+
+Owner: approves Permit2 for the eleven tokens and the PositionManager on Permit2. Idempotent.
+
+```solidity
+function setup() external onlyOwner;
+```
+
+<a id="setdepositspaused-bool"></a>
+
+### setDepositsPaused
+
+```solidity
+function setDepositsPaused(bool paused) external onlyOwner;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| paused | `bool` |  |
+
+<a id="setmaxdeviationbps-uint16"></a>
+
+### setMaxDeviationBps
+
+Owner: sets `maxDeviationBps`, which must be in (0, 10000)
+
+```solidity
+function setMaxDeviationBps(uint16 maxDeviationBps_) external onlyOwner;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| maxDeviationBps_ | `uint16` |  |
+
+<a id="rerange-uint256-int24-int24"></a>
+
+### rerange
+
+Owner: closes constituent i's position into the vault and re-mints the vault's balances of its two
+tokens over `[tickLower, tickUpper)`; reverts `PriceDeviation` like `deposit`
+
+<i>
+
+Decreases the old position to zero (its empty NFT stays with the vault) and mints with the vault's whole
+balance of both tokens as the maximums, so what the new range cannot take stays idle. Liquidity 0 leaves
+`tokenId` 0 for the next deposit.
+
+</i>
+
+```solidity
+function rerange(uint256 i, int24 tickLower, int24 tickUpper) external onlyOwner nonReentrant;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+
+<a id="_collectfees"></a>
+
+### _collectFees
+
+<i>
+
+DECREASE_LIQUIDITY(tokenId, 0) + TAKE_PAIR to the vault for every position holding liquidity (a 0-decrease
+on an empty position reverts in the pool), then re-reads the idle balances
+
+</i>
+
+```solidity
+function _collectFees() internal returns (Snapshot memory s, uint256 navNow);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` | The state after collection |
+| navNow | `uint256` | The NAV after collection, as emitted |
+
+<a id="_decreaseandtake-uint128-bool-address"></a>
+
+### _decreaseAndTake
+
+<i>
+
+One DECREASE_LIQUIDITY per constituent with `liquidity[i] != 0` (of `liquidity[i]`, or 0 when `feesOnly`),
+then a TAKE_PAIR of each one's currencies to `recipient`; the first TAKE_PAIR takes the index token owed by
+all of them, so it moves once. Returns whether any action ran.
+
+</i>
+
+```solidity
+function _decreaseAndTake(uint128[] memory liquidity, bool feesOnly, address recipient)
+        internal
+        returns (bool touched);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| liquidity | `uint128[]` |  |
+| feesOnly | `bool` |  |
+| recipient | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| touched | `bool` |  |
+
+<a id="_addliquidity-uint160-uint256-uint256"></a>
+
+### _addLiquidity
+
+<i>
+
+One MINT_POSITION (first use; the i-th mint of the call gets `nextTokenId + i`) or INCREASE_LIQUIDITY per
+constituent the amounts give liquidity, the amounts as maximums, then a SETTLE_PAIR per such constituent
+(the index token is settled once, by the first). Constituents left at liquidity 0 are skipped.
+
+</i>
+
+```solidity
+function _addLiquidity(
+        uint160[] memory sqrtPriceX96,
+        uint256[] calldata stockAmounts,
+        uint256[] calldata indexAmounts
+    ) internal returns (uint128[] memory added);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPriceX96 | `uint160[]` |  |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| added | `uint128[]` |  |
+
+<a id="_addaction-constituent-uint160-uint256-uint256-uint256"></a>
+
+### _addAction
+
+<i>
+
+The liquidity the amounts buy at `sqrtPriceX96` and its action: MINT_POSITION (recording `nextId` as the
+constituent's token id) when it has no position yet, INCREASE_LIQUIDITY otherwise; the amounts are maximums
+
+</i>
+
+```solidity
+function _addAction(
+        Constituent storage c,
+        uint160 sqrtPriceX96,
+        uint256 stockAmount,
+        uint256 indexAmount,
+        uint256 nextId
+    ) internal returns (uint128 liquidity, bool minted, bytes memory params);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+| sqrtPriceX96 | `uint160` |  |
+| stockAmount | `uint256` |  |
+| indexAmount | `uint256` |  |
+| nextId | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| liquidity | `uint128` |  |
+| minted | `bool` |  |
+| params | `bytes` |  |
+
+<a id="_modify-bytes-bytes-uint256"></a>
+
+### _modify
+
+<i>
+
+Runs the first `count` actions in one unlock; a no-op for 0
+
+</i>
+
+```solidity
+function _modify(bytes memory actions, bytes[] memory params, uint256 count) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| actions | `bytes` |  |
+| params | `bytes[]` |  |
+| count | `uint256` |  |
+
+<a id="_mintparams-constituent-uint128-uint256-uint256"></a>
+
+### _mintParams
+
+```solidity
+function _mintParams(Constituent storage c, uint128 liquidity, uint256 amount0Max, uint256 amount1Max)
+        internal
+        view
+        returns (bytes memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+| liquidity | `uint128` |  |
+| amount0Max | `uint256` |  |
+| amount1Max | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes` |  |
+
+<a id="_modifyparams-uint256-uint128-uint256-uint256"></a>
+
+### _modifyParams
+
+<i>
+
+INCREASE_LIQUIDITY (amounts are maximums) and DECREASE_LIQUIDITY (amounts are minimums) share a layout
+
+</i>
+
+```solidity
+function _modifyParams(uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+        internal
+        pure
+        returns (bytes memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenId | `uint256` |  |
+| liquidity | `uint128` |  |
+| amount0 | `uint256` |  |
+| amount1 | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes` |  |
+
+<a id="_takepairparams-poolkey-address"></a>
+
+### _takePairParams
+
+```solidity
+function _takePairParams(PoolKey storage key, address recipient) internal view returns (bytes memory);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| key | `PoolKey` |  |
+| recipient | `address` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `bytes` |  |
+
+<a id="_pull-uint256-uint256"></a>
+
+### _pull
+
+<i>
+
+Pulls each stock amount and the index amounts' sum from the caller
+
+</i>
+
+```solidity
+function _pull(uint256[] calldata stockAmounts, uint256[] calldata indexAmounts) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmounts | `uint256[]` |  |
+| indexAmounts | `uint256[]` |  |
+
+<a id="_refund-snapshot"></a>
+
+### _refund
+
+<i>
+
+Returns to the caller every token balance above its pre-deposit level (`s` was read before the pull). The
+subtraction reverts if a deposit ever dipped into the vault's own idle balances.
+
+</i>
+
+```solidity
+function _refund(Snapshot memory s) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` |  |
+
+<a id="_refundexcess-address-uint256"></a>
+
+### _refundExcess
+
+```solidity
+function _refundExcess(address token, uint256 idleBefore) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| token | `address` |  |
+| idleBefore | `uint256` |  |
+
+<a id="_payidle-payout-address"></a>
+
+### _payIdle
+
+```solidity
+function _payIdle(Payout memory p, address to) internal;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| p | `Payout` |  |
+| to | `address` |  |
+
+<a id="_mintshares-address-uint256-uint256-uint256-uint256"></a>
+
+### _mintShares
+
+<i>
+
+First deposit: the NAV it added in shares, `DEAD_SHARES` of them to 0xdead (never the NAV already held, so a
+zero-value first deposit cannot claim tokens sitting in the vault). Later: the NAV it added at the NAV per
+share before it, rounded down.
+
+</i>
+
+```solidity
+function _mintShares(address to, uint256 supply, uint256 navBefore, uint256 navAfter, uint256 minShares)
+        internal
+        returns (uint256 shares);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| to | `address` |  |
+| supply | `uint256` |  |
+| navBefore | `uint256` |  |
+| navAfter | `uint256` |  |
+| minShares | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| shares | `uint256` |  |
+
+<a id="_payout-snapshot-uint256-uint256"></a>
+
+### _payout
+
+<i>
+
+`shares / supply` of every position's liquidity and idle balance, rounded down; the idle index token's share
+is attributed to the constituents by target weight (the last takes the rounding remainder)
+
+</i>
+
+```solidity
+function _payout(Snapshot memory s, uint256 shares, uint256 supply) internal view returns (Payout memory p);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` |  |
+| shares | `uint256` |  |
+| supply | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| p | `Payout` |  |
+
+<a id="_route-uint256-uint256-uint256"></a>
+
+### _route
+
+<i>
+
+Target after the deposit minus current value per constituent (0 when over); the deposit is split by those
+shortfalls, or, if they sum below it, covers them and splits the rest by target weight
+
+</i>
+
+```solidity
+function _route(uint256 indexValue, uint256 navNow, uint256[] memory values)
+        internal
+        view
+        returns (uint256[] memory alloc);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| indexValue | `uint256` |  |
+| navNow | `uint256` |  |
+| values | `uint256[]` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| alloc | `uint256[]` |  |
+
+<a id="_amountsforvalue-constituent-uint160-uint160-uint256"></a>
+
+### _amountsForValue
+
+<i>
+
+The token amounts (round down) at `sqrtPriceX96` of the liquidity worth `value`, its stock valued at
+`valuationSqrtPriceX96`
+
+</i>
+
+```solidity
+function _amountsForValue(Constituent storage c, uint160 sqrtPriceX96, uint160 valuationSqrtPriceX96, uint256 value)
+        internal
+        view
+        returns (uint256 stockAmount, uint256 indexAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+| sqrtPriceX96 | `uint160` |  |
+| valuationSqrtPriceX96 | `uint160` |  |
+| value | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmount | `uint256` |  |
+| indexAmount | `uint256` |  |
+
+<a id="_snapshot"></a>
+
+### _snapshot
+
+<i>
+
+Pool prices and position liquidity per constituent, then the idle balances
+
+</i>
+
+```solidity
+function _snapshot() internal view returns (Snapshot memory s);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` |  |
+
+<a id="_readidle-snapshot"></a>
+
+### _readIdle
+
+```solidity
+function _readIdle(Snapshot memory s) internal view;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` |  |
+
+<a id="_values-snapshot-uint160"></a>
+
+### _values
+
+<i>
+
+Per constituent: its position's index amount (at the pool price) plus its position and idle stock valued at
+`valuationSqrtPriceX96` (spot for the views, the reference for deposits). `navNow` adds the idle index token.
+
+</i>
+
+```solidity
+function _values(Snapshot memory s, uint160[] memory valuationSqrtPriceX96)
+        internal
+        view
+        returns (uint256[] memory values, uint256 navNow);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| s | `Snapshot` |  |
+| valuationSqrtPriceX96 | `uint160[]` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| values | `uint256[]` |  |
+| navNow | `uint256` |  |
+
+<a id="_referenceprices-uint160"></a>
+
+### _referencePrices
+
+<i>
+
+Each constituent's hook reference price; reverts `PriceDeviation(i)` when pool i's price is off it by more
+than `maxDeviationBps`
+
+</i>
+
+```solidity
+function _referencePrices(uint160[] memory sqrtPriceX96) internal view returns (uint160[] memory refs);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPriceX96 | `uint160[]` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| refs | `uint160[]` |  |
+
+<a id="_positionamounts-constituent-uint160-uint128"></a>
+
+### _positionAmounts
+
+<i>
+
+The position's (stock, index) amounts for `liquidity` at `sqrtPriceX96`, rounded down as the pool pays them
+
+</i>
+
+```solidity
+function _positionAmounts(Constituent storage c, uint160 sqrtPriceX96, uint128 liquidity)
+        internal
+        view
+        returns (uint256 stockAmount, uint256 indexAmount);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+| sqrtPriceX96 | `uint160` |  |
+| liquidity | `uint128` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockAmount | `uint256` |  |
+| indexAmount | `uint256` |  |
+
+<a id="_liquidityforamounts-constituent-uint160-uint256-uint256"></a>
+
+### _liquidityForAmounts
+
+```solidity
+function _liquidityForAmounts(Constituent storage c, uint160 sqrtPriceX96, uint256 amount0, uint256 amount1)
+        internal
+        view
+        returns (uint128);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+| sqrtPriceX96 | `uint160` |  |
+| amount0 | `uint256` |  |
+| amount1 | `uint256` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint128` |  |
+
+<a id="_stock-constituent"></a>
+
+### _stock
+
+```solidity
+function _stock(Constituent storage c) internal view returns (address);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| c | `Constituent` |  |
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `address` |  |
+
+<a id="_validateconstituent-uint256-constituentinit-address"></a>
+
+### _validateConstituent
+
+```solidity
+function _validateConstituent(uint256 i, ConstituentInit memory init, address index) internal pure;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+| init | `ConstituentInit` |  |
+| index | `address` |  |
+
+<a id="_checkrange-uint256-int24-int24-int24"></a>
+
+### _checkRange
+
+```solidity
+function _checkRange(uint256 i, int24 tickLower, int24 tickUpper, int24 tickSpacing) internal pure;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+| tickSpacing | `int24` |  |
+
+## Errors
+
+### InvalidTargets
+
+The constituents' target weights do not sum to 10000
+
+```solidity
+error InvalidTargets();
+```
+
+### InvalidRange
+
+Constituent i's range is inverted, off its tick spacing or outside the usable ticks
+
+```solidity
+error InvalidRange(uint256 i);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+
+### InvalidConstituent
+
+Constituent i's key does not sort its currencies, does not pair its stock with the index token, or
+repeats an earlier constituent's stock
+
+```solidity
+error InvalidConstituent(uint256 i);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| i | `uint256` |  |
+
+### ZeroNav
+
+Shares exist but the vault holds nothing to price a deposit against
+
+```solidity
+error ZeroNav();
+```
+
+### InvalidMaxDeviation
+
+`setMaxDeviationBps` takes a value in (0, 10000)
+
+```solidity
+error InvalidMaxDeviation(uint16 maxDeviationBps);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| maxDeviationBps | `uint16` |  |
+
+## Structs
+
+### Constituent
+
+<i>
+
+`tokenId` is 0 until a deposit (or `rerange`) gives the constituent liquidity
+
+</i>
+
+```solidity
+struct Constituent {
+        PoolKey key;
+        PoolId poolId;
+        bool stockIsCurrency0;
+        uint16 targetBps;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 tokenId;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| key | `PoolKey` |  |
+| poolId | `PoolId` |  |
+| stockIsCurrency0 | `bool` |  |
+| targetBps | `uint16` |  |
+| tickLower | `int24` |  |
+| tickUpper | `int24` |  |
+| tokenId | `uint256` |  |
+
+### Snapshot
+
+<i>
+
+Pool prices, position liquidity and idle balances, read once per call and kept current by the call
+
+</i>
+
+```solidity
+struct Snapshot {
+        uint160[] sqrtPriceX96;
+        uint128[] liquidity;
+        uint256[] idleStock;
+        uint256 idleIndex;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| sqrtPriceX96 | `uint160[]` |  |
+| liquidity | `uint128[]` |  |
+| idleStock | `uint256[]` |  |
+| idleIndex | `uint256` |  |
+
+### Payout
+
+<i>
+
+What a redemption of some shares pays, per constituent
+
+</i>
+
+```solidity
+struct Payout {
+        uint256[] stockOut;
+        uint256[] indexOut;
+        uint128[] liquidity;
+        uint256[] idleStock;
+        uint256 idleIndex;
+    }
+```
+
+**Properties**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| stockOut | `uint256[]` |  |
+| indexOut | `uint256[]` |  |
+| liquidity | `uint128[]` |  |
+| idleStock | `uint256[]` |  |
+| idleIndex | `uint256` |  |
+
