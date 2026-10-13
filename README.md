@@ -82,18 +82,6 @@ Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0
 | USDC/USDT | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7` | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
 | USDC/USDG | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D` | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
 
-### VolatilePairHook
-
-Same proxy layout as `StablePairHook`: the ERC1967 proxy is the registered v4 hook and the
-implementation column reflects the current implementation as of the listed commit.
-
-| Network | Proxy (hook)                               | Implementation                             | Commit Hash | Date       |
-| ------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
-| Sepolia | 0x6B1DF823F9492000cC6Bc8dB2c1714E767DaFCc0 | 0x01C274A3Ea7CdA08c90140395349004cEf28C000 | ba9a531     | 2026-10-13 |
-
-On Sepolia, `owner`, `poolInitializer` and `configManager` are all the test deployer
-`0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95`.
-
 ## Audits
 
 | Name           | Date       | Report                                                     |

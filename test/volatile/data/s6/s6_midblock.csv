@@ -1,9 +1,0 @@
-case,baseAskE6,baseBidE6,dvE6,fAskE6,fBidE6
-first_swap,450,450,0,450,450
-buy_continuing,450,450,5000,650,2950
-sell_backrun_100bp,450,450,10000,650,5450
-sell_backrun_20bp,450,450,2000,650,1450
-crossed_below_open,450,450,-1000,950,650
-s1_block2_baseline,750,1450,3000,950,2950
-small_move,450,450,500,550,700
-s5_step1_baseline,1650,400,-2000,2650,600

@@ -3,7 +3,7 @@
 name: pre-commit
 on:
   pull_request:
-    branches: [main, dev-*, public*, publish-*, feat/**, fix/**]
+    branches: [main, master, staging, dev, public, feat/**, fix/**]
 
 permissions: {}
 
