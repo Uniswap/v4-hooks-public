@@ -47,10 +47,18 @@ CREATE2_DEPLOYER="0x4e59b44847b379578588920cA78FbF26c0B4956C"
 
 FACTORY_CONTRACT="src/AllowlistedFactory.sol:AllowlistedFactory"
 # Allowlisted hook creation code, hashed into the factory's constructor arg. MUST match the
-# contents AND order in DeployDualPoolFactory.s.sol, or the mined salt resolves elsewhere.
-ALLOWLISTED_CONTRACTS=(
-  "src/alf/DualPoolHook.sol:DualPoolHook"
-)
+# contents AND order in the family's factory deploy script, or the mined salt resolves elsewhere.
+# Defaults to the DualPool family (DeployDualPoolFactory.s.sol); override with a space-separated
+# ALLOWLISTED_CONTRACTS env var for other families, e.g. the ERC-4626 wrapper family
+# (DeployERC4626WrapperFactory.s.sol):
+#   ALLOWLISTED_CONTRACTS="src/ERC4626WrapperHook.sol:ERC4626WrapperHook src/ERC4626RoutingHook.sol:ERC4626RoutingHook"
+if [ -n "${ALLOWLISTED_CONTRACTS:-}" ]; then
+  read -r -a ALLOWLISTED_CONTRACTS <<<"$ALLOWLISTED_CONTRACTS"
+else
+  ALLOWLISTED_CONTRACTS=(
+    "src/alf/DualPoolHook.sol:DualPoolHook"
+  )
+fi
 
 die() {
   echo "error: $*" >&2
@@ -126,8 +134,9 @@ verify_salt() {
     echo "  leading zeros: FAIL"
     die "salt does not satisfy the constraints"
   fi
-  echo "VALID. Deploy AllowlistedFactory with this salt via the 0x4e59 CREATE2 proxy:"
-  echo "  FACTORY_SALT=$salt MIN_LEADING_ZERO_NIBBLES=$MIN_LEADING_ZERO_NIBBLES forge script script/DeployDualPoolFactory.s.sol"
+  echo "VALID. Deploy AllowlistedFactory with this salt via the 0x4e59 CREATE2 proxy, through the"
+  echo "family's factory deploy script (DeployDualPoolFactory.s.sol / DeployERC4626WrapperFactory.s.sol):"
+  echo "  FACTORY_SALT=$salt MIN_LEADING_ZERO_NIBBLES=$MIN_LEADING_ZERO_NIBBLES forge script script/<DeployFactoryScript>.s.sol"
 }
 
 # ── Miner process/tempdir bookkeeping ──
