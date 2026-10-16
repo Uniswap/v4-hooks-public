@@ -60,7 +60,7 @@ runs = 2048
 [invariant]
 runs = 256
 depth = 32
-fail_on_revert = false
+fail_on_revert = true
 shrink_run_limit = 1024
 
 [rpc_endpoints]
