@@ -121,7 +121,6 @@ Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0
 | WETHHook       | 04/24/2025 | [OpenZeppelin](./docs/audits/openzeppelin-weth-wsteth.pdf) |
 | WstETHHook     | 04/24/2025 | [OpenZeppelin](./docs/audits/openzeppelin-weth-wsteth.pdf) |
 | StablePairHook | 03/02/2026 | [OpenZeppelin](./docs/audits/openzeppelin-stablepair.pdf)  |
-| DualPoolHook   | 07/14/2026 | [OpenZeppelin](./docs/audits/openzeppelin-dualpool.pdf)    |
 
 ### Security Contact
 

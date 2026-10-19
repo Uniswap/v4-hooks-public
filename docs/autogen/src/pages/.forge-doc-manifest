@@ -47,13 +47,10 @@ src/base/abstract.BaseHook.mdx
 src/base/abstract.BaseTokenWrapperHook.mdx
 src/base/abstract.BaseUUPSHook.mdx
 src/base/abstract.HookRoles.mdx
-src/contract.AllowlistedFactory.mdx
 src/contract.WETHHook.mdx
 src/contract.WstETHHook.mdx
 src/contract.WstETHRoutingHook.mdx
-src/interfaces/interface.IAllowlistedFactory.mdx
 src/interfaces/interface.IDynamicFeeHook.mdx
-src/interfaces/interface.IIndicativeQuote.mdx
 src/interfaces/interface.IStETH.mdx
 src/interfaces/interface.IWstETH.mdx
 src/permissioned-pools/contract.PermissionedHooks.mdx
