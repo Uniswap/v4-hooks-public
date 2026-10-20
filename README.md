@@ -69,14 +69,18 @@ current implementation as of the listed commit.
 | -------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
 | Ethereum | 0x0000113dCf4ADd69999Fad8F20F2b63F979bfcC0 | 0x5f216d21b1C81346938EDDc1Df7e0111A0F64000 | ecb8c96     | 2026-07-27 |
 | Arbitrum | 0x630e9CaC0ffF557Bd3A01DAa111ed253c771Bcc0 | 0x424e2f8D89eeaB51AF10669D149Fbd4BEB090000 | ecb8c96     | 2026-10-05 |
+| X Layer  | 0x630e9CaC0ffF557Bd3A01DAa111ed253c771Bcc0 | 0x424e2f8D89eeaB51AF10669D149Fbd4BEB090000 | ecb8c96     | 2026-10-20 |
 | Sepolia  | 0x2F45A94782d3e187BaB5F72448bb85d6d1d67CC0 | 0xDBc81fFadaB5ee9c9fB1c2D43Bef547EB9c64000 | 7abd34b     | 2026-07-22 |
 
 `owner` and `configManager` are the [Uniswap Governance Timelock](https://etherscan.io/address/0x1a9C8182C09F50C8318d769245beA52c32BE35BC),
 so fee-config changes and implementation upgrades go through a governance proposal.
-On Arbitrum they are the Timelock's [L1-to-L2 alias](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD),
-so the same governance proposals reach it through the Arbitrum bridge.
+On Arbitrum and X Layer they are the Timelock's [L1-to-L2 alias](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD),
+so the same governance proposals reach them through each chain's bridge.
 On Sepolia, `owner`, `poolInitializer` and `configManager` are all the test deployer
 `0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95`.
+
+On Robinhood Chain only the implementation is deployed, at `0xaF7895228C7E5ea4FA60d6CB7E42eedC99e94000`
+(commit ecb8c96)
 
 #### Pools
 
