@@ -69,24 +69,34 @@ current implementation as of the listed commit.
 | -------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
 | Ethereum | 0x0000113dCf4ADd69999Fad8F20F2b63F979bfcC0 | 0x5f216d21b1C81346938EDDc1Df7e0111A0F64000 | ecb8c96     | 2026-07-27 |
 | Arbitrum | 0x630e9CaC0ffF557Bd3A01DAa111ed253c771Bcc0 | 0x424e2f8D89eeaB51AF10669D149Fbd4BEB090000 | ecb8c96     | 2026-10-05 |
+| X Layer  | 0x630e9CaC0ffF557Bd3A01DAa111ed253c771Bcc0 | 0x424e2f8D89eeaB51AF10669D149Fbd4BEB090000 | ecb8c96     | 2026-10-20 |
 | Sepolia  | 0x2F45A94782d3e187BaB5F72448bb85d6d1d67CC0 | 0xDBc81fFadaB5ee9c9fB1c2D43Bef547EB9c64000 | 7abd34b     | 2026-07-22 |
 
 `owner` and `configManager` are the [Uniswap Governance Timelock](https://etherscan.io/address/0x1a9C8182C09F50C8318d769245beA52c32BE35BC),
 so fee-config changes and implementation upgrades go through a governance proposal.
-On Arbitrum they are the Timelock's [L1-to-L2 alias](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD),
-so the same governance proposals reach it through the Arbitrum bridge.
+On Arbitrum and X Layer they are the Timelock's L1-to-L2 alias `0x2BAD8182C09F50c8318d769245beA52C32Be46CD`
+([Arbiscan](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD), [OKLink](https://www.oklink.com/x-layer/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD)),
+so the same governance proposals reach them through each chain's bridge.
 On Sepolia, `owner`, `poolInitializer` and `configManager` are all the test deployer
 `0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95`.
 
+On Robinhood Chain only the implementation is deployed, at `0xaF7895228C7E5ea4FA60d6CB7E42eedC99e94000`
+(commit ecb8c96)
+
 #### Pools
 
-Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0x800000`) and a
-`tickSpacing` of 1, so the pool ID is `keccak256(abi.encode(PoolKey))` over the values below.
+Pools initialized on the StablePairHook, on each network's hook from the table above. Every pool uses the
+dynamic-fee flag (`0x800000`) and a `tickSpacing` of 1, so the pool ID is `keccak256(abi.encode(PoolKey))`
+over the values below.
 
-| Pool      | Currency0                                         | Currency1                                         | Pool ID                                                            | Date       |
-| --------- | ------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
-| USDC/USDT | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7` | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
-| USDC/USDG | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D` | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
+| Network  | Pool       | Currency0                                         | Currency1                                          | Pool ID                                                            | Date       |
+| -------- | ---------- | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
+| Ethereum | USDC/USDT  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7`  | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
+| Ethereum | USDC/USDG  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D`  | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
+| Arbitrum | USDG/USDC  | USDG `0x004B506865409877C9fA29bfb1ebA929984B9bbC` | USDC `0xaf88d065e77c8cC2239327C5EDb3A432268e5831`  | 0x52b42d5f1e4a0d4bce86667bb069cf257e512d98ce617f549f6e4fbb0bee41e6 | 2026-10-05 |
+| X Layer  | USDG/USDT0 | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8` | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | 0x472a136cc430cb6fc27870fe8e973a2891abc619752fabbdc4d78cf887cd0851 | 2026-10-21 |
+| X Layer  | USDC/USDT0 | USDC `0x74b7F16337b8972027F6196A17a631aC6dE26d22` | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | 0x0527dced3a892ab920c9d890034e6780ad8a74f8463f95c2a2a4fcdc600af695 | 2026-10-21 |
+| X Layer  | USDG/USDC  | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8` | USDC `0x74b7F16337b8972027F6196A17a631aC6dE26d22`  | 0x7507fe799c15cb2ba2862a42d1497c96a2e2e61b38a6f2e80a19bb983f5d37ae | 2026-10-21 |
 
 ### VolatilePairHook
 
