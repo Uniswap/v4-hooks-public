@@ -19,12 +19,13 @@ This repository contains the official Uniswap v4 hook contracts developed and ma
 
 ## Hooks
 
-| Hook                                            | Description                                                                                                                           |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| [StablePairHook](/src/stable/contract.StablePairHook) | Dynamic fee hook for pools of two assets expected to hold the same price, with optimal range pricing and time-decaying fees           |
-| [WETHHook](/src/contract.WETHHook)                    | Wraps ETH to WETH and unwraps WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees                                      |
-| [WstETHHook](/src/contract.WstETHHook)                | Wraps stETH to wstETH and back through a Uniswap v4 pool, handling the dynamic exchange rate and rebasing rounding errors             |
-| [WstETHRoutingHook](/src/contract.WstETHRoutingHook)  | Companion to `WstETHHook` that enables swap simulation via the V4 Quoter, computing wrapping output without executing token transfers |
+| Hook                                                  | Description                                                                                                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [StablePairHook](/src/stable/contract.StablePairHook)       | Dynamic fee hook for pools of two assets expected to hold the same price, with optimal range pricing and time-decaying fees                            |
+| [VolatilePairHook](/src/volatile/contract.VolatilePairHook) | Dynamic fee hook for volatile pairs such as ETH/USDC, with separate ask and bid fees that lean toward the last price move and an extra fee on backruns |
+| [WETHHook](/src/contract.WETHHook)                          | Wraps ETH to WETH and unwraps WETH to ETH through a Uniswap v4 pool at a 1:1 rate with zero fees                                                       |
+| [WstETHHook](/src/contract.WstETHHook)                      | Wraps stETH to wstETH and back through a Uniswap v4 pool, handling the dynamic exchange rate and rebasing rounding errors                              |
+| [WstETHRoutingHook](/src/contract.WstETHRoutingHook)        | Companion to `WstETHHook` that enables swap simulation via the V4 Quoter, computing wrapping output without executing token transfers                  |
 
 ## Installation
 
@@ -126,11 +127,12 @@ Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0
 
 ## Audits
 
-| Name           | Date       | Report                                                     |
-| -------------- | ---------- | ---------------------------------------------------------- |
-| WETHHook       | 04/24/2025 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-weth-wsteth.pdf) |
-| WstETHHook     | 04/24/2025 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-weth-wsteth.pdf) |
-| StablePairHook | 03/02/2026 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-stablepair.pdf)  |
+| Name             | Date       | Report                                                     |
+| ---------------- | ---------- | ---------------------------------------------------------- |
+| WETHHook         | 04/24/2025 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-weth-wsteth.pdf) |
+| WstETHHook       | 04/24/2025 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-weth-wsteth.pdf) |
+| StablePairHook   | 03/02/2026 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-stablepair.pdf)  |
+| VolatilePairHook | 10/14/2026 | [OpenZeppelin](https://github.com/Uniswap/v4-hooks-public/blob/main/docs/audits/openzeppelin-volatile.pdf)    |
 
 ### Security Contact
 
