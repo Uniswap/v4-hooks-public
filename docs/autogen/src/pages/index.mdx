@@ -74,7 +74,8 @@ current implementation as of the listed commit.
 
 `owner` and `configManager` are the [Uniswap Governance Timelock](https://etherscan.io/address/0x1a9C8182C09F50C8318d769245beA52c32BE35BC),
 so fee-config changes and implementation upgrades go through a governance proposal.
-On Arbitrum and X Layer they are the Timelock's [L1-to-L2 alias](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD),
+On Arbitrum and X Layer they are the Timelock's L1-to-L2 alias `0x2BAD8182C09F50c8318d769245beA52C32Be46CD`
+([Arbiscan](https://arbiscan.io/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD), [OKLink](https://www.oklink.com/x-layer/address/0x2BAD8182C09F50c8318d769245beA52C32Be46CD)),
 so the same governance proposals reach them through each chain's bridge.
 On Sepolia, `owner`, `poolInitializer` and `configManager` are all the test deployer
 `0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95`.
