@@ -38,6 +38,8 @@ contract Parameters {
 
     string public constant POOL_USDC_USDT = "USDC/USDT";
     string public constant POOL_USDC_USDG = "USDC/USDG";
+    string public constant POOL_USDG_USDT0 = "USDG/USDT0";
+    string public constant POOL_USDC_USDT0 = "USDC/USDT0";
 
     /// @notice Thrown when parameters are not set for a given chainId
     error ParametersNotSetForChainId(uint256 chainId);
@@ -69,7 +71,7 @@ contract Parameters {
         });
         parameters[ROBINHOOD_CHAIN_ID] = DeployParameters({
             poolManager: IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951),
-            stablePairHookImplementation: address(0),
+            stablePairHookImplementation: 0xaF7895228C7E5ea4FA60d6CB7E42eedC99e94000,
             stablePairHookProxySalt: bytes32(0),
             owner: address(0),
             poolInitializer: address(0),
@@ -127,6 +129,42 @@ contract Parameters {
             feeConfig: StableFeeConfig({
                 k: 16_653_011, // .9925968 in Q24 (0.9925968 * 2**24)
                 optimalFeeE6: 50, // = .5bps = .005%
+                targetMultiplier: 100,
+                referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
+            })
+        });
+        poolParameters[XLAYER_CHAIN_ID][POOL_USDG_USDT0] = PoolParameters({
+            currency0: 0x4ae46a509F6b1D9056937BA4500cb143933D2dc8, // USDG
+            currency1: 0x779Ded0c9e1022225f8E0630b35a9b54bE713736, // USDT0
+            tickSpacing: 1,
+            sqrtPriceX96: 79228162514264337593543950336, // 1:1
+            feeConfig: StableFeeConfig({
+                k: 16_285_886, // .9707145 in Q24 (0.9707145 * 2**24)
+                optimalFeeE6: 100, // = 1bp = .01%
+                targetMultiplier: 100,
+                referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
+            })
+        });
+        poolParameters[XLAYER_CHAIN_ID][POOL_USDC_USDT0] = PoolParameters({
+            currency0: 0x74b7F16337b8972027F6196A17a631aC6dE26d22, // USDC
+            currency1: 0x779Ded0c9e1022225f8E0630b35a9b54bE713736, // USDT0
+            tickSpacing: 1,
+            sqrtPriceX96: 79228162514264337593543950336, // 1:1
+            feeConfig: StableFeeConfig({
+                k: 16_285_886, // .9707145 in Q24 (0.9707145 * 2**24)
+                optimalFeeE6: 100, // = 1bp = .01%
+                targetMultiplier: 100,
+                referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
+            })
+        });
+        poolParameters[XLAYER_CHAIN_ID][POOL_USDC_USDG] = PoolParameters({
+            currency0: 0x4ae46a509F6b1D9056937BA4500cb143933D2dc8, // USDG
+            currency1: 0x74b7F16337b8972027F6196A17a631aC6dE26d22, // USDC
+            tickSpacing: 1,
+            sqrtPriceX96: 79228162514264337593543950336, // 1:1
+            feeConfig: StableFeeConfig({
+                k: 16_285_886, // .9707145 in Q24 (0.9707145 * 2**24)
+                optimalFeeE6: 100, // = 1bp = .01%
                 targetMultiplier: 100,
                 referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
             })
