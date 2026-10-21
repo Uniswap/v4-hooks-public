@@ -12,12 +12,19 @@ import {Parameters, DeployParameters} from "./Parameters.sol";
 
 /// @notice Deploys the StablePairHook implementation and its ERC1967 proxy. The proxy is the
 ///         registered v4 hook, so its address (not the implementation's) is mined for the flags.
+///
+///         Three entry points, using this chain's entry in Parameters.sol:
+///         - `run()`: implementation (if `stablePairHookImplementation` is not set yet), then proxy
+///         - `--sig "deployImplementation()"`: implementation only; record the printed address in
+///           `stablePairHookImplementation`
+///         - `--sig "deployProxy()"`: proxy only, pointing at `stablePairHookImplementation`
 contract DeployStablePairHookScript is Script, Parameters {
     error AddressMismatch(address deployed, address expected);
     error FlagsMismatch(address deployed, uint160 flags);
     error RolesNotSetForChainId(uint256 chainId);
     error ImplementationMismatch(address current, address expected);
     error RolesMismatch(address proxy);
+    error InvalidImplementation(address implementation);
 
     /// @dev Must match BaseDynamicFeeHook.getHookPermissions(); the proxy's mined address freezes
     ///      this flag set forever
@@ -28,33 +35,60 @@ contract DeployStablePairHookScript is Script, Parameters {
 
     function run() public returns (address) {
         DeployParameters memory params = getParameters(block.chainid);
+        // Checked before anything is broadcast, so a missing role can't leave a lone implementation
+        _checkRoles(params);
+        address implementation = params.stablePairHookImplementation == address(0)
+            ? _deployImplementation(params)
+            : _checkImplementation(params);
+        return _deployProxy(params, implementation);
+    }
 
+    function deployImplementation() public returns (address) {
+        DeployParameters memory params = getParameters(block.chainid);
+        if (params.stablePairHookImplementation != address(0)) return _checkImplementation(params);
+        return _deployImplementation(params);
+    }
+
+    function deployProxy() public returns (address) {
+        DeployParameters memory params = getParameters(block.chainid);
+        _checkRoles(params);
+        return _deployProxy(params, _checkImplementation(params));
+    }
+
+    function _checkRoles(DeployParameters memory params) internal view {
         if (params.owner == address(0) || params.poolInitializer == address(0) || params.configManager == address(0)) {
             revert RolesNotSetForChainId(block.chainid);
         }
+    }
 
-        // Step 1: Deploy the implementation via CREATE2 so reruns reuse the same address. Its salt
-        // is mined so the address carries no hook-flag bits
-        bytes memory implementationConstructorArgs = abi.encode(params.poolManager);
-        (address implementation, bytes32 implementationSalt) = _resolveCreate2Address(
-            params.stablePairHookImplementationSalt,
-            uint160(0),
-            type(StablePairHook).creationCode,
-            implementationConstructorArgs,
-            "implementation"
+    /// @notice Validates the recorded implementation: it must exist and use this chain's PoolManager
+    function _checkImplementation(DeployParameters memory params) internal view returns (address implementation) {
+        implementation = params.stablePairHookImplementation;
+        if (
+            implementation.code.length == 0
+                || address(StablePairHook(implementation).poolManager()) != address(params.poolManager)
+        ) revert InvalidImplementation(implementation);
+        console2.log("Using StablePairHook implementation at:", implementation);
+    }
+
+    /// @notice Deploys the implementation via CREATE2 at a mined address that carries no hook-flag
+    ///         bits. The miner counts up from salt 0, so the address is deterministic per chain
+    function _deployImplementation(DeployParameters memory params) internal returns (address implementation) {
+        bytes32 salt;
+        (implementation, salt) = HookMiner.find(
+            CREATE2_DEPLOYER, uint160(0), type(StablePairHook).creationCode, abi.encode(params.poolManager)
         );
-        if (implementation.code.length == 0) {
-            vm.broadcast();
-            StablePairHook deployedImplementation = new StablePairHook{salt: implementationSalt}(params.poolManager);
-            if (address(deployedImplementation) != implementation) {
-                revert AddressMismatch(address(deployedImplementation), implementation);
-            }
-            console2.log("StablePairHook implementation deployed to:", implementation);
-        } else {
-            console2.log("Reusing existing StablePairHook implementation at:", implementation);
+        vm.broadcast();
+        StablePairHook deployedImplementation = new StablePairHook{salt: salt}(params.poolManager);
+        if (address(deployedImplementation) != implementation) {
+            revert AddressMismatch(address(deployedImplementation), implementation);
         }
+        console2.log("StablePairHook implementation deployed to:", implementation);
+        console2.log("Record it as stablePairHookImplementation in Parameters.sol");
+    }
 
-        // Step 2: Deploy the proxy at a mined hook address, initializing the roles atomically
+    /// @notice Deploys the proxy at a mined hook address, initializing the roles atomically
+    function _deployProxy(DeployParameters memory params, address implementation) internal returns (address) {
         bytes memory initializeCall =
             abi.encodeCall(BaseDynamicFeeHook.initialize, (params.owner, params.poolInitializer, params.configManager));
         bytes memory proxyConstructorArgs = abi.encode(implementation, initializeCall);
