@@ -146,8 +146,8 @@ contract Parameters {
             })
         });
         poolParameters[XLAYER_CHAIN_ID][POOL_USDC_USDT0] = PoolParameters({
-            currency0: 0x74b7F16337b8972027F6196A17a631aC6dE26d22, // USDC
-            currency1: 0x779Ded0c9e1022225f8E0630b35a9b54bE713736, // USDT0
+            currency0: 0x779Ded0c9e1022225f8E0630b35a9b54bE713736, // USDT0
+            currency1: 0xB6CEceAB302E2E4948951eE7843FC24E92933061, // USDC (native, Circle)
             tickSpacing: 1,
             sqrtPriceX96: 79228162514264337593543950336, // 1:1
             feeConfig: StableFeeConfig({
@@ -159,7 +159,7 @@ contract Parameters {
         });
         poolParameters[XLAYER_CHAIN_ID][POOL_USDC_USDG] = PoolParameters({
             currency0: 0x4ae46a509F6b1D9056937BA4500cb143933D2dc8, // USDG
-            currency1: 0x74b7F16337b8972027F6196A17a631aC6dE26d22, // USDC
+            currency1: 0xB6CEceAB302E2E4948951eE7843FC24E92933061, // USDC (native, Circle)
             tickSpacing: 1,
             sqrtPriceX96: 79228162514264337593543950336, // 1:1
             feeConfig: StableFeeConfig({
