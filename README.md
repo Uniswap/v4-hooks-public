@@ -90,14 +90,14 @@ Pools initialized on the StablePairHook, on each network's hook from the table a
 dynamic-fee flag (`0x800000`) and a `tickSpacing` of 1, so the pool ID is `keccak256(abi.encode(PoolKey))`
 over the values below.
 
-| Network  | Pool       | Currency0                                         | Currency1                                          | Pool ID                                                            | Date       |
-| -------- | ---------- | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
-| Ethereum | USDC/USDT  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7`  | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
-| Ethereum | USDC/USDG  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D`  | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
-| Arbitrum | USDG/USDC  | USDG `0x004B506865409877C9fA29bfb1ebA929984B9bbC` | USDC `0xaf88d065e77c8cC2239327C5EDb3A432268e5831`  | 0x52b42d5f1e4a0d4bce86667bb069cf257e512d98ce617f549f6e4fbb0bee41e6 | 2026-10-05 |
-| X Layer  | USDG/USDT0 | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8` | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | 0x472a136cc430cb6fc27870fe8e973a2891abc619752fabbdc4d78cf887cd0851 | 2026-10-21 |
-| X Layer  | USDC/USDT0 | USDC `0x74b7F16337b8972027F6196A17a631aC6dE26d22` | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | 0x0527dced3a892ab920c9d890034e6780ad8a74f8463f95c2a2a4fcdc600af695 | 2026-10-21 |
-| X Layer  | USDG/USDC  | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8` | USDC `0x74b7F16337b8972027F6196A17a631aC6dE26d22`  | 0x7507fe799c15cb2ba2862a42d1497c96a2e2e61b38a6f2e80a19bb983f5d37ae | 2026-10-21 |
+| Network  | Pool       | Currency0                                          | Currency1                                          | Pool ID                                                            | Date       |
+| -------- | ---------- | -------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
+| Ethereum | USDC/USDT  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`  | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7`  | 0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634 | 2026-09-10 |
+| Ethereum | USDC/USDG  | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`  | USDG `0xe343167631d89B6Ffc58B88d6b7fB0228795491D`  | 0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb | 2026-09-10 |
+| Arbitrum | USDG/USDC  | USDG `0x004B506865409877C9fA29bfb1ebA929984B9bbC`  | USDC `0xaf88d065e77c8cC2239327C5EDb3A432268e5831`  | 0x52b42d5f1e4a0d4bce86667bb069cf257e512d98ce617f549f6e4fbb0bee41e6 | 2026-10-05 |
+| X Layer  | USDG/USDT0 | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8`  | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | 0x472a136cc430cb6fc27870fe8e973a2891abc619752fabbdc4d78cf887cd0851 | 2026-10-21 |
+| X Layer  | USDT0/USDC | USDT0 `0x779Ded0c9e1022225f8E0630b35a9b54bE713736` | USDC `0xB6CEceAB302E2E4948951eE7843FC24E92933061`  | 0xc3157901d6cdc7ddc8e0e99d03494aab58126bac3e09bad5d107f59fc81a6456 | 2026-10-22 |
+| X Layer  | USDG/USDC  | USDG `0x4ae46a509F6b1D9056937BA4500cb143933D2dc8`  | USDC `0xB6CEceAB302E2E4948951eE7843FC24E92933061`  | 0x97b14788c981b4c79f3fe4d8a3725a2364e03ae56cab6cae4b3ac31c86d73fea | 2026-10-22 |
 
 ### VolatilePairHook
 
