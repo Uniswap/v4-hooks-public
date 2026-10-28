@@ -16,7 +16,7 @@ contract VolatilePairHookV2Mock is VolatilePairHook {
     bytes32 private constant V2_MOCK_STORAGE_LOCATION =
         0xe90d654d9eef4dc3b11d9e617b4016f4cccbc882e48d96738aa44c0d8bd8df00;
 
-    constructor(IPoolManager _manager) VolatilePairHook(_manager) {}
+    constructor(IPoolManager _manager, uint256 _maxTempFeeBlockGap) VolatilePairHook(_manager, _maxTempFeeBlockGap) {}
 
     function _getV2MockStorage() private pure returns (VolatilePairHookV2MockStorage storage $) {
         assembly ("memory-safe") {

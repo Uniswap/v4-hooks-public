@@ -34,6 +34,9 @@ abstract contract VolatilePairTestBase is VolatileFuzzTestBase {
 
     uint24 internal constant NEUTRAL_FEE_E6 = RESTING_SPREAD_E6 / 2;
 
+    /// Ethereum's value: only the block right after the previous block open pays the temp fee.
+    uint256 internal constant MAX_TEMP_FEE_BLOCK_GAP = 1;
+
     int24 internal constant TICK_SPACING = 60;
 
     /// ERC-7201 base slot of `VolatileFeeConfiguration`.
@@ -60,7 +63,7 @@ abstract contract VolatilePairTestBase is VolatileFuzzTestBase {
     }
 
     function setUp() public virtual {
-        VolatilePairHook impl = new VolatilePairHook(IPoolManager(address(this)));
+        VolatilePairHook impl = new VolatilePairHook(IPoolManager(address(this)), MAX_TEMP_FEE_BLOCK_GAP);
         address proxyAddress = address((uint160(type(uint160).max) & ~Hooks.ALL_HOOK_MASK) | HOOK_FLAGS);
         deployCodeTo(
             "ERC1967Proxy.sol:ERC1967Proxy",
