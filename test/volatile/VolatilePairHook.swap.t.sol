@@ -48,7 +48,7 @@ contract VolatilePairHookSwapTest is VolatilePairTestBase, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        impl = new VolatilePairHook(manager);
+        impl = new VolatilePairHook(manager, MAX_TEMP_FEE_BLOCK_GAP);
 
         hook = VolatilePairHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | HOOK_FLAGS)));
         deployCodeTo(

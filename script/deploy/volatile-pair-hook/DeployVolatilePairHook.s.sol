@@ -35,7 +35,7 @@ contract DeployVolatilePairHookScript is Script, Parameters {
 
         // Step 1: Deploy the implementation via CREATE2 so reruns reuse the same address. Its salt
         // is mined so the address carries no hook-flag bits
-        bytes memory implementationConstructorArgs = abi.encode(params.poolManager);
+        bytes memory implementationConstructorArgs = abi.encode(params.poolManager, params.maxTempFeeBlockGap);
         (address implementation, bytes32 implementationSalt) = _resolveCreate2Address(
             params.volatilePairHookImplementationSalt,
             uint160(0),
@@ -45,7 +45,8 @@ contract DeployVolatilePairHookScript is Script, Parameters {
         );
         if (implementation.code.length == 0) {
             vm.broadcast();
-            VolatilePairHook deployedImplementation = new VolatilePairHook{salt: implementationSalt}(params.poolManager);
+            VolatilePairHook deployedImplementation =
+                new VolatilePairHook{salt: implementationSalt}(params.poolManager, params.maxTempFeeBlockGap);
             if (address(deployedImplementation) != implementation) {
                 revert AddressMismatch(address(deployedImplementation), implementation);
             }

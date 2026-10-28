@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {VolatilePairTestBase} from "./base/VolatilePairTestBase.sol";
+import {VolatilePairHook} from "../../src/volatile/VolatilePairHook.sol";
 import {IDynamicFeeHook} from "../../src/interfaces/IDynamicFeeHook.sol";
 import {IVolatilePairHook} from "../../src/volatile/interfaces/IVolatilePairHook.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -474,6 +475,77 @@ contract VolatilePairHookBeforeSwapTest is VolatilePairTestBase {
         vm.roll(1999);
         _callBeforeSwap(testPoolKey, true);
         assertEq(_storedState(poolId).blockNumber, 1999);
+    }
+
+    // -------------------------------------------------------------------------
+    // Temp fee block gap
+    // -------------------------------------------------------------------------
+
+    /// Opens a block at 1:1, pushes the price up 20bp (above the 10bp capture threshold), then waits `gap` blocks
+    /// with no swaps.
+    function _pushUpAndWait(uint256 gap) internal {
+        _swapFee(testPoolKey, true);
+        _setAmmPrice(_sqrtPriceScaled(Constants.SQRT_PRICE_1_1, 1_002_000));
+        _advanceBlocks(gap);
+    }
+
+    function test_beforeSwap_withinMaxBlockGap_chargesTempFee() public {
+        _pushUpAndWait(MAX_TEMP_FEE_BLOCK_GAP);
+        uint24 bidFeeE6 = _callBeforeSwap(testPoolKey, true);
+
+        VolatileFeeState memory s = _storedState(testPoolKey.toId());
+        assertTrue(s.tempOnBid, "up move puts the temp fee on the bid");
+        assertGt(s.tempFeeE6, 0, "temp fee within the gap");
+        assertEq(bidFeeE6, RESTING_SPREAD_E6 - s.askPermFeeE6 + s.tempFeeE6, "bid pays perm + temp");
+    }
+
+    /// The same push seen one block past the gap: the skew steps exactly as within the gap, the temp fee (restore
+    /// and capture) is 0, and the bid pays its lowered permanent fee.
+    function test_beforeSwap_pastMaxBlockGap_dropsTempFeeButStepsSkew() public {
+        uint256 snapshot = vm.snapshotState();
+        _pushUpAndWait(MAX_TEMP_FEE_BLOCK_GAP);
+        _callBeforeSwap(testPoolKey, true);
+        VolatileFeeState memory withinGap = _storedState(testPoolKey.toId());
+        vm.revertToState(snapshot);
+
+        _pushUpAndWait(MAX_TEMP_FEE_BLOCK_GAP + 1);
+        uint24 bidFeeE6 = _callBeforeSwap(testPoolKey, true);
+        VolatileFeeState memory pastGap = _storedState(testPoolKey.toId());
+
+        assertEq(pastGap.askPermFeeE6, withinGap.askPermFeeE6, "skew steps the same");
+        assertGt(pastGap.askPermFeeE6, NEUTRAL_FEE_E6, "ask leans after the up move");
+        assertTrue(pastGap.tempOnBid, "direction still recorded");
+        assertEq(pastGap.tempFeeE6, 0, "temp fee dropped past the gap");
+        assertEq(bidFeeE6, RESTING_SPREAD_E6 - pastGap.askPermFeeE6, "bid pays its lowered permanent fee");
+        assertLt(bidFeeE6, NEUTRAL_FEE_E6, "below neutral once the temp fee is gone");
+    }
+
+    /// An idle pool's quote carries the temp fee only while the next block would still be within the gap.
+    function test_getFee_idlePool_dropsTempFeeOnceGapPassesMax() public {
+        _pushUpAndWait(MAX_TEMP_FEE_BLOCK_GAP);
+        (uint24 bidWithinGapE6, uint24 askWithinGapE6) = hook.getFee(testPoolKey);
+        _advanceBlocks(1);
+        (uint24 bidPastGapE6, uint24 askPastGapE6) = hook.getFee(testPoolKey);
+
+        assertEq(askPastGapE6, askWithinGapE6, "leaning side unchanged");
+        assertEq(bidPastGapE6, RESTING_SPREAD_E6 - askPastGapE6, "bid quote back to its permanent fee");
+        assertGt(bidWithinGapE6, bidPastGapE6, "temp fee was in the earlier quote");
+    }
+
+    /// Any max gap, reached by upgrading the implementation: a swap `gap` blocks after the push pays the temp fee
+    /// exactly when gap <= maxGap.
+    function test_fuzz_beforeSwap_tempFeeOnlyWithinMaxBlockGap(uint256 maxGap, uint256 gap) public {
+        maxGap = bound(maxGap, 1, 1000);
+        gap = bound(gap, 1, 2000);
+        VolatilePairHook newImpl = new VolatilePairHook(IPoolManager(address(this)), maxGap);
+        vm.prank(owner);
+        hook.upgradeToAndCall(address(newImpl), "");
+        assertEq(hook.maxTempFeeBlockGap(), maxGap, "upgrade sets the gap");
+
+        _pushUpAndWait(gap);
+        _callBeforeSwap(testPoolKey, true);
+
+        assertEq(_storedState(testPoolKey.toId()).tempFeeE6 > 0, gap <= maxGap, "temp fee iff within the gap");
     }
 
     // -------------------------------------------------------------------------

@@ -12,9 +12,14 @@ The temp fee is part of the backrun side's starting fee for the whole block. Eve
 
 Where: `VolatileFeeCalculation.baselineFee`, `VolatilePairHook._getFee`
 
-### 2. A backrun can wait one block and avoid the temp fee
+### 2. A backrun can wait and avoid the temp fee
 
-The temp fee is based on the move since the open of the last block that had a swap. Say the price is pushed at the end of block 1, and block 2 has at least one swap but none of them correct the price. The first swap of block 2 saves the pushed price as block 2's open. The first swap of block 3 then compares against that open, sees no move, and sets the temp fee to 0, so the correction pays only the permanent fee. Any swap in block 2 is enough, including a tiny one. If block 2 has no swaps at all, this does not happen: block 3 compares against block 1's open and charges the temp fee as normal.
+The temp fee is based on the move since the open of the last block that had a swap, and only applies within `maxTempFeeBlockGap` blocks of that open. Say the price is pushed at the end of block 1. A correction avoids the temp fee in either of two ways:
+
+- **Any swap in between.** If block 2 has at least one swap but none of them correct the price, the first swap of block 2 saves the pushed price as block 2's open. The first swap of block 3 then compares against that open, sees no move, and sets the temp fee to 0. Any swap in block 2 is enough, including a tiny one.
+- **No swap for long enough.** If blocks 2 through `1 + maxTempFeeBlockGap` have no swaps, a correction in any later block pays no temp fee: the move is still measured from block 1's open, but the gap is too large. On Ethereum (`maxTempFeeBlockGap = 1`), one empty block is enough: with no swap in block 2, a correction in block 3 pays no temp fee.
+
+In both cases the correction pays only the permanent fee. In the second case the permanent fee has just stepped, so the backrun side is cheaper than before the push, and can be 0 when `maxSkewE6 == restingSpreadE6`. This is accepted because a move nobody traded against within the gap is more likely informed, and the temp fee would then fall on ordinary flow trading against the move. Most backruns land in the same block, where the in block extra applies and cannot be avoided this way.
 
 Where: `VolatilePairHook._loadTopOfBlockState`, `VolatileFeeCalculation.newPermAndTempFee`
 
@@ -113,3 +118,11 @@ Each fee term (restore, capture, and the extra fees based on distance from the b
 The permanent fee step also rounds up, so any nonzero move steps the fee by at least 1 pip. On a quiet pool, someone could walk one side's permanent fee down with a tiny swap every block. The saving is at most RS/2 per unit traded at the lowered fee, and it needs a swap in every block for up to `maxSkew - RS/2` blocks with no swap in the other direction. On a low activity pool, liquidity is likely thin too, so slippage and gas make this unprofitable. Rounding up also keeps a slow steady drift leaning the fee the right way.
 
 Where: `VolatileFeeCalculation.newPermanentFee`
+
+## Deployment
+
+### 18. The temp fee block gap is set per chain, not per pool
+
+`maxTempFeeBlockGap` is an immutable of the implementation, so every pool on a chain shares it and changing it needs a new implementation and an upgrade. It is measured in blocks, so the same value means different times on chains with different block times: 1 is 12 seconds on Ethereum but a fraction of a second on a fast L2. Each chain's deployment picks its own value. It must be at least 1, since 0 would turn the temp fee off for every pool; `restoreFractionE6` and `backrunCaptureFractionE6` already turn its pieces off per pool.
+
+Where: `VolatilePairHook.constructor`, `script/deploy/volatile-pair-hook/Parameters.sol`

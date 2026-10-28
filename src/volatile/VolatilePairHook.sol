@@ -30,8 +30,17 @@ contract VolatilePairHook is BaseDynamicFeeHook, VolatileFeeConfiguration, IVola
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
+    /// @inheritdoc IVolatilePairHook
+    /// @dev Immutable so it is set per chain and changes only through an upgrade
+    uint256 public immutable maxTempFeeBlockGap;
+
     /// @param _manager Uniswap v4 PoolManager
-    constructor(IPoolManager _manager) BaseDynamicFeeHook(_manager) {}
+    /// @param _maxTempFeeBlockGap Most blocks after the previous block open at which the temp fee still applies
+    constructor(IPoolManager _manager, uint256 _maxTempFeeBlockGap) BaseDynamicFeeHook(_manager) {
+        // 0 would zero every temp fee; restoreFractionE6 and backrunCaptureFractionE6 already turn its pieces off per pool.
+        if (_maxTempFeeBlockGap == 0) revert MaxTempFeeBlockGapCannotBeZero();
+        maxTempFeeBlockGap = _maxTempFeeBlockGap;
+    }
 
     /// @inheritdoc IVolatilePairHook
     function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, VolatileFeeConfig calldata feeConfiguration)
@@ -102,8 +111,9 @@ contract VolatilePairHook is BaseDynamicFeeHook, VolatileFeeConfiguration, IVola
     /// @notice Loads a pool's config and state, advancing the state to this block's skew and temp fee
     ///         in memory without writing.
     /// @dev New block: steps the permanent skew and prices the backrun charge from the price impact
-    ///      since the previous open, then caches the new open. Same block: returns the stored values
-    ///      unchanged.
+    ///      since the previous open, then caches the new open. The backrun charge is dropped when the
+    ///      previous open was more than `maxTempFeeBlockGap` blocks ago. Same block: returns the stored
+    ///      values unchanged.
     /// @param _poolId Pool id
     /// @return Fee state, advanced on a new block
     /// @return Fee config
@@ -130,6 +140,8 @@ contract VolatilePairHook is BaseDynamicFeeHook, VolatileFeeConfiguration, IVola
                 VolatileFeeCalculation.relativeMove(currentSqrtPriceX96, poolState.sqrtPriceTopX96);
             (poolState.askPermFeeE6, poolState.tempFeeE6, poolState.tempOnBid) =
                 VolatileFeeCalculation.newPermAndTempFee(config, poolState.askPermFeeE6, blockPriceImpact);
+            // poolState.blockNumber is still the previous active block; we know currentBlock > poolState.blockNumber
+            if (currentBlock - poolState.blockNumber > maxTempFeeBlockGap) poolState.tempFeeE6 = 0;
         }
         poolState.sqrtPriceTopX96 = currentSqrtPriceX96;
         poolState.blockNumber = currentBlock;

@@ -41,7 +41,7 @@ contract VolatilePairHookTest is VolatilePairTestBase, Deployers {
     function setUp() public override {
         deployFreshManagerAndRouters();
 
-        impl = new VolatilePairHook(manager);
+        impl = new VolatilePairHook(manager, MAX_TEMP_FEE_BLOCK_GAP);
 
         hook = VolatilePairHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | HOOK_FLAGS)));
         deployCodeTo(
@@ -126,6 +126,21 @@ contract VolatilePairHookTest is VolatilePairTestBase, Deployers {
     function test_initialize_revertsOnReinitialization() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         hook.initialize(other, other, other);
+    }
+
+    // -------------------------------------------------------------------------
+    // constructor
+    // -------------------------------------------------------------------------
+
+    function test_constructor_revertsForZeroMaxTempFeeBlockGap() public {
+        vm.expectRevert(IVolatilePairHook.MaxTempFeeBlockGapCannotBeZero.selector);
+        new VolatilePairHook(manager, 0);
+    }
+
+    /// The immutable lives in the implementation's code, so the proxy reads the implementation's value.
+    function test_maxTempFeeBlockGap_readsImplementationValueThroughProxy() public view {
+        assertEq(impl.maxTempFeeBlockGap(), MAX_TEMP_FEE_BLOCK_GAP);
+        assertEq(hook.maxTempFeeBlockGap(), MAX_TEMP_FEE_BLOCK_GAP);
     }
 
     // -------------------------------------------------------------------------

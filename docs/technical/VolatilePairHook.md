@@ -36,7 +36,7 @@ fee = permanent fee (its side) + temporary fee (backrun side only) + mid block e
 ```
 
 - **Permanent fee:** ask and bid always add up to the resting spread. After a price move, the side the price moved toward gets more expensive and the other side gets cheaper by the same amount. This lean carries over to later blocks.
-- **Temporary fee:** for one block after a move, the side that trades against the move (the "backrun" side) pays extra. It has two pieces, restore and capture, explained below.
+- **Temporary fee:** for one block after a move, the side that trades against the move (the "backrun" side) pays extra. It has two pieces, restore and capture, explained below. It only applies when the block comes soon enough after the previous block open (`maxTempFeeBlockGap`, 1 block on Ethereum).
 - **Mid block extra:** within a block, swaps after the first pay more the further the price has moved since the block opened.
 
 ### Design Goals
@@ -53,6 +53,8 @@ fee = permanent fee (its side) + temporary fee (backrun side only) + mid block e
 `PoolManager` calls `beforeSwap` on every swap. On the first swap of a new block, the hook compares the current pool price with the price saved at the previous block's first swap, updates the permanent and temporary fees, and saves the new state. Every swap, including the first, then pays the block's starting fee for its side plus a mid block extra based on how far the price has moved since the block opened.
 
 `VolatilePairHook` is a UUPS implementation deployed behind an ERC1967 proxy. The proxy, whose mined address encodes the hook permission flags, is the registered v4 hook. All state lives in the proxy's storage under the ERC-7201 namespace `uniswap.storage.VolatileFeeConfiguration`.
+
+One setting is not per pool: `maxTempFeeBlockGap` is an immutable passed to the implementation's constructor (at least 1). It is measured in blocks, so it is chosen per chain, and changing it means deploying a new implementation and upgrading. Ethereum uses 1.
 
 The fee math lives in the `VolatileFeeCalculation` library. `RelativeMoveLibrary` holds the `RelativeMove` type used for price moves. `VolatileFeeConfiguration` holds config, state, validation and the config manager functions. `VolatilePairHook` loads state, calls the library and stores the result.
 
@@ -174,6 +176,14 @@ tempFee = restore + capture   (clamped to MAX_FEE_E6)
 
 The thresholds are independent and either can be higher. For example, both at 10 bp means small moves get no temporary fee and large moves get both pieces.
 
+The whole temporary fee (restore and capture) is 0 when the previous block open is more than `maxTempFeeBlockGap` blocks back:
+
+```
+if currentBlock - previous block open > maxTempFeeBlockGap:  tempFee = 0
+```
+
+The permanent fee still steps as usual, so the backrun side pays its lowered permanent fee. A move that nobody traded against within the gap is treated like an ordinary block-to-block move. With `maxTempFeeBlockGap = 1`, only the block right after the previous block open pays the temporary fee, and one block with no swap in between is enough to drop it.
+
 The temporary fee is saved in state and applies to every swap on the backrun side for the rest of the block. It is replaced on the first swap of the next block that has a swap.
 
 ### Starting Fee for the Block
@@ -219,7 +229,7 @@ Because the extra is fixed at the start of each swap, splitting a backrun into m
 
 1. Load config and state, and read the current sqrt price from `slot0`.
 2. If the current block is greater than the saved `blockNumber`, it is a new block:
-   - If `sqrtPriceTopX96` is nonzero, compute PI and update the permanent and temporary fees.
+   - If `sqrtPriceTopX96` is nonzero, compute PI and update the permanent and temporary fees. If the saved `blockNumber` is more than `maxTempFeeBlockGap` blocks back, set the temporary fee to 0.
    - Set `sqrtPriceTopX96` to the current price and `blockNumber` to the current block, and save the state.
 3. Compute the fee for the swap's direction (starting fee + mid block extra).
 4. Return the fee with `LPFeeLibrary.OVERRIDE_FEE_FLAG`.
@@ -232,7 +242,7 @@ The block number comes from `BlockNumberish`. A block number that is not greater
 
 ## Worked Example
 
-Config: `restingSpreadE6 = 900` (9 bp), `skewRateE6 = 100_000` (10%), `maxSkewStepE6 = 300`, `maxSkewE6 = 900`, `backrunCaptureFractionE6 = 500_000` (50%), `backrunThresholdE6 = 1000` (10 bp), `midFadeRateE6 = 50_000` (5%), `maxMidFadeE6 = 200`, `restoreFractionE6 = 1e6`, `restoreThresholdE6 = 0`. Start: ask 450, bid 450. Numbers are approximate (rounding ignored).
+Config: `restingSpreadE6 = 900` (9 bp), `skewRateE6 = 100_000` (10%), `maxSkewStepE6 = 300`, `maxSkewE6 = 900`, `backrunCaptureFractionE6 = 500_000` (50%), `backrunThresholdE6 = 1000` (10 bp), `midFadeRateE6 = 50_000` (5%), `maxMidFadeE6 = 200`, `restoreFractionE6 = 1e6`, `restoreThresholdE6 = 0`, `maxTempFeeBlockGap = 1`. Start: ask 450, bid 450. Blocks A, B and C come right after each other. Numbers are approximate (rounding ignored).
 
 **Block A, price up 5 bp (PI = 500):**
 
@@ -245,6 +255,7 @@ Config: `restingSpreadE6 = 900` (9 bp), `skewRateE6 = 100_000` (10%), `maxSkewSt
 - Step: 10% of 2000 = 200. Ask perm 700, bid perm 200.
 - Restore: 200. Capture: 50% of 2000 = 1000. Temporary fee on bid = 1200.
 - Starting fees: ask 700, bid 1400. Quoted spread 2100 (21 bp).
+- If block B had come one block later, with no swap in the block between A and B, the temporary fee would be 0: starting fees ask 700, bid 200.
 
 **Within block B, a buy then moves the price up 1% from the block open (displacement 10,000):**
 
@@ -283,6 +294,7 @@ The following hold for any config that passes validation, any sqrt price in `[MI
 | 9   | Restore gate        | With PI below `restoreThresholdE6`, the restore piece is 0.                                                                              |
 | 10  | Full restore        | `restoreFractionE6 = 1e6` with `restoreThresholdE6 = 0` adds back exactly the backrun side's permanent fee drop on every move.           |
 | 11  | Quote matches swap  | `getFee` equals the fee `beforeSwap` charges for the same state, block and direction.                                                    |
+| 12  | Temporary fee gap   | The temporary fee is 0 in any block more than `maxTempFeeBlockGap` blocks after the previous block open.                                  |
 
 ---
 

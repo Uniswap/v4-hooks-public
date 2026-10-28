@@ -5,7 +5,7 @@ description: "Dynamic fee hook for volatile pairs (v2 skew + backrun algorithm);
 
 # VolatilePairHook
 
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/a2f87838068792cc46f4337ed0c4b3506607f907/src/volatile/VolatilePairHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/82de6aa6de5c3e387fa5a088af6977f14f66e314/src/volatile/VolatilePairHook.sol)
 
 **Inherits:** [BaseDynamicFeeHook](/src/base/abstract.BaseDynamicFeeHook), [VolatileFeeConfiguration](/src/volatile/base/abstract.VolatileFeeConfiguration), [IVolatilePairHook](/src/volatile/interfaces/interface.IVolatilePairHook)
 
@@ -27,14 +27,36 @@ the pool's protocolFee into account; when it is turned on, v4 adds it on top of 
 
 - **security-contact:** security@uniswap.org
 
+## Constants
+
+### maxTempFeeBlockGap
+
+Most blocks after the previous block open at which a block's temp fee still applies.
+
+<i>
+
+Immutable so it is set per chain and changes only through an upgrade
+
+</i>
+
+```solidity
+uint256 public immutable maxTempFeeBlockGap;
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | The max block gap |
+
 ## Functions
 
-<a id="constructor-ipoolmanager"></a>
+<a id="constructor-ipoolmanager-uint256"></a>
 
 ### constructor
 
 ```solidity
-constructor(IPoolManager _manager) BaseDynamicFeeHook(_manager);
+constructor(IPoolManager _manager, uint256 _maxTempFeeBlockGap) BaseDynamicFeeHook(_manager);
 ```
 
 **Parameters**
@@ -42,6 +64,7 @@ constructor(IPoolManager _manager) BaseDynamicFeeHook(_manager);
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | _manager | `IPoolManager` | Uniswap v4 PoolManager |
+| _maxTempFeeBlockGap | `uint256` | Most blocks after the previous block open at which the temp fee still applies |
 
 <a id="initializepool-poolkey-uint160-volatilefeeconfig"></a>
 
@@ -140,8 +163,9 @@ in memory without writing.
 <i>
 
 New block: steps the permanent skew and prices the backrun charge from the price impact
-since the previous open, then caches the new open. Same block: returns the stored values
-unchanged.
+since the previous open, then caches the new open. The backrun charge is dropped when the
+previous open was more than `maxTempFeeBlockGap` blocks ago. Same block: returns the stored
+values unchanged.
 
 </i>
 

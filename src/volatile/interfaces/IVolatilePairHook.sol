@@ -16,6 +16,9 @@ interface IVolatilePairHook is IDynamicFeeHook {
     /// @param hookAddress The address that was provided
     error InvalidHookAddress(address hookAddress);
 
+    /// @notice Thrown when the implementation is deployed with a max temp fee block gap of 0
+    error MaxTempFeeBlockGapCannotBeZero();
+
     /// @notice Emitted when a pool is initialized through this hook
     /// @param poolKey The pool that was initialized
     /// @param sqrtPriceX96 The initial sqrt price
@@ -48,4 +51,9 @@ interface IVolatilePairHook is IDynamicFeeHook {
     function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, VolatileFeeConfig calldata feeConfig)
         external
         returns (int24 tick);
+
+    /// @notice Most blocks after the previous block open at which a block's temp fee still applies.
+    /// @dev Past this gap the temp fee is 0 and the permanent fee still steps. Measured in blocks
+    /// @return The max block gap
+    function maxTempFeeBlockGap() external view returns (uint256);
 }

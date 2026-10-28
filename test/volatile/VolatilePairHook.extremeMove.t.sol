@@ -41,7 +41,7 @@ contract VolatilePairHookExtremeMoveTest is VolatilePairTestBase, Deployers {
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
 
-        VolatilePairHook impl = new VolatilePairHook(manager);
+        VolatilePairHook impl = new VolatilePairHook(manager, MAX_TEMP_FEE_BLOCK_GAP);
         hook = VolatilePairHook(address(uint160(uint256(type(uint160).max) & clearAllHookPermissionsMask | HOOK_FLAGS)));
         deployCodeTo(
             "ERC1967Proxy.sol:ERC1967Proxy",

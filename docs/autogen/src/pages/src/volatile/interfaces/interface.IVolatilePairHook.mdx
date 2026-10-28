@@ -5,7 +5,7 @@ description: "Interface for VolatilePairHook"
 
 # IVolatilePairHook
 
-[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/d78c64110151f4eee68837681b4d01fcd47c61c0/src/volatile/interfaces/IVolatilePairHook.sol)
+[Git Source](https://github.com/Uniswap/v4-hooks-public/blob/82de6aa6de5c3e387fa5a088af6977f14f66e314/src/volatile/interfaces/IVolatilePairHook.sol)
 
 **Inherits:** [IDynamicFeeHook](/src/interfaces/interface.IDynamicFeeHook)
 
@@ -38,6 +38,28 @@ function initializePool(PoolKey calldata poolKey, uint160 sqrtPriceX96, Volatile
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | tick | `int24` | Resulting tick |
+
+<a id="maxtempfeeblockgap"></a>
+
+### maxTempFeeBlockGap
+
+Most blocks after the previous block open at which a block's temp fee still applies.
+
+<i>
+
+Past this gap the temp fee is 0 and the permanent fee still steps. Measured in blocks
+
+</i>
+
+```solidity
+function maxTempFeeBlockGap() external view returns (uint256);
+```
+
+**Returns**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| &lt;none&gt; | `uint256` | The max block gap |
 
 ## Events
 
@@ -114,4 +136,12 @@ error InvalidHookAddress(address hookAddress);
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | hookAddress | `address` | The address that was provided |
+
+### MaxTempFeeBlockGapCannotBeZero
+
+Thrown when the implementation is deployed with a max temp fee block gap of 0
+
+```solidity
+error MaxTempFeeBlockGapCannotBeZero();
+```
 
