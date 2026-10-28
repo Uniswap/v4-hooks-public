@@ -294,7 +294,7 @@ The following hold for any config that passes validation, any sqrt price in `[MI
 | 9   | Restore gate        | With PI below `restoreThresholdE6`, the restore piece is 0.                                                                              |
 | 10  | Full restore        | `restoreFractionE6 = 1e6` with `restoreThresholdE6 = 0` adds back exactly the backrun side's permanent fee drop on every move.           |
 | 11  | Quote matches swap  | `getFee` equals the fee `beforeSwap` charges for the same state, block and direction.                                                    |
-| 12  | Temporary fee gap   | The temporary fee is 0 in any block more than `maxTempFeeBlockGap` blocks after the previous block open.                                  |
+| 12  | Temporary fee gap   | The temporary fee is 0 in any block more than `maxTempFeeBlockGap` blocks after the previous block open.                                 |
 
 ---
 
