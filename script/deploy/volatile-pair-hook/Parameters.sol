@@ -11,6 +11,7 @@ struct DeployParameters {
     address owner;
     address poolInitializer;
     address configManager;
+    uint256 maxTempFeeBlockGap; // implementation constructor arg; measured in blocks, so it is set per chain
 }
 
 /// @notice Per-chain parameters for InitVolatilePairHook: the pool to initialize
@@ -52,7 +53,9 @@ contract Parameters {
             // Uniswap Governance Timelock (admin: GovernorBravo 0x408ED6354d4973f66138C91495F2f2FCbd8724C3)
             owner: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC,
             poolInitializer: 0xFc43582532E90Fa8726FE9cdb5FAd48f4e487d27,
-            configManager: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC
+            configManager: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC,
+            // temp fee only on the block right after the previous block open (12s)
+            maxTempFeeBlockGap: 1
         });
         parameters[SEPOLIA_CHAIN_ID] = DeployParameters({
             poolManager: IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543),
@@ -60,7 +63,9 @@ contract Parameters {
             volatilePairHookImplementationSalt: bytes32(uint256(0x290d)),
             owner: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
             poolInitializer: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
-            configManager: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95
+            configManager: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
+            // 12s blocks, same as Ethereum
+            maxTempFeeBlockGap: 1
         });
 
         poolParameters[ETHEREUM_CHAIN_ID][POOL_ETH_USDC] = PoolParameters({
