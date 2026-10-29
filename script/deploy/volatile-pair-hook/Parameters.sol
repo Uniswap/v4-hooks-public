@@ -102,9 +102,9 @@ contract Parameters {
             currency0: address(0), // native ETH
             currency1: 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, // USDG (6 decimals)
             tickSpacing: 1,
-            // ETH = 2,241.70 USDG: slot0 of the v3 WETH/USDG 1bp pool 0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca
-            // at block 101,190,767 (same token order and decimals)
-            sqrtPriceX96: 3_751_187_757_904_919_554_686_976,
+            // ETH = 2,250 USDG: floor(sqrt(2250e6 / 1e18) * 2^96). A round price near Chainlink ETH/USD (2,257.50)
+            // and the v3 WETH/USDG 1bp pool 0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca (2,258.68) on 2026-10-29
+            sqrtPriceX96: 3_758_121_725_625_718_967_796_207,
             feeConfig: VolatileFeeConfig({
                 restingSpreadE6: 200, // 2bp, 1bp per side
                 backrunCaptureFractionE6: 500_000, // 0.5
