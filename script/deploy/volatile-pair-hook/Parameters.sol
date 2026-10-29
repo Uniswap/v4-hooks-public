@@ -102,18 +102,20 @@ contract Parameters {
             currency0: address(0), // native ETH
             currency1: 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, // USDG (6 decimals)
             tickSpacing: 1,
-            sqrtPriceX96: 0,
+            // ETH = 2,241.70 USDG: slot0 of the v3 WETH/USDG 1bp pool 0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca
+            // at block 101,190,767 (same token order and decimals)
+            sqrtPriceX96: 3_751_187_757_904_919_554_686_976,
             feeConfig: VolatileFeeConfig({
-                restingSpreadE6: 0,
-                backrunCaptureFractionE6: 0,
-                midFadeRateE6: 0,
-                maxMidFadeE6: 0,
-                skewRateE6: 0,
-                maxSkewStepE6: 0,
-                maxSkewE6: 0,
-                backrunThresholdE6: 0,
-                restoreFractionE6: 0,
-                restoreThresholdE6: 0
+                restingSpreadE6: 200, // 2bp, 1bp per side
+                backrunCaptureFractionE6: 500_000, // 0.5
+                midFadeRateE6: 4_000_000, // 4x the in-block move
+                maxMidFadeE6: 50, // 0.5bp
+                skewRateE6: 1_000_000, // 1x the block price impact: a 1bp move steps the skew 1bp
+                maxSkewStepE6: 40, // 0.4bp
+                maxSkewE6: 160, // 1.6bp, so each side's permanent fee stays within 0.4bp to 1.6bp
+                backrunThresholdE6: 100, // 1bp
+                restoreFractionE6: 1_000_000, // full restore
+                restoreThresholdE6: 100 // 1bp, same gate as backrun capture
             })
         });
     }
