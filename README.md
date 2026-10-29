@@ -129,7 +129,7 @@ Pools initialized on each network's hook from the table above. Every pool uses t
 | Network   | Pool     | Currency0                                        | Currency1                                         | Tick Spacing | Pool ID                                                            | Date       |
 | --------- | -------- | ------------------------------------------------ | ------------------------------------------------- | ------------ | ------------------------------------------------------------------ | ---------- |
 | Ethereum  | ETH/USDC | ETH `0x0000000000000000000000000000000000000000` | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | 4            | 0x98316e8405502774a5d0a0761276b5d26505a8195c1905169864008d5e7a3eea | 2026-10-13 |
-| Robinhood | ETH/USDG | ETH `0x0000000000000000000000000000000000000000` | USDG `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` | 1            | 0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35 | pending    |
+| Robinhood | ETH/USDG | ETH `0x0000000000000000000000000000000000000000` | USDG `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` | 1            | 0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35 | 2026-10-29 |
 
 ## Audits
 
