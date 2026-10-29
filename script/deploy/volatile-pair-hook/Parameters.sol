@@ -29,9 +29,11 @@ contract Parameters {
     address public constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     uint256 public constant ETHEREUM_CHAIN_ID = 1;
+    uint256 public constant ROBINHOOD_CHAIN_ID = 4663;
     uint256 public constant SEPOLIA_CHAIN_ID = 11155111;
 
     string public constant POOL_ETH_USDC = "ETH/USDC";
+    string public constant POOL_ETH_USDG = "ETH/USDG";
 
     /// @notice Thrown when parameters are not set for a given chainId
     error ParametersNotSetForChainId(uint256 chainId);
@@ -56,6 +58,15 @@ contract Parameters {
             configManager: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC,
             // temp fee only on the block right after the previous block open (12s)
             maxTempFeeBlockGap: 1
+        });
+        parameters[ROBINHOOD_CHAIN_ID] = DeployParameters({
+            poolManager: IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951),
+            volatilePairHookProxySalt: bytes32(uint256(0x1b7a)),
+            volatilePairHookImplementationSalt: bytes32(uint256(0x0f16)),
+            owner: 0x2BAD8182C09F50c8318d769245beA52C32Be46CD,
+            poolInitializer: 0xa67E322d3a0e1336E37AF79A52967d7351C95953,
+            configManager: 0x2BAD8182C09F50c8318d769245beA52C32Be46CD,
+            maxTempFeeBlockGap: 2
         });
         parameters[SEPOLIA_CHAIN_ID] = DeployParameters({
             poolManager: IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543),
@@ -84,6 +95,25 @@ contract Parameters {
                 backrunThresholdE6: 500, // 5bp
                 restoreFractionE6: 1_000_000, // full restore
                 restoreThresholdE6: 500 // 5bp, same gate as backrun capture
+            })
+        });
+
+        poolParameters[ROBINHOOD_CHAIN_ID][POOL_ETH_USDG] = PoolParameters({
+            currency0: address(0), // native ETH
+            currency1: 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, // USDG (6 decimals)
+            tickSpacing: 1,
+            sqrtPriceX96: 0,
+            feeConfig: VolatileFeeConfig({
+                restingSpreadE6: 0,
+                backrunCaptureFractionE6: 0,
+                midFadeRateE6: 0,
+                maxMidFadeE6: 0,
+                skewRateE6: 0,
+                maxSkewStepE6: 0,
+                maxSkewE6: 0,
+                backrunThresholdE6: 0,
+                restoreFractionE6: 0,
+                restoreThresholdE6: 0
             })
         });
     }
