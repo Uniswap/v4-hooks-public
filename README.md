@@ -104,26 +104,32 @@ over the values below.
 Same proxy layout as `StablePairHook`: the ERC1967 proxy is the registered v4 hook and the
 implementation column reflects the current implementation as of the listed commit.
 
-| Network  | Proxy (hook)                               | Implementation                             | Commit Hash | Date       |
-| -------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
-| Ethereum | 0x000022Ec4eBD6b12294396E852E4C3876b253Cc0 | 0x1DDbf7215be4F8A7623B9B1B0255C6e1E3F6c000 | a053a88     | 2026-10-13 |
-| Sepolia  | 0x6B1DF823F9492000cC6Bc8dB2c1714E767DaFCc0 | 0x01C274A3Ea7CdA08c90140395349004cEf28C000 | ba9a531     | 2026-10-13 |
+| Network   | Proxy (hook)                               | Implementation                             | Commit Hash | Date       |
+| --------- | ------------------------------------------ | ------------------------------------------ | ----------- | ---------- |
+| Ethereum  | 0x000022Ec4eBD6b12294396E852E4C3876b253Cc0 | 0x1DDbf7215be4F8A7623B9B1B0255C6e1E3F6c000 | a053a88     | 2026-10-13 |
+| Robinhood | 0x987E330F00B79864a07FE81dFaC344D0078ABCC0 | 0x3328004Ae3B4eE272f25F3a2873F47C2Fb678000 | d04d665     | 2026-10-28 |
+| Sepolia   | 0x6B1DF823F9492000cC6Bc8dB2c1714E767DaFCc0 | 0x01C274A3Ea7CdA08c90140395349004cEf28C000 | ba9a531     | 2026-10-13 |
 
 On Ethereum, `owner` and `configManager` are the [Uniswap Governance Timelock](https://etherscan.io/address/0x1a9C8182C09F50C8318d769245beA52c32BE35BC),
 so fee-config changes and implementation upgrades go through a governance proposal. `poolInitializer`
 is the Labs Safe `0xFc43582532E90Fa8726FE9cdb5FAd48f4e487d27`.
+
+On Robinhood Chain, `owner` and `configManager` are the Timelock's L1-to-L2 alias
+`0x2BAD8182C09F50c8318d769245beA52C32Be46CD`, so the same governance proposals reach it through the
+chain's bridge. `poolInitializer` is the Safe `0xa67E322d3a0e1336E37AF79A52967d7351C95953`.
 
 On Sepolia, `owner`, `poolInitializer` and `configManager` are all the test deployer
 `0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95`.
 
 #### Pools
 
-Pools initialized on the Ethereum hook. Every pool uses the dynamic-fee flag (`0x800000`) and a
-`tickSpacing` of 4, so the pool ID is `keccak256(abi.encode(PoolKey))` over the values below.
+Pools initialized on each network's hook from the table above. Every pool uses the dynamic-fee flag
+(`0x800000`), so the pool ID is `keccak256(abi.encode(PoolKey))` over the values below.
 
-| Pool     | Currency0                                        | Currency1                                         | Pool ID                                                            | Date       |
-| -------- | ------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------ | ---------- |
-| ETH/USDC | ETH `0x0000000000000000000000000000000000000000` | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | 0x98316e8405502774a5d0a0761276b5d26505a8195c1905169864008d5e7a3eea | 2026-10-13 |
+| Network   | Pool     | Currency0                                        | Currency1                                         | Tick Spacing | Pool ID                                                            | Date       |
+| --------- | -------- | ------------------------------------------------ | ------------------------------------------------- | ------------ | ------------------------------------------------------------------ | ---------- |
+| Ethereum  | ETH/USDC | ETH `0x0000000000000000000000000000000000000000` | USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | 4            | 0x98316e8405502774a5d0a0761276b5d26505a8195c1905169864008d5e7a3eea | 2026-10-13 |
+| Robinhood | ETH/USDG | ETH `0x0000000000000000000000000000000000000000` | USDG `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` | 1            | 0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35 | 2026-10-29 |
 
 ## Audits
 

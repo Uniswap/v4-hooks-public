@@ -11,6 +11,7 @@ struct DeployParameters {
     address owner;
     address poolInitializer;
     address configManager;
+    uint256 maxTempFeeBlockGap; // implementation constructor arg; measured in blocks, so it is set per chain
 }
 
 /// @notice Per-chain parameters for InitVolatilePairHook: the pool to initialize
@@ -28,9 +29,11 @@ contract Parameters {
     address public constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     uint256 public constant ETHEREUM_CHAIN_ID = 1;
+    uint256 public constant ROBINHOOD_CHAIN_ID = 4663;
     uint256 public constant SEPOLIA_CHAIN_ID = 11155111;
 
     string public constant POOL_ETH_USDC = "ETH/USDC";
+    string public constant POOL_ETH_USDG = "ETH/USDG";
 
     /// @notice Thrown when parameters are not set for a given chainId
     error ParametersNotSetForChainId(uint256 chainId);
@@ -52,7 +55,18 @@ contract Parameters {
             // Uniswap Governance Timelock (admin: GovernorBravo 0x408ED6354d4973f66138C91495F2f2FCbd8724C3)
             owner: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC,
             poolInitializer: 0xFc43582532E90Fa8726FE9cdb5FAd48f4e487d27,
-            configManager: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC
+            configManager: 0x1a9C8182C09F50C8318d769245beA52c32BE35BC,
+            // temp fee only on the block right after the previous block open (12s)
+            maxTempFeeBlockGap: 1
+        });
+        parameters[ROBINHOOD_CHAIN_ID] = DeployParameters({
+            poolManager: IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951),
+            volatilePairHookProxySalt: bytes32(uint256(0x1b7a)),
+            volatilePairHookImplementationSalt: bytes32(uint256(0x0f16)),
+            owner: 0x2BAD8182C09F50c8318d769245beA52C32Be46CD,
+            poolInitializer: 0xa67E322d3a0e1336E37AF79A52967d7351C95953,
+            configManager: 0x2BAD8182C09F50c8318d769245beA52C32Be46CD,
+            maxTempFeeBlockGap: 2
         });
         parameters[SEPOLIA_CHAIN_ID] = DeployParameters({
             poolManager: IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543),
@@ -60,7 +74,9 @@ contract Parameters {
             volatilePairHookImplementationSalt: bytes32(uint256(0x290d)),
             owner: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
             poolInitializer: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
-            configManager: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95
+            configManager: 0xE49ACc3B16c097ec88Dc9352CE4Cd57aB7e35B95,
+            // 12s blocks, same as Ethereum
+            maxTempFeeBlockGap: 1
         });
 
         poolParameters[ETHEREUM_CHAIN_ID][POOL_ETH_USDC] = PoolParameters({
@@ -79,6 +95,27 @@ contract Parameters {
                 backrunThresholdE6: 500, // 5bp
                 restoreFractionE6: 1_000_000, // full restore
                 restoreThresholdE6: 500 // 5bp, same gate as backrun capture
+            })
+        });
+
+        poolParameters[ROBINHOOD_CHAIN_ID][POOL_ETH_USDG] = PoolParameters({
+            currency0: address(0), // native ETH
+            currency1: 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, // USDG (6 decimals)
+            tickSpacing: 1,
+            // ETH = 2,250 USDG: floor(sqrt(2250e6 / 1e18) * 2^96). A round price near Chainlink ETH/USD (2,257.50)
+            // and the v3 WETH/USDG 1bp pool 0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca (2,258.68) on 2026-10-29
+            sqrtPriceX96: 3_758_121_725_625_718_967_796_207,
+            feeConfig: VolatileFeeConfig({
+                restingSpreadE6: 200, // 2bp, 1bp per side
+                backrunCaptureFractionE6: 500_000, // 0.5
+                midFadeRateE6: 4_000_000, // 4x the in-block move
+                maxMidFadeE6: 50, // 0.5bp
+                skewRateE6: 1_000_000, // 1x the block price impact: a 1bp move steps the skew 1bp
+                maxSkewStepE6: 40, // 0.4bp
+                maxSkewE6: 160, // 1.6bp, so each side's permanent fee stays within 0.4bp to 1.6bp
+                backrunThresholdE6: 100, // 1bp
+                restoreFractionE6: 1_000_000, // full restore
+                restoreThresholdE6: 100 // 1bp, same gate as backrun capture
             })
         });
     }
