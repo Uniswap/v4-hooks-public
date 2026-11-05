@@ -40,6 +40,8 @@ contract Parameters {
     string public constant POOL_USDC_USDG = "USDC/USDG";
     string public constant POOL_USDG_USDT0 = "USDG/USDT0";
     string public constant POOL_USDC_USDT0 = "USDC/USDT0";
+    /// @dev Arbitrum USDG/USDC at tickSpacing 2, initialized after the tickSpacing 1 pool under POOL_USDC_USDG
+    string public constant POOL_USDC_USDG_TS2 = "USDC/USDG-ts2";
 
     /// @notice Thrown when parameters are not set for a given chainId
     error ParametersNotSetForChainId(uint256 chainId);
@@ -129,6 +131,18 @@ contract Parameters {
             feeConfig: StableFeeConfig({
                 k: 16_653_011, // .9925968 in Q24 (0.9925968 * 2**24)
                 optimalFeeE6: 50, // = .5bps = .005%
+                targetMultiplier: 100,
+                referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
+            })
+        });
+        poolParameters[ARBITRUM_CHAIN_ID][POOL_USDC_USDG_TS2] = PoolParameters({
+            currency0: 0x004B506865409877C9fA29bfb1ebA929984B9bbC, // USDG
+            currency1: 0xaf88d065e77c8cC2239327C5EDb3A432268e5831, // USDC
+            tickSpacing: 2,
+            sqrtPriceX96: 79228162514264337593543950336, // 1:1
+            feeConfig: StableFeeConfig({
+                k: 16_653_011, // .9925968 in Q24 (0.9925968 * 2**24)
+                optimalFeeE6: 8, // = .08bps = .0008%
                 targetMultiplier: 100,
                 referenceSqrtPriceX96: 79228162514264337593543950336 // 1:1
             })
